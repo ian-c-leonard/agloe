@@ -13,14 +13,14 @@ This file is for the AI agents and people who build Agloe. Read it before changi
 ## Roles
 
 - Ian Leonard owns the product. Product and architecture decisions are his. Present the options, the trade-offs and a recommendation, one decision at a time, and wait for his answer.
-- Claude Code builds. Codex reviews each release, and any decision Ian asks it to check.
+- Claude Code builds, and merges its own pull requests once the checks pass. Codex reviews each release, and any decision Ian asks it to check.
 - Never file a GitHub issue or post an issue comment without Ian's approval of that specific text. The repository is public.
 
 ## How to work
 
 1. Work in thin slices. Each slice runs from FILE to report, with its tests, before the next begins.
 2. Write the specification text, the examples and the tests before the implementation.
-3. Every change passes the automated checks before it merges. Never claim that something works or is fixed without showing the evidence.
+3. Every change goes through a small pull request, and merges only after the automated checks pass on Linux and macOS. Branch protection enforces this; nothing is pushed to main directly. Never claim that something works or is fixed without showing the evidence.
 4. Use established methods and libraries first. Write a decision record before building anything genuinely new.
 5. Never special-case a rule to make one example pass. Fix the example's data, or change the model by decision.
 
