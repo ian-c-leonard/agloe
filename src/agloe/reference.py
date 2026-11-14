@@ -434,9 +434,10 @@ def itineraries(file: File, world: World) -> list[Itinerary]:
 
     It tries every choice of who takes part in which OPTION and in what order. An unlisted OPTION
     is used only to join two listed ones. Each OPTION starts as early as the CONSTRAINTs allow, and
-    one with nothing before it starts as late as they allow. An ITINERARY with the fewest PERSONs
-    taking part cannot have anything taken out, so every ITINERARY returned also meets "Nothing
-    happens without need".
+    one with nothing before it starts as late as they allow. Where a COMPLETE FACT covers a span of
+    leaving times, leaving before the span and leaving after it are tried too. An ITINERARY with
+    the fewest PERSONs taking part cannot have anything taken out, so every ITINERARY returned
+    also meets "Nothing happens without need".
     """
     best: list[Itinerary] = []
     fewest: int | None = None
@@ -447,14 +448,15 @@ def itineraries(file: File, world: World) -> list[Itinerary]:
             [i for i, persons in enumerate(who) if person.id in persons] for person in file.persons
         ]
         for orders in product(*(list(_orders(file, world, indexes)) for indexes in mine)):
-            found = _schedule(file, world, who, orders)
-            if found is None or _broken_before_need(file, world, found):
-                continue
-            taking_part = sum(len(step.persons) for step in found)
-            if fewest is None or taking_part < fewest:
-                best, fewest = [found], taking_part
-            elif taking_part == fewest and found not in best:
-                best.append(found)
+            for found in _schedules(file, world, who, orders):
+                if _broken_before_need(file, world, found):
+                    continue
+                taking_part = sum(len(step.persons) for step in found)
+                if fewest is None or taking_part < fewest:
+                    best, fewest = [found], taking_part
+                elif taking_part == fewest and found not in best:
+                    best.append(found)
+                break
     return sorted(best, key=lambda itinerary: _in_file_order(file, itinerary))
 
 
@@ -491,13 +493,18 @@ def _orders(file: File, world: World, indexes: list[int]) -> Iterator[tuple[int,
             yield order
 
 
-def _schedule(
+def _schedules(
     file: File,
     world: World,
     who: tuple[tuple[str, ...], ...],
     orders: tuple[tuple[int, ...], ...],
-) -> Itinerary | None:
-    """The ITINERARY for one choice of PERSONs and orders, or None when no start times fit."""
+) -> Iterator[Itinerary]:
+    """The ITINERARIES for one choice of PERSONs and orders, one for each way the timing can fall.
+
+    Start times are as early as the CONSTRAINTs allow. A COMPLETE FACT covers a span of leaving
+    times, and leaving outside that span can let an unlisted OPTION in. So each departure from the
+    PLACE of such a FACT is tried as it falls, then before the span, then after it.
+    """
     listed = len(file.options)
     ways: list[tuple[str, str, str]] = []  # the unlisted OPTIONs: who, from where, to where
 
@@ -506,6 +513,9 @@ def _schedule(
             return world.way_takes
         terms = world.terms[file.options[node].id]
         return None if terms.longest is None else terms.shortest
+
+    def origin(node: int) -> str:
+        return ways[node - listed][1] if node >= listed else file.options[node].origin
 
     def moves(node: int) -> bool:
         if node >= listed:
@@ -528,38 +538,59 @@ def _schedule(
             if position:
                 lasts = takes(line[position - 1])
                 if lasts is None:
-                    return None
+                    return
                 gaps.append((line[position - 1], node, lasts))
             margin = 0 if node >= listed else world.terms[file.options[node].id].margin
             if arrived is not None and margin != 0:
                 lasts = takes(arrived)
                 if lasts is None or margin is None:
-                    return None
+                    return
                 gaps.append((arrived, node, lasts + margin))
             if moves(node):
                 arrived = node
 
-    fixed: dict[int, int] = {}
+    count = listed + len(ways)
+    zero = count  # one more start, pinned at time zero, to measure the spans from
+    fixed: dict[int, int] = {zero: 0}
     for index, option in enumerate(file.options):
         at = world.terms[option.id].fixed_start
         if who[index] and at is not None:
             fixed[index] = at
-    starts = _times(listed + len(ways), gaps, fixed)
-    if starts is None:
-        return None
 
-    steps: list[Step] = []
-    for index, option in enumerate(file.options):
-        if who[index]:
-            lasts = takes(index)
-            end = None if lasts is None else starts[index] + lasts
+    happening = [node for node in range(count) if node >= listed or who[node]]
+    leaving = [
+        (node, fact)
+        for fact in file.facts
+        if isinstance(fact, Complete) and ways
+        for node in happening
+        if moves(node) and origin(node) == fact.origin
+    ]
+    for choice in product(("as it falls", "before", "after"), repeat=len(leaving)):
+        outside: list[tuple[int, int, int]] = []
+        for (node, fact), when in zip(leaving, choice, strict=True):
+            if when == "after":
+                outside.append((zero, node, fact.latest + 1))
+            elif when == "before":
+                outside.append((node, zero, 1 - fact.earliest))
+        starts = _times(count + 1, [*gaps, *outside], fixed)
+        if starts is None:
+            continue
+        steps: list[Step] = []
+        for index, option in enumerate(file.options):
+            if who[index]:
+                lasts = takes(index)
+                end = None if lasts is None else starts[index] + lasts
+                steps.append(
+                    Step(
+                        option.id, option.origin, option.destination, who[index], starts[index], end
+                    )
+                )
+        for number, (person_id, start_place, end_place) in enumerate(ways):
+            start = starts[listed + number]
             steps.append(
-                Step(option.id, option.origin, option.destination, who[index], starts[index], end)
+                Step(None, start_place, end_place, (person_id,), start, start + world.way_takes)
             )
-    for number, (person_id, origin, destination) in enumerate(ways):
-        start = starts[listed + number]
-        steps.append(Step(None, origin, destination, (person_id,), start, start + world.way_takes))
-    return tuple(sorted(steps, key=lambda step: _step_in_file_order(file, step)))
+        yield tuple(sorted(steps, key=lambda step: _step_in_file_order(file, step)))
 
 
 def _times(

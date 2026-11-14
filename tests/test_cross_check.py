@@ -10,7 +10,17 @@ from itertools import combinations, product
 from random import Random
 
 from agloe.file import File
-from agloe.reference import Answer, Step, Terms, World, broken, check, itineraries, worst_case
+from agloe.reference import (
+    Answer,
+    Step,
+    Terms,
+    World,
+    best_case,
+    broken,
+    check,
+    itineraries,
+    worst_case,
+)
 from tests.stories import (
     Document,
     any_time,
@@ -28,10 +38,22 @@ QUARTER = 900
 PLACES = ["a", "b", "c"]
 
 
-def random_trip(rng: Random, leave_out: float) -> File:
-    """Two or three OPTIONs on a quarter-hour grid. ``leave_out``: how often a FACT is unstated."""
-    count = rng.choice([2, 3])
-    persons = ["alex", "sam"] if count == 2 and rng.random() < 0.4 else ["alex"]
+def random_trip(
+    rng: Random,
+    leave_out: float,
+    persons: list[str] | None = None,
+    count: int | None = None,
+    complete: float = 0,
+) -> File:
+    """Two or three OPTIONs on a quarter-hour grid.
+
+    ``leave_out`` is how often a FACT is unstated. ``complete`` is how often a COMPLETE FACT is
+    added. Its span starts one second after a grid time and ends one second before another, so
+    the times just outside it are on the grid.
+    """
+    count = count or rng.choice([2, 3])
+    if persons is None:
+        persons = ["alex", "sam"] if count == 2 and rng.random() < 0.4 else ["alex"]
     options: list[Document] = []
     facts: list[Document] = []
     decisions: list[Document] = []
@@ -55,7 +77,25 @@ def random_trip(rng: Random, leave_out: float) -> File:
         facts += [fact for fact in stated if rng.random() >= leave_out]
         if rng.random() < 0.6:
             decisions.append(lock(id, *rng.sample(persons, rng.randrange(1, len(persons) + 1))))
+    if rng.random() < complete:
+        origin = rng.choice(PLACES)
+        destination = rng.choice([place for place in PLACES if place != origin])
+        first = rng.randrange(4)
+        last = rng.randrange(first + 1, 9)
+        leaving = {
+            "earliest": at_second(seconds(9) + QUARTER * first + 1),
+            "latest": at_second(seconds(9) + QUARTER * last - 1),
+        }
+        ways = {"from": origin, "to": destination, "leaving": leaving}
+        facts.append({"id": "ways", "complete": ways})
     return trip(persons, PLACES, options, facts, decisions)
+
+
+def at_second(moment: int) -> str:
+    """A time on the day of the stories, to the second."""
+    into_day = moment - seconds(0)
+    hour, rest = divmod(into_day, 3600)
+    return f"2027-05-15T{hour:02d}:{rest // 60:02d}:{rest % 60:02d}-05:00[America/Chicago]"
 
 
 def works_on_the_grid(file: File) -> bool:
@@ -95,6 +135,83 @@ def test_starting_as_early_as_possible_finds_an_itinerary_whenever_one_exists() 
         feasible = check(file).answer is Answer.FEASIBLE
         assert feasible == works_on_the_grid(file)
         answers.add(feasible)
+    assert answers == {True, False}
+
+
+def works_in_the_best_case_on_the_grid(file: File) -> bool:
+    """Whether any ITINERARY works in the best case, trying every start on the grid.
+
+    For one PERSON and two OPTIONs. It also tries one unlisted OPTION between any two PLACES.
+    """
+    world = best_case(file)
+    person = file.persons[0].id
+    grid = [seconds(9) + QUARTER * quarter for quarter in range(-4, 11)]
+    hops: list[Step | None] = [None]
+    hops += [
+        Step(None, origin, destination, (person,), moment, moment)
+        for origin in PLACES
+        for destination in PLACES
+        if origin != destination
+        for moment in grid
+    ]
+    for taking in product([False, True], repeat=len(file.options)):
+        options = [option for option, taken in zip(file.options, taking, strict=True) if taken]
+        fixed = {option.id: world.terms[option.id].fixed_start for option in options}
+        free = [id for id, moment in fixed.items() if moment is None]
+        for times in product(grid, repeat=len(free)):
+            chosen = dict(zip(free, times, strict=True))
+            steps: list[Step] = []
+            for option in options:
+                start = fixed[option.id]
+                if start is None:
+                    start = chosen[option.id]
+                end = start + world.terms[option.id].shortest
+                steps.append(
+                    Step(option.id, option.origin, option.destination, (person,), start, end)
+                )
+            for hop in hops if len(options) == 2 else [None]:
+                if not broken(file, world, (*steps, hop) if hop else tuple(steps)):
+                    return True
+    return False
+
+
+def two_places_with_no_listed_way(rng: Random) -> File:
+    """Alex is LOCKed on two OPTIONs in different PLACES, and the FILE lists no way between them.
+
+    A COMPLETE FACT usually covers the ways between those PLACES for some span. Whether an
+    unlisted OPTION can still join them depends on when Alex can leave.
+    """
+    facts: list[Document] = []
+    for id, quarters in (("first", range(4)), ("second", range(2, 9))):
+        quarter = rng.choice(quarters)
+        start = starts_at(id, 9 + quarter // 4, 15 * (quarter % 4))
+        stated = [
+            start if rng.random() < 0.7 else any_time(id),
+            lasts(id, f"PT{15 * rng.randrange(2)}M"),
+            cutoff(id, f"PT{15 * rng.randrange(2)}M"),
+        ]
+        facts += [fact for fact in stated if rng.random() >= 0.15]
+    if rng.random() < 0.85:
+        first = rng.randrange(5)
+        leaving = {
+            "earliest": at_second(seconds(9) + QUARTER * first + 1),
+            "latest": at_second(seconds(9) + QUARTER * rng.randrange(first + 1, 10) - 1),
+        }
+        facts.append({"id": "ways", "complete": {"from": "a", "to": "b", "leaving": leaving}})
+    options = [stays("first", "a"), stays("second", "b")]
+    return trip(["alex"], PLACES, options, facts, [lock("first", "alex"), lock("second", "alex")])
+
+
+def test_the_best_case_search_misses_no_itinerary() -> None:
+    """INFEASIBLE means nothing works in the best case. Check that against trying everything."""
+    rng = Random(42)
+    answers: set[bool] = set()
+    trips = [random_trip(rng, 0.3, persons=["alex"], count=2, complete=0.7) for _ in range(80)]
+    trips += [two_places_with_no_listed_way(rng) for _ in range(200)]
+    for file in trips:
+        infeasible = check(file).answer is Answer.INFEASIBLE
+        assert infeasible != works_in_the_best_case_on_the_grid(file)
+        answers.add(infeasible)
     assert answers == {True, False}
 
 

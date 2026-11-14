@@ -4,6 +4,7 @@ from agloe.file import load
 from agloe.reference import Answer, Missing, Unknown, check
 from tests.stories import (
     any_time,
+    at,
     cutoff,
     flight_home,
     lasts,
@@ -215,6 +216,72 @@ def test_an_option_before_a_fixed_time_starts_as_late_as_it_can() -> None:
         ("walk", seconds(9, 30)),
         ("meeting", seconds(10)),
     ]
+
+
+def test_a_complete_set_says_nothing_after_its_span() -> None:
+    """The listed train is far too slow. An unlisted way that leaves after the span might exist."""
+    document = flight_home()
+    document["facts"][3] = lasts("blue-line", "PT5H")
+    document["facts"][4] = starts_at("flight", 19)
+    ways = {
+        "from": "art-institute",
+        "to": "ohare",
+        "leaving": {"earliest": at(12), "latest": at(16)},
+    }
+    document["facts"].append({"id": "ways-to-ohare", "complete": ways})
+    report = check(load(document))
+    assert report.answer is Answer.UNDETERMINED
+    another = Unknown("another way", origin="art-institute", destination="ohare")
+    assert report.missing == (Missing(another, at_most=2 * 3600 + 14 * 60 + 59),)
+
+
+def test_a_complete_set_says_nothing_before_its_span() -> None:
+    """Packing can be done at any time, so Alex could leave before the span begins."""
+    ways = {"from": "a", "to": "b", "leaving": {"earliest": at(9), "latest": at(10, 30)}}
+    file = trip(
+        ["alex"],
+        ["a", "b"],
+        [stays("pack", "a"), stays("meeting", "b")],
+        [
+            any_time("pack"),
+            lasts("pack", "PT30M"),
+            starts_at("meeting", 10),
+            lasts("meeting", "PT1H"),
+            cutoff("meeting", "PT0S"),
+            {"id": "ways", "complete": ways},
+        ],
+        [lock("pack", "alex"), lock("meeting", "alex")],
+    )
+    report = check(file)
+    assert report.answer is Answer.UNDETERMINED
+    assert report.missing == (Missing(Unknown("another way", origin="a", destination="b"), None),)
+
+
+def test_a_complete_set_that_covers_every_leaving_time_makes_it_infeasible() -> None:
+    ways = {"from": "a", "to": "b", "leaving": {"earliest": at(0), "latest": at(23, 59)}}
+    file = trip(
+        ["alex"],
+        ["a", "b"],
+        [stays("breakfast", "a"), stays("meeting", "b")],
+        [
+            starts_at("breakfast", 8),
+            lasts("breakfast", "PT30M"),
+            starts_at("meeting", 10),
+            lasts("meeting", "PT1H"),
+            cutoff("meeting", "PT0S"),
+            {"id": "ways", "complete": ways},
+        ],
+        [lock("breakfast", "alex"), lock("meeting", "alex")],
+    )
+    report = check(file)
+    assert report.answer is Answer.INFEASIBLE
+    assert report.conflict == (
+        "breakfast-time",
+        "meeting-time",
+        "ways",
+        "lock-breakfast",
+        "lock-meeting",
+    )
 
 
 def test_an_empty_file_is_feasible() -> None:
