@@ -1,6 +1,6 @@
 # Foundation
 
-This document states what a TRIP means and what the COMPILER and the OPTIMIZER answer. Terms in capitals are defined in the [vocabulary](vocabulary.md). Each principle names the qualities from the [vision](../docs/VISION.md) it serves, and cites the original source of the idea where one exists; "to be verified" marks a source still being checked against the original. Later sections of the specification turn these principles into rules with runnable examples.
+This document states what a TRIP means and what the COMPILER and the OPTIMIZER answer. Terms in capitals are defined in the [vocabulary](vocabulary.md). Each principle names the qualities from the [vision](../docs/VISION.md) it serves, and cites the original source of the idea where one exists; "to be verified" marks a source still being checked against the original. The [rules](rules.md) turn these principles into CONSTRAINTs with runnable examples.
 
 ## The foundation
 
@@ -145,7 +145,7 @@ Starter WANTs are never hidden rules; they sit in the FILE like any other WANT. 
 **E4. SETTINGs, never assumed FACTs.** Thresholds such as the minimum connection time are SETTINGs with defaults pinned in the COMPILER, and every report names any override. The COMPILER never assumes a FACT it is not given; it returns UNDETERMINED and states the condition instead ("FEASIBLE if the walk needs no BOOKING"). An assumed ferry time is exactly how a real trip goes wrong.
 *Serves:* trustworthy, deterministic.
 
-**E5. Every result shows its evidence.** FEASIBLE: the ITINERARY and the FACTs and DECISIONs it relies on. INFEASIBLE: the smallest set of FACTs and DECISIONs that conflict. UNDETERMINED: the missing FACTs. A fixed rule picks among equal explanations, so the same FILE always gives the same one.
+**E5. Every result shows its evidence.** FEASIBLE: the ITINERARY and the FACTs and DECISIONs it relies on. INFEASIBLE: a set of FACTs and DECISIONs that conflict, from which none can be removed. UNDETERMINED: the missing FACTs. A fixed rule picks among equal explanations, so the same FILE always gives the same one.
 *Serves:* self-explaining, deterministic. *Source:* QuickXplain (Junker, 2004); why-provenance (Buneman, Khanna and Tan, 2001).
 
 **E6. Every FINDING is visible.** A DISMISSAL silences an ERROR, WARNING or NOTE as it stood, and the FINDING returns if it gets worse. UNDETERMINED FINDINGs, and ERRORs meaning the FILE cannot be read, cannot be dismissed.
@@ -178,12 +178,12 @@ A BET never makes the TRIP INFEASIBLE.
 If ARRIVAL <= DEADLINE: no BET. Advice: wait.
 ```
 
-**F2. ROBUST and RECOVERABLE.** An ITINERARY is ROBUST if every clock time can be fixed now and it still works however long the CONTINGENT durations, such as traffic, turn out. It is RECOVERABLE if, when any one BOOKING it relies on fails, a FEASIBLE ITINERARY exists within a stated number of changes, set by a SETTING. The report warns when a FEASIBLE TRIP is not ROBUST or not RECOVERABLE.
+**F2. ROBUST and RECOVERABLE.** An ITINERARY is ROBUST if every start time can be fixed now and it still works however long the CONTINGENT durations, such as traffic, turn out. It is RECOVERABLE if, when any one BOOKING it relies on fails, a FEASIBLE ITINERARY exists within a stated number of changes, set by a SETTING. The report warns when a FEASIBLE TRIP is not ROBUST or not RECOVERABLE.
 *Serves:* trustworthy, whole-lifecycle. *Source:* strong controllability (Vidal and Fargier, 1999); supermodels (Ginsberg, Parkes and Roy, 1998), adapted as super solutions by Hebrard, Hnich and Walsh (2004).
 
 ```
 ROBUST(ITINERARY) iff
-  one set of clock times meets every CONSTRAINT
+  one set of start times meets every CONSTRAINT
   for every value of every CONTINGENT duration
 RECOVERABLE(ITINERARY) iff
   for each BOOKING it relies on:

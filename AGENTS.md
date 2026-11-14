@@ -6,6 +6,7 @@ This file is for the AI agents and people who build Agloe. Read it before changi
 
 - [docs/VISION.md](docs/VISION.md): what Agloe is and what it must be.
 - [spec/foundation.md](spec/foundation.md) and [spec/vocabulary.md](spec/vocabulary.md): what a TRIP means. A term in capitals means exactly what the vocabulary says.
+- [spec/rules.md](spec/rules.md): exactly what the COMPILER checks. The reference checker in `src/agloe/reference.py` applies these rules directly, and it defines the right answer.
 - [docs/PRINCIPLES.md](docs/PRINCIPLES.md): how Agloe is built. Follow all eight principles.
 - [docs/decisions/](docs/decisions/): why things are the way they are. When a decision changes, its record is rewritten to the new decision.
 - [docs/ROADMAP.md](docs/ROADMAP.md): what each release contains.
@@ -19,7 +20,7 @@ This file is for the AI agents and people who build Agloe. Read it before changi
 ## How to work
 
 1. Work in thin slices. Each slice runs from FILE to report, with its tests, before the next begins.
-2. Write the specification text, the examples and the tests before the implementation.
+2. Write the specification text, the examples and the tests before the implementation. A new rule goes into `spec/rules.md` and the reference checker first. Anything faster must then give the same answers as the reference checker.
 3. Every change goes through a small pull request, and merges only after the automated checks pass on Linux and macOS. Branch protection enforces this; nothing is pushed to main directly. Never claim that something works or is fixed without showing the evidence.
 4. Use established methods and libraries first. Write a decision record before building anything genuinely new.
 5. Never special-case a rule to make one example pass. Fix the example's data, or change the model by decision.

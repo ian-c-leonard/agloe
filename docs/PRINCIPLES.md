@@ -19,7 +19,7 @@ The COMPILER is exact first. When it cannot finish, it says UNDETERMINED; it nev
 - *Decides:* what to do when exact checking is slow.
 - *Rejects:* heuristic-first planners that are fast but sometimes wrong, as most AI trip planners are.
 - *Source:* the project's rule that the reference COMPILER establishes meaning before search performance; differential testing (McKeeman, "Differential Testing for Software", Digital Technical Journal, 1998).
-- *In practice:* the OPTIMIZER is tested against the COMPILER on the same FILEs, and real trips with known verdicts are the acceptance tests.
+- *In practice:* a slow reference checker applies the rules directly and defines the right answers. The COMPILER and the OPTIMIZER are tested against it on the same FILEs, and example trips with known answers are the acceptance tests.
 
 ## 2. The simplest thing that fully works
 
@@ -46,7 +46,7 @@ Each step works from FILE to report before the next begins, and lands on main th
 - *Decides:* what to build next, and when to merge.
 - *Rejects:* building one layer at a time and connecting the layers at the end; long-lived branches.
 - *Source:* the project's standing rule ("Grow the system in layers ... Never trade a working product for unfinished complexity"); the walking skeleton (Cockburn, Crystal Clear, 2004); tracer bullets (Hunt and Thomas, The Pragmatic Programmer, 1999).
-- *In practice:* the first slice checks a ferry connection from end to end.
+- *In practice:* the first slice checks one connection from end to end: whether two travelers can make their flight.
 
 ## 5. General, never special-cased
 

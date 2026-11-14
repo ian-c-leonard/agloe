@@ -1,0 +1,10 @@
+{
+  "answer": "UNDETERMINED",
+  "missing": [
+    {
+      "what": "duration",
+      "option": "cab",
+      "at_most": "PT45M"
+    }
+  ]
+}

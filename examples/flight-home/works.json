@@ -1,0 +1,29 @@
+{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" }
+  ],
+  "places": [
+    { "id": "art-institute", "name": "the Art Institute" },
+    { "id": "ohare", "name": "O'Hare" },
+    { "id": "home", "name": "home" }
+  ],
+  "options": [
+    { "id": "museum-visit", "name": "Museum visit", "place": "art-institute" },
+    { "id": "blue-line", "name": "Blue Line to O'Hare", "from": "art-institute", "to": "ohare" },
+    { "id": "flight", "name": "Flight home", "from": "ohare", "to": "home" }
+  ],
+  "facts": [
+    { "id": "visit-time", "option": "museum-visit", "starts_at": "2027-05-15T14:00:00-05:00[America/Chicago]" },
+    { "id": "visit-length", "option": "museum-visit", "duration": "PT1H" },
+    { "id": "train-time", "option": "blue-line", "starts_any_time": true },
+    { "id": "train-length", "option": "blue-line", "duration": "PT1H" },
+    { "id": "flight-time", "option": "flight", "starts_at": "2027-05-15T17:00:00-05:00[America/Chicago]" },
+    { "id": "flight-length", "option": "flight", "duration": "PT2H30M" },
+    { "id": "bag-drop", "option": "flight", "arrive_before_start": "PT45M" }
+  ],
+  "decisions": [
+    { "id": "lock-visit", "lock": "museum-visit", "persons": ["alex", "sam"] },
+    { "id": "lock-flight", "lock": "flight", "persons": ["alex", "sam"] }
+  ]
+}

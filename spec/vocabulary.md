@@ -56,7 +56,7 @@ A newer FACT that contradicts an older one about the same thing: the 15:55 saili
 
 ### COMPLETE
 
-Describes a set of OPTIONs that a FACT states the FILE holds in full: every OPTION between two PLACEs starting within a stated time span. A COMPLETE set that is empty means "we looked, and there is nothing". A FACT that one set is COMPLETE says nothing about any other set.
+Describes a set of OPTIONs that a FACT states the FILE holds in full: every OPTION a PERSON could use to get from one PLACE to another, directly or through other PLACEs, leaving within a stated time span. A COMPLETE set that is empty means "we looked, and there is nothing". A FACT that one set is COMPLETE says nothing about any other set.
 
 *Uses:* OPTION, FACT, FILE, → PLACE.
 
@@ -337,7 +337,7 @@ A dated point at which something about the TRIP changes unless a DECISION comes 
 
 ### ROBUST
 
-An ITINERARY is ROBUST when one fixed set of clock times meets every CONSTRAINT for every value of every CONTINGENT duration.
+An ITINERARY is ROBUST when its OPTIONs and start times meet every CONSTRAINT for every value of every CONTINGENT duration.
 
 *Uses:* ITINERARY, CONSTRAINT, CONTINGENT.
 
