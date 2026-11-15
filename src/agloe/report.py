@@ -7,6 +7,8 @@ and the words name that zone. Where those clocks change during the times shown, 
 gives its offset from UTC.
 """
 
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
@@ -17,13 +19,18 @@ from agloe.file import (
     Duration,
     File,
     Lock,
+    Option,
+    Person,
+    Place,
     Start,
+    Way,
     length_written,
     local,
     written,
 )
 from agloe.reference import Broken, Constraint, Itinerary, Step
 
+_TIMES = ["first", "second", "third", "fourth", "fifth"]
 _DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 _MONTHS = [
     "January",
@@ -186,6 +193,10 @@ def as_text(file: File, report: Report) -> str:
             lines += [
                 f"  {number}. {case[0].upper()}{case[1:]}." for number, case in enumerate(cases, 1)
             ]
+        if any(
+            needed.unknown.what == "other ways" for enough in report.missing for needed in enough
+        ):
+            lines += ["", "Other WAYs help only if they can be taken when the plan needs them."]
     return "\n".join(lines) + "\n"
 
 
@@ -274,15 +285,41 @@ def _on_their_lines(report: Report) -> list[Broken]:
     return shown
 
 
+def _which_time(itinerary: Itinerary, position: int) -> str:
+    """Words that tell one line of the plan from others with the same WAY, time and PERSON.
+
+    Empty when no other line could be meant. Otherwise " for the second time", and so on.
+    """
+    lines = _lines(itinerary)
+    mine = next(step for step, positions in lines if position in positions)
+    alike = [
+        positions
+        for step, positions in lines
+        if step.option is None
+        and (step.way, step.start) == (mine.way, mine.start)
+        and (
+            step.way is not None
+            or (step.origin, step.destination) == (mine.origin, mine.destination)
+        )
+        and set(step.persons) & set(mine.persons)
+    ]
+    if len(alike) < 2:
+        return ""
+    number = next(count for count, positions in enumerate(alike) if position in positions)
+    which = _TIMES[number] if number < len(_TIMES) else f"{number + 1}th"
+    return f" for the {which} time"
+
+
 def _broken(file: File, clock: _Clock, report: Report, found: Broken) -> str:
     """One CONSTRAINT a plan would break at the longest durations, in words."""
     who = _people(file, found.persons)
     rule = f'the rule "{found.constraint.value}"'
     if found.step is not None:
         step = report.itinerary[found.step]
-        places = {place.id: place.name for place in file.places}
+        places = _names(file.places)
         name = f"another WAY from {places[step.origin]} to {places[step.destination]}"
         name = name if step.way is None else _name(file, step.way)
+        name += _which_time(report.itinerary, found.step)
         when = f"at {clock.time(step.start)}, the time to take {name}"
         if found.constraint is Constraint.PLACE and found.late is not None:
             return f"{who} would still be busy for {_span(found.late)} {when}."
@@ -305,7 +342,7 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
     if unknown.what == "start":
         return f"{_name(file, unknown.option)} can start at any time"
     if unknown.what == "other ways":
-        places = {place.id: place.name for place in file.places}
+        places = _names(file.places)
         there = f"there are other WAYs from {places[unknown.origin or '']} to "
         there += places[unknown.destination or ""]
         if limit is not None:
@@ -330,7 +367,7 @@ def _record(file: File, clock: _Clock, record: str) -> str:
     """One FACT or DECISION in words."""
     found = next(each for each in (*file.facts, *file.locks) if each.id == record)
     if isinstance(found, Complete):
-        places = {place.id: place.name for place in file.places}
+        places = _names(file.places)
         first = clock.day(found.earliest)
         span = f"{clock.moment(found.earliest)} and {clock.time(found.latest, first)}"
         if found.origin is None and found.destination is None:
@@ -367,17 +404,27 @@ def _cutoff(file: File, name: str, found: Cutoff) -> str:
 def _starts_at(file: File, option: str | None) -> str:
     """The name of the PLACE where an OPTION starts."""
     origin = next(each.origin for each in file.options if each.id == option)
-    return next(place.name for place in file.places if place.id == origin)
+    return _names(file.places)[origin]
+
+
+def _names(records: Sequence[Person | Place | Option | Way]) -> dict[str, str]:
+    """The name to show for each record. Where two have the same name, each shows its id too."""
+    shared = Counter(record.name for record in records)
+    return {
+        record.id: record.name if shared[record.name] == 1 else f"{record.name} ({record.id})"
+        for record in records
+    }
 
 
 def _name(file: File, id: str | None) -> str:
     """The name of an OPTION or a WAY."""
-    return next((each.name for each in (*file.options, *file.ways) if each.id == id), "another WAY")
+    return _names((*file.options, *file.ways)).get(id or "", "another WAY")
 
 
 def _people(file: File, persons: tuple[str, ...]) -> str:
     """Names joined as a sentence would: Alex, Sam and Jo."""
-    names = [person.name for person in file.persons if person.id in persons]
+    shown = _names(file.persons)
+    names = [shown[person.id] for person in file.persons if person.id in persons]
     if len(names) < 2:
         return "".join(names)
     return f"{', '.join(names[:-1])} and {names[-1]}"

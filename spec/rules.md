@@ -73,7 +73,7 @@ Two cases settle the answer. For the same OPTIONs, PERSONs, WAYs and start times
 
 An ITINERARY is ROBUST when its OPTIONs, PERSONs, WAYs and start times work in every possible world, for every value of every CONTINGENT duration. A longer duration is never easier, so it is enough to check the longest value of each.
 
-A FEASIBLE TRIP with no ROBUST ITINERARY gets a WARNING. The WARNING names each CONSTRAINT that the ITINERARY shown would break if every CONTINGENT duration ran longest, with the OPTION, the PERSONs and how late they would be.
+A FEASIBLE TRIP with no ROBUST ITINERARY gets a WARNING. The WARNING names each CONSTRAINT that the ITINERARY shown would break if every CONTINGENT duration ran longest, with the OPTION or the time a WAY is taken, the PERSONs and how late they would be.
 
 ## Which ITINERARY is shown
 
@@ -103,7 +103,7 @@ A ROBUST ITINERARY shows each CONTINGENT duration at its longest value, and any 
 - **INFEASIBLE:** a set of FACTs and DECISIONs that make the TRIP INFEASIBLE by themselves, and from which none can be removed. Removing a FACT makes what it stated unknown. The COMPILER goes through the records in the FILE's order, FACTs before DECISIONs, and removes each one that the TRIP stays INFEASIBLE without.
 - **UNDETERMINED:** the unknown FACTs that would make the TRIP FEASIBLE. A set of unknown FACTs is enough when the TRIP is FEASIBLE with those FACTs as in the best case and every other unknown FACT as in the worst case. The report lists every set that is enough and has the fewest FACTs. When a set holds exactly one unknown FACT, and that FACT is a length of time, the report gives the most it can be: "works if the cab takes 45 minutes or less". When any length of time would do, the report gives no limit, and the FACT only has to be stated.
 
-An unknown FACT is the start, the duration or the access cutoff of a listed OPTION, the duration of a listed WAY, or other WAYs from one PLACE to another. Other WAYs are unlisted WAYs that go straight from the first PLACE to the second. Their length of time is how long each one takes.
+An unknown FACT is the start, the duration or the access cutoff of a listed OPTION, the duration of a listed WAY, or other WAYs from one PLACE to another. Other WAYs are unlisted WAYs that go straight from the first PLACE to the second. Their length of time is how long each one takes. They help only if they can be taken when the ITINERARY needs them.
 
 The unknown FACTs have a fixed order. First come the OPTIONs in the FILE's order, each with its start, its duration and its access cutoff. Then come the durations of the WAYs, in the FILE's order. Then come the other WAYs, in the FILE's order of their first PLACE and then of their second. A set lists its FACTs in that order, and the sets are listed in that order too, comparing their first FACTs first.
 

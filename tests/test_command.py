@@ -102,6 +102,8 @@ def test_several_ways_to_make_a_trip_work_are_numbered() -> None:
         "The trip works in any of these cases:",
         "  1. Cab to O'Hare takes 45 min or less.",
         "  2. There are other WAYs from the Art Institute to O'Hare that take 45 min or less.",
+        "",
+        "Other WAYs help only if they can be taken when the plan needs them.",
     ]
 
 
@@ -197,6 +199,8 @@ def test_a_way_nobody_timed_is_named_in_what_is_missing() -> None:
         "The trip works in any of these cases:",
         "  1. Walk takes 30 min or less.",
         "  2. There are other WAYs from hotel to restaurant that take 30 min or less.",
+        "",
+        "Other WAYs help only if they can be taken when the plan needs them.",
     ]
     assert report.as_json(file, found)["missing"] == [
         [{"what": "duration", "way": "walk", "at_most": "PT30M"}],
@@ -413,6 +417,8 @@ def test_a_way_that_must_take_no_time_is_put_plainly() -> None:
         "The trip works in any of these cases:",
         "  1. There are other WAYs from hotel to restaurant that take no time.",
         "  2. There are other WAYs from restaurant to hotel that take no time.",
+        "",
+        "Other WAYs help only if they can be taken when the plan needs them.",
     ]
 
 
@@ -534,3 +540,54 @@ def test_a_person_never_shares_a_line_with_themselves() -> None:
     assert report.together((walk, with_sam)) == [
         Step(None, "hotel", "restaurant", ("alex", "sam"), 0, 600, "walk")
     ]
+
+
+def test_a_warning_says_which_time_a_way_is_taken() -> None:
+    """Alex takes the same WAY twice at 9:00, before and after a ride that can take a minute.
+
+    If the ride takes that minute, Alex is not back for the second time. Both lines of the plan
+    read the same, so the warning says which one it means.
+    """
+    file = trip(
+        ["alex"],
+        ["a", "b"],
+        [stays("first", "a"), moves("ride", "b", "a"), stays("last", "b")],
+        [
+            starts_at("first", 8),
+            lasts("first", "PT1H"),
+            starts_at("ride", 9),
+            lasts_between("ride", "PT0S", "PT1M"),
+            cutoff("ride", "PT0S"),
+            starts_at("last", 9),
+            lasts("last", "PT1H"),
+            cutoff("last", "PT0S"),
+            takes("ab", "PT0S"),
+        ],
+        [lock("first", "alex"), lock("ride", "alex"), lock("last", "alex")],
+        [way("ab", "a", "b")],
+    )
+    words = report.as_text(file, compiler.check(file)).splitlines()
+    assert words[4] == words[6] == "  9:00 am to 9:00 am: ab, alex"
+    assert "  alex would not be free at 9:00 am, the time to take ab for the second time." in words
+
+
+def test_records_with_the_same_name_show_their_ids() -> None:
+    """Two travelers are both called Alex, and only one of them is LOCKed onto the late stop."""
+    document = {
+        "persons": [{"id": "alex-a", "name": "Alex"}, {"id": "alex-b", "name": "Alex"}],
+        "places": [{"id": "hotel", "name": "the hotel"}],
+        "options": [stays("call", "hotel"), stays("nap", "hotel")],
+        "ways": [],
+        "facts": [
+            starts_at("call", 9),
+            lasts_between("call", "PT30M", "PT1H"),
+            starts_at("nap", 9, 30),
+            lasts("nap", "PT1H"),
+        ],
+        "decisions": [lock("call", "alex-a", "alex-b"), lock("nap", "alex-b")],
+    }
+    file = load(document)
+    words = report.as_text(file, compiler.check(file)).splitlines()
+    assert "  9:00 am to 9:30 am: call, Alex (alex-a) and Alex (alex-b)" in words
+    assert "  Alex (alex-b) would still be busy for 30 min when nap starts." in words
+    assert "  lock-nap: Alex (alex-b) takes part in nap" in words
