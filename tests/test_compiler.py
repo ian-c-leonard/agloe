@@ -1,5 +1,6 @@
 """The COMPILER finds with a solver what the reference checker finds by trying everything."""
 
+import json
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -8,7 +9,7 @@ from random import Random
 import pytest
 
 from agloe import compiler, reference
-from agloe.file import File, read
+from agloe.file import File, load, read
 from agloe.reference import (
     Answer,
     Missing,
@@ -466,10 +467,55 @@ def test_the_compiler_names_what_is_missing_from_a_day() -> None:
     assert report.missing == ((Missing(another, at_most=15 * 60),),)
 
 
-def test_the_compiler_sees_that_a_day_cannot_work() -> None:
+def test_the_compiler_names_the_conflict_in_a_day() -> None:
     """The same day, with a FACT that the cab is the only way from the pier to O'Hare."""
     file = a_day_in_chicago(lasts("cab-to-ohare", "PT50M"), complete("pier", "ohare"), flight_at=15)
-    assert compiler.shown(file, worst_case(file)) is None
-    assert not compiler.works(file, best_case(file))
+    report = compiler.check(file)
+    assert report.answer is Answer.INFEASIBLE
+    assert report.conflict == (
+        "lunch-time",
+        "lunch-length",
+        "cab-to-ohare-length",
+        "ways-pier-ohare",
+        "flight-time",
+        "flight-cutoff",
+        "lock-lunch",
+        "lock-flight",
+    )
     without_the_fact = file.without("ways-pier-ohare")
     assert compiler.works(without_the_fact, best_case(without_the_fact))
+
+
+def test_the_conflict_named_is_the_one_found_in_the_files_order() -> None:
+    """Two things are wrong at once. Sam has two fixed stops that overlap, listed first.
+
+    Alex cannot make the flight, as in the story. Going through the records in the FILE's order
+    takes Sam's out first, since Alex's still clash without them. So the conflict named is
+    Alex's, though a search from the other end would find Sam's.
+    """
+    document = json.loads((EXAMPLES / "flight-home" / "cannot-work.json").read_text())
+    document["options"] = [stays("call", "home"), stays("nap", "home"), *document["options"]]
+    document["facts"] = [
+        starts_at("call", 9),
+        lasts("call", "PT1H"),
+        starts_at("nap", 9, 30),
+        lasts("nap", "PT1H"),
+        *document["facts"],
+    ]
+    document["decisions"] = [lock("call", "sam"), lock("nap", "sam"), *document["decisions"]]
+    file = load(document)
+    report = compiler.check(file)
+    assert report == reference.check(file)
+    assert report.conflict == (
+        "visit-time",
+        "visit-length",
+        "train-length",
+        "flight-time",
+        "bag-drop",
+        "ways-to-ohare",
+        "lock-visit",
+        "lock-flight",
+    )
+    assert compiler.stuck(file) == frozenset(
+        {"call-time", "call-length", "nap-time", "lock-call", "lock-nap"}
+    )
