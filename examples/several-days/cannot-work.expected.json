@@ -1,0 +1,10 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "night-time",
+    "night-length",
+    "breakfast-time",
+    "lock-night",
+    "lock-breakfast"
+  ]
+}

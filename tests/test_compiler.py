@@ -789,3 +789,28 @@ def test_the_two_checkers_agree_on_a_group_that_splits_up_and_meets_again() -> N
             assert reference.works_as_listed(file, worst_case(file), shown)
         seen.add(report.answer)
     assert seen == set(Answer)
+
+
+def test_a_plan_may_cross_a_night_that_the_file_says_nothing_about() -> None:
+    """Dinner on Friday and breakfast on Saturday, with no night listed between them.
+
+    The FILE asks for nothing overnight, so neither checker does. The plan has two steps.
+    """
+    friday_dinner = {"id": "dinner-time", "option": "dinner", "starts_at": at(19, 0, day=14)}
+    file = trip(
+        ["alex"],
+        ["hotel"],
+        [stays("dinner", "hotel"), stays("breakfast", "hotel")],
+        [
+            friday_dinner,
+            lasts("dinner", "PT1H"),
+            starts_at("breakfast", 8),
+            lasts("breakfast", "PT45M"),
+        ],
+        [lock("dinner", "alex"), lock("breakfast", "alex")],
+    )
+    report = compiler.check(file)
+    assert report == answers.check(file)
+    assert report.answer is Answer.FEASIBLE
+    assert [step.option for step in report.itinerary] == ["dinner", "breakfast"]
+    assert report.itinerary[1].start - report.itinerary[0].start == 13 * 3600

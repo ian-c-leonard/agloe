@@ -137,4 +137,13 @@ On Saturday morning Sam has arrived, and so has their friend Jo. Alex and Sam vi
 | [depends on the walk](../examples/a-group/depends-on-the-walk.json) | The Skydeck visit starts at 10:30 am, and nobody has recorded how long the walk from Willis Tower takes. | UNDETERMINED. It works if that walk takes 15 minutes or less. |
 | [works, but risky](../examples/a-group/works-but-risky.json) | The Skydeck visit starts at 10:00 am and can take up to two hours. | FEASIBLE, with a WARNING that no ITINERARY is ROBUST. The WARNING names Alex and Sam, who would still be at the Skydeck when their walk should start. |
 
+The trip also runs from one day into the next. On Friday evening Alex has dinner in River North until 8:30 pm and walks 25 minutes to the hotel. The night at the hotel starts at 11:30 pm and lasts eight hours. The FILE lists the night like any other OPTION. On Saturday, breakfast is at 8:00 am, and the Skydeck visit at 10:00 am is a 15 minute walk away.
+
+| FILE | What it says | Answer |
+|---|---|---|
+| [works](../examples/several-days/works.json) | The night ends at 7:30 am, and breakfast is at 8:00 am. | FEASIBLE. The plan runs over two days. |
+| [cannot work](../examples/several-days/cannot-work.json) | Breakfast is at 7:00 am. | INFEASIBLE. The night ends half an hour after breakfast starts. Five FACTs and DECISIONs conflict, from both days. |
+| [depends on the night](../examples/several-days/depends-on-the-night.json) | Nobody has recorded how long the night lasts. | UNDETERMINED. It works if the night takes 8 hours 30 minutes or less. |
+| [works, but risky](../examples/several-days/works-but-risky.json) | Breakfast can take up to two hours. | FEASIBLE, with a WARNING that no ITINERARY is ROBUST. At two hours Alex is still at breakfast when Saturday's walk to Willis Tower should start. |
+
 Each FILE has its expected result beside it, as JSON and in words, and the tests compare the reference checker's answer with it. The command `agloe check` prints the same result for any FILE.
