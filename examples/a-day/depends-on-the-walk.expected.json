@@ -1,0 +1,12 @@
+{
+  "answer": "UNDETERMINED",
+  "missing": [
+    [
+      {
+        "what": "duration",
+        "way": "walk-to-dock",
+        "at_most": "PT15M"
+      }
+    ]
+  ]
+}

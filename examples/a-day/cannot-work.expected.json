@@ -1,0 +1,13 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "lunch-time",
+    "lunch-length",
+    "boat-time",
+    "boat-boarding",
+    "walk-to-dock-length",
+    "all-ways",
+    "lock-lunch",
+    "lock-boat-tour"
+  ]
+}
