@@ -87,7 +87,7 @@ def with_a_cab(*facts: dict[str, object], only_listed_ways: bool = False) -> str
     document["options"][-1]["name"] = "Cab to O'Hare"
     document["facts"] += facts
     if only_listed_ways:
-        document["facts"].append(complete("art-institute", "ohare"))
+        document["facts"].append(complete(None, "ohare"))
     file = load(document)
     return report.as_text(file, compiler.check(file))
 
@@ -235,3 +235,30 @@ def test_a_report_with_a_time_past_the_year_9999_is_not_written(
             f"{path}: the report holds a time outside the years 0001 to 9999, "
             "so it cannot be written\n"
         )
+
+
+def test_a_complete_fact_is_put_in_words_for_the_places_it_names() -> None:
+    """Alex is at the hotel at 9:00 and at the pier at 10:00, and the FILE lists no way there."""
+    words = {
+        ("hotel", "pier"): "ways-hotel-pier: every way straight from hotel to pier",
+        (None, "pier"): "ways-to-pier: every way straight to pier",
+        ("hotel", None): "ways-from-hotel: every way straight from hotel",
+        (None, None): "ways: every way from one PLACE straight to another",
+    }
+    for (origin, destination), expected in words.items():
+        file = trip(
+            ["alex"],
+            ["hotel", "pier"],
+            [stays("breakfast", "hotel"), stays("fireworks", "pier")],
+            [
+                starts_at("breakfast", 9),
+                lasts("breakfast", "PT0S"),
+                starts_at("fireworks", 10),
+                complete(origin, destination),
+            ],
+            [lock("breakfast", "alex"), lock("fireworks", "alex")],
+        )
+        printed = report.as_text(file, compiler.check(file)).splitlines()
+        assert printed[0] == "INFEASIBLE: this trip cannot work."
+        span = "that leaves between 12:00 am on Saturday 15 May 2027 and 11:59 pm is listed"
+        assert f"  {expected} {span}" in printed

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from agloe.file import FileError, instant, length, load, read
+from agloe.file import Complete, FileError, instant, length, load, read
 from tests.stories import (
     Document,
     at,
@@ -291,6 +291,20 @@ def test_each_fact_is_stated_once() -> None:
         {"id": "visit-length-again", "option": "museum-visit", "duration": "PT2H"}
     )
     assert "/facts/7: another FACT already states this about museum-visit" in problems(document)
+
+
+def test_a_complete_fact_names_two_different_places_or_leaves_some_out() -> None:
+    document = flight_home()
+    document["facts"] += [complete("ohare", "ohare"), complete(None, "the-moon")]
+    found = problems(document)
+    assert "/facts/7: a COMPLETE FACT needs two different PLACEs" in found
+    assert "/facts/8: the-moon is not a PLACE in this FILE" in found
+    document["facts"][7:] = [complete("art-institute", None), complete(None, None)]
+    stated = [fact for fact in load(document).facts if isinstance(fact, Complete)]
+    assert [(fact.origin, fact.destination) for fact in stated] == [
+        ("art-institute", None),
+        (None, None),
+    ]
 
 
 def test_a_complete_fact_is_stated_once() -> None:

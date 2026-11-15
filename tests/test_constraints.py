@@ -10,6 +10,7 @@ from agloe.reference import (
     Step,
     best_case,
     broken,
+    check,
     needless,
     worst_case,
 )
@@ -143,13 +144,32 @@ def test_a_complete_set_is_the_whole_set() -> None:
     assert broken(file, best_case(file), shortcut) == [Broken(Constraint.LISTED, None, BOTH)]
 
 
-def test_a_complete_set_covers_ways_through_other_places() -> None:
-    file = with_complete_ways()
+def through_midway() -> Itinerary:
     first = unlisted("art-institute", "midway", seconds(15))
     second = unlisted("midway", "ohare", seconds(15))
-    assert broken(file, best_case(file), (visit(), first, second, flight())) == [
-        Broken(Constraint.LISTED, None, BOTH)
-    ]
+    return (visit(), first, second, flight())
+
+
+def test_a_complete_set_says_nothing_about_travel_through_a_third_place() -> None:
+    file = with_complete_ways()
+    assert broken(file, best_case(file), through_midway()) == []
+
+
+def test_a_complete_set_can_cover_every_place() -> None:
+    """Every way to O'Hare is listed, or every way from the museum, or every way there is."""
+    for origin, destination in ((None, "ohare"), ("art-institute", None), (None, None)):
+        document = flight_home()
+        document["places"].append({"id": "midway", "name": "Midway"})
+        document["facts"].append(complete(origin, destination))
+        file = load(document)
+        assert broken(file, best_case(file), through_midway()) == [
+            Broken(Constraint.LISTED, None, BOTH)
+        ]
+    document = flight_home()
+    document["places"].append({"id": "midway", "name": "Midway"})
+    document["facts"].append(complete(None, "art-institute"))
+    file = load(document)
+    assert broken(file, best_case(file), through_midway()) == []
 
 
 def test_a_complete_set_says_nothing_outside_its_span() -> None:
@@ -185,7 +205,7 @@ def test_a_complete_span_includes_both_of_its_ends() -> None:
     assert leaving_at(seconds(15, 10) + 1) == []
 
 
-def test_a_complete_set_covers_only_ways_that_reach_the_second_place() -> None:
+def test_a_complete_set_covers_only_ways_to_its_second_place() -> None:
     """Sam takes an unlisted way to Midway and stays there. Nothing says those ways are listed."""
     file = with_complete_ways()
     alex = ("alex",)
@@ -293,19 +313,23 @@ def test_options_that_take_time_are_not_tried_in_every_order() -> None:
     ]
 
 
-def test_a_complete_set_covers_a_journey_up_to_the_first_arrival() -> None:
-    """Alex takes the listed train to O'Hare, then unlisted OPTIONs to Midway and back."""
+def test_a_complete_set_covers_one_direction_between_its_two_places() -> None:
+    """Alex takes the listed train to O'Hare, then unlisted WAYs to Midway and back.
+
+    Those are not covered, and neither is an unlisted WAY back to the museum. One from the museum
+    to O'Hare is.
+    """
     file = with_complete_ways()
     alex = ("alex",)
-    journey = (
+    to_midway = (
         step(file, "museum-visit", seconds(14), seconds(15), *alex),
         step(file, "blue-line", seconds(15), seconds(16), *alex),
         unlisted("ohare", "midway", seconds(16), *alex),
         unlisted("midway", "ohare", seconds(16, 30), *alex),
     )
-    found = broken(file, best_case(file), journey)
+    found = broken(file, best_case(file), to_midway)
     assert Constraint.LISTED not in {each.constraint for each in found}
-    there_and_back = (*journey[:2], unlisted("ohare", "art-institute", seconds(16), *alex))
+    there_and_back = (*to_midway[:2], unlisted("ohare", "art-institute", seconds(16), *alex))
     again = unlisted("art-institute", "ohare", seconds(16, 30), *alex)
     found = broken(file, best_case(file), (*there_and_back, again))
     assert Broken(Constraint.LISTED, None, alex) in found
@@ -364,16 +388,16 @@ def test_a_way_must_be_over_before_the_next_thing_starts() -> None:
     ]
 
 
-def test_several_ways_in_a_row_pass_through_no_place_twice() -> None:
+def test_a_person_can_go_round_in_a_circle_but_the_itinerary_shown_does_not() -> None:
+    """Alex walks to the gallery, back to the hotel and to the gallery again. One walk is enough."""
     file = with_walks()
     breakfast = step(file, "breakfast", seconds(8), seconds(9), "alex")
     museum = step(file, "museum", seconds(10), seconds(12), "alex")
     there = walk("hotel", "gallery", seconds(9))
     back = walk("gallery", "hotel", seconds(9, 15))
     again = walk("hotel", "gallery", seconds(9, 30))
-    assert broken(file, worst_case(file), (breakfast, there, back, again, museum)) == [
-        Broken(Constraint.PLACE, None, ("alex",))
-    ]
+    assert broken(file, worst_case(file), (breakfast, there, back, again, museum)) == []
+    assert check(file).itinerary == (breakfast, there, museum)
 
 
 def test_a_way_goes_only_where_the_file_says() -> None:

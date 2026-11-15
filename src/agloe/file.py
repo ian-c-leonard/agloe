@@ -113,13 +113,24 @@ class Cutoff:
 
 @dataclass(frozen=True)
 class Complete:
-    """A FACT: the FILE lists every OPTION that gets a PERSON from one PLACE to another."""
+    """A FACT: the FILE lists every OPTION and WAY that goes straight from one PLACE to another.
+
+    A PLACE that is None stands for every PLACE.
+    """
 
     id: str
-    origin: str
-    destination: str
-    earliest: int  # the span of leaving times the FACT covers
+    origin: str | None
+    destination: str | None
+    earliest: int  # the span of starting times the FACT covers, both ends included
     latest: int
+
+    def covers(self, origin: str, destination: str) -> bool:
+        """Whether this FACT is about travel straight from one of these PLACEs to the other."""
+        return self.origin in (None, origin) and self.destination in (None, destination)
+
+    def rules_out(self, origin: str, destination: str, start: int) -> bool:
+        """Whether this FACT says no unlisted WAY goes between these PLACEs at this time."""
+        return self.covers(origin, destination) and self.earliest <= start <= self.latest
 
 
 @dataclass(frozen=True)
@@ -395,24 +406,26 @@ def load(document: object) -> File:
 
     facts: list[Fact] = []
     stated: set[tuple[str, type]] = set()
-    complete: set[tuple[str, str, int, int]] = set()
+    complete: set[tuple[str | None, str | None, int, int]] = set()
     for index, fact in enumerate(raw["facts"]):
         where = f"/facts/{index}"
         claim(where, fact["id"])
         if "complete" in fact:
             whole = fact["complete"]
-            known(where, whole["from"], "PLACE", place_ids)
-            known(where, whole["to"], "PLACE", place_ids)
-            if whole["from"] == whole["to"]:
+            origin, destination = whole.get("from"), whole.get("to")
+            for place in (origin, destination):
+                if place is not None:
+                    known(where, place, "PLACE", place_ids)
+            if origin is not None and origin == destination:
                 problems.append(f"{where}: a COMPLETE FACT needs two different PLACEs")
             earliest = when(where, whole["leaving"]["earliest"])
             latest = when(where, whole["leaving"]["latest"])
             if earliest > latest:
                 problems.append(f"{where}: the span ends before it starts")
-            if (whole["from"], whole["to"], earliest, latest) in complete:
+            if (origin, destination, earliest, latest) in complete:
                 problems.append(f"{where}: another FACT already states this")
-            complete.add((whole["from"], whole["to"], earliest, latest))
-            facts.append(Complete(fact["id"], whole["from"], whole["to"], earliest, latest))
+            complete.add((origin, destination, earliest, latest))
+            facts.append(Complete(fact["id"], origin, destination, earliest, latest))
             continue
         made: Fact
         if "way" in fact:

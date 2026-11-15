@@ -25,7 +25,6 @@
     {
       "id": "ways-to-ohare",
       "complete": {
-        "from": "art-institute",
         "to": "ohare",
         "leaving": {
           "earliest": "2027-05-15T12:00:00-05:00[America/Chicago]",

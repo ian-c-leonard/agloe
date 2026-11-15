@@ -1,13 +1,14 @@
 """The reference checker's shortcuts, checked the slow way on many small random TRIPs.
 
-The rules page makes three claims that save the checker from trying everything. Starting each
+The rules page makes four claims that save the checker from trying everything. Starting each
 OPTION as early as possible is enough to find an ITINERARY if one exists. The longest value of
 each CONTINGENT duration is enough to decide ROBUST. The best case and the worst case are enough
-to settle the answer for every possible world. These tests try the things the shortcuts skip.
+to settle the answer for every possible world. A PERSON who goes round in a circle by WAYs alone
+could have waited instead. These tests try the things the shortcuts skip.
 """
 
 from dataclasses import replace
-from itertools import combinations, pairwise, product
+from itertools import combinations, pairwise, permutations, product
 from random import Random
 
 from agloe.file import Duration, File
@@ -101,7 +102,10 @@ def random_trip(
             "earliest": at_second(seconds(9) + QUARTER * first + 1),
             "latest": at_second(seconds(9) + QUARTER * last - 1),
         }
-        whole = {"from": origin, "to": destination, "leaving": leaving}
+        whole: Document = {"from": origin, "to": destination, "leaving": leaving}
+        left_out = rng.choice(["from", "to", None, None])
+        if left_out is not None:
+            del whole[left_out]
         facts.append({"id": "ways", "complete": whole})
     ways: list[Document] = []
     if rng.random() < with_ways:
@@ -239,18 +243,24 @@ def test_the_longest_durations_decide_robust() -> None:
 def works_in_the_best_case_on_the_grid(file: File) -> bool:
     """Whether any ITINERARY works in the best case, trying every start on the grid.
 
-    For one PERSON. It also tries one unlisted OPTION between any two PLACES.
+    For one PERSON. It also tries one unlisted WAY between any two PLACES, and two in a row
+    through the third PLACE.
     """
     world = best_case(file)
     person = file.persons[0].id
     grid = [seconds(9) + QUARTER * quarter for quarter in range(-4, 11)]
-    hops: list[Step | None] = [None]
+
+    def hop(origin: str, destination: str, moment: int) -> Step:
+        return Step(None, origin, destination, (person,), moment, moment)
+
+    hops: list[tuple[Step, ...]] = [()]
+    hops += [(hop(*pair, moment),) for pair in permutations(PLACES, 2) for moment in grid]
     hops += [
-        Step(None, origin, destination, (person,), moment, moment)
-        for origin in PLACES
-        for destination in PLACES
-        if origin != destination
+        (hop(first, between, moment), hop(between, last, later))
+        for first, between, last in permutations(PLACES, 3)
         for moment in grid
+        for later in grid
+        if later >= moment
     ]
     for taking in product([False, True], repeat=len(file.options)):
         options = [option for option, taken in zip(file.options, taking, strict=True) if taken]
@@ -267,8 +277,8 @@ def works_in_the_best_case_on_the_grid(file: File) -> bool:
                 steps.append(
                     Step(option.id, option.origin, option.destination, (person,), start, end)
                 )
-            for hop in hops if len(options) >= 2 else [None]:
-                if not broken(file, world, (*steps, hop) if hop else tuple(steps)):
+            for taken in hops if len(options) >= 2 else [()]:
+                if not broken(file, world, (*steps, *taken)):
                     return True
     return False
 
@@ -276,11 +286,12 @@ def works_in_the_best_case_on_the_grid(file: File) -> bool:
 def two_places_with_no_listed_way(rng: Random) -> File:
     """Alex is LOCKed on two OPTIONs in different PLACES, and the FILE lists no way between them.
 
-    One or two COMPLETE FACTs usually cover the ways between those PLACES for some spans. Whether
-    an unlisted OPTION can still join them depends on when Alex can leave.
+    One or two COMPLETE FACTs usually cover the ways from the first PLACE for some spans: to the
+    second PLACE, or to every PLACE. Whether an unlisted WAY can still join the two depends on
+    when Alex can leave, and on whether the way through the third PLACE is open.
 
     Half the time Alex must also be at the second PLACE late in the morning, and a FACT covers
-    the ways back for the whole day.
+    every way back to the first PLACE for the whole day.
     """
     stay_there = rng.random() < 0.5
     facts: list[Document] = []
@@ -304,7 +315,9 @@ def two_places_with_no_listed_way(rng: Random) -> File:
             "earliest": at_second(seconds(9) + QUARTER * first + 1),
             "latest": at_second(seconds(9) + QUARTER * last - 1),
         }
-        ways = {"from": "a", "to": "b", "leaving": leaving}
+        ways: Document = {"from": "a", "leaving": leaving}
+        if rng.random() < 0.3:
+            ways["to"] = "b"
         facts.append({"id": f"ways-{number}", "complete": ways})
     options = [stays("first", "a"), stays("second", "b")]
     decisions = [lock("first", "alex"), lock("second", "alex")]
@@ -314,7 +327,7 @@ def two_places_with_no_listed_way(rng: Random) -> File:
             starts_at("third", 11, 15),
             lasts("third", "PT0S"),
             cutoff("third", "PT0S"),
-            complete("b", "a"),
+            complete(None, "a"),
         ]
         decisions.append(lock("third", "alex"))
     return trip(["alex"], PLACES, options, facts, decisions)
@@ -459,3 +472,102 @@ def test_the_best_and_worst_cases_settle_the_answer_for_every_possible_world() -
     assert answers == set(Answer)
     assert found_by_chance > 500
     assert by_listed_way > 50
+
+
+def a_walk_that_comes_back(rng: Random) -> tuple[File, World, Itinerary, Itinerary] | None:
+    """Two stops with WAYs between them that pass through one PLACE twice.
+
+    Returns the FILE, a world, the ITINERARY, and the same ITINERARY without the WAYs between
+    the two visits to that PLACE. Returns None when the walk made passes through no PLACE twice.
+    Every step starts later than the one before, so the steps can happen in one order only.
+    """
+    listed: list[Document] = []
+    facts: list[Document] = []
+    lengths: dict[tuple[str, str], tuple[str, int]] = {}  # the WAY from one PLACE to another
+    for number, (origin, destination) in enumerate(rng.sample(list(permutations(PLACES, 2)), 3)):
+        id, minutes = f"way-{number}", 5 * rng.randrange(3)
+        both = rng.random() < 0.5
+        listed.append(
+            way_between(id, origin, destination) if both else way(id, origin, destination)
+        )
+        facts.append(takes(id, f"PT{minutes}M"))
+        lengths[origin, destination] = (id, 60 * minutes)
+        if both:
+            lengths.setdefault((destination, origin), (id, 60 * minutes))
+    passed = [rng.choice(PLACES)]
+    for _ in range(rng.randrange(2, 6)):
+        passed.append(rng.choice([place for place in PLACES if place != passed[-1]]))
+    again = next((place for place in range(len(passed)) if passed[place] in passed[:place]), None)
+    if again is None:
+        return None
+    before = passed.index(passed[again])
+
+    unlisted_takes = 300 * rng.randrange(3)
+    legs: list[Step] = []
+    free = seconds(9)
+    for origin, destination in pairwise(passed):
+        name, lasts_for = None, unlisted_takes
+        if (origin, destination) in lengths and rng.random() < 0.7:
+            name, lasts_for = lengths[origin, destination]
+        start = max(free + 300 * rng.randrange(3), seconds(9) + 300 * (len(legs) + 1))
+        if legs:
+            start = max(start, legs[-1].start + 300)
+        legs.append(Step(None, origin, destination, ("alex",), start, start + lasts_for, name))
+        free = start + lasts_for
+    arrive = (free - seconds(9)) // 60 + 5 * rng.randrange(1, 4)  # minutes after 9:00
+
+    facts += [
+        starts_at("first", 9),
+        lasts("first", "PT0S"),
+        starts_at("last", 9 + arrive // 60, arrive % 60),
+        lasts("last", "PT0S"),
+        cutoff("last", f"PT{5 * rng.randrange(3)}M"),
+    ]
+    for number in range(rng.randrange(3)):
+        origin, destination = rng.choice([*permutations(PLACES, 2)])
+        whole: Document = {"from": origin, "to": destination}
+        left_out = rng.choice(["from", "to", None, None])
+        if left_out is not None:
+            del whole[left_out]
+        first = 5 * rng.randrange(20)
+        last = first + 5 * rng.randrange(1, 12)
+        whole["leaving"] = {
+            "earliest": at_second(seconds(9) + 60 * first),
+            "latest": at_second(seconds(9) + 60 * last),
+        }
+        facts.append({"id": f"ways-{number}", "complete": whole})
+    file = trip(
+        ["alex"],
+        PLACES,
+        [stays("first", passed[0]), stays("last", passed[-1])],
+        facts,
+        [lock("first", "alex"), lock("last", "alex")],
+        listed,
+    )
+    world = best_case(file) if rng.random() < 0.5 else possible_world(rng, file)
+    world = replace(world, unlisted_takes=unlisted_takes)
+    first_stop = Step("first", passed[0], passed[0], ("alex",), seconds(9), seconds(9))
+    at_last = seconds(9) + 60 * arrive
+    last_stop = Step("last", passed[-1], passed[-1], ("alex",), at_last, at_last)
+    whole_walk = (first_stop, *legs, last_stop)
+    shorter = (first_stop, *legs[:before], *legs[again:], last_stop)
+    return file, world, whole_walk, shorter
+
+
+def test_going_round_in_a_circle_never_helps() -> None:
+    """A PERSON who comes back to a PLACE by WAYs alone could have waited there instead.
+
+    So the searches only try routes that pass through no PLACE twice. Whenever an ITINERARY with
+    such a circle works, it still works without the WAYs between the two visits.
+    """
+    rng = Random(11)
+    worked = 0
+    for _ in range(1500):
+        made = a_walk_that_comes_back(rng)
+        if made is None:
+            continue
+        file, world, whole_walk, shorter = made
+        if not broken(file, world, whole_walk):
+            worked += 1
+            assert broken(file, world, shorter) == []
+    assert worked > 500
