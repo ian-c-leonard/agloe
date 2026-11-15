@@ -7,7 +7,7 @@ import pytest
 
 from agloe import compiler, report
 from agloe.cli import main
-from agloe.file import load
+from agloe.file import File, load
 from agloe.reference import Answer
 from tests.stories import (
     EXAMPLES,
@@ -21,7 +21,9 @@ from tests.stories import (
     moves,
     starts_at,
     stays,
+    takes_between,
     trip,
+    way_between,
 )
 
 FILES = sorted(
@@ -94,7 +96,7 @@ def test_several_ways_to_make_a_trip_work_are_numbered() -> None:
     assert with_a_cab(any_time("cab")).splitlines()[2:] == [
         "The trip works in any of these cases:",
         "  1. Cab to O'Hare takes 45 min or less.",
-        "  2. There are other ways from the Art Institute to O'Hare that take 45 min or less.",
+        "  2. There are other WAYs from the Art Institute to O'Hare that take 45 min or less.",
     ]
 
 
@@ -141,6 +143,57 @@ def test_a_plan_shows_its_days_and_an_unknown_end() -> None:
     assert report.as_json(file, found)["itinerary"] == [
         {"option": "dinner", "persons": ["alex"], "start": at(23, 30), "end": at(0, 15, day=16)},
         {"option": "night-train", "persons": ["alex"], "start": at(0, 15, day=16), "end": None},
+    ]
+
+
+def a_walk_to_dinner(*facts: dict[str, object]) -> File:
+    """Alex and Sam have a drink at the hotel at 6:00 pm and dinner at a restaurant at 7:00 pm."""
+    return trip(
+        ["alex", "sam"],
+        ["hotel", "restaurant"],
+        [stays("drink", "hotel"), stays("dinner", "restaurant")],
+        [
+            starts_at("drink", 18),
+            lasts("drink", "PT30M"),
+            starts_at("dinner", 19),
+            lasts("dinner", "PT2H"),
+            cutoff("dinner", "PT0S"),
+            *facts,
+        ],
+        [lock("drink", "alex", "sam"), lock("dinner", "alex", "sam")],
+        [way_between("walk", "hotel", "restaurant")],
+    )
+
+
+def test_a_plan_shows_the_ways_people_take() -> None:
+    file = a_walk_to_dinner(takes_between("walk", "PT10M", "PT20M"))
+    found = compiler.check(file)
+    words = report.as_text(file, found).splitlines()
+    assert words[2:6] == [
+        "Saturday 15 May 2027 (times in America/Chicago)",
+        "  6:00 pm to 6:30 pm: drink, alex and sam",
+        "  6:30 pm to 6:50 pm: walk, alex and sam",
+        "  7:00 pm to 9:00 pm: dinner, alex and sam",
+    ]
+    assert "  walk-length: walk takes between 10 min and 20 min" in words
+    assert report.as_json(file, found)["itinerary"] == [
+        {"option": "drink", "persons": ["alex", "sam"], "start": at(18), "end": at(18, 30)},
+        {"way": "walk", "persons": ["alex", "sam"], "start": at(18, 30), "end": at(18, 50)},
+        {"option": "dinner", "persons": ["alex", "sam"], "start": at(19), "end": at(21)},
+    ]
+
+
+def test_a_way_nobody_timed_is_named_in_what_is_missing() -> None:
+    file = a_walk_to_dinner()
+    found = compiler.check(file)
+    assert report.as_text(file, found).splitlines()[2:] == [
+        "The trip works in any of these cases:",
+        "  1. Walk takes 30 min or less.",
+        "  2. There are other WAYs from hotel to restaurant that take 30 min or less.",
+    ]
+    assert report.as_json(file, found)["missing"] == [
+        [{"what": "duration", "way": "walk", "at_most": "PT30M"}],
+        [{"what": "other ways", "from": "hotel", "to": "restaurant", "at_most": "PT30M"}],
     ]
 
 

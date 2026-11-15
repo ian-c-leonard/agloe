@@ -7,7 +7,7 @@ to settle the answer for every possible world. These tests try the things the sh
 """
 
 from dataclasses import replace
-from itertools import combinations, product
+from itertools import combinations, pairwise, product
 from random import Random
 
 from agloe.file import Duration, File
@@ -38,7 +38,11 @@ from tests.stories import (
     seconds,
     starts_at,
     stays,
+    takes,
+    takes_between,
     trip,
+    way,
+    way_between,
 )
 
 QUARTER = 900
@@ -52,12 +56,14 @@ def random_trip(
     count: int | None = None,
     with_complete: float = 0,
     contingent: float = 0,
+    with_ways: float = 0,
 ) -> File:
     """Two or three OPTIONs on a quarter-hour grid.
 
     ``leave_out`` is how often a FACT is unstated. ``with_complete`` is how often a COMPLETE FACT
     is added. Its span starts one second after a grid time and ends one second before another, so
     the times just outside it are on the grid. ``contingent`` is how often a duration is a range.
+    ``with_ways`` is how often the FILE lists one or two WAYs.
     """
     count = count or rng.choice([2, 3])
     if persons is None:
@@ -95,9 +101,23 @@ def random_trip(
             "earliest": at_second(seconds(9) + QUARTER * first + 1),
             "latest": at_second(seconds(9) + QUARTER * last - 1),
         }
-        ways = {"from": origin, "to": destination, "leaving": leaving}
-        facts.append({"id": "ways", "complete": ways})
-    return trip(persons, PLACES, options, facts, decisions)
+        whole = {"from": origin, "to": destination, "leaving": leaving}
+        facts.append({"id": "ways", "complete": whole})
+    ways: list[Document] = []
+    if rng.random() < with_ways:
+        for number in range(rng.choice([1, 2])):
+            id = f"way-{number}"
+            origin, destination = rng.sample(PLACES, 2)
+            both = rng.random() < 0.5
+            ways.append(
+                way_between(id, origin, destination) if both else way(id, origin, destination)
+            )
+            length = takes(id, f"PT{15 * rng.randrange(2)}M")
+            if contingent and rng.random() < contingent:
+                length = takes_between(id, "PT0M", f"PT{15 * rng.randrange(1, 3)}M")
+            if rng.random() >= leave_out:
+                facts.append(length)
+    return trip(persons, PLACES, options, facts, decisions, ways)
 
 
 def at_second(moment: int) -> str:
@@ -337,15 +357,23 @@ def possible_world(rng: Random, file: File) -> World:
         needs = margin.margin if margin is not None else QUARTER * rng.choice([0, 1, 2, 40])
         terms[option.id] = Terms(fixed, free, least, most, needs)
     pairs = [(a, b) for a in PLACES for b in PLACES if a != b]
-    ways = frozenset(pair for pair in pairs if rng.random() < 0.3)
-    return World(terms, ways, QUARTER * rng.choice([0, 1, 2]))
+    unlisted = frozenset(pair for pair in pairs if rng.random() < 0.3)
+    takes: dict[str, tuple[int, int | None]] = {}
+    for each in file.ways:
+        duration = file.duration(each.id)
+        guess = QUARTER * rng.choice([0, 1, 2, 40])
+        takes[each.id] = (
+            (guess, guess) if duration is None else (duration.shortest, duration.longest)
+        )
+    return World(terms, unlisted, QUARTER * rng.choice([0, 1, 2]), takes)
 
 
 def any_choice(rng: Random, file: File, world: World) -> Itinerary:
-    """Some OPTIONs, PERSONs and start times on the grid, with unlisted OPTIONs thrown in.
+    """Some OPTIONs, PERSONs, WAYs and start times on the grid.
 
-    Nothing here comes from the checker's search. LOCKed PERSONs always take part, so that the
-    choice has a fair chance of working.
+    Nothing here comes from the checker's search. LOCKed PERSONs always take part, and a PERSON
+    usually takes a WAY where two of their OPTIONs are in different PLACEs, so that the choice
+    has a fair chance of working.
     """
     people = [person.id for person in file.persons]
     steps: list[Step] = []
@@ -358,11 +386,28 @@ def any_choice(rng: Random, file: File, world: World) -> Itinerary:
         start = seconds(9) + QUARTER * rng.randrange(-4, 8) if fixed is None else fixed
         if persons:
             steps.append(Step(option.id, option.origin, option.destination, persons, start, None))
-    pairs = sorted(world.ways or [(a, b) for a in PLACES for b in PLACES if a != b])
-    for _ in range(rng.choice([0, 0, 1, 2])):
-        origin, destination = rng.choice(pairs)
-        start = seconds(9) + QUARTER * rng.randrange(-4, 8)
-        steps.append(Step(None, origin, destination, (rng.choice(people),), start, None))
+    every = [(a, b) for a in PLACES for b in PLACES if a != b]
+    legs: list[tuple[str | None, str, str]] = [
+        (None, a, b) for a, b in sorted(every if world.unlisted is None else world.unlisted)
+    ]
+    for each in file.ways:
+        legs.append((each.id, each.origin, each.destination))
+        if each.both_ways:
+            legs.append((each.id, each.destination, each.origin))
+    for person in people:
+        mine = sorted((step for step in steps if person in step.persons), key=lambda s: s.start)
+        for before, after in pairwise(mine):
+            direct = [leg for leg in legs if leg[1:] == (before.destination, after.origin)]
+            if direct and rng.random() < 0.8:
+                name, origin, destination = rng.choice(direct)
+                quarters = max((after.start - before.start) // QUARTER, 0)
+                start = before.start + QUARTER * rng.randrange(quarters + 1)
+                steps.append(Step(None, origin, destination, (person,), start, None, name))
+    if legs:
+        for _ in range(rng.choice([0, 0, 0, 1])):
+            name, origin, destination = rng.choice(legs)
+            start = seconds(9) + QUARTER * rng.randrange(-4, 8)
+            steps.append(Step(None, origin, destination, (rng.choice(people),), start, None, name))
     return tuple(steps)
 
 
@@ -378,9 +423,10 @@ def test_the_best_and_worst_cases_settle_the_answer_for_every_possible_world() -
     """
     rng = Random(1970)
     answers: set[Answer] = set()
-    found_by_chance = 0
-    for _ in range(300):
-        file = random_trip(rng, leave_out=0.3, with_complete=0.3)
+    found_by_chance = by_listed_way = 0
+    for number in range(300):
+        with_ways = 0.8 if number % 2 else 0
+        file = random_trip(rng, leave_out=0.3, with_complete=0.3, with_ways=with_ways)
         report = check(file)
         answers.add(report.answer)
         best, worst = best_case(file), worst_case(file)
@@ -402,6 +448,7 @@ def test_the_best_and_worst_cases_settle_the_answer_for_every_possible_world() -
                 each for each in by_chance if not broken(file, world, in_world(world, each))
             ]
             found_by_chance += len(by_chance)
+            by_listed_way += sum(any(step.way for step in each) for each in by_chance)
             if by_chance:
                 assert itineraries(file, world)
             working_here = [*itineraries(file, world), *by_chance]
@@ -411,3 +458,4 @@ def test_the_best_and_worst_cases_settle_the_answer_for_every_possible_world() -
                 assert working_here == []
     assert answers == set(Answer)
     assert found_by_chance > 500
+    assert by_listed_way > 50

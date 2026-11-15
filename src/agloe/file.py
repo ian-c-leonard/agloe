@@ -65,6 +65,17 @@ class Option:
 
 
 @dataclass(frozen=True)
+class Way:
+    """A means of getting from one PLACE to another, at any time and as often as needed."""
+
+    id: str
+    name: str
+    origin: str
+    destination: str
+    both_ways: bool  # whether a PERSON can also take it from the destination to the origin
+
+
+@dataclass(frozen=True)
 class Start:
     """A FACT: when an OPTION can start."""
 
@@ -75,7 +86,10 @@ class Start:
 
 @dataclass(frozen=True)
 class Duration:
-    """A FACT: how long an OPTION takes. CONTINGENT means the world decides within the range."""
+    """A FACT: how long an OPTION or a WAY takes. CONTINGENT means the world decides in the range.
+
+    ``option`` holds the id of the OPTION or of the WAY. Ids are unique across the FILE.
+    """
 
     id: str
     option: str
@@ -123,12 +137,16 @@ class File:
     persons: tuple[Person, ...]
     places: tuple[Place, ...]
     options: tuple[Option, ...]
+    ways: tuple[Way, ...]
     facts: tuple[Fact, ...]
     locks: tuple[Lock, ...]
     zone: str = "UTC"  # the time zone of the first time in the FILE; reports show times in it
 
     def option(self, id: str) -> Option:
         return next(option for option in self.options if option.id == id)
+
+    def way(self, id: str) -> Way:
+        return next(way for way in self.ways if way.id == id)
 
     def start(self, option: str) -> Start | None:
         return next((f for f in self.facts if isinstance(f, Start) and f.option == option), None)
@@ -349,6 +367,18 @@ def load(document: object) -> File:
             options.append(Option(option["id"], option["name"], option["from"], option["to"]))
     option_ids = {option.id for option in options}
 
+    ways: list[Way] = []
+    for index, way in enumerate(raw["ways"]):
+        where = f"/ways/{index}"
+        claim(where, way["id"])
+        origin, destination = way["between"] if "between" in way else (way["from"], way["to"])
+        known(where, origin, "PLACE", place_ids)
+        known(where, destination, "PLACE", place_ids)
+        if origin == destination:
+            problems.append(f"{where}: a WAY needs two different PLACEs")
+        ways.append(Way(way["id"], way["name"], origin, destination, "between" in way))
+    way_ids = {way.id for way in ways}
+
     facts: list[Fact] = []
     stated: set[tuple[str, type]] = set()
     complete: set[tuple[str, str, int, int]] = set()
@@ -356,22 +386,38 @@ def load(document: object) -> File:
         where = f"/facts/{index}"
         claim(where, fact["id"])
         if "complete" in fact:
-            ways = fact["complete"]
-            known(where, ways["from"], "PLACE", place_ids)
-            known(where, ways["to"], "PLACE", place_ids)
-            if ways["from"] == ways["to"]:
+            whole = fact["complete"]
+            known(where, whole["from"], "PLACE", place_ids)
+            known(where, whole["to"], "PLACE", place_ids)
+            if whole["from"] == whole["to"]:
                 problems.append(f"{where}: a COMPLETE FACT needs two different PLACEs")
-            earliest = when(where, ways["leaving"]["earliest"])
-            latest = when(where, ways["leaving"]["latest"])
+            earliest = when(where, whole["leaving"]["earliest"])
+            latest = when(where, whole["leaving"]["latest"])
             if earliest > latest:
                 problems.append(f"{where}: the span ends before it starts")
-            if (ways["from"], ways["to"], earliest, latest) in complete:
+            if (whole["from"], whole["to"], earliest, latest) in complete:
                 problems.append(f"{where}: another FACT already states this")
-            complete.add((ways["from"], ways["to"], earliest, latest))
-            facts.append(Complete(fact["id"], ways["from"], ways["to"], earliest, latest))
+            complete.add((whole["from"], whole["to"], earliest, latest))
+            facts.append(Complete(fact["id"], whole["from"], whole["to"], earliest, latest))
+            continue
+        made: Fact
+        if "way" in fact:
+            known(where, fact["way"], "WAY", way_ids)
+            if "duration" in fact:
+                exact = length(fact["duration"])
+                made = Duration(fact["id"], fact["way"], exact, exact, contingent=False)
+            else:
+                shortest = length(fact["contingent_duration"]["shortest"])
+                longest = length(fact["contingent_duration"]["longest"])
+                if shortest > longest:
+                    problems.append(f"{where}: the shortest duration is longer than the longest")
+                made = Duration(fact["id"], fact["way"], shortest, longest, contingent=True)
+            if (fact["way"], Duration) in stated:
+                problems.append(f"{where}: another FACT already states this about {fact['way']}")
+            stated.add((fact["way"], Duration))
+            facts.append(made)
             continue
         known(where, fact["option"], "OPTION", option_ids)
-        made: Fact
         if "starts_at" in fact:
             made = Start(fact["id"], fact["option"], when(where, fact["starts_at"]))
         elif "starts_any_time" in fact:
@@ -404,7 +450,7 @@ def load(document: object) -> File:
     if problems:
         raise FileError(problems)
     zone = zones[0] if zones else "UTC"
-    return File(persons, places, tuple(options), tuple(facts), tuple(locks), zone)
+    return File(persons, places, tuple(options), tuple(ways), tuple(facts), tuple(locks), zone)
 
 
 def _unwritable_characters(value: object, where: str) -> list[str]:

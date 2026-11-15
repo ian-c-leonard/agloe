@@ -4,13 +4,17 @@
   "description": "One TRIP in the Agloe format. Terms in capitals are defined in spec/vocabulary.md. spec/rules.md says what each part means.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["persons", "places", "options", "facts", "decisions"],
+  "required": ["persons", "places", "options", "ways", "facts", "decisions"],
   "properties": {
     "persons": { "type": "array", "items": { "$ref": "#/$defs/person" } },
     "places": { "type": "array", "items": { "$ref": "#/$defs/place" } },
     "options": {
       "type": "array",
       "items": { "oneOf": [{ "$ref": "#/$defs/option_at_a_place" }, { "$ref": "#/$defs/option_between_places" }] }
+    },
+    "ways": {
+      "type": "array",
+      "items": { "oneOf": [{ "$ref": "#/$defs/way_one_way" }, { "$ref": "#/$defs/way_both_ways" }] }
     },
     "facts": {
       "type": "array",
@@ -21,6 +25,8 @@
           { "$ref": "#/$defs/exact_duration" },
           { "$ref": "#/$defs/contingent_duration" },
           { "$ref": "#/$defs/access_cutoff" },
+          { "$ref": "#/$defs/way_duration" },
+          { "$ref": "#/$defs/way_contingent_duration" },
           { "$ref": "#/$defs/complete_set" }
         ]
       }
@@ -93,6 +99,47 @@
         "to": { "$ref": "#/$defs/id" }
       }
     },
+    "way_one_way": {
+      "title": "WayOneWay",
+      "description": "A WAY from one PLACE to another. A PERSON can take it at any time, and as often as they need.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "from", "to"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "$ref": "#/$defs/name" },
+        "from": { "$ref": "#/$defs/id" },
+        "to": { "$ref": "#/$defs/id" }
+      }
+    },
+    "way_both_ways": {
+      "title": "WayBothWays",
+      "description": "A WAY between two PLACEs, in both directions. A PERSON can take it at any time, and as often as they need.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "between"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "$ref": "#/$defs/name" },
+        "between": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/id" }
+        }
+      }
+    },
+    "range": {
+      "title": "Range",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shortest", "longest"],
+      "properties": {
+        "shortest": { "$ref": "#/$defs/length" },
+        "longest": { "$ref": "#/$defs/length" }
+      }
+    },
     "fixed_start": {
       "title": "FixedStart",
       "description": "A FACT: the OPTION can start only at this time.",
@@ -138,16 +185,31 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "option": { "$ref": "#/$defs/id" },
-        "contingent_duration": {
-          "title": "Range",
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["shortest", "longest"],
-          "properties": {
-            "shortest": { "$ref": "#/$defs/length" },
-            "longest": { "$ref": "#/$defs/length" }
-          }
-        }
+        "contingent_duration": { "$ref": "#/$defs/range" }
+      }
+    },
+    "way_duration": {
+      "title": "WayDuration",
+      "description": "A FACT: the WAY takes exactly this long, each time a PERSON takes it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "way", "duration"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "way": { "$ref": "#/$defs/id" },
+        "duration": { "$ref": "#/$defs/length" }
+      }
+    },
+    "way_contingent_duration": {
+      "title": "WayContingentDuration",
+      "description": "A FACT: each time a PERSON takes the WAY, the world decides how long it takes, within this range.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "way", "contingent_duration"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "way": { "$ref": "#/$defs/id" },
+        "contingent_duration": { "$ref": "#/$defs/range" }
       }
     },
     "access_cutoff": {

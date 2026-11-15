@@ -7,7 +7,16 @@ from pathlib import Path
 import pytest
 
 from agloe.file import FileError, instant, length, load, read
-from tests.stories import Document, at, complete, flight_home
+from tests.stories import (
+    Document,
+    at,
+    complete,
+    flight_home,
+    takes,
+    takes_between,
+    way,
+    way_between,
+)
 
 ROOT = Path(__file__).parent.parent
 
@@ -217,6 +226,48 @@ def test_an_id_is_used_once_in_the_whole_file() -> None:
     assert "/places/0: the id alex is used more than once" in problems(document)
 
 
+def test_a_way_joins_two_places_and_a_fact_says_how_long_it_takes() -> None:
+    document = flight_home()
+    document["ways"] = [
+        way("cab", "art-institute", "ohare"),
+        way_between("walk", "art-institute", "home"),
+    ]
+    document["facts"] += [takes("cab", "PT40M"), takes_between("walk", "PT10M", "PT15M")]
+    file = load(document)
+    assert [(each.id, each.origin, each.destination, each.both_ways) for each in file.ways] == [
+        ("cab", "art-institute", "ohare", False),
+        ("walk", "art-institute", "home", True),
+    ]
+    cab, walk = file.duration("cab"), file.duration("walk")
+    assert cab is not None and (cab.shortest, cab.longest, cab.contingent) == (2400, 2400, False)
+    assert walk is not None and (walk.shortest, walk.longest, walk.contingent) == (600, 900, True)
+
+
+def test_a_way_is_checked_like_everything_else() -> None:
+    document = flight_home()
+    document["ways"] = [
+        way("cab", "art-institute", "the-moon"),
+        way_between("alex", "ohare", "home"),
+        way("stroll", "home", "home"),
+    ]
+    document["facts"] += [
+        takes("cab", "PT40M"),
+        {"id": "cab-again", "way": "cab", "duration": "PT30M"},
+        takes("museum-visit", "PT5M"),
+        takes_between("stroll", "PT20M", "PT10M"),
+    ]
+    found = problems(document)
+    assert "/ways/0: the-moon is not a PLACE in this FILE" in found
+    assert "/ways/1: the id alex is used more than once" in found
+    assert "/ways/2: a WAY needs two different PLACEs" in found
+    assert "/facts/8: another FACT already states this about cab" in found
+    assert "/facts/9: museum-visit is not a WAY in this FILE" in found
+    assert "/facts/10: the shortest duration is longer than the longest" in found
+    document = flight_home()
+    document["ways"] = [{"id": "loop", "name": "Loop", "between": ["home", "home"]}]
+    assert problems(document).startswith("/ways/0: fits no known shape")
+
+
 def test_an_option_that_moves_goes_somewhere_else() -> None:
     document = flight_home()
     document["options"][1]["to"] = "art-institute"
@@ -267,7 +318,8 @@ def test_a_file_on_disk_must_be_json(tmp_path: Path) -> None:
 def test_a_file_on_disk_states_each_key_once(tmp_path: Path) -> None:
     path = tmp_path / "trip.json"
     path.write_text(
-        '{"persons": [], "persons": [], "places": [], "options": [], "facts": [], "decisions": []}'
+        '{"persons": [], "persons": [], "places": [], "options": [], "ways": [],'
+        ' "facts": [], "decisions": []}'
     )
     with pytest.raises(FileError, match="the FILE: states persons more than once"):
         read(path)
@@ -277,7 +329,8 @@ def test_a_repeated_key_is_reported_where_it_is(tmp_path: Path) -> None:
     path = tmp_path / "trip.json"
     path.write_text(
         '{"persons": [{"id": "alex", "name": "Alex"}, {"id": "sam", "id": "sam", "name": "Sam"}],'
-        ' "places": [], "options": [], "decisions": [], "facts": [{"id": "ways", "complete":'
+        ' "places": [], "options": [], "ways": [], "decisions": [],'
+        ' "facts": [{"id": "ways", "complete":'
         ' {"from": "a", "to": "b", "leaving": {"earliest": "x", "earliest": "y", "latest": "z"}}}]}'
     )
     with pytest.raises(FileError) as refused:
@@ -331,7 +384,7 @@ def test_every_problem_can_be_written_out(tmp_path: Path) -> None:
         '{"\\ud800": 1, "\\ud800": 2}',
         '{"\\ud800": {"x": 1, "x": 2}}',
         '{"\\n": 1, "\\n": 2}',
-        '{"persons": [], "places": [], "options": [], "facts": [], "decisions": [],'
+        '{"persons": [], "places": [], "options": [], "ways": [], "facts": [], "decisions": [],'
         ' "\\ud800": {"caf\\u00e9": "\\u0007"}}',
     ):
         path.write_text(text)
@@ -344,5 +397,7 @@ def test_every_problem_can_be_written_out(tmp_path: Path) -> None:
 
 
 def test_an_empty_file_is_a_file() -> None:
-    file = load({"persons": [], "places": [], "options": [], "facts": [], "decisions": []})
+    file = load(
+        {"persons": [], "places": [], "options": [], "ways": [], "facts": [], "decisions": []}
+    )
     assert file.options == ()

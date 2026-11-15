@@ -25,7 +25,11 @@ from tests.stories import (
     seconds,
     starts_at,
     stays,
+    takes,
+    takes_between,
     trip,
+    way,
+    way_between,
 )
 
 STORY = load(flight_home())
@@ -305,6 +309,79 @@ def test_a_complete_set_covers_a_journey_up_to_the_first_arrival() -> None:
     again = unlisted("art-institute", "ohare", seconds(16, 30), *alex)
     found = broken(file, best_case(file), (*there_and_back, again))
     assert Broken(Constraint.LISTED, None, alex) in found
+
+
+def with_walks() -> File:
+    """Alex at three stops, with a walk between the hotel and the gallery and one to the cafe."""
+    return trip(
+        ["alex"],
+        ["hotel", "gallery", "cafe"],
+        [stays("breakfast", "hotel"), stays("museum", "gallery")],
+        [
+            starts_at("breakfast", 8),
+            lasts("breakfast", "PT1H"),
+            starts_at("museum", 10),
+            lasts("museum", "PT2H"),
+            cutoff("museum", "PT0S"),
+            takes("walk", "PT15M"),
+            takes_between("stroll", "PT10M", "PT20M"),
+        ],
+        [lock("breakfast", "alex"), lock("museum", "alex")],
+        [way_between("walk", "hotel", "gallery"), way("stroll", "gallery", "cafe")],
+    )
+
+
+def walk(origin: str, destination: str, start: int, minutes: int = 15, name: str = "walk") -> Step:
+    return Step(None, origin, destination, ("alex",), start, start + 60 * minutes, name)
+
+
+def test_a_way_takes_as_long_as_it_takes_each_time() -> None:
+    file = with_walks()
+    world = worst_case(file)
+    breakfast = step(file, "breakfast", seconds(8), seconds(9), "alex")
+    museum = step(file, "museum", seconds(10), seconds(12), "alex")
+    there = walk("hotel", "gallery", seconds(9, 30))
+    assert broken(file, world, (breakfast, there, museum)) == []
+    too_quick = walk("hotel", "gallery", seconds(9, 30), minutes=5)
+    assert broken(file, world, (breakfast, too_quick, museum)) == [
+        Broken(Constraint.DURATION, None, ("alex",))
+    ]
+    stroll = walk("gallery", "cafe", seconds(12), minutes=20, name="stroll")
+    assert broken(file, world, (breakfast, there, museum, stroll)) == []
+    too_long = walk("gallery", "cafe", seconds(12), minutes=25, name="stroll")
+    assert broken(file, world, (breakfast, there, museum, too_long)) == [
+        Broken(Constraint.DURATION, None, ("alex",))
+    ]
+
+
+def test_a_way_must_be_over_before_the_next_thing_starts() -> None:
+    file = with_walks()
+    breakfast = step(file, "breakfast", seconds(8), seconds(9), "alex")
+    museum = step(file, "museum", seconds(10), seconds(12), "alex")
+    late = walk("hotel", "gallery", seconds(9, 50))
+    assert broken(file, worst_case(file), (breakfast, late, museum)) == [
+        Broken(Constraint.PLACE, "museum", ("alex",), late=300)
+    ]
+
+
+def test_several_ways_in_a_row_pass_through_no_place_twice() -> None:
+    file = with_walks()
+    breakfast = step(file, "breakfast", seconds(8), seconds(9), "alex")
+    museum = step(file, "museum", seconds(10), seconds(12), "alex")
+    there = walk("hotel", "gallery", seconds(9))
+    back = walk("gallery", "hotel", seconds(9, 15))
+    again = walk("hotel", "gallery", seconds(9, 30))
+    assert broken(file, worst_case(file), (breakfast, there, back, again, museum)) == [
+        Broken(Constraint.PLACE, None, ("alex",))
+    ]
+
+
+def test_a_way_goes_only_where_the_file_says() -> None:
+    file = with_walks()
+    with pytest.raises(ValueError, match="does not go where the FILE says"):
+        broken(file, worst_case(file), (walk("cafe", "gallery", seconds(9), name="stroll"),))
+    with pytest.raises(ValueError, match="is not a WAY in the FILE"):
+        broken(file, worst_case(file), (walk("hotel", "gallery", seconds(9), name="swim"),))
 
 
 def test_what_nobody_needs_can_be_taken_out() -> None:
