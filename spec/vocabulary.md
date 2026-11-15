@@ -56,9 +56,9 @@ A newer FACT that contradicts an older one about the same thing: the 15:55 saili
 
 ### COMPLETE
 
-Describes a set of OPTIONs that a FACT states the FILE holds in full: the ways from one PLACE to another, directly or through other PLACEs, within a stated time span. A PERSON who leaves the first PLACE within the span and later reaches the second uses only OPTIONs the FILE lists, from that departure to their first arrival. The FACT does not limit a PERSON who never reaches the second PLACE. A COMPLETE set that is empty means "we looked, and there is nothing". A FACT that one set is COMPLETE says nothing about any other set.
+Describes a set of OPTIONs and WAYs that a FACT states the FILE holds in full: everything that leads from one PLACE to another, directly or through other PLACEs, within a stated time span. A PERSON who leaves the first PLACE within the span and later reaches the second uses only OPTIONs and WAYs the FILE lists, from that departure to their first arrival. The FACT does not limit a PERSON who never reaches the second PLACE. A COMPLETE set that is empty means "we looked, and there is nothing". A FACT that one set is COMPLETE says nothing about any other set.
 
-*Uses:* OPTION, FACT, FILE, → PLACE.
+*Uses:* FACT, FILE, → OPTION, → WAY, → PLACE, → PERSON.
 
 ### DECISION
 
@@ -72,9 +72,9 @@ A dated choice by a PERSON: a LOCK, a PIN or a DISMISSAL, or the undoing of one.
 
 ### PERSON
 
-A human the TRIP concerns, whether or not they travel. A PERSON may hold WANTs, have CAPABILITIES, draw on BUDGETs and take part in OPTIONs. In any ITINERARY, a PERSON who travels is at exactly one PLACE or in exactly one OPTION at every moment.
+A human the TRIP concerns, whether or not they travel. A PERSON may hold WANTs, have CAPABILITIES, draw on BUDGETs and take part in OPTIONs. In any ITINERARY, a PERSON who travels is at exactly one PLACE, in exactly one OPTION or on exactly one WAY at every moment.
 
-*Uses:* TRIP, → WANT, → CAPABILITY, → BUDGET, → OPTION, → ITINERARY, → PLACE.
+*Uses:* TRIP, → WANT, → CAPABILITY, → BUDGET, → OPTION, → WAY, → ITINERARY, → PLACE.
 
 ### CAPABILITY
 
@@ -87,6 +87,12 @@ Something a PERSON can do: drive a manual car, climb stairs, dive. An OPTION can
 A location where OPTIONs happen, or between which they move: a city, a harbor, a hotel, a museum. A PLACE may sit within a larger PLACE: a museum within central Kyoto, within Kyoto. A PLACE exists over time; it does not happen. The Louvre is a PLACE; a visit to the Louvre on Thursday morning is an OPTION.
 
 *Uses:* → OPTION.
+
+### WAY
+
+A means of getting from one PLACE to another that is there whenever a PERSON needs it: a walk, a cab ride, a train that runs every few minutes. A WAY has no time of its own. A PERSON can take it at any time and as often as they need, alone or with others. How long a WAY takes is a FACT: an exact value, or a CONTINGENT range. A WAY is not an OPTION: an OPTION happens at its own time, and at most once.
+
+*Uses:* PLACE, PERSON, FACT, → CONTINGENT, → OPTION.
 
 ### OBJECT
 
@@ -249,9 +255,9 @@ The program that reads one FILE and reports, for the TRIP and for each VARIANT, 
 
 ### ITINERARY
 
-One complete way the TRIP could go: which OPTIONs happen, the exact start of each, the value chosen or assumed for each duration and the end that follows from it, which PERSONs and OBJECTs take part in each, and, for each OPTION that needs a right, the BOOKING or OFFER that covers it, which price is paid and from which BUDGET. Where a duration is unknown, no value is assumed and the end is unknown too. In constraint-solving terms, an ITINERARY is a complete assignment of the TRIP's choices. An ITINERARY is derived by the COMPILER; it is never stored in the FILE.
+One complete way the TRIP could go: which OPTIONs happen, the exact start of each, the value chosen or assumed for each duration and the end that follows from it, which PERSONs and OBJECTs take part in each, which WAYs each PERSON takes and when, and, for each OPTION that needs a right, the BOOKING or OFFER that covers it, which price is paid and from which BUDGET. Where a duration is unknown, no value is assumed and the end is unknown too. In constraint-solving terms, an ITINERARY is a complete assignment of the TRIP's choices. An ITINERARY is derived by the COMPILER; it is never stored in the FILE.
 
-*Uses:* TRIP, OPTION, PERSON, OBJECT, BOOKING, OFFER, BUDGET, COMPILER, FILE.
+*Uses:* TRIP, OPTION, WAY, PERSON, OBJECT, BOOKING, OFFER, BUDGET, COMPILER, FILE.
 
 ### CONSTRAINT
 

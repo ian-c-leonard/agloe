@@ -9,7 +9,7 @@ and "Evidence".
 """
 
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from itertools import combinations, groupby, pairwise, permutations, product
 
@@ -23,7 +23,7 @@ class Constraint(Enum):
 
     LOCK = "LOCKs are honored"
     START = "Each OPTION starts when it can"
-    DURATION = "Each OPTION takes as long as it takes"
+    DURATION = "Each OPTION and WAY takes as long as it takes"
     PLACE = "Each PERSON is in one place at a time"
     ARRIVAL = "Each PERSON arrives in time"
     LISTED = "A COMPLETE set is the whole set"
@@ -37,10 +37,11 @@ class Answer(Enum):
 
 @dataclass(frozen=True)
 class Step:
-    """One OPTION in an ITINERARY: who takes part and when it starts.
+    """One thing in an ITINERARY: an OPTION that happens, or a WAY that PERSONs take.
 
-    ``option`` is None for an OPTION the FILE does not list. ``end`` follows from the duration, and
-    is None when nobody knows how long the OPTION takes.
+    ``option`` names an OPTION. Otherwise the step is a WAY: ``way`` names a listed one, and both
+    are None for a WAY the FILE does not list. ``end`` follows from the duration, and is None when
+    nobody knows how long the step takes.
     """
 
     option: str | None
@@ -49,6 +50,7 @@ class Step:
     persons: tuple[str, ...]
     start: int
     end: int | None
+    way: str | None = None
 
 
 type Itinerary = tuple[Step, ...]
@@ -85,28 +87,32 @@ class Terms:
 class World:
     """One way the unknown FACTs turn out, or the worst of all the ways at once.
 
-    ``ways`` holds the pairs of PLACEs that unlisted OPTIONs join directly, and None means every
-    pair. A pair has as many unlisted OPTIONs as the PERSONs need. Each takes ``way_takes``
-    seconds, starts at any time and has no access cutoff.
+    ``unlisted`` holds the pairs of PLACEs that an unlisted WAY joins directly, and None means
+    every pair. Each unlisted WAY takes ``unlisted_takes`` seconds. ``takes`` gives the shortest
+    and the longest time of each listed WAY, and the longest is None when there is no limit.
     """
 
     terms: Mapping[str, Terms]
-    ways: frozenset[tuple[str, str]] | None
-    way_takes: int = 0
+    unlisted: frozenset[tuple[str, str]] | None
+    unlisted_takes: int = 0
+    takes: Mapping[str, tuple[int, int | None]] = field(
+        default_factory=dict[str, tuple[int, int | None]]
+    )
 
 
 @dataclass(frozen=True)
 class Unknown:
     """A FACT the FILE does not state.
 
-    ``what`` is "start", "duration" or "cutoff" for an OPTION, or "other ways" from one PLACE to
-    another: unlisted OPTIONs that go straight there, as many as the PERSONs need.
+    ``what`` is "start", "duration" or "cutoff" for an OPTION, "duration" for a WAY, or "other
+    ways" from one PLACE to another: unlisted WAYs that go straight there.
     """
 
     what: str
     option: str | None = None
     origin: str | None = None
     destination: str | None = None
+    way: str | None = None
 
 
 @dataclass(frozen=True)
@@ -148,6 +154,9 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
             out.append(Unknown("duration", option.id))
         if file.cutoff(option.id) is None:
             out.append(Unknown("cutoff", option.id))
+    for way in file.ways:
+        if file.duration(way.id) is None:
+            out.append(Unknown("duration", way=way.id))
     for origin in file.places:
         for destination in file.places:
             if origin != destination:
@@ -213,31 +222,42 @@ def _world(
             least = most or 0
         margin = cutoff.margin if cutoff is not None else value(Unknown("cutoff", option.id))
         terms[option.id] = Terms(fixed, free, least, most, margin)
-    ways = None
+    takes: dict[str, tuple[int, int | None]] = {}
+    for way in file.ways:
+        duration = file.duration(way.id)
+        if duration is not None:
+            takes[way.id] = (duration.longest if longest else duration.shortest, duration.longest)
+        else:
+            most = value(Unknown("duration", way=way.id))
+            takes[way.id] = (most or 0, most)
+    unlisted = None
     if kind is not None:
-        ways = frozenset(
+        unlisted = frozenset(
             (u.origin, u.destination)
             for u in kind
             if u.what == "other ways" and u.origin is not None and u.destination is not None
         )
-    takes = pinned[1] if pinned is not None and pinned[0].what == "other ways" else 0
-    return World(terms, ways, takes)
+    unlisted_takes = pinned[1] if pinned is not None and pinned[0].what == "other ways" else 0
+    return World(terms, unlisted, unlisted_takes, takes)
 
 
 # ------------------------------- The CONSTRAINTs -------------------------------
 
 
 def in_world(world: World, itinerary: Itinerary) -> Itinerary:
-    """The same OPTIONs, PERSONs and start times, with each end as this world makes it.
+    """The same OPTIONs, PERSONs, WAYs and start times, with each end as this world makes it.
 
-    An end is None when the world sets no limit to how long the OPTION takes.
+    An end is None when the world sets no limit to how long the step takes.
     """
 
     def end(step: Step) -> int | None:
-        if step.option is None:
-            return step.start + world.way_takes
-        terms = world.terms[step.option]
-        return None if terms.longest is None else step.start + terms.shortest
+        if step.option is not None:
+            terms = world.terms[step.option]
+            return None if terms.longest is None else step.start + terms.shortest
+        if step.way is None:
+            return step.start + world.unlisted_takes
+        shortest, longest = world.takes[step.way]
+        return None if longest is None else step.start + shortest
 
     return tuple(replace(step, end=end(step)) for step in itinerary)
 
@@ -254,10 +274,11 @@ def broken(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
 
 
 def _well_formed(file: File, itinerary: Itinerary) -> None:
-    """An ITINERARY names PERSONs, PLACEs and OPTIONs from the FILE, each OPTION at most once."""
+    """An ITINERARY names PERSONs, PLACEs, OPTIONs and WAYs from the FILE, each OPTION once."""
     persons = {person.id for person in file.persons}
     places = {place.id for place in file.places}
     options = {option.id: option for option in file.options}
+    ways = {way.id: way for way in file.ways}
     listed = [step.option for step in itinerary if step.option is not None]
     if len(listed) != len(set(listed)):
         raise ValueError("an OPTION happens at most once")
@@ -265,15 +286,22 @@ def _well_formed(file: File, itinerary: Itinerary) -> None:
         named_once = len(set(step.persons)) == len(step.persons)
         if not step.persons or not named_once or not persons.issuperset(step.persons):
             raise ValueError("each step needs PERSONs from the FILE, each named once")
-        if step.option is None:
-            if not {step.origin, step.destination} <= places:
-                raise ValueError("an unlisted OPTION still joins PLACEs from the FILE")
-        elif step.option not in options:
-            raise ValueError(f"{step.option} is not an OPTION in the FILE")
-        else:
-            option = options[step.option]
-            if (step.origin, step.destination) != (option.origin, option.destination):
+        ends = (step.origin, step.destination)
+        if step.option is not None:
+            if step.way is not None or step.option not in options:
+                raise ValueError(f"{step.option} is not an OPTION in the FILE")
+            if ends != (options[step.option].origin, options[step.option].destination):
                 raise ValueError(f"{step.option} does not happen where the FILE says")
+        elif step.way is not None:
+            if step.way not in ways:
+                raise ValueError(f"{step.way} is not a WAY in the FILE")
+            way = ways[step.way]
+            there = ends == (way.origin, way.destination)
+            back = way.both_ways and ends == (way.destination, way.origin)
+            if not (there or back):
+                raise ValueError(f"{step.way} does not go where the FILE says")
+        elif not set(ends) <= places or step.origin == step.destination:
+            raise ValueError("an unlisted WAY still joins two PLACEs from the FILE")
         if step.end is not None and step.end < step.start:
             raise ValueError("a step ends before it starts")
 
@@ -318,17 +346,20 @@ def _starts(world: World, itinerary: Itinerary) -> list[Broken]:
 
 
 def _durations(world: World, itinerary: Itinerary) -> list[Broken]:
-    """Each OPTION takes as long as it takes: it ends after a duration the FACTs allow."""
+    """Each OPTION and WAY takes as long as it takes: it ends after a duration the FACTs allow."""
     out: list[Broken] = []
     for step in itinerary:
-        if step.option is None:
-            fits = step.end == step.start + world.way_takes
-        else:
+        if step.option is not None:
             terms = world.terms[step.option]
-            if terms.longest is None or step.end is None:
-                fits = terms.longest is None and step.end is None
-            else:
-                fits = terms.shortest <= step.end - step.start <= terms.longest
+            shortest, longest = terms.shortest, terms.longest
+        elif step.way is not None:
+            shortest, longest = world.takes[step.way]
+        else:
+            shortest = longest = world.unlisted_takes
+        if longest is None or step.end is None:
+            fits = longest is None and step.end is None
+        else:
+            fits = shortest <= step.end - step.start <= longest
         if not fits:
             out.append(Broken(Constraint.DURATION, step.option, step.persons))
     return out
@@ -427,7 +458,11 @@ def _sharing_persons(steps: list[Step]) -> list[list[Step]]:
 
 
 def _places(path: list[Step]) -> _Found:
-    """Each PERSON is in one place at a time: no overlap, and each OPTION starts where they are."""
+    """Each PERSON is in one place at a time.
+
+    Nothing overlaps, each step starts where the PERSON is, and several WAYs in a row pass
+    through no PLACE twice.
+    """
     found: _Found = []
     for before, after in pairwise(path):
         if before.end is None:
@@ -436,6 +471,15 @@ def _places(path: list[Step]) -> _Found:
             found.append((Constraint.PLACE, after.option, before.end - after.start))
         elif before.destination != after.origin:
             found.append((Constraint.PLACE, after.option, None))
+    passed: list[str] = []  # the PLACEs of the WAYs taken in a row so far
+    for step in path:
+        if step.option is not None:
+            passed = []
+            continue
+        passed = passed or [step.origin]
+        if step.destination in passed:
+            found.append((Constraint.PLACE, None, None))
+        passed.append(step.destination)
     return found
 
 
@@ -456,15 +500,20 @@ def _arrivals(world: World, path: list[Step]) -> _Found:
 
 
 def _listed(file: File, world: World, path: list[Step]) -> _Found:
-    """A COMPLETE set is the whole set: an unlisted OPTION needs a world that has it.
+    """A COMPLETE set is the whole set: an unlisted WAY needs a world that has it.
 
-    No world has one on a way between the PLACEs of a COMPLETE FACT that leaves within its span.
-    The span includes both of its ends, and a way counts only if it reaches the second PLACE.
+    No world has one on a journey between the PLACEs of a COMPLETE FACT that leaves within its
+    span. The span includes both of its ends, and a journey counts only if it reaches the second
+    PLACE.
     """
+
+    def unlisted(step: Step) -> bool:
+        return step.option is None and step.way is None
+
     found: _Found = []
     for step in path:
         here = (step.origin, step.destination)
-        if step.option is None and world.ways is not None and here not in world.ways:
+        if unlisted(step) and world.unlisted is not None and here not in world.unlisted:
             found.append((Constraint.LISTED, None, None))
     for fact in file.facts:
         if not isinstance(fact, Complete):
@@ -475,7 +524,7 @@ def _listed(file: File, world: World, path: list[Step]) -> _Found:
                 continue
             for last in range(first, len(path)):
                 if path[last].destination == fact.destination:
-                    if any(part.option is None for part in path[first : last + 1]):
+                    if any(unlisted(part) for part in path[first : last + 1]):
                         found.append((Constraint.LISTED, None, None))
                     break
     return found
@@ -597,32 +646,60 @@ def _orders(file: File, world: World, indexes: list[int]) -> Iterator[tuple[int,
             yield order
 
 
-type Route = tuple[tuple[str, str], ...]  # unlisted OPTIONs one after another: from, to
+type Leg = tuple[str | None, str, str]  # a WAY, or None for an unlisted one; from; to
+type Route = tuple[Leg, ...]
 
 
 def routes(file: File, world: World, here: str, there: str) -> list[Route]:
-    """The ways to get from one PLACE to another by unlisted OPTIONs alone, shortest first.
+    """Every route from one PLACE to another by WAYs alone, shortest first.
 
-    A direct unlisted OPTION is never worse than a way through other PLACEs, so where the world
-    has one, it is the only route. Otherwise every route that visits no PLACE twice is given.
+    A route passes through no PLACE twice. A listed WAY with no limit to how long it takes is
+    left out, because nothing could follow it. Two unlisted WAYs in a row are left out where one
+    unlisted WAY joins the same two PLACEs: the one is never worse than the two.
     """
-    if world.ways is None or (here, there) in world.ways:
-        return [((here, there),)]
     places = [place.id for place in file.places]
-    found: list[tuple[str, ...]] = []
 
-    def extend(visited: tuple[str, ...]) -> None:
-        for place in places:
-            if place in visited or (visited[-1], place) not in (world.ways or ()):
+    def joined(origin: str, destination: str) -> bool:
+        return world.unlisted is None or (origin, destination) in world.unlisted
+
+    def onward(place: str) -> Iterator[tuple[str | None, str]]:
+        for way in file.ways:
+            if world.takes[way.id][1] is None:
                 continue
-            if place == there:
-                found.append((*visited, place))
-            else:
-                extend((*visited, place))
+            if way.origin == place:
+                yield way.id, way.destination
+            elif way.both_ways and way.destination == place:
+                yield way.id, way.origin
+        for other in places:
+            if other != place and joined(place, other):
+                yield None, other
 
-    extend((here,))
-    found.sort(key=lambda visited: (len(visited), [places.index(place) for place in visited]))
-    return [tuple(pairwise(visited)) for visited in found]
+    found: list[Route] = []
+
+    def extend(passed: tuple[str, ...], legs: Route) -> None:
+        for way, place in onward(passed[-1]):
+            if place in passed:
+                continue
+            if way is None and legs and legs[-1][0] is None and joined(legs[-1][1], place):
+                continue
+            longer = (*legs, (way, passed[-1], place))
+            if place == there:
+                found.append(longer)
+            else:
+                extend((*passed, place), longer)
+
+    extend((here,), ())
+    return sorted(found, key=lambda route: (len(route), _legs_in_file_order(file, route)))
+
+
+def _legs_in_file_order(file: File, route: Route) -> list[tuple[int, int, int]]:
+    """The WAYs listed first come first, then the PLACEs listed first. Unlisted WAYs come last."""
+    ways = [way.id for way in file.ways]
+    places = [place.id for place in file.places]
+    return [
+        (len(ways) if way is None else ways.index(way), places.index(origin), places.index(to))
+        for way, origin, to in route
+    ]
 
 
 def _schedules(
@@ -633,8 +710,9 @@ def _schedules(
 ) -> Iterator[Itinerary]:
     """The ITINERARIES for one choice of PERSONs and orders.
 
-    Where a PERSON's next OPTION starts somewhere else, unlisted OPTIONs must take them there.
-    Each route is tried, fewest unlisted OPTIONs first, and then each way the timing can fall.
+    Where a PERSON's next OPTION starts somewhere else, WAYs must take them there. The routes
+    are tried with the fewest WAYs first, then in the order of "Which ITINERARY is shown": PERSON
+    by PERSON, the WAYs listed first. Then each way the timing can fall is tried.
     """
     needed: list[tuple[int, int, list[Route]]] = []  # which PERSON, after which step, the routes
     for number, order in enumerate(orders):
@@ -645,13 +723,34 @@ def _schedules(
                 if not possible:
                     return
                 needed.append((number, position, possible))
-    every = product(*(possible for _, _, possible in needed))
-    for chosen in sorted(every, key=lambda chosen: sum(len(route) for route in chosen)):
-        hops = {
-            (number, position): route
-            for (number, position, _), route in zip(needed, chosen, strict=True)
-        }
-        yield from _timings(file, world, who, orders, hops)
+
+    def taken(chosen: tuple[Route, ...]) -> list[list[tuple[int, int, int]]]:
+        """For each PERSON in turn, every WAY they take, in the order they take them."""
+        each: list[list[tuple[int, int, int]]] = [[] for _ in orders]
+        for (number, _, _), route in zip(needed, chosen, strict=True):
+            each[number] += _legs_in_file_order(file, route)
+        return each
+
+    def with_this_many(total: int, rest: int = 0) -> Iterator[tuple[Route, ...]]:
+        """Every choice of routes that takes this many WAYs in all."""
+        if rest == len(needed):
+            if total == 0:
+                yield ()
+            return
+        for route in needed[rest][2]:
+            if len(route) <= total:
+                for others in with_this_many(total - len(route), rest + 1):
+                    yield (route, *others)
+
+    fewest = sum(min(len(route) for route in possible) for _, _, possible in needed)
+    most = sum(max(len(route) for route in possible) for _, _, possible in needed)
+    for total in range(fewest, most + 1):
+        for chosen in sorted(with_this_many(total), key=taken):
+            hops = {
+                (number, position): route
+                for (number, position, _), route in zip(needed, chosen, strict=True)
+            }
+            yield from _timings(file, world, who, orders, hops)
 
 
 def _timings(
@@ -664,29 +763,30 @@ def _timings(
     """The ITINERARIES for one choice of PERSONs, orders and routes, one for each timing.
 
     Start times are as early as the CONSTRAINTs allow. A COMPLETE FACT covers a span of leaving
-    times, and leaving outside that span can let an unlisted OPTION in. So each departure from the
+    times, and leaving outside that span can let an unlisted WAY in. So each departure from the
     PLACE of such a FACT is tried as it falls, then before the span, then after it.
     """
     listed = len(file.options)
-    ways: list[tuple[str, str, str]] = []  # the unlisted OPTIONs: who, from where, to where
-    lines: list[list[int]] = []  # what each PERSON does in order, unlisted OPTIONs included
+    legs: list[tuple[str, Leg]] = []  # each WAY taken: who takes it, and which one
+    lines: list[list[int]] = []  # what each PERSON does in order, the WAYs they take included
     for number, (person, order) in enumerate(zip(file.persons, orders, strict=True)):
         line: list[int] = []
         for position, index in enumerate(order):
             line.append(index)
-            for start_place, end_place in hops.get((number, position), ()):
-                ways.append((person.id, start_place, end_place))
-                line.append(listed + len(ways) - 1)
+            for leg in hops.get((number, position), ()):
+                legs.append((person.id, leg))
+                line.append(listed + len(legs) - 1)
         lines.append(line)
 
     def takes(node: int) -> int | None:
-        if node >= listed:
-            return world.way_takes
-        terms = world.terms[file.options[node].id]
-        return None if terms.longest is None else terms.shortest
+        if node < listed:
+            terms = world.terms[file.options[node].id]
+            return None if terms.longest is None else terms.shortest
+        way = legs[node - listed][1][0]
+        return world.unlisted_takes if way is None else world.takes[way][0]
 
     def origin(node: int) -> str:
-        return ways[node - listed][1] if node >= listed else file.options[node].origin
+        return legs[node - listed][1][1] if node >= listed else file.options[node].origin
 
     def moves(node: int) -> bool:
         if node >= listed:
@@ -711,7 +811,7 @@ def _timings(
             if moves(node):
                 arrived = node
 
-    count = listed + len(ways)
+    count = listed + len(legs)
     if _goes_round(count, gaps):
         return  # two PERSONs would do the same OPTIONs at one instant in opposite orders
     zero = count  # one more start, pinned at time zero, to measure the spans from
@@ -722,10 +822,11 @@ def _timings(
             fixed[index] = at
 
     happening = [node for node in range(count) if node >= listed or who[node]]
+    any_unlisted = any(way is None for _, (way, _, _) in legs)
     leaving = [
         (node, fact)
         for fact in file.facts
-        if isinstance(fact, Complete) and ways
+        if isinstance(fact, Complete) and any_unlisted
         for node in happening
         if moves(node) and origin(node) == fact.origin
     ]
@@ -748,17 +849,42 @@ def _timings(
                 steps[index] = Step(
                     option.id, option.origin, option.destination, who[index], start, end
                 )
-        for number, (person_id, start_place, end_place) in enumerate(ways):
+        for number, (person_id, (way, start_place, end_place)) in enumerate(legs):
             start = starts[listed + number]
+            lasts = takes(listed + number)
+            end = None if lasts is None else start + lasts
             steps[listed + number] = Step(
-                None, start_place, end_place, (person_id,), start, start + world.way_takes
+                None, start_place, end_place, (person_id,), start, end, way
             )
         paths = [[steps[node] for node in line] for line in lines]
         if any(
             [*_places(path), *_arrivals(world, path), *_listed(file, world, path)] for path in paths
         ):
             continue
-        yield tuple(sorted(steps.values(), key=lambda step: _step_in_file_order(file, step)))
+        yield tuple(
+            sorted(
+                _together(file, steps.values()), key=lambda step: _step_in_file_order(file, step)
+            )
+        )
+
+
+def _together(file: File, steps: Iterable[Step]) -> list[Step]:
+    """The steps, with PERSONs who take the same WAY at the same time shown as one step.
+
+    A PERSON who takes the same WAY twice in one instant still has two steps.
+    """
+    order = [person.id for person in file.persons]
+    merged: list[Step] = []
+    for step in steps:
+        for place, other in enumerate(merged):
+            same = replace(other, persons=step.persons) == step
+            if same and not set(step.persons) & set(other.persons):
+                persons = tuple(sorted((*other.persons, *step.persons), key=order.index))
+                merged[place] = replace(other, persons=persons)
+                break
+        else:
+            merged.append(step)
+    return merged
 
 
 def _goes_round(count: int, gaps: list[tuple[int, int, int]]) -> bool:
@@ -852,11 +978,15 @@ type _StepOrder = tuple[int, int, tuple[int, ...], int, int, int]
 
 
 def _step_in_file_order(file: File, step: Step) -> _StepOrder:
-    """Earlier steps first, then the FILE's order of OPTIONs, PERSONs and PLACEs."""
+    """Earlier steps first, then the FILE's order of OPTIONs, WAYs, PERSONs and PLACEs."""
     options = [option.id for option in file.options]
+    ways = [way.id for way in file.ways]
     people = [person.id for person in file.persons]
     places = [place.id for place in file.places]
-    index = len(options) if step.option is None else options.index(step.option)
+    if step.option is not None:
+        index = options.index(step.option)
+    else:
+        index = len(options) + (len(ways) if step.way is None else ways.index(step.way))
     persons = tuple(people.index(person) for person in step.persons)
     origin, destination = places.index(step.origin), places.index(step.destination)
     end = -1 if step.end is None else step.end
@@ -871,13 +1001,12 @@ def _in_file_order(file: File, itinerary: Itinerary, orders: tuple[tuple[int, ..
 
     Fewest OPTIONs; then the OPTIONs listed first in the FILE; then, PERSON by PERSON, the
     OPTIONs each one does, in the order they do them, with the OPTIONs listed first coming first.
+    The WAYs are already those listed first: ``scheduled`` gives one ITINERARY for each order.
     """
     options = [option.id for option in file.options]
-    used = sorted(
-        len(options) if step.option is None else options.index(step.option) for step in itinerary
-    )
+    used = sorted(options.index(step.option) for step in itinerary if step.option is not None)
     steps = [_step_in_file_order(file, step) for step in itinerary]
-    return (len(itinerary), used, orders, steps)
+    return (len(used), used, orders, steps)
 
 
 # ------------------------------- The three answers -------------------------------
@@ -925,7 +1054,7 @@ def check(
         longest = longest_case(file)
         robust = shown(file, longest)
         chosen = plain if robust is None else robust
-        used = {step.option for step in chosen}
+        used = {step.option or step.way for step in chosen}
         relies_on = [
             fact.id for fact in file.facts if not isinstance(fact, Complete) and fact.option in used
         ]

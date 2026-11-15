@@ -131,7 +131,7 @@ def test_a_limit_does_not_depend_on_how_far_the_solver_can_count() -> None:
     assert [needed.at_most for enough in report.missing for needed in enough] == [None, None, None]
     years = with_these_at_best(file, [Unknown("other ways", origin="a", destination="b")])
     for takes in (262_223_455, 262_223_456, 268_435_456, 2**40):
-        assert compiler.works(file, replace(years, way_takes=takes))
+        assert compiler.works(file, replace(years, unlisted_takes=takes))
 
 
 def stops(*visits: tuple[str, str, int, int], more: Sequence[Document] = ()) -> File:

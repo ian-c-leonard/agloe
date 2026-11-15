@@ -1,5 +1,6 @@
 """The three answers, ROBUST, the ITINERARY shown and the evidence, on small TRIPs."""
 
+from collections.abc import Sequence
 from dataclasses import replace
 
 from agloe.file import File, load
@@ -30,7 +31,11 @@ from tests.stories import (
     seconds,
     starts_at,
     stays,
+    takes,
+    takes_between,
     trip,
+    way,
+    way_between,
     without,
 )
 
@@ -837,7 +842,209 @@ def test_options_at_one_instant_happen_in_one_order_for_everyone() -> None:
     )
 
 
+def a_morning(*ways: dict[str, object], more: Sequence[dict[str, object]] = ()) -> File:
+    """Breakfast at the hotel until 9:00, the museum at 10:00, lunch at the cafe at 1:00 pm.
+
+    Alex and Sam do all three. The FILE lists no OPTION that moves, only the WAYs given.
+    """
+    stops = [("breakfast", "hotel", 8, "PT1H"), ("museum", "gallery", 10, "PT2H")]
+    stops.append(("lunch", "cafe", 13, "PT1H"))
+    return trip(
+        ["alex", "sam"],
+        ["hotel", "gallery", "cafe", "station"],
+        [stays(name, place) for name, place, _, _ in stops],
+        [
+            *(
+                fact
+                for name, _, hour, length in stops
+                for fact in (starts_at(name, hour), lasts(name, length), cutoff(name, "PT0S"))
+            ),
+            *more,
+        ],
+        [lock(name, "alex", "sam") for name, _, _, _ in stops],
+        ways,
+    )
+
+
+WALKS = [
+    way_between("walk-to-gallery", "hotel", "gallery"),
+    way_between("walk-to-cafe", "gallery", "cafe"),
+]
+BOTH = ("alex", "sam")
+
+
+def taken(file: File) -> list[tuple[str | None, tuple[str, ...], int, int | None]]:
+    """The WAYs in the ITINERARY shown: which, who, from when, until when."""
+    report = check(file)
+    assert report.answer is Answer.FEASIBLE
+    return [
+        (step.way, step.persons, step.start, step.end)
+        for step in report.itinerary
+        if step.option is None
+    ]
+
+
+def test_persons_take_ways_between_their_options() -> None:
+    file = a_morning(
+        *WALKS, more=[takes("walk-to-gallery", "PT15M"), takes("walk-to-cafe", "PT10M")]
+    )
+    report = check(file)
+    assert report.robust is True
+    assert [(step.option or step.way, step.persons, step.start) for step in report.itinerary] == [
+        ("breakfast", BOTH, seconds(8)),
+        ("walk-to-gallery", BOTH, seconds(9)),
+        ("museum", BOTH, seconds(10)),
+        ("walk-to-cafe", BOTH, seconds(12)),
+        ("lunch", BOTH, seconds(13)),
+    ]
+    assert taken(file) == [
+        ("walk-to-gallery", BOTH, seconds(9), seconds(9, 15)),
+        ("walk-to-cafe", BOTH, seconds(12), seconds(12, 10)),
+    ]
+    assert report.relies_on[-5:] == (
+        "walk-to-gallery-length",
+        "walk-to-cafe-length",
+        "lock-breakfast",
+        "lock-museum",
+        "lock-lunch",
+    )
+    assert broken(file, worst_case(file), report.itinerary) == []
+
+
+def test_a_way_can_be_taken_in_both_directions_and_more_than_once() -> None:
+    """Sam goes back to the hotel for a nap after the museum, then walks to the gallery again."""
+    file = trip(
+        ["sam"],
+        ["hotel", "gallery"],
+        [stays("museum", "gallery"), stays("nap", "hotel"), stays("talk", "gallery")],
+        [
+            starts_at("museum", 10),
+            lasts("museum", "PT1H"),
+            starts_at("nap", 12),
+            lasts("nap", "PT1H"),
+            cutoff("nap", "PT0S"),
+            starts_at("talk", 14),
+            lasts("talk", "PT1H"),
+            cutoff("talk", "PT0S"),
+            takes("walk", "PT15M"),
+        ],
+        [lock("museum", "sam"), lock("nap", "sam"), lock("talk", "sam")],
+        [way_between("walk", "hotel", "gallery")],
+    )
+    report = check(file)
+    walks = [step for step in report.itinerary if step.way == "walk"]
+    assert [(step.origin, step.destination, step.start) for step in walks] == [
+        ("gallery", "hotel", seconds(11)),
+        ("hotel", "gallery", seconds(13)),
+    ]
+
+
+def test_a_way_in_one_direction_does_not_lead_back() -> None:
+    file = a_morning(
+        way("walk-to-gallery", "gallery", "hotel"),
+        WALKS[1],
+        more=[takes("walk-to-gallery", "PT15M"), takes("walk-to-cafe", "PT10M")],
+    )
+    assert check(file).answer is Answer.UNDETERMINED
+
+
+def test_the_way_listed_first_is_taken_where_it_works() -> None:
+    cab = way("cab", "hotel", "gallery")
+    lengths = [takes("walk-to-cafe", "PT10M"), takes("cab", "PT5M")]
+    quick = a_morning(*WALKS, cab, more=[*lengths, takes("walk-to-gallery", "PT15M")])
+    assert taken(quick)[0] == ("walk-to-gallery", BOTH, seconds(9), seconds(9, 15))
+    slow = a_morning(*WALKS, cab, more=[*lengths, takes("walk-to-gallery", "PT1H10M")])
+    assert taken(slow)[0] == ("cab", BOTH, seconds(9), seconds(9, 5))
+
+
+def test_ways_join_up_through_another_place() -> None:
+    file = a_morning(
+        way_between("to-station", "hotel", "station"),
+        way_between("from-station", "station", "gallery"),
+        WALKS[1],
+        more=[
+            takes("to-station", "PT5M"),
+            takes("from-station", "PT20M"),
+            takes("walk-to-cafe", "PT10M"),
+        ],
+    )
+    assert taken(file)[:2] == [
+        ("to-station", BOTH, seconds(9), seconds(9, 5)),
+        ("from-station", BOTH, seconds(9, 5), seconds(9, 25)),
+    ]
+
+
+def test_one_way_is_taken_before_two() -> None:
+    """Two short WAYs through the station are listed first. The direct walk is one WAY."""
+    file = a_morning(
+        way_between("to-station", "hotel", "station"),
+        way_between("from-station", "station", "gallery"),
+        *WALKS,
+        more=[
+            takes("to-station", "PT5M"),
+            takes("from-station", "PT5M"),
+            takes("walk-to-gallery", "PT15M"),
+            takes("walk-to-cafe", "PT10M"),
+        ],
+    )
+    assert taken(file)[0] == ("walk-to-gallery", BOTH, seconds(9), seconds(9, 15))
+
+
+def test_a_way_nobody_timed_cannot_be_counted_on() -> None:
+    """Nobody recorded how long the walk to the gallery takes. An hour or less would do.
+
+    So would another WAY to the gallery, or one to the cafe that leaves ten minutes for the walk
+    from the cafe to the gallery.
+    """
+    file = a_morning(*WALKS, more=[takes("walk-to-cafe", "PT10M")])
+    report = check(file)
+    assert report.answer is Answer.UNDETERMINED
+    to_gallery = Unknown("other ways", origin="hotel", destination="gallery")
+    to_cafe = Unknown("other ways", origin="hotel", destination="cafe")
+    assert report.missing == (
+        (Missing(Unknown("duration", way="walk-to-gallery"), at_most=3600),),
+        (Missing(to_gallery, at_most=3600),),
+        (Missing(to_cafe, at_most=3000),),
+    )
+
+
+def test_a_way_that_can_run_long_is_checked_at_its_longest_every_time() -> None:
+    """The walk to the cafe takes between ten minutes and seventy. Lunch is an hour away."""
+    risky = takes_between("walk-to-cafe", "PT10M", "PT1H10M")
+    file = a_morning(*WALKS, more=[takes("walk-to-gallery", "PT15M"), risky])
+    report = check(file)
+    assert report.answer is Answer.FEASIBLE
+    assert report.robust is False
+    assert report.at_worst == (Broken(Constraint.PLACE, "lunch", BOTH, late=600),)
+    safe = takes_between("walk-to-cafe", "PT10M", "PT50M")
+    file = a_morning(*WALKS, more=[takes("walk-to-gallery", "PT15M"), safe])
+    assert check(file).robust is True
+    assert taken(file)[1] == ("walk-to-cafe", BOTH, seconds(12), seconds(12, 50))
+
+
+def test_a_listed_way_counts_as_listed_for_a_complete_fact() -> None:
+    """Every way from the hotel to the gallery is listed: the walk, and it takes too long."""
+    lengths = [takes("walk-to-gallery", "PT1H10M"), takes("walk-to-cafe", "PT10M")]
+    file = a_morning(*WALKS, more=[*lengths, complete("hotel", "gallery")])
+    report = check(file)
+    assert report.answer is Answer.INFEASIBLE
+    assert report.conflict == (
+        "breakfast-time",
+        "breakfast-length",
+        "museum-time",
+        "walk-to-gallery-length",
+        "ways-hotel-gallery",
+        "lock-breakfast",
+        "lock-museum",
+    )
+    in_time = [takes("walk-to-gallery", "PT1H"), takes("walk-to-cafe", "PT10M")]
+    file = a_morning(*WALKS, more=[*in_time, complete("hotel", "gallery")])
+    assert check(file).answer is Answer.FEASIBLE
+
+
 def test_an_empty_file_is_feasible() -> None:
-    report = check(load({"persons": [], "places": [], "options": [], "facts": [], "decisions": []}))
+    report = check(
+        load({"persons": [], "places": [], "options": [], "ways": [], "facts": [], "decisions": []})
+    )
     assert report.answer is Answer.FEASIBLE
     assert report.itinerary == ()

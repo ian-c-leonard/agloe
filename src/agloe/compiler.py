@@ -29,7 +29,13 @@ type _Journey = Sequence[tuple[_Flag, _Flag]]  # for each COMPLETE FACT: on its 
 
 
 def check(file: File) -> Report:
-    """The answer for this TRIP, with its evidence. The same Report as ``reference.check``."""
+    """The answer for this TRIP, with its evidence. The same Report as ``reference.check``.
+
+    The solver's model does not hold listed WAYs yet. A FILE that lists any is checked by the
+    reference checker's own search.
+    """
+    if file.ways:
+        return reference.check(file)
     return reference.check(file, shown=shown, works=works, stuck=stuck)
 
 
@@ -122,6 +128,8 @@ class _Search:
         A FACT that is switched off is unknown, and turns out as in the best case. So the world
         must be the best case when ``switched`` is set.
         """
+        if file.ways:
+            raise ValueError("the solver's model does not hold listed WAYs yet")
         self.file = file
         self.model = cp_model.CpModel()
         model = self.model
@@ -149,7 +157,7 @@ class _Search:
             margins.append(each.margin if given is None or not each.margin else each.margin * given)
         when_fixed = [switch_of(file.start(option.id)) for option in options]
         moves = [option.origin != option.destination for option in options]
-        unlisted = world.ways is None or bool(world.ways)
+        unlisted = world.unlisted is None or bool(world.unlisted)
         self.facts = [fact for fact in file.facts if isinstance(fact, Complete)] if unlisted else []
         facts = self.facts
 
@@ -160,7 +168,7 @@ class _Search:
         self.zero = min([*fixed, *spans], default=0)
         self.given = [self.switch.get(fact.id) for fact in facts]
         room = sum(each.shortest for each in terms) + sum(each.margin or 0 for each in terms) + 1
-        room += count * max(len(file.places), 1) * world.way_takes
+        room += count * max(len(file.places), 1) * world.unlisted_takes
         earliest, latest = -room, max([*fixed, *spans], default=0) - self.zero + room
 
         self.takes = [
@@ -318,14 +326,14 @@ class _Search:
                         for route, chosen in zip(possible, via, strict=True):
                             there: _Journey = journey[before]
                             free: _Amount = ready
-                            for place, (origin, destination) in enumerate(route):
+                            for place, (_, origin, destination) in enumerate(route):
                                 name = f"{chosen.name} leg {place}"
                                 moment = model.new_int_var(earliest, latest, name)
                                 _when(model.add(moment >= free), chosen)
                                 there = self._after_unlisted(
                                     there, origin, destination, moment, chosen
                                 )
-                                free = moment + world.way_takes
+                                free = moment + world.unlisted_takes
                             _when(model.add(start[after] >= free + margin), chosen)
                             if not moves[after]:
                                 _when(model.add(arrived[after] >= free), chosen)

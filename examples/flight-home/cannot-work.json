@@ -13,6 +13,7 @@
     { "id": "blue-line", "name": "Blue Line to O'Hare", "from": "art-institute", "to": "ohare" },
     { "id": "flight", "name": "Flight home", "from": "ohare", "to": "home" }
   ],
+  "ways": [],
   "facts": [
     { "id": "visit-time", "option": "museum-visit", "starts_at": "2027-05-15T14:30:00-05:00[America/Chicago]" },
     { "id": "visit-length", "option": "museum-visit", "duration": "PT1H" },

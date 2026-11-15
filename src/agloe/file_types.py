@@ -44,6 +44,28 @@ OptionBetweenPlaces = TypedDict(
 )
 
 
+WayOneWay = TypedDict(
+    "WayOneWay",
+    {
+        "id": Id,
+        "name": Name,
+        "from": Id,
+        "to": Id,
+    },
+)
+
+
+class WayBothWays(TypedDict):
+    id: Id
+    name: Name
+    between: list[Id]
+
+
+class Range(TypedDict):
+    shortest: Length
+    longest: Length
+
+
 class FixedStart(TypedDict):
     id: Id
     option: Id
@@ -62,14 +84,21 @@ class ExactDuration(TypedDict):
     duration: Length
 
 
-class Range(TypedDict):
-    shortest: Length
-    longest: Length
-
-
 class ContingentDuration(TypedDict):
     id: Id
     option: Id
+    contingent_duration: Range
+
+
+class WayDuration(TypedDict):
+    id: Id
+    way: Id
+    duration: Length
+
+
+class WayContingentDuration(TypedDict):
+    id: Id
+    way: Id
     contingent_duration: Range
 
 
@@ -109,7 +138,15 @@ class File(TypedDict):
     persons: list[Person]
     places: list[Place]
     options: list[OptionAtAPlace | OptionBetweenPlaces]
+    ways: list[WayOneWay | WayBothWays]
     facts: list[
-        FixedStart | FreeStart | ExactDuration | ContingentDuration | AccessCutoff | CompleteSet
+        FixedStart
+        | FreeStart
+        | ExactDuration
+        | ContingentDuration
+        | AccessCutoff
+        | WayDuration
+        | WayContingentDuration
+        | CompleteSet
     ]
     decisions: list[Lock]

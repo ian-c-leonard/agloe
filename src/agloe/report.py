@@ -41,7 +41,7 @@ def as_json(file: File, report: Report) -> dict[str, object]:
     if report.answer is Answer.FEASIBLE:
         out["itinerary"] = [
             {
-                "option": step.option,
+                ("way" if step.option is None else "option"): step.option or step.way,
                 "persons": list(step.persons),
                 "start": written(step.start, file.zone),
                 "end": None if step.end is None else written(step.end, file.zone),
@@ -74,6 +74,8 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
     out: dict[str, object] = {"what": unknown.what}
     if unknown.option is not None:
         out["option"] = unknown.option
+    elif unknown.way is not None:
+        out["way"] = unknown.way
     else:
         out["from"], out["to"] = unknown.origin, unknown.destination
     out["at_most"] = None if needed.at_most is None else length_written(needed.at_most)
@@ -122,7 +124,8 @@ def _feasible(file: File, report: Report) -> list[str]:
             lines += ["", f"{name} (times in {file.zone})"]
         end = "an unknown time" if step.end is None else _clock(file, step.end, start.date())
         who = _people(file, step.persons)
-        lines.append(f"  {_clock(file, step.start)} to {end}: {_name(file, step.option)}, {who}")
+        what = _name(file, step.option or step.way)
+        lines.append(f"  {_clock(file, step.start)} to {end}: {what}, {who}")
     if not report.itinerary:
         lines += ["", "Nobody has to do anything."]
     lines.append("")
@@ -156,12 +159,12 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
         return f"{_name(file, unknown.option)} can start at any time"
     if unknown.what == "other ways":
         places = {place.id: place.name for place in file.places}
-        there = f"there are other ways from {places[unknown.origin or '']} to "
+        there = f"there are other WAYs from {places[unknown.origin or '']} to "
         there += places[unknown.destination or ""]
         if limit is not None:
             return f"{there} that take {_span(limit)} or less"
         return there if alone else f"{there} that are quick enough"
-    name = _name(file, unknown.option)
+    name = _name(file, unknown.option or unknown.way)
     if unknown.what == "duration":
         if limit is not None:
             return f"{name} takes {_span(limit)} or less"
@@ -213,8 +216,9 @@ def _starts_at(file: File, option: str | None) -> str:
     return next(place.name for place in file.places if place.id == origin)
 
 
-def _name(file: File, option: str | None) -> str:
-    return next((each.name for each in file.options if each.id == option), "an unlisted way")
+def _name(file: File, id: str | None) -> str:
+    """The name of an OPTION or a WAY."""
+    return next((each.name for each in (*file.options, *file.ways) if each.id == id), "another WAY")
 
 
 def _people(file: File, persons: tuple[str, ...]) -> str:
