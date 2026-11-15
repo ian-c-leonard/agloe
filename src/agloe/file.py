@@ -3,7 +3,8 @@
 The schema in ``schema/file.schema.json`` is the source of truth for a FILE's shape, and
 ``file_types`` is generated from it. This module refuses anything the schema or the checks below
 do not accept, and repairs nothing. What it accepts becomes exact values: a time is a whole number
-of seconds since 1970-01-01T00:00:00Z, and a length of time is a whole number of seconds.
+of seconds since 1970-01-01T00:00:00Z, and a length of time is a whole number of seconds. A time
+must agree with the time zone it names.
 """
 
 import json
@@ -12,9 +13,11 @@ import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from functools import cache
 from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
+from zoneinfo import ZoneInfo
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
@@ -150,6 +153,35 @@ def instant(text: str) -> int:
     return (moment - _EPOCH) // timedelta(seconds=1)
 
 
+def _zone_problem(text: str) -> str | None:
+    """Why a time does not agree with the time zone it names, or None when it does.
+
+    The time-zone database is the one pinned with Agloe, never the computer's own, so the same
+    FILE gives the same answer on every machine.
+    """
+    bracket = text.index("[")
+    name = text[bracket + 1 : -1]
+    if name not in _zone_names():
+        return f"{name} is not a time zone in the time-zone database"
+    moment = datetime.fromisoformat(text[:bracket])
+    there = moment.astimezone(_zone(name))
+    if there.utcoffset() != moment.utcoffset():
+        offset = there.isoformat(timespec="seconds")[19:]
+        return f"{text} does not agree with its time zone: {name} is at {offset} then"
+    return None
+
+
+@cache
+def _zone_names() -> frozenset[str]:
+    return frozenset(resources.files("tzdata").joinpath("zones").read_text().split())
+
+
+@cache
+def _zone(name: str) -> ZoneInfo:
+    with resources.files("tzdata.zoneinfo").joinpath(*name.split("/")).open("rb") as data:
+        return ZoneInfo.from_file(data, key=name)
+
+
 def length(text: str) -> int:
     """A length of time as whole seconds."""
     parts = _LENGTH.fullmatch(text)
@@ -261,10 +293,14 @@ def load(document: object) -> File:
 
     def when(where: str, text: str) -> int:
         try:
-            return instant(text)
+            moment = instant(text)
         except ValueError:
             problems.append(f"{where}: {text} is not a real date and time")
             return 0
+        disagreement = _zone_problem(text)
+        if disagreement is not None:
+            problems.append(f"{where}: {disagreement}")
+        return moment
 
     persons = tuple(Person(p["id"], p["name"]) for p in raw["persons"])
     places = tuple(Place(p["id"], p["name"]) for p in raw["places"])
