@@ -34,9 +34,9 @@
       "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
     },
     "name": {
-      "description": "Text for people to read. It holds at least one character that is not a space. The pattern lists the space characters one by one, so that every regular expression engine agrees.",
+      "description": "Text for people to read. It holds no control character and no line or paragraph separator, and at least one character that is not a space. The pattern lists those characters one by one, so that every regular expression engine agrees. A reader also refuses half of a surrogate pair, which a pattern cannot state for every engine.",
       "type": "string",
-      "pattern": "[^\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]"
+      "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]*[^\\u0000-\\u0020\\u007F-\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF][^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]*$"
     },
     "time": {
       "description": "A date and time to the second, with its offset from UTC and the name of its time zone in brackets. This is a narrow form of RFC 9557.",
@@ -164,7 +164,7 @@
     },
     "complete_set": {
       "title": "CompleteSet",
-      "description": "A FACT: the FILE lists every OPTION a PERSON could use to get from one PLACE to another, leaving within the stated span.",
+      "description": "A FACT: a PERSON who leaves one PLACE within the stated span and later reaches the other uses only OPTIONs the FILE lists, from that departure to their first arrival.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "complete"],

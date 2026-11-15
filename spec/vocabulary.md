@@ -56,7 +56,7 @@ A newer FACT that contradicts an older one about the same thing: the 15:55 saili
 
 ### COMPLETE
 
-Describes a set of OPTIONs that a FACT states the FILE holds in full: every OPTION a PERSON could use to get from one PLACE to another, directly or through other PLACEs, leaving within a stated time span. A PERSON who makes that journey therefore uses only OPTIONs the FILE lists. A COMPLETE set that is empty means "we looked, and there is nothing". A FACT that one set is COMPLETE says nothing about any other set.
+Describes a set of OPTIONs that a FACT states the FILE holds in full: the ways from one PLACE to another, directly or through other PLACEs, within a stated time span. A PERSON who leaves the first PLACE within the span and later reaches the second uses only OPTIONs the FILE lists, from that departure to their first arrival. The FACT does not limit a PERSON who never reaches the second PLACE. A COMPLETE set that is empty means "we looked, and there is nothing". A FACT that one set is COMPLETE says nothing about any other set.
 
 *Uses:* OPTION, FACT, FILE, → PLACE.
 

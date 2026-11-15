@@ -215,6 +215,98 @@ def test_many_options_at_one_instant_are_checked_at_once() -> None:
     assert broken(file, worst_case(file), everyone) == []
 
 
+def test_every_order_is_tried_at_every_instant() -> None:
+    """At 9:00 Alex must do a task at a before the ride to b, though the ride is listed first.
+
+    At 10:00 two more things at b take no time. The order at 10:00 must not stop the checker from
+    trying the other order at 9:00.
+    """
+    file = trip(
+        ["alex"],
+        ["a", "b"],
+        [moves("ride", "a", "b"), stays("task", "a"), stays("lunch", "b"), stays("call", "b")],
+        [
+            fact
+            for id, hour in (("ride", 9), ("task", 9), ("lunch", 10), ("call", 10))
+            for fact in (starts_at(id, hour), lasts(id, "PT0S"), cutoff(id, "PT0S"))
+        ],
+        [lock(id, "alex") for id in ("ride", "task", "lunch", "call")],
+    )
+    alex = ("alex",)
+    day = (
+        Step("ride", "a", "b", alex, seconds(9), seconds(9)),
+        Step("task", "a", "a", alex, seconds(9), seconds(9)),
+        Step("lunch", "b", "b", alex, seconds(10), seconds(10)),
+        Step("call", "b", "b", alex, seconds(10), seconds(10)),
+    )
+    assert broken(file, worst_case(file), day) == []
+
+
+def test_a_long_day_is_checked_step_by_step() -> None:
+    """Alex stays at one PLACE for 1,200 one-second OPTIONs in a row."""
+    count = 1200
+    ids = [f"stay-{number}" for number in range(count)]
+    facts: list[dict[str, object]] = []
+    for number, id in enumerate(ids):
+        start = starts_at(id, 9)
+        start["starts_at"] = (
+            f"2027-05-15T09:{number // 60:02d}:{number % 60:02d}-05:00[America/Chicago]"
+        )
+        facts += [start, lasts(id, "PT1S")]
+    file = trip(
+        ["alex"], ["a"], [stays(id, "a") for id in ids], facts, [lock(id, "alex") for id in ids]
+    )
+    day = tuple(
+        Step(id, "a", "a", ("alex",), seconds(9) + number, seconds(9) + number + 1)
+        for number, id in enumerate(ids)
+    )
+    assert broken(file, worst_case(file), day) == []
+
+
+def test_options_that_take_time_are_not_tried_in_every_order() -> None:
+    """Nine PERSONs each stay an hour from 9:00. The first one is also booked at 9:30."""
+    people = [f"person-{number}" for number in range(9)]
+    stays_at_nine = [stays(f"task-{number}", "hall") for number in range(9)]
+    facts = [
+        fact
+        for number in range(9)
+        for fact in (starts_at(f"task-{number}", 9), lasts(f"task-{number}", "PT1H"))
+    ]
+    file = trip(
+        people,
+        ["hall"],
+        [*stays_at_nine, stays("clash", "hall")],
+        [*facts, starts_at("clash", 9, 30), lasts("clash", "PT1H")],
+        [],
+    )
+    steps = [
+        Step(f"task-{number}", "hall", "hall", (people[number],), seconds(9), seconds(10))
+        for number in range(9)
+    ]
+    clash = Step("clash", "hall", "hall", (people[0],), seconds(9, 30), seconds(10, 30))
+    assert broken(file, worst_case(file), (*steps, clash)) == [
+        Broken(Constraint.PLACE, "clash", (people[0],), late=1800)
+    ]
+
+
+def test_a_complete_set_covers_a_journey_up_to_the_first_arrival() -> None:
+    """Alex takes the listed train to O'Hare, then unlisted OPTIONs to Midway and back."""
+    file = with_complete_ways()
+    alex = ("alex",)
+    journey = (
+        step(file, "museum-visit", seconds(14), seconds(15), *alex),
+        step(file, "blue-line", seconds(15), seconds(16), *alex),
+        unlisted("ohare", "midway", seconds(16), *alex),
+        unlisted("midway", "ohare", seconds(16, 30), *alex),
+    )
+    found = broken(file, best_case(file), journey)
+    assert Constraint.LISTED not in {each.constraint for each in found}
+    there_and_back = (*journey[:2], unlisted("ohare", "art-institute", seconds(16), *alex))
+    again = unlisted("art-institute", "ohare", seconds(16, 30), *alex)
+    found = broken(file, best_case(file), (*there_and_back, again))
+    assert Broken(Constraint.LISTED, None, alex) in found
+
+
 def test_what_nobody_needs_can_be_taken_out() -> None:
     document = flight_home()
     document["options"].append(stays("coffee", "art-institute"))

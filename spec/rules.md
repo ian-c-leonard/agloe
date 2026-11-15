@@ -19,9 +19,11 @@ A FACT states one thing:
 | a duration | The OPTION takes exactly that long. |
 | a CONTINGENT duration | The world decides how long the OPTION takes, between a shortest and a longest value. |
 | an access cutoff | Each PERSON must reach the PLACE where the OPTION starts at least that long before it starts. |
-| a COMPLETE set | The FILE lists every OPTION a PERSON could use to get from one PLACE to another, directly or through other PLACEs, leaving within a stated span of time. The span includes both of its ends. |
+| a COMPLETE set | The FILE lists the ways from one PLACE to another for a stated span of time. A PERSON who leaves the first PLACE within the span and later reaches the second uses only listed OPTIONs, from that departure to their first arrival. The span includes both of its ends. |
 
 A FILE states each FACT once. An OPTION has at most one start, one duration and one access cutoff.
+
+No text in a FILE holds a control character, a line break or half of a character pair. A name holds at least one character that is not a space.
 
 A LOCK names an OPTION and the PERSONs who take part in it.
 
@@ -44,10 +46,10 @@ An ITINERARY works in a possible world when it meets every CONSTRAINT below.
 
 1. **LOCKs are honored.** Every LOCKed OPTION happens, and the PERSONs its LOCK names take part.
 2. **Each OPTION starts when it can.** An OPTION with a fixed start starts at that time.
-3. **Each OPTION takes as long as it takes.** It ends at its start plus its duration. For a CONTINGENT duration, the world picks one value in the range.
+3. **Each OPTION takes as long as it takes.** It ends at its start plus its duration. A CONTINGENT duration is one value in its range.
 4. **Each PERSON is in one place at a time.** A PERSON's OPTIONs do not overlap, and each one starts at the PLACE where the one before it ended. A PERSON's path begins at the PLACE of their first OPTION. OPTIONs that take no time and share an instant happen one after another, in any order, and that order is the same for every PERSON.
 5. **Each PERSON arrives in time.** A PERSON who travels to the PLACE where an OPTION starts gets there at least its access cutoff before it starts. A PERSON whose path has no movement before the OPTION was there all along, and is in time.
-6. **A COMPLETE set is the whole set.** A PERSON uses an unlisted OPTION only in a possible world that has it. Where a FACT says the ways from one PLACE to another are COMPLETE, a PERSON who leaves the first PLACE within the stated span uses only listed OPTIONs until they first reach the second. A PERSON leaves a PLACE when an OPTION that moves them away from it starts. The COMPILER draws no other conclusion from a COMPLETE FACT.
+6. **A COMPLETE set is the whole set.** A PERSON uses an unlisted OPTION only in a possible world that has it. Where a FACT says the ways from one PLACE to another are COMPLETE, a PERSON who leaves the first PLACE within the stated span and later reaches the second uses only listed OPTIONs, from that departure to their first arrival. A PERSON leaves a PLACE when an OPTION that moves them away from it starts. The FACT does not limit a PERSON who never reaches the second PLACE.
 
 ## The three answers
 
@@ -55,7 +57,7 @@ An ITINERARY works in a possible world when it meets every CONSTRAINT below.
 - **INFEASIBLE:** no choice works in any possible world.
 - **UNDETERMINED:** some choice works in some possible world, but none works in all of them.
 
-A CONTINGENT duration has a stated range, so it is not unknown. FEASIBLE may rely on any value in the range. A shorter duration is never harder, so the three answers use the shortest value of each.
+A CONTINGENT duration has a stated range, so it is not unknown, and a possible world does not settle it. FEASIBLE may rely on any value in the range. A shorter duration is never harder, so the three answers use the shortest value of each.
 
 Two cases settle the answer. For the same OPTIONs, PERSONs and start times, every CONSTRAINT is at least as easy to meet when an OPTION can start more freely, takes less time or needs less margin, and when more OPTIONs exist.
 
@@ -76,7 +78,7 @@ When several ITINERARIES work, the report shows one, chosen by a fixed rule:
 2. then one in which PERSONs take part the fewest times, counting each PERSON once for every OPTION they take part in;
 3. then one with the fewest OPTIONs;
 4. then one that uses the OPTIONs listed first in the FILE;
-5. then, comparing the OPTIONs one by one in order of time, one whose OPTION starts earlier, is listed first in the FILE, or has the PERSONs listed first in the FILE.
+5. then, comparing the OPTIONs one by one in order of time: first the earlier start, then the OPTION listed first in the FILE, then the PERSONs listed first in the FILE.
 
 The second rule keeps out anything nobody needs. If any OPTION were taken out of the ITINERARY shown, or any PERSON out of one of its OPTIONs, it would stop working in some possible world, or stop being ROBUST.
 

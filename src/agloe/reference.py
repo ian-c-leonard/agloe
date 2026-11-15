@@ -374,26 +374,38 @@ def _in_each_order(itinerary: Itinerary) -> Iterator[list[Step]]:
     Steps that take no time and share an instant can happen in any order. The order is one order
     for the whole ITINERARY, so every PERSON sees those steps happen in the same order. Only the
     order among steps that share a PERSON, directly or through other steps, can matter, so only
-    those are tried in every order.
+    those are tried in every order. The orders are made one at a time.
     """
 
     def moment(step: Step) -> tuple[int, bool, int]:
         return (step.start, step.end is None, step.end or 0)
 
-    together: list[list[Step]] = []
+    groups: list[list[Step]] = []
     for _, steps in groupby(sorted(itinerary, key=moment), key=moment):
         same = list(steps)
-        together += _sharing_persons(same) if same[0].end == same[0].start else [same]
+        instant = same[0].end == same[0].start
+        groups += _sharing_persons(same) if instant else [[step] for step in same]
 
-    def from_group(number: int) -> Iterator[list[Step]]:
-        if number == len(together):
-            yield []
+    chosen = [tuple(group) for group in groups]
+    choices = [number for number, group in enumerate(groups) if len(group) > 1]
+    orders = [permutations(groups[number]) for number in choices]
+    for place, number in enumerate(choices):
+        chosen[number] = next(orders[place])
+    while True:
+        yield [step for steps in chosen for step in steps]
+        # Move on like a mileage counter: the last group that has another order takes it, and
+        # every group after it starts again from its first order.
+        place = len(choices) - 1
+        while place >= 0:
+            following = next(orders[place], None)
+            if following is not None:
+                chosen[choices[place]] = following
+                break
+            orders[place] = permutations(groups[choices[place]])
+            chosen[choices[place]] = next(orders[place])
+            place -= 1
+        else:
             return
-        for first in permutations(together[number]):
-            for rest in from_group(number + 1):
-                yield [*first, *rest]
-
-    yield from from_group(0)
 
 
 def _sharing_persons(steps: list[Step]) -> list[list[Step]]:

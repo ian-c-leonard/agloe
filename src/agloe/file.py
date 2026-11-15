@@ -227,8 +227,12 @@ def _shown(key: str) -> str:
 
 
 def _inside(where: str, key: str | int) -> str:
-    """The path to one member of a list or an object."""
-    return f"{where}/{_shown(str(key))}".lstrip("/")
+    """The path to one member of a list or an object, as a JSON Pointer (RFC 6901).
+
+    A slash inside a key is written ``~1`` and a tilde ``~0``, so two different places never
+    get the same path. The path of the whole document is empty.
+    """
+    return f"{where}/{_shown(str(key)).replace('~', '~0').replace('/', '~1')}"
 
 
 def load(document: object) -> File:
@@ -266,13 +270,13 @@ def load(document: object) -> File:
     places = tuple(Place(p["id"], p["name"]) for p in raw["places"])
     for kind, records in (("persons", persons), ("places", places)):
         for index, record in enumerate(records):
-            claim(f"{kind}/{index}", record.id)
+            claim(f"/{kind}/{index}", record.id)
     person_ids = {person.id for person in persons}
     place_ids = {place.id for place in places}
 
     options: list[Option] = []
     for index, option in enumerate(raw["options"]):
-        where = f"options/{index}"
+        where = f"/options/{index}"
         claim(where, option["id"])
         if "place" in option:
             known(where, option["place"], "PLACE", place_ids)
@@ -289,7 +293,7 @@ def load(document: object) -> File:
     stated: set[tuple[str, type]] = set()
     complete: set[tuple[str, str, int, int]] = set()
     for index, fact in enumerate(raw["facts"]):
-        where = f"facts/{index}"
+        where = f"/facts/{index}"
         claim(where, fact["id"])
         if "complete" in fact:
             ways = fact["complete"]
@@ -330,7 +334,7 @@ def load(document: object) -> File:
 
     locks: list[Lock] = []
     for index, decision in enumerate(raw["decisions"]):
-        where = f"decisions/{index}"
+        where = f"/decisions/{index}"
         claim(where, decision["id"])
         known(where, decision["lock"], "OPTION", option_ids)
         for person in decision["persons"]:
@@ -369,7 +373,7 @@ def _unwritable_characters(value: object, where: str) -> list[str]:
 
 def _describe(error: ValidationError) -> str:
     """One schema problem as 'where: what'. A record that fits no shape gets its closest miss."""
-    where = "/".join(_shown(str(part)) for part in error.absolute_path) or "the FILE"
+    where = "".join(_inside("", part) for part in error.absolute_path) or "the FILE"
     if error.context:
         closest = max(error.context, key=lambda miss: len(miss.absolute_path))
         return f"{where}: fits no known shape; the closest miss: {closest.message}"
