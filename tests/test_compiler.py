@@ -727,3 +727,47 @@ def test_the_compiler_keeps_each_use_of_a_way_apart() -> None:
     report = compiler.check(file)
     assert report == answers.check(file)
     assert reference.broken(file, longest_case(file), report.itinerary) == []
+
+
+def between_two_stops(*spans: tuple[tuple[int, int], tuple[int, int]], arrive: int) -> File:
+    """Alex is at a at 9:00 and at b at a later hour. Every way from a to b is listed, for spans.
+
+    Each span runs from one hour and minute to another, and the FILE lists no WAY at all.
+    """
+    ways = [
+        {
+            "id": f"ways-{number}",
+            "complete": {
+                "from": "a",
+                "to": "b",
+                "leaving": {"earliest": at(*first), "latest": at(*last)},
+            },
+        }
+        for number, (first, last) in enumerate(spans)
+    ]
+    return stops(("first", "a", 9, 0), ("last", "b", arrive, 0), more=ways)
+
+
+def test_complete_facts_that_overlap_rule_out_one_span() -> None:
+    """Sixteen FACTs cover 8:00 to some minute after 10:00. Together they cover 8:00 to 10:16."""
+    file = between_two_stops(*(((8, 0), (10, minute)) for minute in range(1, 17)), arrive=11)
+    other_ways = Unknown("other ways", origin="a", destination="b")
+    after_the_last_span = 44 * 60 - 1
+    report = compiler.check(file)
+    assert report.missing == ((Missing(other_ways, at_most=after_the_last_span),),)
+    assert report == answers.check(file)
+
+
+def test_an_unlisted_way_can_leave_in_the_opening_between_two_spans() -> None:
+    """The FACTs cover 8:00 to 9:30 and 9:40 to 10:30. Alex must be at b by 10:00."""
+    file = between_two_stops(((8, 0), (9, 30)), ((9, 40), (10, 30)), arrive=10)
+    other_ways = Unknown("other ways", origin="a", destination="b")
+    report = compiler.check(file)
+    assert report.missing == ((Missing(other_ways, at_most=30 * 60 - 1),),)
+    assert report == answers.check(file)
+    # With no opening, a WAY straight from a to b is no help. Only a way round through c or d is.
+    shut = between_two_stops(((8, 0), (9, 30)), ((9, 30), (10, 30)), arrive=10)
+    report = compiler.check(shut)
+    assert report == answers.check(shut)
+    assert [len(enough) for enough in report.missing] == [2, 2]
+    assert all(other_ways not in [needed.unknown for needed in enough] for enough in report.missing)

@@ -567,6 +567,7 @@ def itineraries(file: File, world: World) -> list[Itinerary]:
     """
     best: list[tuple[_Shown, Itinerary]] = []
     fewest: int | None = None
+    known = Routes(file, world)
     for who in _who_takes_part(file, world):
         if fewest is not None and sum(len(persons) for persons in who) > fewest:
             break
@@ -574,7 +575,7 @@ def itineraries(file: File, world: World) -> list[Itinerary]:
             [i for i, persons in enumerate(who) if person.id in persons] for person in file.persons
         ]
         for orders in product(*(list(_orders(file, world, indexes)) for indexes in mine)):
-            found = scheduled(file, world, who, orders)
+            found = scheduled(file, world, who, orders, known=known)
             if found is None:
                 continue
             taking_part = sum(len(step.persons) for step in found)
@@ -595,6 +596,7 @@ def scheduled(
     who: tuple[tuple[str, ...], ...],
     orders: tuple[tuple[int, ...], ...],
     by: Mapping[tuple[int, int], Route] | None = None,
+    known: Routes | None = None,
 ) -> Itinerary | None:
     """The ITINERARY for one choice of PERSONs and orders, or None when it breaks a CONSTRAINT.
 
@@ -607,11 +609,12 @@ def scheduled(
     WAYs the PERSONs take.
 
     With ``by``, only one choice of WAYs is tried: for a PERSON, by position in the FILE, and
-    the position of an OPTION in their order, the route they take after that OPTION.
+    the position of an OPTION in their order, the route they take after that OPTION. Without it,
+    ``known`` can hold the routes of this world that are already worked out.
     """
     if by is not None:
         return next(_timings(file, world, who, orders, by), None)
-    return next(_schedules(file, world, who, orders), None)
+    return next(_schedules(file, world, who, orders, known or Routes(file, world)), None)
 
 
 def _who_takes_part(file: File, world: World) -> list[tuple[tuple[str, ...], ...]]:
@@ -714,6 +717,20 @@ def routes(file: File, world: World, here: str, there: str) -> list[Route]:
     return sorted(found, key=lambda route: (len(route), _legs_in_file_order(file, route)))
 
 
+class Routes:
+    """The routes between the PLACEs of one world, with each pair worked out once."""
+
+    def __init__(self, file: File, world: World) -> None:
+        self._file, self._world = file, world
+        self._found: dict[tuple[str, str], list[Route]] = {}
+
+    def between(self, here: str, there: str) -> list[Route]:
+        """Every route from one PLACE to another that is worth trying, shortest first."""
+        if (here, there) not in self._found:
+            self._found[here, there] = routes(self._file, self._world, here, there)
+        return self._found[here, there]
+
+
 def _legs_in_file_order(file: File, route: Route) -> list[tuple[int, int, int]]:
     """The WAYs listed first come first, then the PLACEs listed first. Unlisted WAYs come last."""
     ways = [way.id for way in file.ways]
@@ -729,6 +746,7 @@ def _schedules(
     world: World,
     who: tuple[tuple[str, ...], ...],
     orders: tuple[tuple[int, ...], ...],
+    known: Routes,
 ) -> Iterator[Itinerary]:
     """The ITINERARIES for one choice of PERSONs and orders.
 
@@ -741,7 +759,7 @@ def _schedules(
         for position, (before, after) in enumerate(pairwise(order)):
             here, there = file.options[before].destination, file.options[after].origin
             if here != there:
-                possible = routes(file, world, here, there)
+                possible = known.between(here, there)
                 if not possible:
                     return
                 needed.append((number, position, possible))
@@ -793,7 +811,7 @@ def _timings(
 
     Start times are as early as the CONSTRAINTs allow. A COMPLETE FACT rules out an unlisted WAY
     only within its span. So each unlisted WAY between the PLACEs of such a FACT is tried as it
-    falls, then before the span, then after it.
+    falls, then before the first span that rules it out, then after each one.
     """
     listed = len(file.options)
     legs: list[tuple[str, Leg]] = []  # each WAY taken: who takes it, and which one
@@ -854,20 +872,24 @@ def _timings(
         if who[index] and at is not None:
             fixed[index] = at
 
-    leaving = [
-        (node, fact)
-        for fact in file.facts
-        if isinstance(fact, Complete)
+    ruled_out = [
+        (node, spans)
         for node in range(listed, count)
-        if unlisted(node) and fact.covers(origin(node), destination(node))
+        if unlisted(node)
+        for spans in [_closed(file, origin(node), destination(node))]
+        if spans
     ]
-    for choice in product(("as it falls", "before", "after"), repeat=len(leaving)):
+    # Each such WAY as it falls, then in each opening: before the first span, after each one.
+    openings = [[None, *range(len(spans) + 1)] for _, spans in ruled_out]
+    for choice in product(*openings):
         outside: list[tuple[int, int, int]] = []
-        for (node, fact), when in zip(leaving, choice, strict=True):
-            if when == "after":
-                outside.append((zero, node, fact.latest + 1))
-            elif when == "before":
-                outside.append((node, zero, 1 - fact.earliest))
+        for (node, spans), opening in zip(ruled_out, choice, strict=True):
+            if opening is None:
+                continue
+            if opening > 0:
+                outside.append((zero, node, spans[opening - 1][1] + 1))
+            if opening < len(spans):
+                outside.append((node, zero, 1 - spans[opening][0]))
         starts = _times(count + 1, [*gaps, *outside], fixed)
         if starts is None:
             continue
@@ -890,6 +912,26 @@ def _timings(
         itinerary = _in_the_order_they_happen(file, steps, gaps)
         if works_as_listed(file, world, itinerary):
             yield itinerary
+
+
+def _closed(file: File, origin: str, destination: str) -> list[tuple[int, int]]:
+    """The spans of time in which no unlisted WAY goes straight from one PLACE to another.
+
+    These are the spans of the COMPLETE FACTs about the two PLACEs, earliest first, with spans
+    that overlap or meet joined into one.
+    """
+    spans = sorted(
+        (fact.earliest, fact.latest)
+        for fact in file.facts
+        if isinstance(fact, Complete) and fact.covers(origin, destination)
+    )
+    joined: list[tuple[int, int]] = []
+    for earliest, latest in spans:
+        if joined and earliest <= joined[-1][1] + 1:
+            joined[-1] = (joined[-1][0], max(joined[-1][1], latest))
+        else:
+            joined.append((earliest, latest))
+    return joined
 
 
 def _in_the_order_they_happen(
