@@ -22,20 +22,17 @@ from agloe.reference import Itinerary, Report, World
 
 _MOST_AT_ONCE = 60  # yes-or-no choices ranked in one solve: their weights must fit in 64 bits
 
-type _Choice = tuple[tuple[tuple[str, ...], ...], tuple[tuple[int, ...], ...]]  # who, and orders
+type _Who = tuple[tuple[str, ...], ...]  # the PERSONs in each OPTION
+type _Orders = tuple[tuple[int, ...], ...]  # the OPTIONs each PERSON does, in order
+type _By = dict[tuple[int, int], reference.Route]  # the WAYs a PERSON takes after an OPTION
+type _Choice = tuple[_Who, _Orders, _By | None]
 type _Flag = cp_model.IntVar | bool  # something true or false: decided by the solver, or known
 type _Amount = cp_model.LinearExpr | int  # seconds: a plain number, or one the solver works out
 type _Journey = Sequence[tuple[_Flag, _Flag]]  # for each COMPLETE FACT: on its way, by unlisted
 
 
 def check(file: File) -> Report:
-    """The answer for this TRIP, with its evidence. The same Report as ``reference.check``.
-
-    The solver's model does not hold listed WAYs yet. A FILE that lists any is checked by the
-    reference checker's own search.
-    """
-    if file.ways:
-        return reference.check(file)
+    """The answer for this TRIP, with its evidence. The same Report as ``reference.check``."""
     return reference.check(file, shown=shown, works=works, stuck=stuck)
 
 
@@ -87,7 +84,11 @@ def stuck(file: File) -> frozenset[str] | None:
 
 
 def _checked(file: File, world: World, choice: _Choice) -> Itinerary:
-    """The solver's choice, timed and checked by the reference checker."""
+    """The solver's choice, timed and checked by the reference checker.
+
+    For the ITINERARY shown, the reference checker picks the WAYs itself, in the order of the
+    rules page. Otherwise it checks the WAYs the solver picked.
+    """
     itinerary = reference.scheduled(file, world, *choice)
     if itinerary is None:
         raise AssertionError("the solver chose PERSONs and orders that the rules refuse")
@@ -107,6 +108,25 @@ def _solver() -> cp_model.CpSolver:
     return solver
 
 
+def _quickest(world: World, routes: Sequence[reference.Route]) -> list[reference.Route]:
+    """The routes worth choosing between when only their time and their number of WAYs matter.
+
+    For each number of WAYs the quickest route is kept, unless a route with fewer WAYs is at
+    least as quick. The reference checker still names the WAYs of the ITINERARY shown.
+    """
+
+    def time(route: reference.Route) -> int:
+        return sum(
+            world.unlisted_takes if way is None else world.takes[way][0] for way, _, _ in route
+        )
+
+    kept: list[reference.Route] = []
+    for route in sorted(routes, key=lambda route: (len(route), time(route))):
+        if not kept or time(route) < time(kept[-1]):
+            kept.append(route)
+    return kept
+
+
 def _when(constraint: cp_model.Constraint, *conditions: cp_model.LiteralT) -> None:
     """Make a constraint apply only when every condition holds."""
     constraint.only_enforce_if(list(conditions))  # pyright: ignore[reportUnknownMemberType]
@@ -117,7 +137,7 @@ class _Search:
 
     Each PERSON's OPTIONs form a path. The path is a circuit through a starting point that stands
     for "before the first OPTION and after the last". Where the next OPTION starts somewhere
-    else, unlisted OPTIONs take the PERSON there, by one of the routes the world has. Start times
+    else, WAYs take the PERSON there, by one of the routes the world has. Start times
     exist in the model only to prove that some timing fits; the times shown come from the
     reference checker.
     """
@@ -128,8 +148,6 @@ class _Search:
         A FACT that is switched off is unknown, and turns out as in the best case. So the world
         must be the best case when ``switched`` is set.
         """
-        if file.ways:
-            raise ValueError("the solver's model does not hold listed WAYs yet")
         self.file = file
         self.model = cp_model.CpModel()
         model = self.model
@@ -156,6 +174,11 @@ class _Search:
             given = switch_of(file.cutoff(option.id))
             margins.append(each.margin if given is None or not each.margin else each.margin * given)
         when_fixed = [switch_of(file.start(option.id)) for option in options]
+        way_lasts: dict[str | None, _Amount] = {None: world.unlisted_takes}
+        for way in file.ways:
+            given = switch_of(file.duration(way.id))
+            shortest = world.takes[way.id][0]
+            way_lasts[way.id] = shortest if given is None else shortest * given
         moves = [option.origin != option.destination for option in options]
         unlisted = world.unlisted is None or bool(world.unlisted)
         self.facts = [fact for fact in file.facts if isinstance(fact, Complete)] if unlisted else []
@@ -168,7 +191,8 @@ class _Search:
         self.zero = min([*fixed, *spans], default=0)
         self.given = [self.switch.get(fact.id) for fact in facts]
         room = sum(each.shortest for each in terms) + sum(each.margin or 0 for each in terms) + 1
-        room += count * max(len(file.places), 1) * world.unlisted_takes
+        slowest = max([world.unlisted_takes, *(shortest for shortest, _ in world.takes.values())])
+        room += count * max(len(file.places), 1) * slowest
         earliest, latest = -room, max([*fixed, *spans], default=0) - self.zero + room
 
         self.takes = [
@@ -176,7 +200,7 @@ class _Search:
             for person in persons
         ]
         self.used = [model.new_bool_var(f"used {option.id}") for option in options]
-        self.legs: list[tuple[cp_model.IntVar, int]] = []  # a route taken, and its unlisted OPTIONs
+        self.legs: list[tuple[cp_model.IntVar, int]] = []  # a route taken, and how many WAYs it has
         # A start is a plain number where a FACT fixes it for good, and the solver's otherwise.
         known = [
             each.fixed_start if given is None else None
@@ -228,12 +252,16 @@ class _Search:
         home = count  # the starting point of every PERSON's circuit
         self.follows: list[dict[tuple[int, int], cp_model.IntVar]] = []
         self.nothing: list[cp_model.IntVar] = []
+        # For each PERSON, the routes between two OPTIONs in different PLACEs, each with the
+        # choice that takes it.
+        self.routes: list[dict[tuple[int, int], list[tuple[cp_model.IntVar, reference.Route]]]] = []
         for number, person in enumerate(persons):
             takes = self.takes[number]
             nothing = model.new_bool_var(f"{person.id} takes part in nothing")
             self.nothing.append(nothing)
             arcs: list[tuple[int, int, cp_model.LiteralT]] = [(home, home, nothing)]
             follows: dict[tuple[int, int], cp_model.IntVar] = {}
+            between: dict[tuple[int, int], list[tuple[cp_model.IntVar, reference.Route]]] = {}
             # Whether this PERSON has moved by the end of an OPTION, and when they last arrived.
             # These, and the journeys below, are only ever pushed one way: towards "has moved",
             # "arrived later" and "is on the way". That way is the one that forbids more, so the
@@ -313,6 +341,8 @@ class _Search:
                         possible = reference.routes(file, world, earlier.destination, later.origin)
                         if not possible or margin is None:
                             continue  # no way there, or no way to be in time after travelling
+                        if not facts and not switched:
+                            possible = _quickest(world, possible)
                         next_ = model.new_bool_var(f"{person.id}: {later.id} after {earlier.id}")
                         if not moves[after]:
                             _when(model.add(moved[after] == 1), next_)
@@ -323,17 +353,18 @@ class _Search:
                                 for place in range(len(possible))
                             ]
                             model.add(sum(via) == next_)
+                        between[before, after] = list(zip(via, possible, strict=True))
                         for route, chosen in zip(possible, via, strict=True):
                             there: _Journey = journey[before]
                             free: _Amount = ready
-                            for place, (_, origin, destination) in enumerate(route):
+                            for place, (way, origin, destination) in enumerate(route):
                                 name = f"{chosen.name} leg {place}"
                                 moment = model.new_int_var(earliest, latest, name)
                                 _when(model.add(moment >= free), chosen)
-                                there = self._after_unlisted(
-                                    there, origin, destination, moment, chosen
+                                there = self._after_way(
+                                    there, origin, destination, moment, chosen, way is not None
                                 )
-                                free = moment + world.unlisted_takes
+                                free = moment + way_lasts[way]
                             _when(model.add(start[after] >= free + margin), chosen)
                             if not moves[after]:
                                 _when(model.add(arrived[after] >= free), chosen)
@@ -344,6 +375,7 @@ class _Search:
                     _when(model.add(turn[after] >= turn[before] + 1), next_)
             model.add_circuit(arcs)
             self.follows.append(follows)
+            self.routes.append(between)
 
     def clash(self, given: Sequence[str]) -> tuple[_Choice | None, frozenset[str]]:
         """A choice that works with only these FACTs and DECISIONs, or the ones that rule one out.
@@ -387,7 +419,8 @@ class _Search:
             raise AssertionError("the solver stopped early")
         count = len(self.file.options)
         orders: list[tuple[int, ...]] = []
-        for follows in self.follows:
+        by: _By = {}
+        for number, follows in enumerate(self.follows):
             order: list[int] = []
             here = count
             while True:
@@ -398,23 +431,24 @@ class _Search:
                 ]
                 if not ahead:
                     break
+                for chosen, route in self.routes[number].get((here, ahead[0]), ()):
+                    if solver.boolean_value(chosen):
+                        by[number, len(order) - 1] = route
                 order.append(ahead[0])
                 here = ahead[0]
             orders.append(tuple(order))
-        return self._who(orders), tuple(orders)
+        return self._who(orders), tuple(orders), by
 
     def first_in_file_order(self) -> _Choice | None:
         """The choice of PERSONs and orders that "Which ITINERARY is shown" puts first."""
         model, file = self.model, self.file
         count = len(file.options)
-        unlisted = sum(route * length for route, length in self.legs)
-        taking_part = sum(each for row in self.takes for each in row) + unlisted
-        steps = sum(self.used) + unlisted
-        most_steps = count + sum(length for _, length in self.legs) + 1
-        fewest = self._least(taking_part * most_steps + steps)
+        ways_taken = sum(route * length for route, length in self.legs)
+        taking_part = sum(each for row in self.takes for each in row) + ways_taken
+        fewest = self._least(taking_part * (count + 1) + sum(self.used))
         if fewest is None:
             return None
-        model.add(taking_part * most_steps + steps == fewest)
+        model.add(taking_part * (count + 1) + sum(self.used) == fewest)
         self._settle(self.used)
 
         # Each PERSON in turn: the OPTION listed first that can come next, or nothing more.
@@ -441,7 +475,7 @@ class _Search:
                 order.append(found)
                 here = found
             orders.append(tuple(order))
-        return self._who(orders), tuple(orders)
+        return self._who(orders), tuple(orders), None
 
     def _who(self, orders: Sequence[tuple[int, ...]]) -> tuple[tuple[str, ...], ...]:
         """The PERSONs in each OPTION, given the OPTIONs each PERSON does."""
@@ -465,28 +499,32 @@ class _Search:
         _when(model.add(moment >= fact.latest + 1 - self.zero), inside.negated(), sooner.negated())
         return inside
 
-    def _after_unlisted(
+    def _after_way(
         self,
         before: _Journey,
         origin: str,
         destination: str,
         moment: cp_model.IntVar,
         when: cp_model.IntVar,
+        listed: bool,
     ) -> _Journey:
-        """What each COMPLETE FACT makes of one unlisted OPTION taken under ``when``.
+        """What each COMPLETE FACT makes of one WAY taken under ``when``.
 
         A PERSON on the way from the first PLACE of a FACT, who left within its span, cannot
-        reach the second PLACE by an unlisted OPTION, or after one.
+        reach the second PLACE by an unlisted WAY, or after one.
         """
         after: list[tuple[_Flag, _Flag]] = []
-        for place, ((on_the_way, _), fact) in enumerate(zip(before, self.facts, strict=True)):
+        for place, (state, fact) in enumerate(zip(before, self.facts, strict=True)):
+            on_the_way, by_unlisted = state
             if origin == fact.origin:
                 on_the_way = self._either(on_the_way, self._inside(moment, fact, when.name), when)
+            if not listed:
+                by_unlisted = on_the_way
             if destination == fact.destination:
-                self._never(on_the_way, when, place)
+                self._never(by_unlisted, when, place)
                 after.append((False, False))
             else:
-                after.append((on_the_way, on_the_way))
+                after.append((on_the_way, by_unlisted))
         return after
 
     def _either(self, first: _Flag, second: _Flag, when: cp_model.IntVar) -> _Flag:

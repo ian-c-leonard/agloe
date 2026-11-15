@@ -602,13 +602,20 @@ def scheduled(
     world: World,
     who: tuple[tuple[str, ...], ...],
     orders: tuple[tuple[int, ...], ...],
+    by: Mapping[tuple[int, int], Route] | None = None,
 ) -> Itinerary | None:
     """The ITINERARY for one choice of PERSONs and orders, or None when that choice does not work.
 
     ``who`` names the PERSONs in each OPTION, in the FILE's order of OPTIONs. ``orders`` gives,
     for each PERSON in the FILE's order, the OPTIONs they do, by position in the FILE, in the
-    order they do them. The start times are those of "Which ITINERARY is shown".
+    order they do them. The start times are those of "Which ITINERARY is shown", and so are the
+    WAYs the PERSONs take.
+
+    With ``by``, only one choice of WAYs is tried: for a PERSON, by position in the FILE, and
+    the position of an OPTION in their order, the route they take after that OPTION.
     """
+    if by is not None:
+        return next(_timings(file, world, who, orders, by), None)
     return next(_schedules(file, world, who, orders), None)
 
 
@@ -731,19 +738,26 @@ def _schedules(
             each[number] += _legs_in_file_order(file, route)
         return each
 
+    # The fewest and the most WAYs that the routes from each point on can take in all.
+    least = [0] * (len(needed) + 1)
+    greatest = [0] * (len(needed) + 1)
+    for rest in reversed(range(len(needed))):
+        lengths = [len(route) for route in needed[rest][2]]
+        least[rest] = least[rest + 1] + min(lengths)
+        greatest[rest] = greatest[rest + 1] + max(lengths)
+
     def with_this_many(total: int, rest: int = 0) -> Iterator[tuple[Route, ...]]:
         """Every choice of routes that takes this many WAYs in all."""
         if rest == len(needed):
-            if total == 0:
-                yield ()
+            yield ()
             return
         for route in needed[rest][2]:
-            if len(route) <= total:
-                for others in with_this_many(total - len(route), rest + 1):
+            left = total - len(route)
+            if least[rest + 1] <= left <= greatest[rest + 1]:
+                for others in with_this_many(left, rest + 1):
                     yield (route, *others)
 
-    fewest = sum(min(len(route) for route in possible) for _, _, possible in needed)
-    most = sum(max(len(route) for route in possible) for _, _, possible in needed)
+    fewest, most = least[0], greatest[0]
     for total in range(fewest, most + 1):
         for chosen in sorted(with_this_many(total), key=taken):
             hops = {
@@ -788,10 +802,31 @@ def _timings(
     def origin(node: int) -> str:
         return legs[node - listed][1][1] if node >= listed else file.options[node].origin
 
+    def destination(node: int) -> str:
+        return legs[node - listed][1][2] if node >= listed else file.options[node].destination
+
     def moves(node: int) -> bool:
-        if node >= listed:
-            return True
-        return file.options[node].origin != file.options[node].destination
+        return origin(node) != destination(node)
+
+    def unlisted(node: int) -> bool:
+        return node >= listed and legs[node - listed][1][0] is None
+
+    def matters(node: int, fact: Complete) -> bool:
+        """Whether when this step leaves can decide if a COMPLETE FACT is kept.
+
+        It can if some PERSON goes on from it to the second PLACE of the FACT and takes an
+        unlisted WAY before they first get there.
+        """
+        for line in lines:
+            if node not in line:
+                continue
+            onward = line[line.index(node) :]
+            for place, later in enumerate(onward):
+                if destination(later) == fact.destination:
+                    if any(unlisted(each) for each in onward[: place + 1]):
+                        return True
+                    break
+        return False
 
     gaps: list[tuple[int, int, int]] = []  # (before, after, least seconds between their starts)
     for line in lines:
@@ -822,13 +857,12 @@ def _timings(
             fixed[index] = at
 
     happening = [node for node in range(count) if node >= listed or who[node]]
-    any_unlisted = any(way is None for _, (way, _, _) in legs)
     leaving = [
         (node, fact)
         for fact in file.facts
-        if isinstance(fact, Complete) and any_unlisted
+        if isinstance(fact, Complete)
         for node in happening
-        if moves(node) and origin(node) == fact.origin
+        if moves(node) and origin(node) == fact.origin and matters(node, fact)
     ]
     for choice in product(("as it falls", "before", "after"), repeat=len(leaving)):
         outside: list[tuple[int, int, int]] = []
