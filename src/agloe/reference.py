@@ -885,6 +885,7 @@ def _in_file_order(file: File, itinerary: Itinerary, orders: tuple[tuple[int, ..
 
 type Shown = Callable[[File, World], Itinerary | None]
 type Works = Callable[[File, World], bool]
+type Stuck = Callable[[File], frozenset[str] | None]
 
 
 def first_shown(file: File, world: World) -> Itinerary | None:
@@ -898,13 +899,27 @@ def any_works(file: File, world: World) -> bool:
     return bool(itineraries(file, world))
 
 
-def check(file: File, shown: Shown = first_shown, works: Works = any_works) -> Report:
+def check(
+    file: File, shown: Shown = first_shown, works: Works = any_works, stuck: Stuck | None = None
+) -> Report:
     """The answer for this TRIP, with its evidence.
 
     ``shown`` and ``works`` are how ITINERARIES are found. By default the reference checker tries
     every choice. A solver can stand in for that search. The answers and the evidence are worked
     out here in either case.
+
+    ``stuck`` names FACTs and DECISIONs that rule out every ITINERARY by themselves, or None when
+    one works in the best case. The set need not be small. A search that can name a small one
+    saves most of the work of finding the conflict. Without it, every record counts.
     """
+    if stuck is None:
+
+        def every_record(given: File) -> frozenset[str] | None:
+            if works(given, best_case(given)):
+                return None
+            return frozenset([fact.id for fact in given.facts] + [lock.id for lock in given.locks])
+
+        stuck = every_record
     plain = shown(file, worst_case(file))
     if plain is not None:
         longest = longest_case(file)
@@ -917,18 +932,32 @@ def check(file: File, shown: Shown = first_shown, works: Works = any_works) -> R
         relies_on += [lock.id for lock in file.locks]
         at_worst = tuple(broken(file, longest, in_world(longest, chosen))) if robust is None else ()
         return Report(Answer.FEASIBLE, chosen, tuple(relies_on), robust is not None, at_worst)
-    if not works(file, best_case(file)):
-        return Report(Answer.INFEASIBLE, conflict=_conflict(file, works))
+    enough = stuck(file)
+    if enough is not None:
+        return Report(Answer.INFEASIBLE, conflict=_conflict(file, stuck, enough))
     return Report(Answer.UNDETERMINED, missing=_missing(file, works))
 
 
-def _conflict(file: File, works: Works) -> tuple[str, ...]:
-    """FACTs and DECISIONs that make the TRIP INFEASIBLE by themselves; none can be removed."""
+def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[str, ...]:
+    """FACTs and DECISIONs that make the TRIP INFEASIBLE by themselves; none can be removed.
+
+    It goes through the records in the FILE's order and removes each one that the TRIP stays
+    INFEASIBLE without. ``enough`` is a set of records known to make the TRIP INFEASIBLE by
+    themselves. A record outside it can go without another search: what is left still holds all
+    of ``enough``, and more records never make a TRIP easier.
+    """
     kept = file
+    skipped = False
     for record in [fact.id for fact in file.facts] + [lock.id for lock in file.locks]:
         without = kept.without(record)
-        if not works(without, best_case(without)):
-            kept = without
+        if record not in enough:
+            kept, skipped = without, True
+            continue
+        smaller = stuck(without)
+        if smaller is not None:
+            kept, enough = without, smaller
+    if skipped and stuck(kept) is None:
+        raise AssertionError("records said to rule out every ITINERARY do not")
     return tuple([fact.id for fact in kept.facts] + [lock.id for lock in kept.locks])
 
 

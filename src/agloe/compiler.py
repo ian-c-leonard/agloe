@@ -8,9 +8,8 @@ rules as the reference checker applies them have agreed.
 Only the search is different. The three answers, ROBUST and the evidence are worked out by
 ``reference.check``, with this module's search in place of its own.
 
-The evidence for INFEASIBLE comes from removing FACTs and DECISIONs one at a time. Each step asks
-the solver to prove again that nothing works, and those proofs are slow for a TRIP of ten OPTIONs
-or more.
+For INFEASIBLE, the solver also names the FACTs and DECISIONs its proof used. The reference
+checker then looks for the conflict among those alone.
 """
 
 from collections.abc import Sequence
@@ -18,19 +17,20 @@ from collections.abc import Sequence
 from ortools.sat.python import cp_model
 
 from agloe import reference
-from agloe.file import Complete, File
+from agloe.file import Complete, Cutoff, Duration, File, Start
 from agloe.reference import Itinerary, Report, World
 
 _MOST_AT_ONCE = 60  # yes-or-no choices ranked in one solve: their weights must fit in 64 bits
 
 type _Choice = tuple[tuple[tuple[str, ...], ...], tuple[tuple[int, ...], ...]]  # who, and orders
 type _Flag = cp_model.IntVar | bool  # something true or false: decided by the solver, or known
+type _Amount = cp_model.LinearExpr | int  # seconds: a plain number, or one the solver works out
 type _Journey = Sequence[tuple[_Flag, _Flag]]  # for each COMPLETE FACT: on its way, by unlisted
 
 
 def check(file: File) -> Report:
     """The answer for this TRIP, with its evidence. The same Report as ``reference.check``."""
-    return reference.check(file, shown=shown, works=works)
+    return reference.check(file, shown=shown, works=works, stuck=stuck)
 
 
 def shown(file: File, world: World) -> Itinerary | None:
@@ -45,6 +45,39 @@ def works(file: File, world: World) -> bool:
     if choice is not None:
         _checked(file, world, choice)
     return choice is not None
+
+
+def stuck(file: File) -> frozenset[str] | None:
+    """FACTs and DECISIONs that rule out every ITINERARY by themselves, or None if one works.
+
+    The question is asked in the best case. The set returned is small: no record can be taken
+    out of it. It need not be the conflict the report names, which is found in the FILE's order.
+    This search goes the other way, from the last record to the first. That takes the DECISIONs
+    out before the FACTs, and with fewer LOCKs to honor each proof is quick.
+    """
+    world = reference.best_case(file)
+    search = _Search(file, world, switched=True)
+    records = [fact.id for fact in file.facts] + [lock.id for lock in file.locks]
+    choice, needed = search.clash(records)
+    if choice is not None:
+        _checked(file, world, choice)
+        return None
+    while True:  # ask again with only the records the proof used, until it uses them all
+        choice, fewer = search.clash([record for record in records if record in needed])
+        if choice is not None:
+            raise AssertionError("records the solver's proof used do not rule out every choice")
+        if fewer == needed:
+            break
+        needed = fewer
+    kept = [record for record in records if record in needed]
+    for record in reversed(list(kept)):
+        if record in needed:
+            choice, fewer = search.clash([other for other in kept if other != record])
+            if choice is not None:
+                continue
+            needed = fewer
+        kept.remove(record)
+    return frozenset(kept)
 
 
 def _checked(file: File, world: World, choice: _Choice) -> Itinerary:
@@ -83,7 +116,12 @@ class _Search:
     reference checker.
     """
 
-    def __init__(self, file: File, world: World) -> None:
+    def __init__(self, file: File, world: World, switched: bool = False) -> None:
+        """Build the model. With ``switched``, each FACT and DECISION applies only if switched on.
+
+        A FACT that is switched off is unknown, and turns out as in the best case. So the world
+        must be the best case when ``switched`` is set.
+        """
         self.file = file
         self.model = cp_model.CpModel()
         model = self.model
@@ -91,8 +129,25 @@ class _Search:
         count = len(options)
         terms = [world.terms[option.id] for option in options]
         usable = [each.fixed_start is not None or each.free_start for each in terms]
-        lasts = [each.shortest for each in terms]
         endless = [each.longest is None for each in terms]
+        self.switch: dict[str, cp_model.IntVar] = {}
+        if switched:
+            for record in (*file.facts, *file.locks):
+                self.switch[record.id] = model.new_bool_var(f"given {record.id}")
+
+        def switch_of(record: Start | Duration | Cutoff | None) -> cp_model.IntVar | None:
+            return None if record is None else self.switch.get(record.id)
+
+        # How long each OPTION takes and how early a PERSON must arrive: plain numbers, or
+        # numbers that count only when their FACT is switched on.
+        lasts: list[_Amount] = []
+        margins: list[_Amount | None] = []
+        for option, each in zip(options, terms, strict=True):
+            given = switch_of(file.duration(option.id))
+            lasts.append(each.shortest if given is None else each.shortest * given)
+            given = switch_of(file.cutoff(option.id))
+            margins.append(each.margin if given is None or not each.margin else each.margin * given)
+        when_fixed = [switch_of(file.start(option.id)) for option in options]
         moves = [option.origin != option.destination for option in options]
         unlisted = world.ways is None or bool(world.ways)
         self.facts = [fact for fact in file.facts if isinstance(fact, Complete)] if unlisted else []
@@ -103,7 +158,8 @@ class _Search:
         fixed = [each.fixed_start for each in terms if each.fixed_start is not None]
         spans = [moment for fact in facts for moment in (fact.earliest - 1, fact.latest + 1)]
         self.zero = min([*fixed, *spans], default=0)
-        room = sum(lasts) + sum(each.margin or 0 for each in terms) + 1
+        self.given = [self.switch.get(fact.id) for fact in facts]
+        room = sum(each.shortest for each in terms) + sum(each.margin or 0 for each in terms) + 1
         room += count * max(len(file.places), 1) * world.way_takes
         earliest, latest = -room, max([*fixed, *spans], default=0) - self.zero + room
 
@@ -113,38 +169,53 @@ class _Search:
         ]
         self.used = [model.new_bool_var(f"used {option.id}") for option in options]
         self.legs: list[tuple[cp_model.IntVar, int]] = []  # a route taken, and its unlisted OPTIONs
+        # A start is a plain number where a FACT fixes it for good, and the solver's otherwise.
+        known = [
+            each.fixed_start if given is None else None
+            for each, given in zip(terms, when_fixed, strict=True)
+        ]
         start = [
             model.new_int_var(earliest, latest, f"start {option.id}")
-            if each.fixed_start is None
-            else model.new_constant(each.fixed_start - self.zero)
-            for option, each in zip(options, terms, strict=True)
+            if moment is None
+            else model.new_constant(moment - self.zero)
+            for option, moment in zip(options, known, strict=True)
         ]
+        for index, (each, given) in enumerate(zip(terms, when_fixed, strict=True)):
+            if given is not None and each.fixed_start is not None:
+                _when(model.add(start[index] == each.fixed_start - self.zero), given)
         turn = [model.new_int_var(0, max(count - 1, 0), f"turn {option.id}") for option in options]
         # Whether each OPTION leaves the first PLACE of each COMPLETE FACT within its span.
         leaves: list[list[_Flag]] = [
             [
                 option.origin == fact.origin
                 and option.destination != fact.origin
-                and self._inside(
-                    start[index] if each.fixed_start is None else each.fixed_start, fact, option.id
-                )
+                and self._inside(start[index] if moment is None else moment, fact, option.id)
                 for fact in facts
             ]
-            for index, (option, each) in enumerate(zip(options, terms, strict=True))
+            for index, (option, moment) in enumerate(zip(options, known, strict=True))
         ]
 
         for index, option in enumerate(options):
             model.add_max_equality(self.used[index], [0, *(row[index] for row in self.takes)])
-            locked = {
-                name for lock in file.locks if lock.option == option.id for name in lock.persons
-            }
             for number, person in enumerate(persons):
+                takes = self.takes[number][index]
+                asking = [
+                    self.switch.get(lock.id)
+                    for lock in file.locks
+                    if lock.option == option.id and person.id in lock.persons
+                ]
+                for given in asking:
+                    if given is None:
+                        model.add(takes == 1)
+                    else:
+                        _when(model.add(takes == 1), given)
                 # Staying somewhere changes nothing for a PERSON whom no LOCK asks to stay.
-                idle = not moves[index] and person.id not in locked
-                if not usable[index] or idle:
-                    model.add(self.takes[number][index] == 0)
-                if person.id in locked:
-                    model.add(self.takes[number][index] == 1)
+                if not usable[index] or (not moves[index] and not asking):
+                    model.add(takes == 0)
+                elif not moves[index] and all(given is not None for given in asking):
+                    model.add_bool_or(
+                        [takes.negated(), *(given for given in asking if given is not None)]
+                    )
 
         home = count  # the starting point of every PERSON's circuit
         self.follows: list[dict[tuple[int, int], cp_model.IntVar]] = []
@@ -187,7 +258,7 @@ class _Search:
                     on_the_way, by_unlisted = before[place]
                     on_the_way = self._either(on_the_way, leaves[index][place], when)
                     if options[index].destination == fact.destination:
-                        self._never(by_unlisted, when)
+                        self._never(by_unlisted, when, place)
                         on_the_way, by_unlisted = False, False
                     _when(model.add(journey[index][place][0] >= on_the_way), when)
                     _when(model.add(journey[index][place][1] >= by_unlisted), when)
@@ -213,7 +284,7 @@ class _Search:
                         continue
                     if not (usable[before] and usable[after]):
                         continue
-                    margin = terms[after].margin
+                    margin = margins[after]
                     ready = start[before] + lasts[before]
                     if earlier.destination == later.origin:
                         next_ = model.new_bool_var(f"{person.id}: {later.id} after {earlier.id}")
@@ -223,7 +294,7 @@ class _Search:
                             _when(model.add(arrived[after] >= arrived[before]), next_)
                         if margin is None:
                             model.add_implication(next_, moved[before].negated())
-                        elif margin:
+                        elif not (isinstance(margin, int) and margin == 0):
                             _when(
                                 model.add(start[after] >= arrived[before] + margin),
                                 next_,
@@ -246,7 +317,7 @@ class _Search:
                             model.add(sum(via) == next_)
                         for route, chosen in zip(possible, via, strict=True):
                             there: _Journey = journey[before]
-                            free: cp_model.LinearExprT = ready
+                            free: _Amount = ready
                             for place, (origin, destination) in enumerate(route):
                                 name = f"{chosen.name} leg {place}"
                                 moment = model.new_int_var(earliest, latest, name)
@@ -266,14 +337,46 @@ class _Search:
             model.add_circuit(arcs)
             self.follows.append(follows)
 
+    def clash(self, given: Sequence[str]) -> tuple[_Choice | None, frozenset[str]]:
+        """A choice that works with only these FACTs and DECISIONs, or the ones that rule one out.
+
+        Every other record is switched off. The records returned are those of ``given`` that the
+        solver's proof needed. They rule out every choice by themselves: a record that is
+        switched on never makes a TRIP easier. There may be fewer that would do.
+        """
+        names = {switch.index: record for record, switch in self.switch.items()}
+        self.model.add_assumptions(
+            [
+                switch if record in given else switch.negated()
+                for record, switch in self.switch.items()
+            ]
+        )
+        solver = _solver()
+        status = solver.solve(self.model)
+        self.model.clear_assumptions()
+        if status != cp_model.INFEASIBLE:
+            return self._found(solver, status), frozenset()
+        needed = frozenset(
+            names[index]
+            for index in solver.sufficient_assumptions_for_infeasibility()
+            if index in names
+        )
+        if not needed:
+            raise AssertionError("the solver ruled out every choice without using any record")
+        return None, needed
+
     def any(self) -> _Choice | None:
         """Some choice of PERSONs and orders that works, or None when none does."""
         solver = _solver()
         status = solver.solve(self.model)
         if status == cp_model.INFEASIBLE:
             return None
+        return self._found(solver, status)
+
+    def _found(self, solver: cp_model.CpSolver, status: object) -> _Choice:
+        """The choice of PERSONs and orders in the answer the solver gave."""
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            raise AssertionError(f"the solver stopped early: {solver.status_name(status)}")
+            raise AssertionError("the solver stopped early")
         count = len(self.file.options)
         orders: list[tuple[int, ...]] = []
         for follows in self.follows:
@@ -368,11 +471,11 @@ class _Search:
         reach the second PLACE by an unlisted OPTION, or after one.
         """
         after: list[tuple[_Flag, _Flag]] = []
-        for (on_the_way, _), fact in zip(before, self.facts, strict=True):
+        for place, ((on_the_way, _), fact) in enumerate(zip(before, self.facts, strict=True)):
             if origin == fact.origin:
                 on_the_way = self._either(on_the_way, self._inside(moment, fact, when.name), when)
             if destination == fact.destination:
-                self._never(on_the_way, when)
+                self._never(on_the_way, when, place)
                 after.append((False, False))
             else:
                 after.append((on_the_way, on_the_way))
@@ -391,12 +494,17 @@ class _Search:
         _when(self.model.add(either >= second), when)
         return either
 
-    def _never(self, flag: _Flag, when: cp_model.IntVar) -> None:
-        """Rule out ``when`` together with something being true."""
-        if flag is True:
-            self.model.add(when == 0)
-        elif flag is not False:
-            self.model.add_implication(when, flag.negated())
+    def _never(self, flag: _Flag, when: cp_model.IntVar, place: int) -> None:
+        """Rule out ``when`` together with something being true, if this COMPLETE FACT is given."""
+        if flag is False:
+            return
+        together: list[cp_model.LiteralT] = [when.negated()]
+        if flag is not True:
+            together.append(flag.negated())
+        given = self.given[place]
+        if given is not None:
+            together.append(given.negated())
+        self.model.add_bool_or(together)
 
     def _settle(self, choices: Sequence[cp_model.IntVar]) -> None:
         """Fix these yes-or-no choices: "yes" wherever it can be, the earlier choices first."""
