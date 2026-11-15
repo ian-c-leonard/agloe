@@ -6,8 +6,9 @@ from pathlib import Path
 import pytest
 
 from agloe import report
+from agloe.answers import check
 from agloe.file import read
-from agloe.reference import broken, check, needless, worst_case
+from agloe.reference import broken, needless, worst_case
 from tests.stories import EXAMPLES
 
 FILES = sorted(

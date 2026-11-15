@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 
 from agloe import compiler, report
+from agloe.answers import Answer
 from agloe.cli import main
 from agloe.file import File, load
-from agloe.reference import Answer
 from tests.stories import (
     EXAMPLES,
     any_time,

@@ -2,7 +2,7 @@
 
 This document says exactly what the COMPILER checks. It turns the principles of the [foundation](foundation.md) into CONSTRAINTs, each stated in plain words about a finished ITINERARY. Terms in capitals are defined in the [vocabulary](vocabulary.md).
 
-The rules exist twice: here in words, and in the reference checker, [`src/agloe/reference.py`](../src/agloe/reference.py). The reference checker is a small program that applies these rules directly and uses no solver. It defines the right answer for small TRIPs, and anything faster must give the same answers. Every FILE under [`examples/`](../examples/) is one of its tests.
+The rules exist twice: here in words, and in the reference checker, [`src/agloe/reference.py`](../src/agloe/reference.py). The reference checker is a small program that applies these rules directly and uses no solver. It defines the right answer for small TRIPs, and anything faster must give the same answers. The three answers and the evidence are worked out in [`src/agloe/answers.py`](../src/agloe/answers.py), from its search or from a faster one. Every FILE under [`examples/`](../examples/) is one of its tests.
 
 ## What a FILE holds
 

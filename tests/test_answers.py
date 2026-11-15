@@ -3,17 +3,15 @@
 from collections.abc import Sequence
 from dataclasses import replace
 
+from agloe.answers import Answer, Missing, check
 from agloe.file import File, load
 from agloe.reference import (
-    Answer,
     Broken,
     Constraint,
-    Missing,
     Step,
     Unknown,
     World,
     broken,
-    check,
     in_world,
     itineraries,
     worst_case,

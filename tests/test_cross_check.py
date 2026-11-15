@@ -11,16 +11,15 @@ from dataclasses import replace
 from itertools import combinations, pairwise, permutations, product
 from random import Random
 
+from agloe.answers import Answer, check
 from agloe.file import Duration, File
 from agloe.reference import (
-    Answer,
     Itinerary,
     Step,
     Terms,
     World,
     best_case,
     broken,
-    check,
     in_world,
     itineraries,
     needless,
