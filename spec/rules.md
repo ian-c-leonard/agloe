@@ -22,7 +22,7 @@ A FACT states one thing:
 | a CONTINGENT duration | The world decides how long the OPTION takes, between a shortest and a longest value. |
 | an access cutoff | Each PERSON must reach the PLACE where the OPTION starts at least that long before it starts. |
 | how long a WAY takes | Each time a PERSON takes the WAY, it takes that long. The FACT gives an exact value, or a CONTINGENT range from which the world decides each time. |
-| a COMPLETE set | The FILE lists every OPTION and WAY that goes straight from one PLACE to another and starts within a stated span of time. So no unlisted WAY does. The span includes both of its ends. The FACT can leave out the first PLACE, the second, or both. A PLACE it leaves out stands for every PLACE. The FACT says nothing about travel through a third PLACE. |
+| a COMPLETE set | The FILE lists every OPTION and WAY that goes straight from one PLACE to another and starts within a stated span of time. Straight means that it stops at no other PLACE of the FILE on the way. So no unlisted WAY does. The span includes both of its ends. The FACT can leave out the first PLACE, the second, or both. A PLACE it leaves out stands for every PLACE. The FACT says nothing about travel through a third PLACE. |
 
 A FILE states each FACT once. An OPTION has at most one start, one duration and one access cutoff. A WAY has at most one duration.
 
@@ -39,9 +39,9 @@ A FACT that the FILE does not state is unknown. The COMPILER never fills one in.
 - With no stated start, an OPTION might start only at some time nobody has recorded.
 - With no stated duration, an OPTION or a WAY might take any length of time.
 - With no stated access cutoff, an OPTION might need any margin.
-- WAYs that the FILE does not list might exist between any two PLACEs, and take any length of time. A COMPLETE FACT says that none goes straight from its first PLACE to its second within its span.
+- Travel that the FILE does not list might exist between any two PLACEs, and take any length of time. The rules call it an unlisted WAY. It stands for a WAY, or for an OPTION that leaves at some time, so it can be there at one time and not at another. A COMPLETE FACT says that none goes straight from its first PLACE to its second within its span.
 
-A possible world is one way that all the unknown FACTs could turn out.
+A possible world is one way that all the unknown FACTs could turn out. It has no PLACE that the FILE does not name: travel through anywhere else is part of one WAY between two PLACEs of the FILE.
 
 ## The CONSTRAINTs
 

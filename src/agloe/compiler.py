@@ -37,8 +37,9 @@ def check(file: File) -> Report:
 
 def shown(file: File, world: World) -> Itinerary | None:
     """The ITINERARY that "Which ITINERARY is shown" puts first in this world, or None."""
-    choice = _Search(file, world).first_in_file_order()
-    return None if choice is None else _checked(file, world, choice)
+    search = _Search(file, world)
+    choice = search.first_in_file_order()
+    return None if choice is None else _checked(file, world, choice, search.known)
 
 
 def works(file: File, world: World) -> bool:
@@ -82,13 +83,16 @@ def stuck(file: File) -> frozenset[str] | None:
     return frozenset(kept)
 
 
-def _checked(file: File, world: World, choice: _Choice) -> Itinerary:
+def _checked(
+    file: File, world: World, choice: _Choice, known: reference.Routes | None = None
+) -> Itinerary:
     """The solver's choice, timed and checked by the reference checker.
 
     For the ITINERARY shown, the reference checker picks the WAYs itself, in the order of the
-    rules page. Otherwise it checks the WAYs the solver picked.
+    rules page, from the routes already worked out. Otherwise it checks the WAYs the solver
+    picked.
     """
-    itinerary = reference.scheduled(file, world, *choice)
+    itinerary = reference.scheduled(file, world, *choice, known)
     if itinerary is None:
         raise AssertionError("the solver chose PERSONs and orders that the rules refuse")
     return itinerary
@@ -162,6 +166,7 @@ class _Search:
         # choice that takes it.
         self.routes: list[dict[tuple[int, int], list[tuple[cp_model.IntVar, reference.Route]]]] = []
         self.legs: list[tuple[cp_model.IntVar, int]] = []  # a route taken, and how many WAYs it has
+        self.known = reference.Routes(file, world)
         self._worth_trying: dict[tuple[str, str], list[reference.Route]] = {}
         for number in range(len(file.persons)):
             self._lay_out_path(number)
@@ -384,7 +389,7 @@ class _Search:
         and the number of WAYs of a route matter, so the quickest of each length is enough.
         """
         if (here, there) not in self._worth_trying:
-            possible = reference.routes(self.file, self.world, here, there)
+            possible = self.known.between(here, there)
             if not self.facts and not self.switch:
                 possible = _quickest(self.world, possible)
             self._worth_trying[here, there] = possible

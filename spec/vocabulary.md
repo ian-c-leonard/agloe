@@ -56,7 +56,7 @@ A newer FACT that contradicts an older one about the same thing: the 15:55 saili
 
 ### COMPLETE
 
-Describes a set of OPTIONs and WAYs that a FACT states the FILE holds in full: everything that goes straight from one PLACE to another and starts within a stated time span. Nothing unlisted does. The FACT can name both PLACEs, one of them, or neither, and a PLACE it does not name stands for every PLACE. A COMPLETE set that is empty means "we looked, and there is nothing". A FACT that one set is COMPLETE says nothing about any other set, and so nothing about travel through a third PLACE.
+Describes a set of OPTIONs and WAYs that a FACT states the FILE holds in full. The FACT describes the set by a filter: everything that goes straight from one PLACE to another and starts within a stated time span. Nothing unlisted does. The filter can name both PLACEs, one of them, or neither, and a PLACE it does not name stands for every PLACE. A COMPLETE set that is empty means "we looked, and there is nothing". A FACT that one set is COMPLETE says nothing about any other set, and so nothing about travel through a third PLACE.
 
 *Uses:* FACT, FILE, → OPTION, → WAY, → PLACE.
 
