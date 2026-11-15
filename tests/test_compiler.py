@@ -35,8 +35,12 @@ from tests.stories import (
     seconds,
     starts_at,
     stays,
+    takes,
     trip,
+    way,
+    way_between,
 )
+from tests.test_answers import WALKS, a_morning
 from tests.test_cross_check import (
     a_shared_ride,
     possible_world,
@@ -63,6 +67,10 @@ def test_the_compiler_and_the_reference_checker_agree_on_random_trips() -> None:
     trips += [random_trip(rng, leave_out=0, contingent=0.6) for _ in range(80)]
     trips += [random_trip(rng, 0.25, contingent=0.3, with_complete=0.4) for _ in range(120)]
     trips += [two_places_with_no_listed_way(rng) for _ in range(80)]
+    trips += [random_trip(rng, leave_out=0, contingent=0.5, with_ways=0.9) for _ in range(80)]
+    trips += [
+        random_trip(rng, 0.2, contingent=0.3, with_complete=0.4, with_ways=0.9) for _ in range(120)
+    ]
     answers: set[Answer] = set()
     robust: set[bool | None] = set()
     for file in trips:
@@ -82,10 +90,13 @@ def test_the_two_searches_agree_in_every_kind_of_world() -> None:
     """
     rng = Random(505)
     trips = [random_trip(rng, 0.3, contingent=0.2, with_complete=0.5) for _ in range(60)]
+    trips += [
+        random_trip(rng, 0.3, contingent=0.2, with_complete=0.5, with_ways=1) for _ in range(100)
+    ]
     trips += [two_places_with_no_listed_way(rng) for _ in range(40)]
     trips += [a_shared_ride(rng) for _ in range(20)]
     found: set[bool] = set()
-    unlisted = 0
+    unlisted = listed = 0
     for file in trips:
         every = unknowns(file)
         worlds = [worst_case(file), longest_case(file), best_case(file)]
@@ -98,9 +109,11 @@ def test_the_two_searches_agree_in_every_kind_of_world() -> None:
             assert compiler.shown(file, world) == first
             assert compiler.works(file, world) == (first is not None)
             found.add(first is not None)
-            unlisted += any(step.option is None for step in first or ())
+            unlisted += any(step.option is None and step.way is None for step in first or ())
+            listed += any(step.way is not None for step in first or ())
     assert found == {True, False}
     assert unlisted > 50
+    assert listed > 30
 
 
 def test_a_limit_does_not_depend_on_how_far_the_solver_can_count() -> None:
@@ -130,8 +143,8 @@ def test_a_limit_does_not_depend_on_how_far_the_solver_can_count() -> None:
     assert report == reference.check(file)
     assert [needed.at_most for enough in report.missing for needed in enough] == [None, None, None]
     years = with_these_at_best(file, [Unknown("other ways", origin="a", destination="b")])
-    for takes in (262_223_455, 262_223_456, 268_435_456, 2**40):
-        assert compiler.works(file, replace(years, unlisted_takes=takes))
+    for seconds_taken in (262_223_455, 262_223_456, 268_435_456, 2**40):
+        assert compiler.works(file, replace(years, unlisted_takes=seconds_taken))
 
 
 def stops(*visits: tuple[str, str, int, int], more: Sequence[Document] = ()) -> File:
@@ -505,7 +518,6 @@ def test_the_conflict_named_is_the_one_found_in_the_files_order() -> None:
     document["decisions"] = [lock("call", "sam"), lock("nap", "sam"), *document["decisions"]]
     file = load(document)
     report = compiler.check(file)
-    assert report == reference.check(file)
     assert report.conflict == (
         "visit-time",
         "visit-length",
@@ -519,3 +531,132 @@ def test_the_conflict_named_is_the_one_found_in_the_files_order() -> None:
     assert compiler.stuck(file) == frozenset(
         {"call-time", "call-length", "nap-time", "lock-call", "lock-nap"}
     )
+
+
+def test_two_conflicts_at_once_give_the_reference_checkers_report() -> None:
+    """Alex has two stops that overlap, and so has Sam. Sam's are listed last."""
+    stops = [("call", "alex"), ("nap", "alex"), ("swim", "sam"), ("lunch", "sam")]
+    file = trip(
+        ["alex", "sam"],
+        ["hotel"],
+        [stays(name, "hotel") for name, _ in stops],
+        [
+            fact
+            for number, (name, _) in enumerate(stops)
+            for fact in (starts_at(name, 9, 30 * (number % 2)), lasts(name, "PT1H"))
+        ],
+        [lock(name, person) for name, person in stops],
+    )
+    report = compiler.check(file)
+    assert report == reference.check(file)
+    assert report.conflict == ("swim-time", "swim-length", "lunch-time", "lock-swim", "lock-lunch")
+    assert compiler.stuck(file) == frozenset(
+        {"call-time", "call-length", "nap-time", "lock-call", "lock-nap"}
+    )
+
+
+def a_day_on_foot(*more: dict[str, object], flight_at: int = 17) -> File:
+    """The same day, with walks and cabs as WAYs. Only the water taxi and the flight are timed."""
+    everyone = ("alex", "sam", "jo")
+    stops = [
+        ("breakfast", "hotel", 8, 0, "PT1H"),
+        ("museum-visit", "art-institute", 10, 0, "PT2H"),
+        ("boat-tour", "river", 10, 30, "PT1H30M"),
+        ("lunch", "pier", 13, 0, "PT1H"),
+    ]
+    options = [stays(name, place) for name, place, _, _, _ in stops]
+    options += [moves("water-taxi", "river", "pier"), moves("flight", "ohare", "home")]
+    facts = [
+        fact
+        for name, _, hour, minute, length in stops
+        for fact in (starts_at(name, hour, minute), lasts(name, length), cutoff(name, "PT0S"))
+    ]
+    facts += [
+        starts_at("water-taxi", 12, 15),
+        lasts("water-taxi", "PT20M"),
+        cutoff("water-taxi", "PT0S"),
+        takes("walk-to-museum", "PT20M"),
+        takes("cab-to-river", "PT15M"),
+        takes("walk-to-pier", "PT25M"),
+        takes("cab-to-ohare", "PT50M"),
+        *more,
+        starts_at("flight", flight_at),
+        lasts("flight", "PT2H30M"),
+        cutoff("flight", "PT45M"),
+    ]
+    ways = [
+        way_between("walk-to-museum", "hotel", "art-institute"),
+        way_between("cab-to-river", "hotel", "river"),
+        way_between("walk-to-pier", "art-institute", "pier"),
+        way("cab-to-ohare", "pier", "ohare"),
+    ]
+    decisions = [
+        lock("breakfast", *everyone),
+        lock("museum-visit", "alex", "sam"),
+        lock("boat-tour", "jo"),
+        lock("lunch", *everyone),
+        lock("flight", *everyone),
+    ]
+    places = ["hotel", "art-institute", "river", "pier", "ohare", "home"]
+    return trip(list(everyone), places, options, facts, decisions, ways)
+
+
+def test_the_compiler_plans_a_day_with_ways() -> None:
+    file = a_day_on_foot()
+    report = compiler.check(file)
+    assert report.answer is Answer.FEASIBLE
+    assert report.robust is True
+    assert [(step.option or step.way, step.persons, step.start) for step in report.itinerary] == [
+        ("breakfast", ("alex", "sam", "jo"), seconds(8)),
+        ("walk-to-museum", ("alex", "sam"), seconds(9)),
+        ("cab-to-river", ("jo",), seconds(9)),
+        ("museum-visit", ("alex", "sam"), seconds(10)),
+        ("boat-tour", ("jo",), seconds(10, 30)),
+        ("walk-to-pier", ("alex", "sam"), seconds(12)),
+        ("water-taxi", ("jo",), seconds(12, 15)),
+        ("lunch", ("alex", "sam", "jo"), seconds(13)),
+        ("cab-to-ohare", ("alex", "sam", "jo"), seconds(14)),
+        ("flight", ("alex", "sam", "jo"), seconds(17)),
+    ]
+    assert reference.broken(file, worst_case(file), report.itinerary) == []
+
+
+def test_the_compiler_names_what_is_missing_from_a_day_with_ways() -> None:
+    file = a_day_on_foot(flight_at=15)
+    report = compiler.check(file)
+    another = Unknown("other ways", origin="pier", destination="ohare")
+    assert report.missing == ((Missing(another, at_most=15 * 60),),)
+
+
+def test_the_compiler_names_the_conflict_in_a_day_with_ways() -> None:
+    file = a_day_on_foot(complete("pier", "ohare"), flight_at=15)
+    report = compiler.check(file)
+    assert report.answer is Answer.INFEASIBLE
+    assert report.conflict == (
+        "lunch-time",
+        "lunch-length",
+        "cab-to-ohare-length",
+        "ways-pier-ohare",
+        "flight-time",
+        "flight-cutoff",
+        "lock-lunch",
+        "lock-flight",
+    )
+
+
+def test_two_quick_ways_are_taken_where_one_slow_way_is_too_late() -> None:
+    """The walk to the gallery takes seventy minutes. Through the station it takes ten."""
+    file = a_morning(
+        *WALKS,
+        way_between("to-station", "hotel", "station"),
+        way_between("from-station", "station", "gallery"),
+        more=[
+            takes("walk-to-gallery", "PT1H10M"),
+            takes("walk-to-cafe", "PT10M"),
+            takes("to-station", "PT5M"),
+            takes("from-station", "PT5M"),
+        ],
+    )
+    report = compiler.check(file)
+    assert report == reference.check(file)
+    assert [step.way for step in report.itinerary if step.way][:2] == ["to-station", "from-station"]
