@@ -2,8 +2,13 @@
 
 The JSON has the shape of the expected results beside the examples. The words are for a person:
 the plan with its times, or the FACTs and DECISIONs that clash, or what the FILE would have to
-say for the TRIP to work. Times are shown on the clocks of the first time zone the FILE names.
+say for the TRIP to work. Times are shown on the clocks of the first time zone the FILE names,
+and the words name that zone. Where those clocks change during the times shown, each time also
+gives its offset from UTC.
 """
+
+from dataclasses import dataclass
+from datetime import date, timedelta
 
 from agloe.file import (
     Complete,
@@ -51,21 +56,25 @@ def as_json(file: File, report: Report) -> dict[str, object]:
         out["relies_on"] = list(report.relies_on)
         out["robust"] = report.robust
     if report.at_worst:
-        out["at_worst"] = [
-            {
-                "constraint": found.constraint.value,
-                "option": found.option,
-                "persons": list(found.persons),
-                "late": None if found.late is None else length_written(found.late),
-            }
-            for found in report.at_worst
-        ]
+        out["at_worst"] = [_broken_as_json(file, found) for found in report.at_worst]
     if report.conflict:
         out["conflict"] = list(report.conflict)
     if report.missing:
         out["missing"] = [
             [_missing_as_json(needed) for needed in enough] for enough in report.missing
         ]
+    return out
+
+
+def _broken_as_json(file: File, found: Broken) -> dict[str, object]:
+    out: dict[str, object] = {"constraint": found.constraint.value}
+    if found.taken is None:
+        out["option"] = found.option
+    else:
+        (out["way"], out["from"], out["to"]), start = found.taken
+        out["start"] = written(start, file.zone)
+    out["persons"] = list(found.persons)
+    out["late"] = None if found.late is None else length_written(found.late)
     return out
 
 
@@ -82,16 +91,84 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
     return out
 
 
+@dataclass(frozen=True)
+class _Clock:
+    """How times are put in words: on the clocks of one time zone.
+
+    With ``offsets``, each time also gives its offset from UTC, because the clocks change during
+    the times shown and a time of day alone could mean two moments.
+    """
+
+    zone: str
+    offsets: bool
+
+    def day(self, moment: int) -> date:
+        return local(moment, self.zone).date()
+
+    def day_name(self, moment: int) -> str:
+        """A day: Saturday 15 May 2027."""
+        there = local(moment, self.zone)
+        return f"{_DAYS[there.weekday()]} {there.day} {_MONTHS[there.month - 1]} {there.year}"
+
+    def time(self, moment: int, day: date | None = None) -> str:
+        """A time of day: 2:00 pm. The date is added when it is not the day given."""
+        there = local(moment, self.zone)
+        seconds = f":{there.second:02d}" if there.second else ""
+        half = "am" if there.hour < 12 else "pm"
+        clock = f"{there.hour % 12 or 12}:{there.minute:02d}{seconds} {half}"
+        if self.offsets:
+            clock += f" ({_offset(there.utcoffset() or timedelta())})"
+        if day is None or there.date() == day:
+            return clock
+        return f"{clock} on {there.day} {_MONTHS[there.month - 1]}"
+
+    def moment(self, moment: int) -> str:
+        """A time with its day: 2:00 pm on Saturday 15 May 2027."""
+        return f"{self.time(moment)} on {self.day_name(moment)}"
+
+
+def _offset(ahead: timedelta) -> str:
+    """An offset from UTC: UTC-5, UTC+5:30."""
+    minutes = ahead // timedelta(minutes=1)
+    hours, rest = divmod(abs(minutes), 60)
+    return f"UTC{'-' if minutes < 0 else '+'}{hours}" + (f":{rest:02d}" if rest else "")
+
+
+def _times_stated(file: File, records: tuple[str, ...]) -> list[int]:
+    """The times that these FACTs state."""
+    facts = {fact.id: fact for fact in file.facts}
+    times: list[int] = []
+    for record in records:
+        found = facts.get(record)
+        if isinstance(found, Start) and found.at is not None:
+            times.append(found.at)
+        elif isinstance(found, Complete):
+            times += [found.earliest, found.latest]
+    return times
+
+
+def _clock_for(file: File, report: Report) -> _Clock:
+    """The clock for one report: with offsets if the times it shows have more than one."""
+    moments = [step.start for step in report.itinerary]
+    moments += [step.end for step in report.itinerary if step.end is not None]
+    moments += [found.taken[1] for found in report.at_worst if found.taken is not None]
+    moments += _times_stated(file, (*report.relies_on, *report.conflict))
+    offsets = {local(moment, file.zone).utcoffset() for moment in moments}
+    return _Clock(file.zone, len(offsets) > 1)
+
+
 def as_text(file: File, report: Report) -> str:
     """The Report in plain words, ending with a line break."""
+    clock = _clock_for(file, report)
     if report.answer is Answer.FEASIBLE:
-        lines = _feasible(file, report)
+        lines = _feasible(file, clock, report)
     elif report.answer is Answer.INFEASIBLE:
         lines = [
             "INFEASIBLE: this trip cannot work.",
             "",
-            "These FACTs and DECISIONs clash. Each one is needed for the clash.",
-            *(f"  {record}: {_record(file, record)}" for record in report.conflict),
+            "These FACTs and DECISIONs clash. Each one is needed for the clash."
+            f" Times are in {file.zone}.",
+            *(f"  {record}: {_record(file, clock, record)}" for record in report.conflict),
         ]
     else:
         lines = ["UNDETERMINED: the FILE does not say enough to tell.", ""]
@@ -109,7 +186,7 @@ def as_text(file: File, report: Report) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _feasible(file: File, report: Report) -> list[str]:
+def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
     lines = [
         "FEASIBLE: this trip works."
         if report.robust
@@ -117,39 +194,58 @@ def _feasible(file: File, report: Report) -> list[str]:
     ]
     day = None
     for step in report.itinerary:
-        start = local(step.start, file.zone)
-        if start.date() != day:
-            day = start.date()
-            name = f"{_DAYS[start.weekday()]} {start.day} {_MONTHS[start.month - 1]} {start.year}"
-            lines += ["", f"{name} (times in {file.zone})"]
-        end = "an unknown time" if step.end is None else _clock(file, step.end, start.date())
+        if clock.day(step.start) != day:
+            day = clock.day(step.start)
+            lines += ["", f"{clock.day_name(step.start)} (times in {file.zone})"]
+        end = "an unknown time" if step.end is None else clock.time(step.end, day)
         who = _people(file, step.persons)
         what = _name(file, step.option or step.way)
-        lines.append(f"  {_clock(file, step.start)} to {end}: {what}, {who}")
+        lines.append(f"  {clock.time(step.start)} to {end}: {what}, {who}")
     if not report.itinerary:
         lines += ["", "Nobody has to do anything."]
-    lines.append("")
-    if report.robust:
-        lines.append("This plan holds however long the uncertain parts take.")
-    else:
-        lines.append("WARNING: no plan holds if every uncertain part takes its longest. Then:")
-        lines += [f"  {_broken(file, found)}" for found in report.at_worst]
+    relied_on = [fact for fact in file.facts if fact.id in report.relies_on]
+    if not report.robust:
+        lines += [
+            "",
+            "WARNING: no plan is sure to hold if the uncertain parts take their longest."
+            " In this plan:",
+        ]
+        lines += [f"  {_broken(file, clock, found)}" for found in report.at_worst]
+    elif any(isinstance(fact, Duration) and fact.contingent for fact in relied_on):
+        lines += [
+            "",
+            "This plan holds however long the uncertain parts take, within the ranges the FILE"
+            " states.",
+        ]
     if report.relies_on:
         lines += ["", "The plan relies on these FACTs and DECISIONs:"]
-        lines += [f"  {record}: {_record(file, record)}" for record in report.relies_on]
+        lines += [f"  {record}: {_record(file, clock, record)}" for record in report.relies_on]
     return lines
 
 
-def _broken(file: File, found: Broken) -> str:
+def _broken(file: File, clock: _Clock, found: Broken) -> str:
     """One CONSTRAINT a plan would break at the longest durations, in words."""
-    who, name = _people(file, found.persons), _name(file, found.option)
+    who = _people(file, found.persons)
+    rule = f'the rule "{found.constraint.value}"'
+    if found.taken is not None:
+        (way, origin, destination), start = found.taken
+        places = {place.id: place.name for place in file.places}
+        name = f"another WAY from {places[origin]} to {places[destination]}"
+        name = name if way is None else _name(file, way)
+        when = f"at {clock.time(start)}, the time to take {name}"
+        if found.constraint is Constraint.PLACE and found.late is not None:
+            return f"{who} would still be busy for {_span(found.late)} {when}."
+        if found.constraint is Constraint.PLACE:
+            return f"{who} would not be free {when}."
+        return f"{name} at {clock.time(start)} would break {rule} for {who}."
+    name = _name(file, found.option)
     if found.constraint is Constraint.ARRIVAL and found.late is not None:
         return f"{who} would be {_span(found.late)} too late for {name}."
     if found.constraint is Constraint.PLACE and found.late is not None:
         return f"{who} would still be busy for {_span(found.late)} when {name} starts."
     if found.constraint is Constraint.PLACE:
         return f"{who} would not be free in time for {name}."
-    return f'{name} would break the rule "{found.constraint.value}" for {who}.'
+    return f"{name} would break {rule} for {who}."
 
 
 def _wanted(file: File, needed: Missing, alone: bool) -> str:
@@ -177,13 +273,13 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
     return f"people need not be at {place} long before {name} starts"
 
 
-def _record(file: File, record: str) -> str:
+def _record(file: File, clock: _Clock, record: str) -> str:
     """One FACT or DECISION in words."""
     found = next(each for each in (*file.facts, *file.locks) if each.id == record)
     if isinstance(found, Complete):
         places = {place.id: place.name for place in file.places}
-        first = local(found.earliest, file.zone).date()
-        span = f"{_moment(file, found.earliest)} and {_clock(file, found.latest, first)}"
+        first = clock.day(found.earliest)
+        span = f"{clock.moment(found.earliest)} and {clock.time(found.latest, first)}"
         if found.origin is None and found.destination is None:
             ways = "every way from one PLACE straight to another"
         elif found.origin is None:
@@ -200,7 +296,7 @@ def _record(file: File, record: str) -> str:
     if isinstance(found, Start):
         if found.at is None:
             return f"{name} can start at any time"
-        return f"{name} starts at {_moment(file, found.at)}"
+        return f"{name} starts at {clock.moment(found.at)}"
     if isinstance(found, Duration):
         if found.contingent:
             return f"{name} takes between {_span(found.shortest)} and {_span(found.longest)}"
@@ -232,25 +328,6 @@ def _people(file: File, persons: tuple[str, ...]) -> str:
     if len(names) < 2:
         return "".join(names)
     return f"{', '.join(names[:-1])} and {names[-1]}"
-
-
-def _moment(file: File, moment: int) -> str:
-    """A time with its day: 2:00 pm on Saturday 15 May 2027."""
-    there = local(moment, file.zone)
-    day = f"{_DAYS[there.weekday()]} {there.day} {_MONTHS[there.month - 1]} {there.year}"
-    return f"{_clock(file, moment)} on {day}"
-
-
-def _clock(file: File, moment: int, day: object = None) -> str:
-    """A time of day: 2:00 pm. The date is added when it is not the day given."""
-    there = local(moment, file.zone)
-    seconds = f":{there.second:02d}" if there.second else ""
-    clock = (
-        f"{there.hour % 12 or 12}:{there.minute:02d}{seconds} {'am' if there.hour < 12 else 'pm'}"
-    )
-    if day is None or there.date() == day:
-        return clock
-    return f"{clock} on {there.day} {_MONTHS[there.month - 1]}"
 
 
 def _span(seconds: int) -> str:

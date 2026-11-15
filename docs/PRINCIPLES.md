@@ -37,7 +37,7 @@ Before designing anything, find how mature tools or research already solve it, a
 - *Decides:* invent or adopt.
 - *Rejects:* bespoke approaches built from scratch.
 - *Source:* the project's standing rules ("Study how established products solve the problem before designing a solution"; "Prefer established, well-maintained libraries").
-- *In practice:* Google's CP-SAT solver is the engine, explanations use QuickXplain, and anything genuinely new needs a short decision record saying why nothing established fits.
+- *In practice:* Google's CP-SAT solver is the engine, explanations use a deletion filter over the FILE's records, and anything genuinely new needs a short decision record saying why nothing established fits.
 
 ## 4. Grow in thin, working slices
 

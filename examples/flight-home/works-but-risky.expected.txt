@@ -5,7 +5,7 @@ Saturday 15 May 2027 (times in America/Chicago)
   3:00 pm to 4:00 pm: Blue Line to O'Hare, Alex and Sam
   5:00 pm to 7:30 pm: Flight home, Alex and Sam
 
-WARNING: no plan holds if every uncertain part takes its longest. Then:
+WARNING: no plan is sure to hold if the uncertain parts take their longest. In this plan:
   Alex and Sam would be 5 min too late for Flight home.
 
 The plan relies on these FACTs and DECISIONs:

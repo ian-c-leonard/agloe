@@ -17,12 +17,15 @@ from tests.stories import (
     cutoff,
     flight_home,
     lasts,
+    lasts_between,
     lock,
     moves,
     starts_at,
     stays,
+    takes,
     takes_between,
     trip,
+    way,
     way_between,
 )
 
@@ -200,8 +203,7 @@ def test_a_way_nobody_timed_is_named_in_what_is_missing() -> None:
 def test_a_trip_with_nothing_to_do_says_so() -> None:
     file = trip([], [], [], [], [])
     assert report.as_text(file, compiler.check(file)) == (
-        "FEASIBLE: this trip works.\n\nNobody has to do anything.\n\n"
-        "This plan holds however long the uncertain parts take.\n"
+        "FEASIBLE: this trip works.\n\nNobody has to do anything.\n"
     )
 
 
@@ -262,3 +264,80 @@ def test_a_complete_fact_is_put_in_words_for_the_places_it_names() -> None:
         assert printed[0] == "INFEASIBLE: this trip cannot work."
         span = "that leaves between 12:00 am on Saturday 15 May 2027 and 11:59 pm is listed"
         assert f"  {expected} {span}" in printed
+
+
+def test_a_warning_names_the_way_and_the_time_it_is_taken() -> None:
+    """The visit can run an hour late. Then Alex is still there when the walk should start."""
+    file = trip(
+        ["alex"],
+        ["gallery", "pier"],
+        [stays("visit", "gallery"), stays("dinner", "pier")],
+        [
+            starts_at("visit", 9),
+            lasts_between("visit", "PT30M", "PT1H30M"),
+            starts_at("dinner", 10, 30),
+            lasts("dinner", "PT1H"),
+            cutoff("dinner", "PT0S"),
+            takes("walk", "PT30M"),
+        ],
+        [lock("visit", "alex"), lock("dinner", "alex")],
+        [way("walk", "gallery", "pier")],
+    )
+    found = compiler.check(file)
+    assert report.as_json(file, found)["at_worst"] == [
+        {
+            "constraint": "Each PERSON is in one place at a time",
+            "way": "walk",
+            "from": "gallery",
+            "to": "pier",
+            "start": at(9, 30),
+            "persons": ["alex"],
+            "late": "PT1H",
+        }
+    ]
+    assert report.as_text(file, found).splitlines()[6:9] == [
+        "",
+        "WARNING: no plan is sure to hold if the uncertain parts take their longest. In this plan:",
+        "  alex would still be busy for 1 h at 9:30 am, the time to take walk.",
+    ]
+
+
+def test_a_plan_that_holds_with_uncertain_parts_says_so() -> None:
+    document = json.loads((EXAMPLES / "flight-home" / "works-but-risky.json").read_text())
+    for fact in document["facts"]:
+        if fact["id"] == "train-length":
+            fact["contingent_duration"]["longest"] = "PT1H15M"
+    file = load(document)
+    lines = report.as_text(file, compiler.check(file)).splitlines()
+    assert lines[0] == "FEASIBLE: this trip works."
+    assert lines[7] == (
+        "This plan holds however long the uncertain parts take, within the ranges the FILE states."
+    )
+
+
+def test_times_show_their_offset_when_the_clocks_change() -> None:
+    """Chicago's clocks go back at 2:00 am on 7 November 2027, so 1:15 am comes twice."""
+    document = {
+        "persons": [{"id": "alex", "name": "Alex"}],
+        "places": [{"id": "hotel", "name": "Hotel"}],
+        "options": [stays("night-shift", "hotel")],
+        "ways": [],
+        "facts": [
+            {
+                "id": "night-shift-time",
+                "option": "night-shift",
+                "starts_at": "2027-11-07T01:45:00-05:00[America/Chicago]",
+            },
+            lasts("night-shift", "PT30M"),
+        ],
+        "decisions": [lock("night-shift", "alex")],
+    }
+    file = load(document)
+    lines = report.as_text(file, compiler.check(file)).splitlines()
+    assert lines[2:4] == [
+        "Sunday 7 November 2027 (times in America/Chicago)",
+        "  1:45 am (UTC-5) to 1:15 am (UTC-6): night-shift, Alex",
+    ]
+    assert lines[6] == (
+        "  night-shift-time: night-shift starts at 1:45 am (UTC-5) on Sunday 7 November 2027"
+    )

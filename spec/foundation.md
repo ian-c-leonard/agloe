@@ -104,7 +104,7 @@ Starter WANTs are never hidden rules; they sit in the FILE like any other WANT. 
 **D2. Four kinds of time, and durations we do not control.** A fixed time, an allowed window, a duration range and the scheduled time are separate facts. A CONTROLLABLE duration is ours to choose; a CONTINGENT one the world chooses. The COMPILER may pick a CONTROLLABLE value; for a CONTINGENT one it checks whether the ITINERARY is ROBUST, and warns if not. Every time carries its date and time zone.
 *Serves:* compiler, deterministic. *Source:* simple temporal networks (Dechter, Meiri and Pearl, 1991); controllable and contingent durations (Vidal and Fargier, 1999); zoned timestamps (RFC 9557).
 
-**D3. One place at a time.** Each traveling PERSON and each OBJECT has one unbroken path through the ITINERARY, is in one place at a time, and is moved or placed only by OPTIONs. A car left in Oban stays there until an OPTION moves it. A BOOKING gives a right over a period, such as a room for two nights, a car for three days or a rail pass for a week; it never places anyone anywhere. The bed WANT is SATISFIED by whatever OPTION has a PERSON sleeping somewhere: a hotel night, a sleeper train, a tent.
+**D3. One place at a time.** Each traveling PERSON and each OBJECT has one unbroken path through the ITINERARY, is in one place at a time, and is moved or placed only by OPTIONs and WAYs. A car left in Oban stays there until an OPTION moves it. A BOOKING gives a right over a period, such as a room for two nights, a car for three days or a rail pass for a week; it never places anyone anywhere. The bed WANT is SATISFIED by whatever OPTION has a PERSON sleeping somewhere: a hotel night, a sleeper train, a tent.
 *Serves:* compiler. *Source:* the space-time path (Hägerstrand, 1970), which covers people; giving OBJECTs paths is our extension.
 
 **D4. DECISIONs and FACTs do not change each other.** A LOCK says "we are doing this"; a PIN says "suppose we did this" inside a VARIANT. Only a FACT makes an OPTION UNAVAILABLE. If a LOCKed OPTION becomes UNAVAILABLE, the LOCK stays and the COMPILER reports an ERROR; it never quietly swaps in something else.
@@ -139,14 +139,14 @@ Starter WANTs are never hidden rules; they sit in the FILE like any other WANT. 
 **E2. Every check returns FEASIBLE, INFEASIBLE or UNDETERMINED.** FEASIBLE: an ITINERARY works however the unknown FACTs turn out. INFEASIBLE: no ITINERARY works however they turn out. UNDETERMINED: the answer depends on FACTs the FILE does not hold, and the report names them ("FEASIBLE if a route under 2 h 15 min exists"). An undecided choice never makes a TRIP UNDETERMINED; only missing FACTs or a search limit do.
 *Serves:* trustworthy, self-explaining. *Source:* solver result statuses (SMT-LIB; CP-SAT); certain answers over incomplete information (Imieliński and Lipski, 1984; Libkin, 2016).
 
-**E3. INFEASIBLE needs a COMPLETE set.** An INFEASIBLE result that rests on an OPTION not existing ("no OPTION gets you from Craignure to Fionnphort before 17:50") needs a FACT saying that set of OPTIONs is COMPLETE. Not finding an OPTION is no proof that none exists.
+**E3. INFEASIBLE needs a COMPLETE set.** An INFEASIBLE result that rests on an OPTION or a WAY not existing ("nothing gets you from Craignure to Fionnphort before 17:50") needs a FACT saying that set of OPTIONs and WAYs is COMPLETE. Not finding one is no proof that none exists.
 *Serves:* trustworthy. *Source:* the closed-world assumption (Reiter, 1978), applied to a stated scope (Etzioni, Golden and Weld, 1997).
 
 **E4. SETTINGs, never assumed FACTs.** Thresholds such as the minimum connection time are SETTINGs with defaults pinned in the COMPILER, and every report names any override. The COMPILER never assumes a FACT it is not given; it returns UNDETERMINED and states the condition instead ("FEASIBLE if the walk needs no BOOKING"). An assumed ferry time is exactly how a real trip goes wrong.
 *Serves:* trustworthy, deterministic.
 
 **E5. Every result shows its evidence.** FEASIBLE: the ITINERARY and the FACTs and DECISIONs it relies on. INFEASIBLE: a set of FACTs and DECISIONs that conflict, from which none can be removed. UNDETERMINED: the missing FACTs. A fixed rule picks among equal explanations, so the same FILE always gives the same one.
-*Serves:* self-explaining, deterministic. *Source:* QuickXplain (Junker, 2004); why-provenance (Buneman, Khanna and Tan, 2001).
+*Serves:* self-explaining, deterministic. *Source:* the deletion filter (Chinneck and Dravnieks, 1991) and QuickXplain (Junker, 2004); why-provenance (Buneman, Khanna and Tan, 2001).
 
 **E6. Every FINDING is visible.** A DISMISSAL silences an ERROR, WARNING or NOTE as it stood, and the FINDING returns if it gets worse. UNDETERMINED FINDINGs, and ERRORs meaning the FILE cannot be read, cannot be dismissed.
 *Serves:* trustworthy, self-explaining.

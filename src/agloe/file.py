@@ -352,7 +352,8 @@ def load(document: object) -> File:
 
     def known(where: str, id: str, kind: str, ids: set[str]) -> bool:
         if id not in ids:
-            problems.append(f"{where}: {id} is not a {kind} in this FILE")
+            article = "an" if kind[0] in "AEIOU" else "a"
+            problems.append(f"{where}: {id} is not {article} {kind} in this FILE")
         return id in ids
 
     zones: list[str] = []
