@@ -8,12 +8,12 @@ the section "Which ITINERARY is shown". ``check`` is the sections "The three ans
 and "Evidence".
 """
 
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
 from itertools import combinations, groupby, pairwise, permutations, product
 
-from agloe.file import Complete, File
+from agloe.file import Complete, File, Start
 
 _MOST_TO_TAKE_OUT = 12  # ``needless`` tries every combination of things to take out
 
@@ -590,17 +590,17 @@ def _orders(file: File, world: World, indexes: list[int]) -> Iterator[tuple[int,
             return False
         if before.destination == after.origin:
             return True
-        return bool(_routes(file, world, before.destination, after.origin))
+        return bool(routes(file, world, before.destination, after.origin))
 
     for order in permutations(indexes):
         if all(can_follow(first, then) for first, then in pairwise(order)):
             yield order
 
 
-type _Route = tuple[tuple[str, str], ...]  # unlisted OPTIONs one after another: from, to
+type Route = tuple[tuple[str, str], ...]  # unlisted OPTIONs one after another: from, to
 
 
-def _routes(file: File, world: World, here: str, there: str) -> list[_Route]:
+def routes(file: File, world: World, here: str, there: str) -> list[Route]:
     """The ways to get from one PLACE to another by unlisted OPTIONs alone, shortest first.
 
     A direct unlisted OPTION is never worse than a way through other PLACEs, so where the world
@@ -636,16 +636,16 @@ def _schedules(
     Where a PERSON's next OPTION starts somewhere else, unlisted OPTIONs must take them there.
     Each route is tried, fewest unlisted OPTIONs first, and then each way the timing can fall.
     """
-    needed: list[tuple[int, int, list[_Route]]] = []  # which PERSON, after which step, the routes
+    needed: list[tuple[int, int, list[Route]]] = []  # which PERSON, after which step, the routes
     for number, order in enumerate(orders):
         for position, (before, after) in enumerate(pairwise(order)):
             here, there = file.options[before].destination, file.options[after].origin
             if here != there:
-                routes = _routes(file, world, here, there)
-                if not routes:
+                possible = routes(file, world, here, there)
+                if not possible:
                     return
-                needed.append((number, position, routes))
-    every = product(*(routes for _, _, routes in needed))
+                needed.append((number, position, possible))
+    every = product(*(possible for _, _, possible in needed))
     for chosen in sorted(every, key=lambda chosen: sum(len(route) for route in chosen)):
         hops = {
             (number, position): route
@@ -659,7 +659,7 @@ def _timings(
     world: World,
     who: tuple[tuple[str, ...], ...],
     orders: tuple[tuple[int, ...], ...],
-    hops: Mapping[tuple[int, int], _Route],
+    hops: Mapping[tuple[int, int], Route],
 ) -> Iterator[Itinerary]:
     """The ITINERARIES for one choice of PERSONs, orders and routes, one for each timing.
 
@@ -883,36 +883,56 @@ def _in_file_order(file: File, itinerary: Itinerary, orders: tuple[tuple[int, ..
 # ------------------------------- The three answers -------------------------------
 
 
-def check(file: File) -> Report:
-    """The answer for this TRIP, with its evidence."""
-    works = itineraries(file, worst_case(file))
-    if works:
+type Shown = Callable[[File, World], Itinerary | None]
+type Works = Callable[[File, World], bool]
+
+
+def first_shown(file: File, world: World) -> Itinerary | None:
+    """The ITINERARY that "Which ITINERARY is shown" puts first in this world, if any works."""
+    found = itineraries(file, world)
+    return found[0] if found else None
+
+
+def any_works(file: File, world: World) -> bool:
+    """Whether any ITINERARY works in this world."""
+    return bool(itineraries(file, world))
+
+
+def check(file: File, shown: Shown = first_shown, works: Works = any_works) -> Report:
+    """The answer for this TRIP, with its evidence.
+
+    ``shown`` and ``works`` are how ITINERARIES are found. By default the reference checker tries
+    every choice. A solver can stand in for that search. The answers and the evidence are worked
+    out here in either case.
+    """
+    plain = shown(file, worst_case(file))
+    if plain is not None:
         longest = longest_case(file)
-        robust = itineraries(file, longest)
-        shown = robust[0] if robust else works[0]
-        used = {step.option for step in shown}
+        robust = shown(file, longest)
+        chosen = plain if robust is None else robust
+        used = {step.option for step in chosen}
         relies_on = [
             fact.id for fact in file.facts if not isinstance(fact, Complete) and fact.option in used
         ]
         relies_on += [lock.id for lock in file.locks]
-        at_worst = () if robust else tuple(broken(file, longest, in_world(longest, shown)))
-        return Report(Answer.FEASIBLE, shown, tuple(relies_on), bool(robust), at_worst)
-    if not itineraries(file, best_case(file)):
-        return Report(Answer.INFEASIBLE, conflict=_conflict(file))
-    return Report(Answer.UNDETERMINED, missing=_missing(file))
+        at_worst = tuple(broken(file, longest, in_world(longest, chosen))) if robust is None else ()
+        return Report(Answer.FEASIBLE, chosen, tuple(relies_on), robust is not None, at_worst)
+    if not works(file, best_case(file)):
+        return Report(Answer.INFEASIBLE, conflict=_conflict(file, works))
+    return Report(Answer.UNDETERMINED, missing=_missing(file, works))
 
 
-def _conflict(file: File) -> tuple[str, ...]:
+def _conflict(file: File, works: Works) -> tuple[str, ...]:
     """FACTs and DECISIONs that make the TRIP INFEASIBLE by themselves; none can be removed."""
     kept = file
     for record in [fact.id for fact in file.facts] + [lock.id for lock in file.locks]:
         without = kept.without(record)
-        if not itineraries(without, best_case(without)):
+        if not works(without, best_case(without)):
             kept = without
     return tuple([fact.id for fact in kept.facts] + [lock.id for lock in kept.locks])
 
 
-def _missing(file: File) -> tuple[tuple[Missing, ...], ...]:
+def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
     """Every smallest set of unknown FACTs that would be enough if they turned out well.
 
     Each set makes the TRIP FEASIBLE with every other unknown FACT at its worst. A set of one
@@ -921,19 +941,17 @@ def _missing(file: File) -> tuple[tuple[Missing, ...], ...]:
     every = unknowns(file)
     for size in range(1, len(every) + 1):
         enough = [
-            some
-            for some in combinations(every, size)
-            if itineraries(file, _world(file, frozenset(some)))
+            some for some in combinations(every, size) if works(file, _world(file, frozenset(some)))
         ]
         if enough:
             return tuple(
-                tuple(Missing(u, _limit(file, u) if size == 1 else None) for u in some)
+                tuple(Missing(u, _limit(file, u, works) if size == 1 else None) for u in some)
                 for some in enough
             )
     raise AssertionError("the best case works, so some unknown FACTs make it work")
 
 
-def _limit(file: File, unknown: Unknown) -> int | None:
+def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
     """The most seconds this one unknown can be for the TRIP to work.
 
     None for an unknown start, and None when any length of time would do.
@@ -942,16 +960,19 @@ def _limit(file: File, unknown: Unknown) -> int | None:
         return None
     kind = frozenset({unknown}) if unknown.what == "other ways" else frozenset[Unknown]()
 
-    def works(seconds: int) -> bool:
-        return bool(itineraries(file, _world(file, kind, pinned=(unknown, seconds))))
+    def enough(seconds: int) -> bool:
+        return works(file, _world(file, kind, pinned=(unknown, seconds)))
 
-    over = 1
-    while works(over):
-        over *= 2
-        if over > 2**40:
-            return None  # it works however long this takes
-    under = over // 2
+    # Only two fixed times can limit a length of time: it must fit between them. So a length
+    # longer than the time between the earliest and the latest fixed time has no limit.
+    fixed = [fact.at for fact in file.facts if isinstance(fact, Start) and fact.at is not None]
+    for fact in file.facts:
+        if isinstance(fact, Complete):
+            fixed += [fact.earliest - 1, fact.latest + 1]
+    under, over = 0, max(fixed) - min(fixed) + 1 if fixed else 1
+    if enough(over):
+        return None
     while over - under > 1:
         middle = (under + over) // 2
-        under, over = (middle, over) if works(middle) else (under, middle)
+        under, over = (middle, over) if enough(middle) else (under, middle)
     return under

@@ -1,5 +1,7 @@
 """The COMPILER finds with a solver what the reference checker finds by trying everything."""
 
+from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from random import Random
 
@@ -7,10 +9,23 @@ import pytest
 
 from agloe import compiler, reference
 from agloe.file import File, read
-from agloe.reference import Answer, longest_case, worst_case
+from agloe.reference import (
+    Answer,
+    Missing,
+    Unknown,
+    World,
+    best_case,
+    longest_case,
+    unknowns,
+    with_these_at_best,
+    worst_case,
+)
 from tests.stories import (
     EXAMPLES,
+    Document,
     any_time,
+    at,
+    complete,
     cutoff,
     lasts,
     lasts_between,
@@ -21,7 +36,12 @@ from tests.stories import (
     stays,
     trip,
 )
-from tests.test_cross_check import a_shared_ride, random_trip
+from tests.test_cross_check import (
+    a_shared_ride,
+    possible_world,
+    random_trip,
+    two_places_with_no_listed_way,
+)
 
 FILES = sorted(
     path for path in EXAMPLES.rglob("*.json") if not path.name.endswith(".expected.json")
@@ -35,28 +55,183 @@ def test_the_compiler_gives_the_reference_checkers_report(path: Path) -> None:
 
 
 def test_the_compiler_and_the_reference_checker_agree_on_random_trips() -> None:
-    """The same Report for every TRIP, and the same ITINERARY shown in both worlds it is chosen in.
-
-    The second comparison matters because the COMPILER asks the reference checker when its own
-    search finds nothing. A search that wrongly found nothing would otherwise go unnoticed.
-    """
+    """The same Report for every TRIP: the answer, the ITINERARY shown and the evidence."""
     rng = Random(404)
-    trips = [random_trip(rng, leave_out=0) for _ in range(100)]
-    trips += [a_shared_ride(rng) for _ in range(100)]
-    trips += [random_trip(rng, leave_out=0, contingent=0.6) for _ in range(100)]
-    trips += [random_trip(rng, 0.2, contingent=0.3, with_complete=0.3) for _ in range(100)]
+    trips = [random_trip(rng, leave_out=0) for _ in range(80)]
+    trips += [a_shared_ride(rng) for _ in range(80)]
+    trips += [random_trip(rng, leave_out=0, contingent=0.6) for _ in range(80)]
+    trips += [random_trip(rng, 0.25, contingent=0.3, with_complete=0.4) for _ in range(120)]
+    trips += [two_places_with_no_listed_way(rng) for _ in range(80)]
     answers: set[Answer] = set()
     robust: set[bool | None] = set()
     for file in trips:
         report = reference.check(file)
         assert compiler.check(file) == report
-        for world in (worst_case(file), longest_case(file)):
-            every = reference.itineraries(file, world)
-            assert compiler.shown(file, world) == (every[0] if every else None)
         answers.add(report.answer)
         robust.add(report.robust)
     assert answers == set(Answer)
     assert robust == {True, False, None}
+
+
+def test_the_two_searches_agree_in_every_kind_of_world() -> None:
+    """The same ITINERARY first, or none, in the worlds the answers and the evidence are built on.
+
+    Those are the worst case, the longest durations, the best case, worlds in which a few unknown
+    FACTs turn out well, and possible worlds chosen at random.
+    """
+    rng = Random(505)
+    trips = [random_trip(rng, 0.3, contingent=0.2, with_complete=0.5) for _ in range(60)]
+    trips += [two_places_with_no_listed_way(rng) for _ in range(40)]
+    trips += [a_shared_ride(rng) for _ in range(20)]
+    found: set[bool] = set()
+    unlisted = 0
+    for file in trips:
+        every = unknowns(file)
+        worlds = [worst_case(file), longest_case(file), best_case(file)]
+        for _ in range(2):
+            some = rng.sample(every, min(len(every), rng.randrange(1, 4)))
+            worlds.append(with_these_at_best(file, some))
+            worlds.append(possible_world(rng, file))
+        for world in worlds:
+            first = reference.first_shown(file, world)
+            assert compiler.shown(file, world) == first
+            assert compiler.works(file, world) == (first is not None)
+            found.add(first is not None)
+            unlisted += any(step.option is None for step in first or ())
+    assert found == {True, False}
+    assert unlisted > 50
+
+
+def test_a_limit_does_not_depend_on_how_far_the_solver_can_count() -> None:
+    """Alex's two OPTIONs can start at any time, so another way between them can take any time.
+
+    With OR-Tools 9.15, the solver's simplification step once said that a way of about eight
+    years could not work, though shorter and longer ones could.
+    """
+    file = trip(
+        ["alex"],
+        ["a", "b", "c"],
+        [moves("option-0", "b", "a"), stays("option-1", "b"), moves("option-2", "c", "a")],
+        [
+            starts_at("option-0", 9, 45),
+            lasts("option-0", "PT15M"),
+            cutoff("option-0", "PT0S"),
+            any_time("option-1"),
+            lasts_between("option-1", "PT15M", "PT30M"),
+            cutoff("option-1", "PT15M"),
+            any_time("option-2"),
+            lasts_between("option-2", "PT0S", "PT30M"),
+            cutoff("option-2", "PT15M"),
+        ],
+        [lock("option-1", "alex"), lock("option-2", "alex")],
+    )
+    report = compiler.check(file)
+    assert report == reference.check(file)
+    assert [needed.at_most for enough in report.missing for needed in enough] == [None, None, None]
+    years = with_these_at_best(file, [Unknown("other ways", origin="a", destination="b")])
+    for takes in (262_223_455, 262_223_456, 268_435_456, 2**40):
+        assert compiler.works(file, replace(years, way_takes=takes))
+
+
+def stops(*visits: tuple[str, str, int, int], more: Sequence[Document] = ()) -> File:
+    """Alex is LOCKed onto a stop at each of these PLACEs, at these times. Each takes no time."""
+    names = [name for name, _, _, _ in visits]
+    return trip(
+        ["alex"],
+        ["a", "b", "c", "d"],
+        [stays(name, place) for name, place, _, _ in visits],
+        [
+            fact
+            for name, _, hour, minute in visits
+            for fact in (starts_at(name, hour, minute), lasts(name, "PT0S"), cutoff(name, "PT0S"))
+        ]
+        + list(more),
+        [lock(name, "alex") for name in names],
+    )
+
+
+def same_in_both(file: File, world: World) -> bool:
+    """Whether anything works in this world, once both searches have agreed on what is shown."""
+    first = reference.first_shown(file, world)
+    assert compiler.shown(file, world) == first
+    assert compiler.works(file, world) == (first is not None)
+    return first is not None
+
+
+def test_a_listed_option_cannot_finish_a_journey_that_used_an_unlisted_one() -> None:
+    """Every way from a to b is listed, and there is none. A listed ride runs from c to b."""
+    ride = [moves("ride", "c", "b"), starts_at("ride", 9, 30), lasts("ride", "PT10M")]
+    with_ride = trip(
+        ["alex"],
+        ["a", "b", "c", "d"],
+        [stays("first", "a"), stays("last", "b"), ride[0]],
+        [
+            starts_at("first", 9),
+            lasts("first", "PT0S"),
+            cutoff("first", "PT0S"),
+            starts_at("last", 10),
+            lasts("last", "PT0S"),
+            cutoff("last", "PT0S"),
+            *ride[1:],
+            cutoff("ride", "PT0S"),
+            complete("a", "b"),
+        ],
+        [lock("first", "alex"), lock("last", "alex")],
+    )
+    assert not same_in_both(with_ride, best_case(with_ride))
+    freed = with_ride.without("ways-a-b")
+    assert same_in_both(freed, best_case(freed))
+
+
+def test_a_span_starts_on_its_first_second() -> None:
+    """Every way from a to b that leaves from 9:00:00 on is listed, and there is none.
+
+    No way leads back from b to a either, so Alex cannot do the stop at b first.
+    """
+    from_nine = {"from": "a", "to": "b", "leaving": {"earliest": at(9), "latest": at(12)}}
+    ways = [{"id": "ways", "complete": from_nine}, complete("b", "a")]
+    on_the_dot = stops(("first", "a", 9, 0), ("last", "b", 9, 0), more=ways)
+    assert not same_in_both(on_the_dot, best_case(on_the_dot))
+    a_minute_before = stops(("first", "a", 8, 59), ("last", "b", 9, 0), more=ways)
+    assert same_in_both(a_minute_before, best_case(a_minute_before))
+
+
+def test_a_journey_ends_when_the_person_arrives() -> None:
+    """Alex takes the listed ride from a to b, then goes on to c and back to b by other ways."""
+    ride = [
+        moves("ride", "a", "b"),
+        starts_at("ride", 9),
+        lasts("ride", "PT10M"),
+        cutoff("ride", "PT0S"),
+    ]
+    file = trip(
+        ["alex"],
+        ["a", "b", "c", "d"],
+        [stays("first", "a"), ride[0], stays("far", "c"), stays("last", "b")],
+        [
+            starts_at("first", 8, 50),
+            lasts("first", "PT0S"),
+            *ride[1:],
+            starts_at("far", 10),
+            lasts("far", "PT0S"),
+            cutoff("far", "PT0S"),
+            starts_at("last", 10, 30),
+            lasts("last", "PT0S"),
+            cutoff("last", "PT0S"),
+            complete("a", "b"),
+        ],
+        [lock("first", "alex"), lock("far", "alex"), lock("last", "alex")],
+    )
+    assert same_in_both(file, best_case(file))
+
+
+def test_every_route_between_two_places_is_tried() -> None:
+    """Unlisted OPTIONs lead from a to d through b or through c. Only the way through c is open."""
+    file = stops(("first", "a", 9, 0), ("last", "d", 10, 0), more=[complete("a", "b")])
+    ways = frozenset({("a", "b"), ("b", "d"), ("a", "c"), ("c", "d")})
+    assert same_in_both(file, World(worst_case(file).terms, ways))
+    only_through_b = frozenset({("a", "b"), ("b", "d")})
+    assert not same_in_both(file, World(worst_case(file).terms, only_through_b))
 
 
 def at_one_instant(rng: Random) -> File:
@@ -201,7 +376,7 @@ def test_the_options_listed_first_matter_more_than_the_order_they_are_done_in() 
     assert report == reference.check(file)
 
 
-def a_day_in_chicago(cab: dict[str, object]) -> File:
+def a_day_in_chicago(*more: dict[str, object], flight_at: int = 17) -> File:
     """Three PERSONs, ten OPTIONs: far more choices than the reference checker can try."""
     everyone = ("alex", "sam", "jo")
     options = [
@@ -234,8 +409,8 @@ def a_day_in_chicago(cab: dict[str, object]) -> File:
         starts_at("lunch", 13),
         lasts("lunch", "PT1H"),
         any_time("cab-to-ohare"),
-        cab,
-        starts_at("flight", 17),
+        *more,
+        starts_at("flight", flight_at),
         lasts("flight", "PT2H30M"),
         cutoff("flight", "PT45M"),
     ]
@@ -282,7 +457,19 @@ def test_the_compiler_warns_when_the_day_is_not_robust() -> None:
     ]
 
 
-def test_the_search_refuses_unlisted_options_for_now() -> None:
-    file = a_day_in_chicago(lasts("cab-to-ohare", "PT50M"))
-    with pytest.raises(ValueError, match="unlisted OPTIONs"):
-        compiler.shown(file, reference.best_case(file))
+def test_the_compiler_names_what_is_missing_from_a_day() -> None:
+    """The flight leaves at 3:00 pm. Lunch ends at 2:00 pm, and the cab takes 50 minutes."""
+    file = a_day_in_chicago(lasts("cab-to-ohare", "PT50M"), flight_at=15)
+    report = compiler.check(file)
+    assert report.answer is Answer.UNDETERMINED
+    another = Unknown("other ways", origin="pier", destination="ohare")
+    assert report.missing == ((Missing(another, at_most=15 * 60),),)
+
+
+def test_the_compiler_sees_that_a_day_cannot_work() -> None:
+    """The same day, with a FACT that the cab is the only way from the pier to O'Hare."""
+    file = a_day_in_chicago(lasts("cab-to-ohare", "PT50M"), complete("pier", "ohare"), flight_at=15)
+    assert compiler.shown(file, worst_case(file)) is None
+    assert not compiler.works(file, best_case(file))
+    without_the_fact = file.without("ways-pier-ohare")
+    assert compiler.works(without_the_fact, best_case(without_the_fact))
