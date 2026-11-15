@@ -128,4 +128,13 @@ The day before, Alex spends Friday in Chicago alone: breakfast at the hotel at 8
 | [depends on the walk](../examples/a-day/depends-on-the-walk.json) | The boat leaves at 2:00 pm, and nobody has recorded how long the walk to the dock takes. | UNDETERMINED. It works if that walk takes 15 minutes or less. |
 | [works, but risky](../examples/a-day/works-but-risky.json) | The boat leaves at 2:15 pm, and lunch can take up to 90 minutes. | FEASIBLE, with a WARNING that no ITINERARY is ROBUST. At 90 minutes Alex is still at lunch when the walk to the dock should start. |
 
+On Saturday morning Sam has arrived, and so has their friend Jo. Alex and Sam visit the Skydeck at Willis Tower at 10:00 am, while Jo goes to a gallery talk at the Art Institute at 10:30 am. All three meet for lunch in Millennium Park at 12:15 pm. The Skydeck visit takes 90 minutes, and the walk from Willis Tower to the park takes 20 minutes.
+
+| FILE | What it says | Answer |
+|---|---|---|
+| [works](../examples/a-group/works.json) | The Skydeck visit starts at 10:00 am. | FEASIBLE. The plan shows Alex and Sam at the Skydeck, Jo at the talk, and all three at lunch. |
+| [cannot work](../examples/a-group/cannot-work.json) | The Skydeck visit starts at 10:30 am, and a FACT says the FILE lists every way. | INFEASIBLE. Alex and Sam would reach the park five minutes after lunch starts. Seven FACTs and DECISIONs conflict, and none of them is about Jo's talk. |
+| [depends on the walk](../examples/a-group/depends-on-the-walk.json) | The Skydeck visit starts at 10:30 am, and nobody has recorded how long the walk from Willis Tower takes. | UNDETERMINED. It works if that walk takes 15 minutes or less. |
+| [works, but risky](../examples/a-group/works-but-risky.json) | The Skydeck visit starts at 10:00 am and can take up to two hours. | FEASIBLE, with a WARNING that no ITINERARY is ROBUST. The WARNING names Alex and Sam, who would still be at the Skydeck when their walk should start. |
+
 Each FILE has its expected result beside it, as JSON and in words, and the tests compare the reference checker's answer with it. The command `agloe check` prints the same result for any FILE.

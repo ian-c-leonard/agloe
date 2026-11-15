@@ -602,3 +602,35 @@ def test_one_unlisted_way_stands_in_for_a_route_that_takes_one() -> None:
 def covers(fact: object, origin: str, destination: str) -> bool:
     """Whether a FACT is a COMPLETE FACT about travel straight from one PLACE to another."""
     return isinstance(fact, Complete) and fact.covers(origin, destination)
+
+
+def a_group_that_meets(rng: Random) -> File:
+    """Three PERSONs do two things apart, in two PLACEs, and then one thing together in a third.
+
+    A WAY leads from each of the first two PLACEs to the third. One of them may be untimed. Half
+    the time a FACT says the FILE lists every way.
+    """
+    people = ["alex", "sam", "jo"]
+    first = rng.sample(people, rng.choice([1, 2]))
+    second = [person for person in people if person not in first]
+    facts: list[Document] = []
+    for id in ("one", "two"):
+        facts += [starts_at(id, 9, 15 * rng.randrange(4)), lasts(id, f"PT{15 * rng.randrange(4)}M")]
+    facts += [
+        starts_at("meet", 10, 15 * rng.randrange(3)),
+        lasts("meet", "PT0S"),
+        cutoff("meet", f"PT{15 * rng.randrange(2)}M"),
+    ]
+    for id in ("from-a", "from-b"):
+        if rng.random() < 0.8:
+            facts.append(takes(id, f"PT{15 * rng.randrange(3)}M"))
+    if rng.random() < 0.5:
+        facts.append(complete(None, None))
+    return trip(
+        people,
+        PLACES,
+        [stays("one", "a"), stays("two", "b"), stays("meet", "c")],
+        facts,
+        [lock("one", *first), lock("two", *second), lock("meet", *people)],
+        [way_between("from-a", "a", "c"), way_between("from-b", "b", "c")],
+    )
