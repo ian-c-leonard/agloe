@@ -11,6 +11,7 @@ from agloe.reference import (
     Step,
     best_case,
     broken,
+    broken_as_listed,
     needless,
     works_as_listed,
     worst_case,
@@ -467,3 +468,82 @@ def test_an_itinerary_lists_its_steps_in_the_order_they_happen() -> None:
     assert broken(file, world, (late, early)) == []
     assert works_as_listed(file, world, (early, late))
     assert not works_as_listed(file, world, (late, early))
+
+
+def test_one_listed_order_can_break_what_another_order_meets() -> None:
+    """Three steps at 9:00 that take no time: a stop at a, a WAY to b and a stop at b.
+
+    Some order of them works, so ``broken`` finds nothing. Listed with the WAY last, the plan
+    has Alex at b before the WAY takes them there.
+    """
+    file = trip(
+        ["alex"],
+        ["a", "b"],
+        [stays("first", "a"), stays("last", "b")],
+        [
+            starts_at("first", 9),
+            lasts("first", "PT0S"),
+            starts_at("last", 9),
+            lasts("last", "PT0S"),
+            cutoff("last", "PT0S"),
+            takes("ab", "PT0S"),
+        ],
+        [lock("first", "alex"), lock("last", "alex")],
+        [way("ab", "a", "b")],
+    )
+    first = Step("first", "a", "a", ("alex",), seconds(9), seconds(9))
+    leg = Step(None, "a", "b", ("alex",), seconds(9), seconds(9), "ab")
+    last = Step("last", "b", "b", ("alex",), seconds(9), seconds(9))
+    world = worst_case(file)
+    assert broken(file, world, (first, last, leg)) == []
+    assert broken_as_listed(file, world, (first, leg, last)) == []
+    assert broken_as_listed(file, world, (first, last, leg)) == [
+        Broken(Constraint.PLACE, "last", ("alex",)),
+        Broken(Constraint.PLACE, None, ("alex",), None, 2),
+    ]
+
+
+def test_a_person_is_busy_until_the_latest_end_so_far() -> None:
+    """A long call from 9:00 to 11:00, a short one at 9:30, and a nap at 10:00.
+
+    The nap starts after the short call ends, but the long call is still running.
+    """
+    file = trip(
+        ["alex"],
+        ["a"],
+        [stays("long", "a"), stays("short", "a"), stays("nap", "a")],
+        [
+            starts_at("long", 9),
+            lasts("long", "PT2H"),
+            starts_at("short", 9, 30),
+            lasts("short", "PT15M"),
+            starts_at("nap", 10),
+            lasts("nap", "PT1H"),
+        ],
+        [lock(name, "alex") for name in ("long", "short", "nap")],
+    )
+    steps = (
+        Step("long", "a", "a", ("alex",), seconds(9), seconds(11)),
+        Step("short", "a", "a", ("alex",), seconds(9, 30), seconds(9, 45)),
+        Step("nap", "a", "a", ("alex",), seconds(10), seconds(11)),
+    )
+    assert broken_as_listed(file, worst_case(file), steps) == [
+        Broken(Constraint.PLACE, "short", ("alex",), late=5400),
+        Broken(Constraint.PLACE, "nap", ("alex",), late=3600),
+    ]
+
+
+def test_nothing_follows_a_step_whose_end_nobody_knows() -> None:
+    """Nobody has recorded how long the call takes, so Alex may never be free for the nap."""
+    file = trip(
+        ["alex"],
+        ["a"],
+        [stays("call", "a"), stays("nap", "a")],
+        [starts_at("call", 9), starts_at("nap", 10), lasts("nap", "PT1H")],
+        [lock("call", "alex"), lock("nap", "alex")],
+    )
+    call = Step("call", "a", "a", ("alex",), seconds(9), None)
+    nap = Step("nap", "a", "a", ("alex",), seconds(10), seconds(11))
+    assert broken(file, worst_case(file), (call, nap)) == [
+        Broken(Constraint.PLACE, "nap", ("alex",))
+    ]

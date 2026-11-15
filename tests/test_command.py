@@ -584,7 +584,7 @@ def test_a_warning_sits_under_the_right_one_of_two_lines_that_read_the_same() ->
     words = report.as_text(file, compiler.check(file)).splitlines()
     assert words[4] == words[6] == "  9:00 am to 9:00 am: ab, alex"
     assert not words[5].startswith("    ! ")
-    assert words[7] == "    ! alex would not be free when this starts."
+    assert words[7] == "    ! alex would still be busy for 1 min when this starts."
 
 
 def test_records_with_the_same_name_show_their_ids() -> None:
@@ -610,37 +610,119 @@ def test_records_with_the_same_name_show_their_ids() -> None:
 
 
 def test_a_warning_names_only_the_persons_in_trouble_on_a_shared_line() -> None:
-    """Alex takes a WAY, rides back and takes it again with Sam. Their first stop can run long.
+    """Alex has a drink and Sam takes a call, both at the hotel. Only the call can run long.
 
-    Sam takes the WAY once. Sam's warning is under the line Sam shares with Alex, and it says
-    nothing about a second time.
+    They walk to dinner together, on one line of the plan. The warning under that line names
+    Sam alone.
     """
     file = trip(
-        ["alex", "sam", "jo"],
-        ["a", "b"],
-        [stays("first", "a"), moves("back", "b", "a"), stays("last", "b")],
+        ["alex", "sam"],
+        ["hotel", "restaurant"],
+        [stays("drink", "hotel"), stays("call", "hotel"), stays("dinner", "restaurant")],
         [
-            starts_at("first", 8),
-            lasts_between("first", "PT1H", "PT1H1M"),
-            starts_at("back", 9),
-            lasts("back", "PT0S"),
+            starts_at("drink", 18),
+            lasts("drink", "PT30M"),
+            starts_at("call", 18),
+            lasts_between("call", "PT30M", "PT50M"),
+            starts_at("dinner", 19),
+            lasts("dinner", "PT2H"),
+            cutoff("dinner", "PT0S"),
+            takes("walk", "PT20M"),
+        ],
+        [lock("drink", "alex"), lock("call", "sam"), lock("dinner", "alex", "sam")],
+        [way_between("walk", "hotel", "restaurant")],
+    )
+    assert report.as_text(file, compiler.check(file)).splitlines()[5:8] == [
+        "  6:30 pm to 6:50 pm: walk, alex and sam",
+        "    ! sam would still be busy for 20 min when this starts.",
+        "  7:00 pm to 9:00 pm: dinner, alex and sam",
+    ]
+
+
+def test_a_warning_follows_the_order_the_plan_shows() -> None:
+    """Sam rides back to a one second before midnight, takes a WAY to b, and is there at midnight.
+
+    The ride can take a minute. In the plan shown, the WAY comes after the ride, so the warning
+    is worked out in that order too: Sam is still riding when the WAY should start.
+    """
+    document = {
+        "persons": [{"id": "sam", "name": "Sam"}],
+        "places": [{"id": "a", "name": "a"}, {"id": "b", "name": "b"}],
+        "options": [moves("back", "b", "a"), stays("last", "b")],
+        "ways": [way("ab", "a", "b")],
+        "facts": [
+            {
+                "id": "back-time",
+                "option": "back",
+                "starts_at": "2027-12-31T23:59:59-06:00[America/Chicago]",
+            },
+            lasts_between("back", "PT0S", "PT1M"),
             cutoff("back", "PT0S"),
-            starts_at("last", 9),
+            {
+                "id": "last-time",
+                "option": "last",
+                "starts_at": "2028-01-01T00:00:00-06:00[America/Chicago]",
+            },
             lasts("last", "PT1H"),
             cutoff("last", "PT0S"),
             takes("ab", "PT0S"),
         ],
-        [lock("first", "alex", "sam"), lock("back", "alex"), lock("last", "alex", "sam", "jo")],
-        [way("ab", "a", "b")],
-    )
-    assert report.as_text(file, compiler.check(file)).splitlines()[3:10] == [
-        "  8:00 am to 9:00 am: first, alex and sam",
-        "  9:00 am to 9:00 am: ab, alex",
-        "    ! alex would still be busy for 1 min when this starts.",
-        "  9:00 am to 9:00 am: back, alex",
-        "  9:00 am to 9:00 am: ab, alex and sam",
-        "    ! sam would still be busy for 1 min when this starts.",
-        "  9:00 am to 10:00 am: last, alex, sam and jo",
+        "decisions": [lock("back", "sam"), lock("last", "sam")],
+    }
+    file = load(document)
+    assert report.as_text(file, compiler.check(file)).splitlines()[2:10] == [
+        "Friday 31 December 2027 (times in America/Chicago)",
+        "  11:59:59 pm to 11:59:59 pm: back, Sam",
+        "  11:59:59 pm to 11:59:59 pm: ab, Sam",
+        "    ! Sam would still be busy for 1 min when this starts.",
+        "",
+        "Saturday 1 January 2028 (times in America/Chicago)",
+        "  12:00 am to 1:00 am: last, Sam",
+        "    ! Sam would still be busy for 59 s when this starts.",
+    ]
+
+
+def test_an_offset_is_shown_to_the_second() -> None:
+    """Until 11 March 1911, clocks in Paris ran 9 minutes and 21 seconds ahead of UTC."""
+    document = {
+        "persons": [{"id": "alex", "name": "Alex"}],
+        "places": [{"id": "cafe", "name": "the cafe"}],
+        "options": [stays("coffee", "cafe"), stays("paper", "cafe")],
+        "ways": [],
+        "facts": [
+            any_time("coffee"),
+            lasts("coffee", "PT1H"),
+            {
+                "id": "paper-time",
+                "option": "paper",
+                "starts_at": "1911-03-11T00:00:00+00:00[Europe/Paris]",
+            },
+            lasts("paper", "PT1M"),
+        ],
+        "decisions": [lock("coffee", "alex"), lock("paper", "alex")],
+    }
+    file = load(document)
+    words = report.as_text(file, compiler.check(file)).splitlines()
+    assert words[3] == "  11:09:21 pm (UTC+0:09:21) to 12:00 am (UTC+0) on 11 March: coffee, Alex"
+
+
+def test_an_end_in_another_year_shows_its_year() -> None:
+    document = {
+        "persons": [{"id": "alex", "name": "Alex"}],
+        "places": [{"id": "cabin", "name": "the cabin"}],
+        "options": [stays("stay", "cabin")],
+        "ways": [],
+        "facts": [
+            {"id": "stay-time", "option": "stay", "starts_at": "2027-05-14T23:30:00+00:00[UTC]"},
+            lasts("stay", "PT8784H"),
+        ],
+        "decisions": [lock("stay", "alex")],
+    }
+    file = load(document)
+    words = report.as_text(file, compiler.check(file)).splitlines()
+    assert words[2:4] == [
+        "Friday 14 May 2027 (times in UTC)",
+        "  11:30 pm to 11:30 pm on 14 May 2028: stay, Alex",
     ]
 
 

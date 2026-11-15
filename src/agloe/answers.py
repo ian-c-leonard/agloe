@@ -20,7 +20,7 @@ from agloe.reference import (
     World,
     any_works,
     best_case,
-    broken,
+    broken_as_listed,
     first_shown,
     in_world,
     longest_case,
@@ -99,7 +99,10 @@ def check(
             fact.id for fact in file.facts if not isinstance(fact, Complete) and fact.option in used
         ]
         relies_on += [lock.id for lock in file.locks]
-        at_worst = tuple(broken(file, longest, in_world(longest, chosen))) if robust is None else ()
+        at_worst: tuple[Broken, ...] = ()
+        if robust is None:
+            # The steps keep the order the ITINERARY lists them in: that is the plan shown.
+            at_worst = tuple(broken_as_listed(file, longest, in_world(longest, chosen)))
         return Report(Answer.FEASIBLE, chosen, tuple(relies_on), robust is not None, at_worst)
     enough = stuck(file)
     if enough is not None:

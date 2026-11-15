@@ -1173,8 +1173,8 @@ def test_each_time_a_person_takes_a_way_is_a_step_of_its_own() -> None:
 def test_a_warning_points_at_one_use_of_a_way() -> None:
     """Alex takes the same WAY twice at 9:00, before and after a ride that can take an hour.
 
-    If the ride runs long, Alex is not back at a for the second time. The warning gives the
-    position of that step, since the two steps look the same.
+    If the ride runs long, Alex is still riding when the second time should start. The warning
+    gives the position of that step, since the two steps look the same.
     """
     file = trip(
         ["alex"],
@@ -1205,7 +1205,7 @@ def test_a_warning_points_at_one_use_of_a_way() -> None:
     ]
     assert found.itinerary[1] == found.itinerary[3]
     assert found.at_worst == (
-        Broken(Constraint.PLACE, None, ("alex",), step=3),
+        Broken(Constraint.PLACE, None, ("alex",), late=3600, step=3),
         Broken(Constraint.PLACE, "last", ("alex",), late=3600),
     )
 
