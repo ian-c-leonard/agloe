@@ -225,7 +225,7 @@ def test_every_reference_points_at_something_in_the_file() -> None:
     document["decisions"][0]["persons"] = ["alex", "jo"]
     found = problems(document)
     assert "/options/0: the-moon is not a PLACE in this FILE" in found
-    assert "/facts/1: a-nap is not a OPTION in this FILE" in found
+    assert "/facts/1: a-nap is not an OPTION in this FILE" in found
     assert "/decisions/0: jo is not a PERSON in this FILE" in found
 
 

@@ -274,9 +274,9 @@ A TRIP or VARIANT is FEASIBLE when at least one ITINERARY meets every CONSTRAINT
 
 ### INFEASIBLE
 
-A TRIP or VARIANT is INFEASIBLE when no ITINERARY meets every CONSTRAINT, however the unknown FACTs turn out. A conclusion that no OPTION exists to do something needs a FACT that the relevant set of OPTIONs is COMPLETE.
+A TRIP or VARIANT is INFEASIBLE when no ITINERARY meets every CONSTRAINT, however the unknown FACTs turn out. A conclusion that no OPTION or WAY exists to do something needs a FACT that the relevant set is COMPLETE.
 
-*Uses:* TRIP, VARIANT, ITINERARY, CONSTRAINT, FACT, OPTION, COMPLETE.
+*Uses:* TRIP, VARIANT, ITINERARY, CONSTRAINT, FACT, OPTION, WAY, COMPLETE.
 
 ### UNDETERMINED
 
@@ -343,7 +343,7 @@ A dated point at which something about the TRIP changes unless a DECISION comes 
 
 ### ROBUST
 
-An ITINERARY is ROBUST when its OPTIONs, PERSONs and start times meet every CONSTRAINT for every value of every CONTINGENT duration.
+An ITINERARY is ROBUST when its OPTIONs, PERSONs, WAYs and start times meet every CONSTRAINT however the unknown FACTs turn out, for every value of every CONTINGENT duration.
 
 *Uses:* ITINERARY, CONSTRAINT, CONTINGENT.
 

@@ -54,16 +54,23 @@ class Step:
 
 
 type Itinerary = tuple[Step, ...]
+type Leg = tuple[str | None, str, str]  # a WAY, or None for an unlisted one; from; to
 
 
 @dataclass(frozen=True)
 class Broken:
-    """A CONSTRAINT an ITINERARY does not meet: at which OPTION, for whom, by how many seconds."""
+    """A CONSTRAINT an ITINERARY does not meet: at which step, for whom, by how many seconds.
+
+    ``option`` names the OPTION where it happens. Where it happens at a WAY, ``option`` is None
+    and ``taken`` says which WAY and which time it is taken: the WAY with its two PLACEs, and
+    its start.
+    """
 
     constraint: Constraint
     option: str | None
     persons: tuple[str, ...]
     late: int | None = None
+    taken: tuple[Leg, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -306,30 +313,43 @@ def _well_formed(file: File, itinerary: Itinerary) -> None:
             raise ValueError("a step ends before it starts")
 
 
-def _gathered(
-    file: File, constraint: Constraint, found: list[tuple[str | None, int | None, str]]
-) -> list[Broken]:
-    """One Broken for each OPTION and amount, naming every PERSON it affects in the FILE's order."""
-    groups: dict[tuple[str | None, int | None], list[str]] = {}
-    for option, late, person in found:
-        groups.setdefault((option, late), []).append(person)
+def _where(step: Step) -> tuple[str | None, tuple[Leg, int] | None]:
+    """How a Broken names a step: an OPTION by its id, a WAY by what it is and when it starts."""
+    if step.option is not None:
+        return step.option, None
+    return None, ((step.way, step.origin, step.destination), step.start)
+
+
+def _in_file_order_of_persons(file: File, persons: Iterable[str]) -> tuple[str, ...]:
     order = [person.id for person in file.persons]
+    return tuple(sorted(set(persons), key=order.index))
+
+
+def _gathered(
+    file: File, constraint: Constraint, found: list[tuple[Step, int | None, str]]
+) -> list[Broken]:
+    """One Broken for each step and amount, naming every PERSON it affects in the FILE's order."""
+    groups: dict[tuple[str | None, tuple[Leg, int] | None, int | None], list[str]] = {}
+    for step, late, person in found:
+        groups.setdefault((*_where(step), late), []).append(person)
     return [
-        Broken(constraint, option, tuple(sorted(set(people), key=order.index)), late)
-        for (option, late), people in groups.items()
+        Broken(constraint, option, _in_file_order_of_persons(file, people), late, taken)
+        for (option, taken, late), people in groups.items()
     ]
 
 
 def _locks(file: File, itinerary: Itinerary) -> list[Broken]:
     """LOCKs are honored: every LOCKed OPTION happens, and the PERSONs its LOCK names take part."""
     taking_part = {step.option: step.persons for step in itinerary if step.option is not None}
-    found: list[tuple[str | None, int | None, str]] = [
-        (lock.option, None, person)
-        for lock in file.locks
-        for person in lock.persons
-        if person not in taking_part.get(lock.option, ())
+    left_out: dict[str, list[str]] = {}
+    for lock in file.locks:
+        for person in lock.persons:
+            if person not in taking_part.get(lock.option, ()):
+                left_out.setdefault(lock.option, []).append(person)
+    return [
+        Broken(Constraint.LOCK, option, _in_file_order_of_persons(file, people))
+        for option, people in left_out.items()
     ]
-    return _gathered(file, Constraint.LOCK, found)
 
 
 def _starts(world: World, itinerary: Itinerary) -> list[Broken]:
@@ -361,11 +381,12 @@ def _durations(world: World, itinerary: Itinerary) -> list[Broken]:
         else:
             fits = shortest <= step.end - step.start <= longest
         if not fits:
-            out.append(Broken(Constraint.DURATION, step.option, step.persons))
+            option, taken = _where(step)
+            out.append(Broken(Constraint.DURATION, option, step.persons, None, taken))
     return out
 
 
-type _Found = list[tuple[Constraint, str | None, int | None]]  # which, at which OPTION, how late
+type _Found = list[tuple[Constraint, Step, int | None]]  # which, at which step, how late
 
 
 def _along_each_path(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
@@ -373,13 +394,13 @@ def _along_each_path(file: File, world: World, itinerary: Itinerary) -> list[Bro
 
     The ITINERARY meets them if one of the orders its times allow works for every PERSON.
     """
-    fewest: list[tuple[Constraint, str | None, int | None, str]] | None = None
+    fewest: list[tuple[Constraint, Step, int | None, str]] | None = None
     for order in _in_each_order(itinerary):
         found = [
-            (constraint, option, late, person.id)
+            (constraint, step, late, person.id)
             for person in file.persons
             for path in [[step for step in order if person.id in step.persons]]
-            for constraint, option, late in (
+            for constraint, step, late in (
                 *_places(path),
                 *_arrivals(world, path),
                 *_listed(file, world, path),
@@ -395,11 +416,7 @@ def _along_each_path(file: File, world: World, itinerary: Itinerary) -> list[Bro
         for broken in _gathered(
             file,
             kind,
-            [
-                (option, late, person)
-                for which, option, late, person in fewest or []
-                if which is kind
-            ],
+            [(step, late, person) for which, step, late, person in fewest or [] if which is kind],
         )
     ]
 
@@ -462,11 +479,11 @@ def _places(path: list[Step]) -> _Found:
     found: _Found = []
     for before, after in pairwise(path):
         if before.end is None:
-            found.append((Constraint.PLACE, after.option, None))
+            found.append((Constraint.PLACE, after, None))
         elif before.end > after.start:
-            found.append((Constraint.PLACE, after.option, before.end - after.start))
+            found.append((Constraint.PLACE, after, before.end - after.start))
         elif before.destination != after.origin:
-            found.append((Constraint.PLACE, after.option, None))
+            found.append((Constraint.PLACE, after, None))
     return found
 
 
@@ -478,9 +495,9 @@ def _arrivals(world: World, path: list[Step]) -> _Found:
         margin = 0 if step.option is None else world.terms[step.option].margin
         if arrived is not None and margin != 0:
             if arrived.end is None or margin is None:
-                found.append((Constraint.ARRIVAL, step.option, None))
+                found.append((Constraint.ARRIVAL, step, None))
             elif arrived.end + margin > step.start:
-                found.append((Constraint.ARRIVAL, step.option, arrived.end + margin - step.start))
+                found.append((Constraint.ARRIVAL, step, arrived.end + margin - step.start))
         if step.origin != step.destination:
             arrived = step
     return found
@@ -498,10 +515,10 @@ def _listed(file: File, world: World, path: list[Step]) -> _Found:
             continue
         here = (step.origin, step.destination)
         if world.unlisted is not None and here not in world.unlisted:
-            found.append((Constraint.LISTED, None, None))
+            found.append((Constraint.LISTED, step, None))
         for fact in file.facts:
             if isinstance(fact, Complete) and fact.rules_out(*here, step.start):
-                found.append((Constraint.LISTED, None, None))
+                found.append((Constraint.LISTED, step, None))
     return found
 
 
@@ -628,7 +645,6 @@ def _orders(file: File, world: World, indexes: list[int]) -> Iterator[tuple[int,
             yield order
 
 
-type Leg = tuple[str | None, str, str]  # a WAY, or None for an unlisted one; from; to
 type Route = tuple[Leg, ...]
 
 

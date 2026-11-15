@@ -1,6 +1,6 @@
 INFEASIBLE: this trip cannot work.
 
-These FACTs and DECISIONs clash. Each one is needed for the clash.
+These FACTs and DECISIONs clash. Each one is needed for the clash. Times are in America/Chicago.
   visit-time: Museum visit starts at 2:30 pm on Saturday 15 May 2027
   visit-length: Museum visit takes 1 h
   train-length: Blue Line to O'Hare takes 1 h

@@ -5,8 +5,6 @@ Saturday 15 May 2027 (times in America/Chicago)
   3:00 pm to 4:00 pm: Blue Line to O'Hare, Alex and Sam
   5:00 pm to 7:30 pm: Flight home, Alex and Sam
 
-This plan holds however long the uncertain parts take.
-
 The plan relies on these FACTs and DECISIONs:
   visit-time: Museum visit starts at 2:00 pm on Saturday 15 May 2027
   visit-length: Museum visit takes 1 h

@@ -46,6 +46,12 @@ def unlisted(origin: str, destination: str, start: int, *persons: str) -> Step:
     return Step(None, origin, destination, persons or BOTH, start, start)
 
 
+def at_way(constraint: Constraint, step: Step) -> Broken:
+    """A CONSTRAINT broken at a WAY: the Broken names the WAY and the time it is taken."""
+    taken = ((step.way, step.origin, step.destination), step.start)
+    return Broken(constraint, None, step.persons, None, taken)
+
+
 def visit(end: int = seconds(15)) -> Step:
     return step(STORY, "museum-visit", seconds(14), end)
 
@@ -127,7 +133,7 @@ def test_a_person_who_was_there_all_along_is_in_time() -> None:
 
 def test_an_unlisted_option_needs_a_world_that_has_it() -> None:
     shortcut = (visit(), unlisted("art-institute", "ohare", seconds(15)), flight())
-    assert broken(STORY, worst_case(STORY), shortcut) == [Broken(Constraint.LISTED, None, BOTH)]
+    assert broken(STORY, worst_case(STORY), shortcut) == [at_way(Constraint.LISTED, shortcut[1])]
     assert broken(STORY, best_case(STORY), shortcut) == []
 
 
@@ -141,7 +147,7 @@ def with_complete_ways() -> File:
 def test_a_complete_set_is_the_whole_set() -> None:
     file = with_complete_ways()
     shortcut = (visit(), unlisted("art-institute", "ohare", seconds(15)), flight())
-    assert broken(file, best_case(file), shortcut) == [Broken(Constraint.LISTED, None, BOTH)]
+    assert broken(file, best_case(file), shortcut) == [at_way(Constraint.LISTED, shortcut[1])]
 
 
 def through_midway() -> Itinerary:
@@ -157,13 +163,19 @@ def test_a_complete_set_says_nothing_about_travel_through_a_third_place() -> Non
 
 def test_a_complete_set_can_cover_every_place() -> None:
     """Every way to O'Hare is listed, or every way from the museum, or every way there is."""
-    for origin, destination in ((None, "ohare"), ("art-institute", None), (None, None)):
+    _, to_midway, to_ohare, _ = through_midway()
+    ruled_out = {
+        (None, "ohare"): [to_ohare],
+        ("art-institute", None): [to_midway],
+        (None, None): [to_midway, to_ohare],
+    }
+    for (origin, destination), legs in ruled_out.items():
         document = flight_home()
         document["places"].append({"id": "midway", "name": "Midway"})
         document["facts"].append(complete(origin, destination))
         file = load(document)
         assert broken(file, best_case(file), through_midway()) == [
-            Broken(Constraint.LISTED, None, BOTH)
+            at_way(Constraint.LISTED, leg) for leg in legs
         ]
     document = flight_home()
     document["places"].append({"id": "midway", "name": "Midway"})
@@ -195,14 +207,15 @@ def test_a_complete_span_includes_both_of_its_ends() -> None:
     document["facts"].append({"id": "ways-at-three", "complete": ways})
     file = load(document)
 
-    def leaving_at(moment: int) -> list[Broken]:
-        shortcut = (visit(), unlisted("art-institute", "ohare", moment), flight())
-        return broken(file, best_case(file), shortcut)
+    def ruled_out_at(moment: int) -> bool:
+        leg = unlisted("art-institute", "ohare", moment)
+        found = broken(file, best_case(file), (visit(), leg, flight()))
+        assert found in ([], [at_way(Constraint.LISTED, leg)])
+        return bool(found)
 
-    covered = [Broken(Constraint.LISTED, None, BOTH)]
-    assert leaving_at(seconds(15)) == covered
-    assert leaving_at(seconds(15, 10)) == covered
-    assert leaving_at(seconds(15, 10) + 1) == []
+    assert ruled_out_at(seconds(15))
+    assert ruled_out_at(seconds(15, 10))
+    assert not ruled_out_at(seconds(15, 10) + 1)
 
 
 def test_a_complete_set_covers_only_ways_to_its_second_place() -> None:
@@ -332,7 +345,7 @@ def test_a_complete_set_covers_one_direction_between_its_two_places() -> None:
     there_and_back = (*to_midway[:2], unlisted("ohare", "art-institute", seconds(16), *alex))
     again = unlisted("art-institute", "ohare", seconds(16, 30), *alex)
     found = broken(file, best_case(file), (*there_and_back, again))
-    assert Broken(Constraint.LISTED, None, alex) in found
+    assert at_way(Constraint.LISTED, again) in found
 
 
 def with_walks() -> File:
@@ -368,13 +381,13 @@ def test_a_way_takes_as_long_as_it_takes_each_time() -> None:
     assert broken(file, world, (breakfast, there, museum)) == []
     too_quick = walk("hotel", "gallery", seconds(9, 30), minutes=5)
     assert broken(file, world, (breakfast, too_quick, museum)) == [
-        Broken(Constraint.DURATION, None, ("alex",))
+        at_way(Constraint.DURATION, too_quick)
     ]
     stroll = walk("gallery", "cafe", seconds(12), minutes=20, name="stroll")
     assert broken(file, world, (breakfast, there, museum, stroll)) == []
     too_long = walk("gallery", "cafe", seconds(12), minutes=25, name="stroll")
     assert broken(file, world, (breakfast, there, museum, too_long)) == [
-        Broken(Constraint.DURATION, None, ("alex",))
+        at_way(Constraint.DURATION, too_long)
     ]
 
 
