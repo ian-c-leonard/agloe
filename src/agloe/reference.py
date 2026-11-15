@@ -574,7 +574,7 @@ def itineraries(file: File, world: World) -> list[Itinerary]:
         mine = [
             [i for i, persons in enumerate(who) if person.id in persons] for person in file.persons
         ]
-        for orders in product(*(list(_orders(file, world, indexes)) for indexes in mine)):
+        for orders in product(*(list(_orders(file, world, indexes, known)) for indexes in mine)):
             found = scheduled(file, world, who, orders, known=known)
             if found is None:
                 continue
@@ -634,7 +634,9 @@ def _who_takes_part(file: File, world: World) -> list[tuple[tuple[str, ...], ...
     return sorted(product(*choices), key=lambda who: sum(len(persons) for persons in who))
 
 
-def _orders(file: File, world: World, indexes: list[int]) -> Iterator[tuple[int, ...]]:
+def _orders(
+    file: File, world: World, indexes: list[int], known: Routes
+) -> Iterator[tuple[int, ...]]:
     """Every order in which one PERSON could do their OPTIONs."""
 
     def can_follow(first: int, then: int) -> bool:
@@ -644,7 +646,7 @@ def _orders(file: File, world: World, indexes: list[int]) -> Iterator[tuple[int,
             return False
         if before.destination == after.origin:
             return True
-        return bool(routes(file, world, before.destination, after.origin))
+        return bool(known.between(before.destination, after.origin))
 
     for order in permutations(indexes):
         if all(can_follow(first, then) for first, then in pairwise(order)):

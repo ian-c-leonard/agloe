@@ -84,6 +84,8 @@ def test_the_compiler_and_the_reference_checker_agree_on_random_trips() -> None:
         assert compiler.check(file) == report
         if report.answer is Answer.FEASIBLE:
             assert reference.broken(file, worst_case(file), report.itinerary) == []
+            shown = tuple(together(report.itinerary))
+            assert reference.works_as_listed(file, worst_case(file), shown)
         seen.add(report.answer)
         robust.add(report.robust)
     assert seen == set(Answer)

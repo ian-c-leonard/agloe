@@ -213,7 +213,7 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
             "WARNING: no plan is sure to hold if the uncertain parts take their longest."
             " In this plan:",
         ]
-        lines += [f"  {_broken(file, clock, report, found)}" for found in report.at_worst]
+        lines += [f"  {_broken(file, clock, report, found)}" for found in _on_their_lines(report)]
     elif any(isinstance(fact, Duration) and fact.contingent for fact in relied_on):
         lines += [
             "",
@@ -227,18 +227,50 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
 
 
 def together(itinerary: Itinerary) -> list[Step]:
-    """The steps as a plan shows them: PERSONs who take the same WAY at the same time share a line.
+    """The steps as a plan shows them, in the same order.
 
-    This is for reading only. In the ITINERARY each time a PERSON takes a WAY is its own step.
+    Steps next to each other that differ only in the PERSON share a line: those PERSONs take the
+    same WAY at the same time. Nothing is moved and nothing is left out. So what each PERSON
+    does, and in what order, reads the same as in the ITINERARY.
     """
-    shown: list[Step] = []
-    for step in itinerary:
-        for place, other in enumerate(shown):
-            if step.option is None and replace(other, persons=step.persons) == step:
-                shown[place] = replace(other, persons=(*other.persons, *step.persons))
-                break
+    return [step for step, _ in _lines(itinerary)]
+
+
+def _lines(itinerary: Itinerary) -> list[tuple[Step, list[int]]]:
+    """Each line of the plan: the step it shows, and the positions of the steps it stands for."""
+    lines: list[tuple[Step, list[int]]] = []
+    for position, step in enumerate(itinerary):
+        if lines and step.option is None:
+            shown, positions = lines[-1]
+            alike = replace(shown, persons=step.persons) == step
+            if alike and not set(shown.persons) & set(step.persons):
+                both = replace(shown, persons=(*shown.persons, *step.persons))
+                lines[-1] = (both, [*positions, position])
+                continue
+        lines.append((step, [position]))
+    return lines
+
+
+def _on_their_lines(report: Report) -> list[Broken]:
+    """What the plan would break, with PERSONs who share a line of the plan named together."""
+    line_of = {
+        position: number
+        for number, (_, positions) in enumerate(_lines(report.itinerary))
+        for position in positions
+    }
+    shown: list[Broken] = []
+    places: dict[tuple[Constraint, int | None, int], int] = {}
+    for found in report.at_worst:
+        if found.step is None:
+            shown.append(found)
+            continue
+        key = (found.constraint, found.late, line_of[found.step])
+        if key in places:
+            first = shown[places[key]]
+            shown[places[key]] = replace(first, persons=(*first.persons, *found.persons))
         else:
-            shown.append(step)
+            places[key] = len(shown)
+            shown.append(found)
     return shown
 
 
