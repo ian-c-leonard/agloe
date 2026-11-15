@@ -274,7 +274,7 @@ def test_a_complete_fact_is_put_in_words_for_the_places_it_names() -> None:
         assert f"  {expected} {span}" in printed
 
 
-def test_a_warning_names_the_way_and_the_time_it_is_taken() -> None:
+def test_a_warning_is_printed_under_the_step_it_is_about() -> None:
     """The visit can run an hour late. Then Alex is still there when the walk should start."""
     file = trip(
         ["alex"],
@@ -304,10 +304,14 @@ def test_a_warning_names_the_way_and_the_time_it_is_taken() -> None:
             "late": "PT1H",
         }
     ]
-    assert report.as_text(file, found).splitlines()[6:9] == [
+    assert report.as_text(file, found).splitlines()[3:9] == [
+        "  9:00 am to 9:30 am: visit, alex",
+        "  9:30 am to 10:00 am: walk, alex",
+        "    ! alex would still be busy for 1 h when this starts.",
+        "  10:30 am to 11:30 am: dinner, alex",
         "",
-        "WARNING: no plan is sure to hold if the uncertain parts take their longest. In this plan:",
-        "  alex would still be busy for 1 h at 9:30 am, the time to take walk.",
+        "WARNING: no plan is sure to hold if the uncertain parts take their longest."
+        ' Each line marked "!" says what would go wrong at the step above it.',
     ]
 
 
@@ -496,9 +500,9 @@ def test_a_warning_names_together_the_persons_who_share_a_line() -> None:
         (1, ("alex",)),
         (2, ("sam",)),
     ]
-    assert report.as_text(file, found).splitlines()[7:9] == [
-        "WARNING: no plan is sure to hold if the uncertain parts take their longest. In this plan:",
-        "  alex and sam would still be busy for 20 min at 6:30 pm, the time to take walk.",
+    assert report.as_text(file, found).splitlines()[4:6] == [
+        "  6:30 pm to 6:50 pm: walk, alex and sam",
+        "    ! alex and sam would still be busy for 20 min when this starts.",
     ]
 
 
@@ -527,9 +531,20 @@ def test_warnings_on_two_lines_of_the_plan_stay_apart() -> None:
         [way("walk", "hotel", "restaurant"), way("stroll", "bar", "restaurant")],
     )
     words = report.as_text(file, compiler.check(file)).splitlines()
-    assert [line for line in words if "would still be busy" in line] == [
-        "  alex would still be busy for 20 min at 6:30 pm, the time to take walk.",
-        "  sam would still be busy for 20 min at 6:30 pm, the time to take stroll.",
+    marked = [
+        (words[number - 1].strip(), line.strip())
+        for number, line in enumerate(words)
+        if line.startswith("    ! ")
+    ]
+    assert marked == [
+        (
+            "6:30 pm to 6:50 pm: walk, alex",
+            "! alex would still be busy for 20 min when this starts.",
+        ),
+        (
+            "6:30 pm to 6:50 pm: stroll, sam",
+            "! sam would still be busy for 20 min when this starts.",
+        ),
     ]
 
 
@@ -542,11 +557,11 @@ def test_a_person_never_shares_a_line_with_themselves() -> None:
     ]
 
 
-def test_a_warning_says_which_time_a_way_is_taken() -> None:
+def test_a_warning_sits_under_the_right_one_of_two_lines_that_read_the_same() -> None:
     """Alex takes the same WAY twice at 9:00, before and after a ride that can take a minute.
 
     If the ride takes that minute, Alex is not back for the second time. Both lines of the plan
-    read the same, so the warning says which one it means.
+    read the same, and the warning is printed under the second one.
     """
     file = trip(
         ["alex"],
@@ -568,7 +583,8 @@ def test_a_warning_says_which_time_a_way_is_taken() -> None:
     )
     words = report.as_text(file, compiler.check(file)).splitlines()
     assert words[4] == words[6] == "  9:00 am to 9:00 am: ab, alex"
-    assert "  alex would not be free at 9:00 am, the time to take ab for the second time." in words
+    assert not words[5].startswith("    ! ")
+    assert words[7] == "    ! alex would not be free when this starts."
 
 
 def test_records_with_the_same_name_show_their_ids() -> None:
@@ -589,5 +605,103 @@ def test_records_with_the_same_name_show_their_ids() -> None:
     file = load(document)
     words = report.as_text(file, compiler.check(file)).splitlines()
     assert "  9:00 am to 9:30 am: call, Alex (alex-a) and Alex (alex-b)" in words
-    assert "  Alex (alex-b) would still be busy for 30 min when nap starts." in words
+    assert "    ! Alex (alex-b) would still be busy for 30 min when this starts." in words
     assert "  lock-nap: Alex (alex-b) takes part in nap" in words
+
+
+def test_a_warning_names_only_the_persons_in_trouble_on_a_shared_line() -> None:
+    """Alex takes a WAY, rides back and takes it again with Sam. Their first stop can run long.
+
+    Sam takes the WAY once. Sam's warning is under the line Sam shares with Alex, and it says
+    nothing about a second time.
+    """
+    file = trip(
+        ["alex", "sam", "jo"],
+        ["a", "b"],
+        [stays("first", "a"), moves("back", "b", "a"), stays("last", "b")],
+        [
+            starts_at("first", 8),
+            lasts_between("first", "PT1H", "PT1H1M"),
+            starts_at("back", 9),
+            lasts("back", "PT0S"),
+            cutoff("back", "PT0S"),
+            starts_at("last", 9),
+            lasts("last", "PT1H"),
+            cutoff("last", "PT0S"),
+            takes("ab", "PT0S"),
+        ],
+        [lock("first", "alex", "sam"), lock("back", "alex"), lock("last", "alex", "sam", "jo")],
+        [way("ab", "a", "b")],
+    )
+    assert report.as_text(file, compiler.check(file)).splitlines()[3:10] == [
+        "  8:00 am to 9:00 am: first, alex and sam",
+        "  9:00 am to 9:00 am: ab, alex",
+        "    ! alex would still be busy for 1 min when this starts.",
+        "  9:00 am to 9:00 am: back, alex",
+        "  9:00 am to 9:00 am: ab, alex and sam",
+        "    ! sam would still be busy for 1 min when this starts.",
+        "  9:00 am to 10:00 am: last, alex, sam and jo",
+    ]
+
+
+def test_no_two_records_are_shown_by_the_same_name() -> None:
+    """Two travelers are called Alex. A third is called "Alex (b)", as the second is shown."""
+    document = {
+        "persons": [
+            {"id": "a", "name": "Alex"},
+            {"id": "b", "name": "Alex"},
+            {"id": "c", "name": "Alex (b)"},
+        ],
+        "places": [{"id": "hotel", "name": "the hotel"}],
+        "options": [stays("call", "hotel")],
+        "ways": [],
+        "facts": [starts_at("call", 9), lasts("call", "PT30M")],
+        "decisions": [lock("call", "a", "b", "c")],
+    }
+    file = load(document)
+    words = report.as_text(file, compiler.check(file)).splitlines()
+    assert words[3] == "  9:00 am to 9:30 am: call, Alex (a), Alex (b) and Alex (b) (c)"
+
+
+def test_a_warning_falls_under_the_day_it_is_about() -> None:
+    """Alex takes the same walk at 9:00 am on Saturday and on Sunday. Only Sunday's is at risk."""
+
+    def on(day: int, hour: int, minute: int = 0) -> str:
+        return f"2027-05-{day:02d}T{hour:02d}:{minute:02d}:00-05:00[America/Chicago]"
+
+    document = {
+        "persons": [{"id": "alex", "name": "Alex"}],
+        "places": [{"id": "hotel", "name": "the hotel"}, {"id": "pier", "name": "the pier"}],
+        "options": [
+            stays("coffee", "hotel"),
+            stays("swim", "pier"),
+            moves("shuttle", "pier", "hotel"),
+            stays("sail", "pier"),
+        ],
+        "ways": [way("walk", "hotel", "pier")],
+        "facts": [
+            {"id": "coffee-time", "option": "coffee", "starts_at": on(15, 8)},
+            lasts("coffee", "PT1H"),
+            {"id": "swim-time", "option": "swim", "starts_at": on(15, 10)},
+            lasts("swim", "PT0S"),
+            cutoff("swim", "PT0S"),
+            {"id": "shuttle-time", "option": "shuttle", "starts_at": on(16, 8)},
+            lasts_between("shuttle", "PT1H", "PT1H1M"),
+            cutoff("shuttle", "PT0S"),
+            {"id": "sail-time", "option": "sail", "starts_at": on(16, 9, 20)},
+            lasts("sail", "PT1H"),
+            cutoff("sail", "PT0S"),
+            takes("walk", "PT20M"),
+        ],
+        "decisions": [lock(name, "alex") for name in ("coffee", "swim", "shuttle", "sail")],
+    }
+    file = load(document)
+    words = report.as_text(file, compiler.check(file)).splitlines()
+    saturday, sunday = (
+        words.index("Saturday 15 May 2027 (times in America/Chicago)"),
+        words.index("Sunday 16 May 2027 (times in America/Chicago)"),
+    )
+    marks = [number for number, line in enumerate(words) if line.startswith("    ! ")]
+    assert len(marks) == 1
+    assert saturday < sunday < marks[0]
+    assert words[marks[0] - 1] == "  9:00 am to 9:20 am: walk, Alex"

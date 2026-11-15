@@ -4,11 +4,11 @@ Saturday 15 May 2027 (times in America/Chicago)
   10:00 am to 11:30 am: Skydeck visit, Alex and Sam
   10:30 am to 11:30 am: Gallery talk, Jo
   11:30 am to 11:50 am: the walk between Willis Tower and Millennium Park, Alex and Sam
+    ! Alex and Sam would still be busy for 30 min when this starts.
   11:30 am to 11:35 am: the walk between the Art Institute and Millennium Park, Jo
   12:15 pm to 1:15 pm: Lunch in the park, Alex, Sam and Jo
 
-WARNING: no plan is sure to hold if the uncertain parts take their longest. In this plan:
-  Alex and Sam would still be busy for 30 min at 11:30 am, the time to take the walk between Willis Tower and Millennium Park.
+WARNING: no plan is sure to hold if the uncertain parts take their longest. Each line marked "!" says what would go wrong at the step above it.
 
 The plan relies on these FACTs and DECISIONs:
   skydeck-time: Skydeck visit starts at 10:00 am on Saturday 15 May 2027
