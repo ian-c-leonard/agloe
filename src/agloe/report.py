@@ -5,6 +5,9 @@ the plan with its times, or the FACTs and DECISIONs that clash, or what the FILE
 say for the TRIP to work. Times are shown on the clocks of the first time zone the FILE names,
 and the words name that zone. Where those clocks change during the times shown, each time also
 gives its offset from UTC.
+
+What a plan would break at the longest durations is printed under the line of the plan it is
+about. So the words never have to describe which step they mean.
 """
 
 from collections import Counter
@@ -30,7 +33,6 @@ from agloe.file import (
 )
 from agloe.reference import Broken, Constraint, Itinerary, Step
 
-_TIMES = ["first", "second", "third", "fourth", "fifth"]
 _DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 _MONTHS = [
     "January",
@@ -206,8 +208,9 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
         if report.robust
         else "FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold."
     ]
+    marks, elsewhere = _marks(file, report)
     day = None
-    for step in together(report.itinerary):
+    for number, (step, _) in enumerate(_lines(report.itinerary)):
         if clock.day(step.start) != day:
             day = clock.day(step.start)
             lines += ["", f"{clock.day_name(step.start)} (times in {file.zone})"]
@@ -215,6 +218,7 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
         who = _people(file, step.persons)
         what = _name(file, step.option or step.way)
         lines.append(f"  {clock.time(step.start)} to {end}: {what}, {who}")
+        lines += [f"    ! {mark}" for mark in marks.get(number, [])]
     if not report.itinerary:
         lines += ["", "Nobody has to do anything."]
     relied_on = [fact for fact in file.facts if fact.id in report.relies_on]
@@ -222,9 +226,9 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
         lines += [
             "",
             "WARNING: no plan is sure to hold if the uncertain parts take their longest."
-            " In this plan:",
+            ' Each line marked "!" says what would go wrong at the step above it.',
         ]
-        lines += [f"  {_broken(file, clock, report, found)}" for found in _on_their_lines(report)]
+        lines += [f"  {mark}" for mark in elsewhere]
     elif any(isinstance(fact, Duration) and fact.contingent for fact in relied_on):
         lines += [
             "",
@@ -262,78 +266,46 @@ def _lines(itinerary: Itinerary) -> list[tuple[Step, list[int]]]:
     return lines
 
 
-def _on_their_lines(report: Report) -> list[Broken]:
-    """What the plan would break, with PERSONs who share a line of the plan named together."""
-    line_of = {
-        position: number
-        for number, (_, positions) in enumerate(_lines(report.itinerary))
-        for position in positions
-    }
-    shown: list[Broken] = []
-    places: dict[tuple[Constraint, int | None, int], int] = {}
-    for found in report.at_worst:
-        if found.step is None:
-            shown.append(found)
-            continue
-        key = (found.constraint, found.late, line_of[found.step])
-        if key in places:
-            first = shown[places[key]]
-            shown[places[key]] = replace(first, persons=(*first.persons, *found.persons))
-        else:
-            places[key] = len(shown)
-            shown.append(found)
-    return shown
+def _marks(file: File, report: Report) -> tuple[dict[int, list[str]], list[str]]:
+    """What the plan would break at the longest durations, in words, for each line of the plan.
 
-
-def _which_time(itinerary: Itinerary, position: int) -> str:
-    """Words that tell one line of the plan from others with the same WAY, time and PERSON.
-
-    Empty when no other line could be meant. Otherwise " for the second time", and so on.
+    A line is known by its number, counting from zero. PERSONs who share a line and are in the
+    same trouble are named together. The second list holds anything that belongs to no line,
+    with the OPTION named.
     """
-    lines = _lines(itinerary)
-    mine = next(step for step, positions in lines if position in positions)
-    alike = [
-        positions
-        for step, positions in lines
-        if step.option is None
-        and (step.way, step.start) == (mine.way, mine.start)
-        and (
-            step.way is not None
-            or (step.origin, step.destination) == (mine.origin, mine.destination)
-        )
-        and set(step.persons) & set(mine.persons)
-    ]
-    if len(alike) < 2:
-        return ""
-    number = next(count for count, positions in enumerate(alike) if position in positions)
-    which = _TIMES[number] if number < len(_TIMES) else f"{number + 1}th"
-    return f" for the {which} time"
-
-
-def _broken(file: File, clock: _Clock, report: Report, found: Broken) -> str:
-    """One CONSTRAINT a plan would break at the longest durations, in words."""
-    who = _people(file, found.persons)
-    rule = f'the rule "{found.constraint.value}"'
-    if found.step is not None:
-        step = report.itinerary[found.step]
-        places = _names(file.places)
-        name = f"another WAY from {places[step.origin]} to {places[step.destination]}"
-        name = name if step.way is None else _name(file, step.way)
-        name += _which_time(report.itinerary, found.step)
-        when = f"at {clock.time(step.start)}, the time to take {name}"
-        if found.constraint is Constraint.PLACE and found.late is not None:
-            return f"{who} would still be busy for {_span(found.late)} {when}."
-        if found.constraint is Constraint.PLACE:
-            return f"{who} would not be free {when}."
-        return f"{name} at {clock.time(step.start)} would break {rule} for {who}."
-    name = _name(file, found.option)
-    if found.constraint is Constraint.ARRIVAL and found.late is not None:
-        return f"{who} would be {_span(found.late)} too late for {name}."
-    if found.constraint is Constraint.PLACE and found.late is not None:
-        return f"{who} would still be busy for {_span(found.late)} when {name} starts."
-    if found.constraint is Constraint.PLACE:
-        return f"{who} would not be free in time for {name}."
-    return f"{name} would break {rule} for {who}."
+    lines = _lines(report.itinerary)
+    line_of = {
+        position: number for number, (_, positions) in enumerate(lines) for position in positions
+    }
+    line_of_option = {
+        step.option: number for number, (step, _) in enumerate(lines) if step.option is not None
+    }
+    together: dict[tuple[int | None, str | None, Constraint, int | None], list[str]] = {}
+    for found in report.at_worst:
+        if found.step is not None:
+            number = line_of.get(found.step)
+        else:
+            number = line_of_option.get(found.option or "")
+        named = None if number is not None else found.option
+        together.setdefault((number, named, found.constraint, found.late), []).extend(found.persons)
+    marks: dict[int, list[str]] = {}
+    elsewhere: list[str] = []
+    for (number, named, constraint, late), persons in together.items():
+        who = _people(file, tuple(persons))
+        rule = f'the rule "{constraint.value}"'
+        if number is None:
+            elsewhere.append(f"{_name(file, named)} would break {rule} for {who}.")
+        elif constraint is Constraint.ARRIVAL and late is not None:
+            marks.setdefault(number, []).append(f"{who} would be {_span(late)} too late for this.")
+        elif constraint is Constraint.PLACE and late is not None:
+            marks.setdefault(number, []).append(
+                f"{who} would still be busy for {_span(late)} when this starts."
+            )
+        elif constraint is Constraint.PLACE:
+            marks.setdefault(number, []).append(f"{who} would not be free when this starts.")
+        else:
+            marks.setdefault(number, []).append(f"This would break {rule} for {who}.")
+    return marks, elsewhere
 
 
 def _wanted(file: File, needed: Missing, alone: bool) -> str:
@@ -408,12 +380,19 @@ def _starts_at(file: File, option: str | None) -> str:
 
 
 def _names(records: Sequence[Person | Place | Option | Way]) -> dict[str, str]:
-    """The name to show for each record. Where two have the same name, each shows its id too."""
+    """The name to show for each record, so that no two records show the same.
+
+    A record whose name another record has shows its id too. If two would still show the same,
+    every record shows its id: no two ids are the same.
+    """
     shared = Counter(record.name for record in records)
-    return {
+    shown = {
         record.id: record.name if shared[record.name] == 1 else f"{record.name} ({record.id})"
         for record in records
     }
+    if len(set(shown.values())) < len(shown):
+        return {record.id: f"{record.name} ({record.id})" for record in records}
+    return shown
 
 
 def _name(file: File, id: str | None) -> str:

@@ -7,12 +7,12 @@ Friday 14 May 2027 (times in America/Chicago)
   12:00 pm to 12:05 pm: the walk between the Art Institute and Millennium Park, Alex
   12:30 pm to 1:30 pm: Lunch in the park, Alex
   1:30 pm to 1:50 pm: the walk between Millennium Park and the Riverwalk dock, Alex
+    ! Alex would still be busy for 30 min when this starts.
   2:15 pm to 3:45 pm: Architecture boat tour, Alex
   3:45 pm to 4:00 pm: the walk between the Riverwalk dock and River North, Alex
   7:00 pm to 8:30 pm: Dinner, Alex
 
-WARNING: no plan is sure to hold if the uncertain parts take their longest. In this plan:
-  Alex would still be busy for 30 min at 1:30 pm, the time to take the walk between Millennium Park and the Riverwalk dock.
+WARNING: no plan is sure to hold if the uncertain parts take their longest. Each line marked "!" says what would go wrong at the step above it.
 
 The plan relies on these FACTs and DECISIONs:
   breakfast-time: Breakfast starts at 8:00 am on Friday 14 May 2027
