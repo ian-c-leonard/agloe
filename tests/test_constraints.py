@@ -194,6 +194,27 @@ def test_a_complete_set_covers_only_ways_that_reach_the_second_place() -> None:
     assert broken(file, best_case(file), alone) == [Broken(Constraint.LOCK, "flight", ("sam",))]
 
 
+def test_many_options_at_one_instant_are_checked_at_once() -> None:
+    """Ten PERSONs each do their own thing at 9:00, and none of it takes any time."""
+    people = [f"person-{number}" for number in range(10)]
+    file = trip(
+        people,
+        ["hall"],
+        [stays(f"task-{number}", "hall") for number in range(10)],
+        [
+            fact
+            for number in range(10)
+            for fact in (starts_at(f"task-{number}", 9), lasts(f"task-{number}", "PT0S"))
+        ],
+        [lock(f"task-{number}", people[number]) for number in range(10)],
+    )
+    everyone = tuple(
+        Step(f"task-{number}", "hall", "hall", (people[number],), seconds(9), seconds(9))
+        for number in range(10)
+    )
+    assert broken(file, worst_case(file), everyone) == []
+
+
 def test_what_nobody_needs_can_be_taken_out() -> None:
     document = flight_home()
     document["options"].append(stays("coffee", "art-institute"))

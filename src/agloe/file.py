@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from agloe import file_types as shape
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+_DEEPEST = 16  # a FILE that follows the format nests far less deeply than this
 _LENGTH = re.compile(r"PT(?:([0-9]{1,9})H)?(?:([0-9]{1,9})M)?(?:([0-9]{1,9})S)?")
 
 
@@ -174,6 +175,8 @@ def read(path: Path) -> File:
         raise FileError([f"not readable as JSON: {problem}"]) from problem
     except RecursionError as problem:
         raise FileError(["not readable as JSON: it is nested too deeply"]) from problem
+    if _too_deep(written):
+        raise FileError(["not readable as JSON: it is nested too deeply"])
     repeats: list[str] = []
     document = _stated_once(written, "", repeats)
     if repeats:
@@ -190,21 +193,48 @@ def _stated_once(value: object, where: str, problems: list[str]) -> object:
     if isinstance(value, _Pairs):
         keys = [key for key, _ in value]
         for key in sorted({key for key in keys if keys.count(key) > 1}):
-            problems.append(f"{where or 'the FILE'}: states {key} more than once")
-        return {
-            key: _stated_once(inside, f"{where}/{key}".lstrip("/"), problems)
-            for key, inside in value
-        }
+            problems.append(f"{where or 'the FILE'}: states {_shown(key)} more than once")
+        return {key: _stated_once(inside, _inside(where, key), problems) for key, inside in value}
     if isinstance(value, list):
         return [
-            _stated_once(inside, f"{where}/{index}".lstrip("/"), problems)
+            _stated_once(inside, _inside(where, index), problems)
             for index, inside in enumerate(cast("list[object]", value))
         ]
     return value
 
 
+def _too_deep(value: object) -> bool:
+    """Whether lists and objects nest more deeply than any FILE that follows the format."""
+    level: list[object] = [value]
+    for _ in range(_DEEPEST):
+        inner: list[object] = []
+        for each in level:
+            if isinstance(each, _Pairs):
+                inner += [inside for _, inside in each]
+            elif isinstance(each, dict):
+                inner += list(cast("dict[str, object]", each).values())
+            elif isinstance(each, list):
+                inner += cast("list[object]", each)
+        if not inner:
+            return False
+        level = inner
+    return True
+
+
+def _shown(key: str) -> str:
+    """A key as it can always be printed: anything but plain letters and marks is escaped."""
+    return ascii(key)[1:-1]
+
+
+def _inside(where: str, key: str | int) -> str:
+    """The path to one member of a list or an object."""
+    return f"{where}/{_shown(str(key))}".lstrip("/")
+
+
 def load(document: object) -> File:
     """Turn a parsed JSON document into a FILE. Raises FileError if it breaks the format."""
+    if _too_deep(document):
+        raise FileError(["the FILE: it is nested too deeply"])
     schema = json.loads(resources.files("agloe").joinpath("schema/file.schema.json").read_text())
     validator = cast("_Validator", Draft202012Validator(schema))
     problems = sorted(_describe(error) for error in validator.iter_errors(document))
@@ -330,16 +360,16 @@ def _unwritable_characters(value: object, where: str) -> list[str]:
     found: list[str] = []
     if isinstance(value, dict):
         for key, inside in cast("dict[str, object]", value).items():
-            found += _unwritable_characters(inside, f"{where}/{key}".lstrip("/"))
+            found += _unwritable_characters(inside, _inside(where, key))
     elif isinstance(value, list):
         for index, inside in enumerate(cast("list[object]", value)):
-            found += _unwritable_characters(inside, f"{where}/{index}".lstrip("/"))
+            found += _unwritable_characters(inside, _inside(where, index))
     return found
 
 
 def _describe(error: ValidationError) -> str:
     """One schema problem as 'where: what'. A record that fits no shape gets its closest miss."""
-    where = "/".join(str(part) for part in error.absolute_path) or "the FILE"
+    where = "/".join(_shown(str(part)) for part in error.absolute_path) or "the FILE"
     if error.context:
         closest = max(error.context, key=lambda miss: len(miss.absolute_path))
         return f"{where}: fits no known shape; the closest miss: {closest.message}"

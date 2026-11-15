@@ -85,9 +85,9 @@ class Terms:
 class World:
     """One way the unknown FACTs turn out, or the worst of all the ways at once.
 
-    ``ways`` holds the pairs of PLACEs that an unlisted OPTION joins directly, and None means
-    every pair. Every unlisted OPTION takes ``way_takes`` seconds, starts at any time and has no
-    access cutoff.
+    ``ways`` holds the pairs of PLACEs that unlisted OPTIONs join directly, and None means every
+    pair. A pair has as many unlisted OPTIONs as the PERSONs need. Each takes ``way_takes``
+    seconds, starts at any time and has no access cutoff.
     """
 
     terms: Mapping[str, Terms]
@@ -99,7 +99,8 @@ class World:
 class Unknown:
     """A FACT the FILE does not state.
 
-    ``what`` is "start", "duration" or "cutoff" for an OPTION, or "another way" between two PLACEs.
+    ``what`` is "start", "duration" or "cutoff" for an OPTION, or "other ways" from one PLACE to
+    another: unlisted OPTIONs that go straight there, as many as the PERSONs need.
     """
 
     what: str
@@ -150,7 +151,7 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
     for origin in file.places:
         for destination in file.places:
             if origin != destination:
-                out.append(Unknown("another way", origin=origin.id, destination=destination.id))
+                out.append(Unknown("other ways", origin=origin.id, destination=destination.id))
     return tuple(out)
 
 
@@ -212,9 +213,9 @@ def _world(
         ways = frozenset(
             (u.origin, u.destination)
             for u in kind
-            if u.what == "another way" and u.origin is not None and u.destination is not None
+            if u.what == "other ways" and u.origin is not None and u.destination is not None
         )
-    takes = pinned[1] if pinned is not None and pinned[0].what == "another way" else 0
+    takes = pinned[1] if pinned is not None and pinned[0].what == "other ways" else 0
     return World(terms, ways, takes)
 
 
@@ -371,19 +372,41 @@ def _in_each_order(itinerary: Itinerary) -> Iterator[list[Step]]:
     """The steps of an ITINERARY, in each order that their times allow.
 
     Steps that take no time and share an instant can happen in any order. The order is one order
-    for the whole ITINERARY, so every PERSON sees those steps happen in the same order.
+    for the whole ITINERARY, so every PERSON sees those steps happen in the same order. Only the
+    order among steps that share a PERSON, directly or through other steps, can matter, so only
+    those are tried in every order.
     """
 
     def moment(step: Step) -> tuple[int, bool, int]:
         return (step.start, step.end is None, step.end or 0)
 
-    together = [list(steps) for _, steps in groupby(sorted(itinerary, key=moment), key=moment)]
-    orders = [
-        list(permutations(steps)) if steps[0].end == steps[0].start else [tuple(steps)]
-        for steps in together
-    ]
-    for order in product(*orders):
-        yield [step for steps in order for step in steps]
+    together: list[list[Step]] = []
+    for _, steps in groupby(sorted(itinerary, key=moment), key=moment):
+        same = list(steps)
+        together += _sharing_persons(same) if same[0].end == same[0].start else [same]
+
+    def from_group(number: int) -> Iterator[list[Step]]:
+        if number == len(together):
+            yield []
+            return
+        for first in permutations(together[number]):
+            for rest in from_group(number + 1):
+                yield [*first, *rest]
+
+    yield from from_group(0)
+
+
+def _sharing_persons(steps: list[Step]) -> list[list[Step]]:
+    """These steps in groups: two steps are in one group when PERSONs link them."""
+    groups: list[list[Step]] = []
+    for step in steps:
+        linked = [
+            group for group in groups if any(set(step.persons) & set(o.persons) for o in group)
+        ]
+        for group in linked:
+            groups.remove(group)
+        groups.append([member for group in linked for member in group] + [step])
+    return groups
 
 
 def _places(path: list[Step]) -> _Found:
@@ -700,60 +723,68 @@ def _times(
 ) -> list[int] | None:
     """Start times that keep every gap and every fixed start, or None when there are none.
 
-    Each start is as early as the gaps allow. A start with nothing before it is as late as they
-    allow. With no fixed start to measure from, the times count from zero.
+    A start that comes after one already timed is as early as the gaps allow. Then a start that
+    comes before one already timed is as late as they allow. Those two steps repeat until they
+    time nothing more. What is left is tied to no fixed start, and counts from zero.
     """
-    early: list[int | None] = [fixed.get(node) for node in range(count)]
+    times: list[int | None] = [fixed.get(node) for node in range(count)]
     for _ in range(count + 1):
         moved = False
         for before, after, gap in gaps:
-            base, current = early[before], early[after]
+            base, current = times[before], times[after]
             if base is not None and (current is None or base + gap > current):
                 if after in fixed:
                     return None  # something before a fixed start runs past it
-                early[after] = base + gap
+                times[after] = base + gap
                 moved = True
         if not moved:
             break
     else:
         return None  # the order goes round in a circle
 
-    late = list(early)
-    for _ in range(count + 1):
-        moved = False
-        for before, after, gap in gaps:
-            limit, current = late[after], late[before]
-            if early[before] is not None or limit is None:
-                continue
-            if current is None or limit - gap < current:
-                late[before] = limit - gap
-                moved = True
-        if not moved:
+    while True:
+        untimed = {node for node in range(count) if times[node] is None}
+        if not untimed:
             break
-    else:
-        return None
+        if not _settle(gaps, times, untimed, late=True):
+            return None
+        still = {node for node in untimed if times[node] is None}
+        if not _settle(gaps, times, still, late=False):
+            return None
+        if len(still) == len(untimed) and all(times[node] is None for node in still):
+            for node in still:
+                times[node] = 0
+            if not _settle(gaps, times, still, late=False):
+                return None
+    return [moment for moment in times if moment is not None]
 
-    # What is left has nothing to hurry it. It follows whatever comes before it, and counts from
-    # zero if nothing with a time does.
-    starts = list(late)
-    for _ in range(count * (count + 1) + 1):
+
+def _settle(
+    gaps: list[tuple[int, int, int]], times: list[int | None], free: set[int], *, late: bool
+) -> bool:
+    """Time the starts in ``free`` from those already timed. False if the gaps go round in a circle.
+
+    With ``late``, a start takes the latest time that the timed starts after it allow. Otherwise
+    it takes the earliest time that the timed starts before it allow.
+    """
+    for _ in range(len(times) + 1):
         moved = False
         for before, after, gap in gaps:
-            base, current = starts[before], starts[after]
-            if (
-                late[after] is None
-                and base is not None
-                and (current is None or base + gap > current)
-            ):
-                starts[after] = base + gap
-                moved = True
-        if moved:
-            continue
-        unset = [node for node in range(count) if starts[node] is None]
-        if not unset:
-            return [moment for moment in starts if moment is not None]
-        starts[unset[0]] = 0
-    return None
+            if late:
+                limit, current = times[after], times[before]
+                sooner = limit is not None and (current is None or limit - gap < current)
+                if before in free and limit is not None and sooner:
+                    times[before] = limit - gap
+                    moved = True
+            else:
+                base, current = times[before], times[after]
+                later = base is not None and (current is None or base + gap > current)
+                if after in free and base is not None and later:
+                    times[after] = base + gap
+                    moved = True
+        if not moved:
+            return True
+    return False
 
 
 type _StepOrder = tuple[int, int, tuple[int, ...], int, int, int]
@@ -834,10 +865,13 @@ def _missing(file: File) -> tuple[tuple[Missing, ...], ...]:
 
 
 def _limit(file: File, unknown: Unknown) -> int | None:
-    """The most seconds this one unknown can be for the TRIP to work. None for an unknown start."""
+    """The most seconds this one unknown can be for the TRIP to work.
+
+    None for an unknown start, and None when any length of time would do.
+    """
     if unknown.what == "start":
         return None
-    kind = frozenset({unknown}) if unknown.what == "another way" else frozenset[Unknown]()
+    kind = frozenset({unknown}) if unknown.what == "other ways" else frozenset[Unknown]()
 
     def works(seconds: int) -> bool:
         return bool(itineraries(file, _world(file, kind, pinned=(unknown, seconds))))

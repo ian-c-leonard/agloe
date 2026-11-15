@@ -34,9 +34,9 @@
       "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
     },
     "name": {
-      "description": "Text for people to read. It holds at least one character that is not a space.",
+      "description": "Text for people to read. It holds at least one character that is not a space. The pattern lists the space characters one by one, so that every regular expression engine agrees.",
       "type": "string",
-      "pattern": "\\S"
+      "pattern": "[^\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]"
     },
     "time": {
       "description": "A date and time to the second, with its offset from UTC and the name of its time zone in brackets. This is a narrow form of RFC 9557.",

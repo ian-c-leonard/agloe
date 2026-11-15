@@ -108,7 +108,7 @@ def test_a_length_of_time_is_not_endless() -> None:
 
 def test_a_name_can_be_read_and_written() -> None:
     document = flight_home()
-    document["persons"][0]["name"] = "   "
+    document["persons"][0]["name"] = " \u00a0\ufeff "
     document["persons"][1]["name"] = "Sam\u2028Lee"
     document["places"][1]["name"] = "O'Hare\u0085"
     document["places"][0]["name"] = "Art \ud800 Institute"
@@ -215,11 +215,36 @@ def test_a_repeated_key_is_reported_where_it_is(tmp_path: Path) -> None:
     )
 
 
-def test_a_file_on_disk_is_not_nested_without_end(tmp_path: Path) -> None:
+def test_a_file_is_not_nested_deeply(tmp_path: Path) -> None:
     path = tmp_path / "trip.json"
-    path.write_text("[" * 200_000)
-    with pytest.raises(FileError, match="nested too deeply"):
-        read(path)
+    for depth in (20, 2_000, 200_000):
+        path.write_text("[" * depth + "]" * depth)
+        with pytest.raises(FileError, match="nested too deeply"):
+            read(path)
+    document = flight_home()
+    nested: list[object] = []
+    for _ in range(2_000):
+        nested = [nested]
+    document["notes"] = nested
+    assert problems(document) == "the FILE: it is nested too deeply"
+
+
+def test_every_problem_can_be_written_out(tmp_path: Path) -> None:
+    path = tmp_path / "trip.json"
+    for text in (
+        '{"\\ud800": 1, "\\ud800": 2}',
+        '{"\\ud800": {"x": 1, "x": 2}}',
+        '{"\\n": 1, "\\n": 2}',
+        '{"persons": [], "places": [], "options": [], "facts": [], "decisions": [],'
+        ' "\\ud800": {"caf\\u00e9": "\\u0007"}}',
+    ):
+        path.write_text(text)
+        with pytest.raises(FileError) as refused:
+            read(path)
+        for problem in refused.value.problems:
+            assert problem.encode("utf-8")
+            assert "\n" not in problem
+    assert refused.value.problems[-1] == "\\ud800/caf\\xe9: '\\x07' holds a control character"
 
 
 def test_an_empty_file_is_a_file() -> None:

@@ -57,7 +57,7 @@ def test_an_unrecorded_duration_is_not_a_choice() -> None:
     facts = [*MORNING_FACTS, cutoff("meeting", "PT0S")]
     report = check(trip(["alex"], ["hotel", "office"], MORNING, facts, MORNING_LOCKS))
     assert report.answer is Answer.UNDETERMINED
-    another = Unknown("another way", origin="hotel", destination="office")
+    another = Unknown("other ways", origin="hotel", destination="office")
     assert report.missing == (
         (Missing(Unknown("duration", "walk"), at_most=3600),),
         (Missing(another, at_most=3600),),
@@ -67,7 +67,7 @@ def test_an_unrecorded_duration_is_not_a_choice() -> None:
 def test_two_unknown_facts_can_both_matter() -> None:
     report = check(trip(["alex"], ["hotel", "office"], MORNING, MORNING_FACTS, MORNING_LOCKS))
     assert report.answer is Answer.UNDETERMINED
-    another = Unknown("another way", origin="hotel", destination="office")
+    another = Unknown("other ways", origin="hotel", destination="office")
     assert report.missing == (
         (
             Missing(Unknown("duration", "walk"), at_most=None),
@@ -100,6 +100,90 @@ def test_each_unknown_fact_that_would_be_enough_is_named() -> None:
         (Missing(Unknown("duration", "cab"), at_most=3600),),
         (Missing(Unknown("duration", "bus"), at_most=3600),),
     )
+
+
+def test_a_limit_can_be_no_time_at_all() -> None:
+    """Breakfast ends as the meeting starts, so the walk must take no time."""
+    facts = [
+        lasts("breakfast", "PT2H") if fact["id"] == "breakfast-length" else fact
+        for fact in MORNING_FACTS
+    ]
+    file = trip(
+        ["alex"],
+        ["hotel", "office"],
+        MORNING,
+        [*facts, cutoff("meeting", "PT0S"), complete("hotel", "office")],
+        MORNING_LOCKS,
+    )
+    report = check(file)
+    assert report.missing == ((Missing(Unknown("duration", "walk"), at_most=0),),)
+
+
+def test_a_limit_is_left_out_when_any_length_of_time_would_do() -> None:
+    """The event can start at any time, so it can wait out any access cutoff.
+
+    Nobody recorded the cutoff, though, so no start time can be fixed now. A way back to a would
+    be enough too: Alex could then go to the event first.
+    """
+    file = trip(
+        ["alex"],
+        ["a", "b"],
+        [moves("ride", "a", "b"), stays("event", "b")],
+        [
+            starts_at("ride", 9),
+            lasts("ride", "PT0S"),
+            cutoff("ride", "PT0S"),
+            any_time("event"),
+            lasts("event", "PT1H"),
+        ],
+        [lock("ride", "alex"), lock("event", "alex")],
+    )
+    report = check(file)
+    assert report.answer is Answer.UNDETERMINED
+    assert report.missing == (
+        (Missing(Unknown("cutoff", "event"), at_most=None),),
+        (Missing(Unknown("other ways", origin="b", destination="a"), at_most=None),),
+    )
+
+
+def test_other_ways_are_as_many_as_the_persons_need() -> None:
+    """Alex must go from a to b twice, with a listed ride back in between.
+
+    The evidence names other ways from a to b. One more listed OPTION is not enough, because an
+    OPTION happens once. Two are.
+    """
+
+    def with_ways(count: int) -> File:
+        ways = [moves(f"way-{number}", "a", "b") for number in range(count)]
+        return trip(
+            ["alex"],
+            ["a", "b"],
+            [stays("first", "a"), moves("back", "b", "a"), stays("last", "b"), *ways],
+            [
+                starts_at("first", 9),
+                lasts("first", "PT0S"),
+                starts_at("back", 10),
+                lasts("back", "PT0S"),
+                cutoff("back", "PT0S"),
+                starts_at("last", 11),
+                cutoff("last", "PT0S"),
+                *(
+                    fact
+                    for way in ways
+                    for fact in (
+                        any_time(way["id"]),
+                        lasts(way["id"], "PT0S"),
+                        cutoff(way["id"], "PT0S"),
+                    )
+                ),
+            ],
+            [lock("first", "alex"), lock("back", "alex"), lock("last", "alex")],
+        )
+
+    others = Unknown("other ways", origin="a", destination="b")
+    assert check(with_ways(0)).missing == ((Missing(others, at_most=3600),),)
+    assert check(with_ways(1)).missing == ((Missing(others, at_most=3600),),)
+    assert check(with_ways(2)).answer is Answer.FEASIBLE
 
 
 def test_an_unrecorded_start_is_not_a_choice() -> None:
@@ -283,7 +367,7 @@ def test_a_complete_set_says_nothing_after_its_span() -> None:
     document["facts"].append({"id": "ways-to-ohare", "complete": ways})
     report = check(load(document))
     assert report.answer is Answer.UNDETERMINED
-    another = Unknown("another way", origin="art-institute", destination="ohare")
+    another = Unknown("other ways", origin="art-institute", destination="ohare")
     assert report.missing == ((Missing(another, at_most=2 * 3600 + 14 * 60 + 59),),)
 
 
@@ -306,9 +390,7 @@ def test_a_complete_set_says_nothing_before_its_span() -> None:
     )
     report = check(file)
     assert report.answer is Answer.UNDETERMINED
-    assert report.missing == (
-        (Missing(Unknown("another way", origin="a", destination="b"), None),),
-    )
+    assert report.missing == ((Missing(Unknown("other ways", origin="a", destination="b"), None),),)
 
 
 def test_a_complete_set_that_covers_every_leaving_time_makes_it_infeasible() -> None:
@@ -525,7 +607,7 @@ def test_a_way_through_another_place_is_not_a_direct_way() -> None:
     assert report.answer is Answer.UNDETERMINED
 
     def way(origin: str, destination: str) -> Missing:
-        return Missing(Unknown("another way", origin=origin, destination=destination), None)
+        return Missing(Unknown("other ways", origin=origin, destination=destination), None)
 
     assert report.missing == (
         (way("a", "c"), way("b", "a")),
@@ -561,6 +643,57 @@ def test_a_free_option_takes_its_time_from_what_comes_before_it() -> None:
         ("ride", -10),
         ("meeting", -10),
         ("nap", -10),
+    ]
+
+
+def test_a_free_option_before_a_timed_one_starts_as_late_as_it_can() -> None:
+    """Alex's meeting times the packing, and the packing times Sam's tram and nap.
+
+    Jo stretches on the beach before sharing the nap. The stretch has nothing before it, so it
+    starts as late as the nap allows.
+    """
+    file = trip(
+        ["alex", "sam", "jo"],
+        ["hotel", "office", "beach"],
+        [
+            stays("pack", "hotel"),
+            moves("walk", "hotel", "office"),
+            stays("meeting", "office"),
+            moves("tram", "hotel", "beach"),
+            stays("stretch", "beach"),
+            stays("nap", "beach"),
+        ],
+        [
+            any_time("pack"),
+            lasts("pack", "PT30M"),
+            any_time("walk"),
+            lasts("walk", "PT15M"),
+            starts_at("meeting", 10),
+            lasts("meeting", "PT1H"),
+            cutoff("meeting", "PT0S"),
+            any_time("tram"),
+            lasts("tram", "PT20M"),
+            any_time("stretch"),
+            lasts("stretch", "PT10M"),
+            any_time("nap"),
+            lasts("nap", "PT1H"),
+            cutoff("nap", "PT0S"),
+        ],
+        [
+            lock("pack", "alex", "sam"),
+            lock("meeting", "alex"),
+            lock("stretch", "jo"),
+            lock("nap", "sam", "jo"),
+        ],
+    )
+    report = check(file)
+    assert [(step.option, step.start) for step in report.itinerary] == [
+        ("pack", seconds(9, 15)),
+        ("walk", seconds(9, 45)),
+        ("tram", seconds(9, 45)),
+        ("stretch", seconds(9, 55)),
+        ("meeting", seconds(10)),
+        ("nap", seconds(10, 5)),
     ]
 
 
