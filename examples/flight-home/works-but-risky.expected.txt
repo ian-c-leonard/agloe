@@ -1,0 +1,20 @@
+FEASIBLE, with a WARNING: this trip works, but only if the uncertain parts go well.
+
+Saturday 15 May 2027 (times in America/Chicago)
+  2:00 pm to 3:00 pm: Museum visit, Alex and Sam
+  3:00 pm to 4:00 pm: Blue Line to O'Hare, Alex and Sam
+  5:00 pm to 7:30 pm: Flight home, Alex and Sam
+
+WARNING: no plan holds if every uncertain part takes its longest. Then:
+  Alex and Sam would be 5 min too late for Flight home.
+
+The plan relies on these FACTs and DECISIONs:
+  visit-time: Museum visit starts at 2:00 pm on Saturday 15 May 2027
+  visit-length: Museum visit takes 1 h
+  train-time: Blue Line to O'Hare can start at any time
+  train-length: Blue Line to O'Hare takes between 1 h and 1 h 20 min
+  flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
+  flight-length: Flight home takes 2 h 30 min
+  bag-drop: people must be at O'Hare 45 min before Flight home starts
+  lock-visit: Alex and Sam take part in Museum visit
+  lock-flight: Alex and Sam take part in Flight home

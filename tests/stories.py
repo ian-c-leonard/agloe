@@ -11,9 +11,9 @@ EXAMPLES = Path(__file__).parent.parent / "examples"
 type Document = dict[str, Any]
 
 
-def at(hour: int, minute: int = 0) -> str:
+def at(hour: int, minute: int = 0, day: int = 15) -> str:
     """A time on the day of the stories, in Chicago."""
-    return f"2027-05-15T{hour:02d}:{minute:02d}:00-05:00[America/Chicago]"
+    return f"2027-05-{day:02d}T{hour:02d}:{minute:02d}:00-05:00[America/Chicago]"
 
 
 def seconds(hour: int, minute: int = 0) -> int:
