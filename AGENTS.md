@@ -6,7 +6,7 @@ This file is for the AI agents and people who build Agloe. Read it before changi
 
 - [docs/VISION.md](docs/VISION.md): what Agloe is and what it must be.
 - [spec/foundation.md](spec/foundation.md) and [spec/vocabulary.md](spec/vocabulary.md): what a TRIP means. A term in capitals means exactly what the vocabulary says.
-- [spec/rules.md](spec/rules.md): exactly what the COMPILER checks. The reference checker in `src/agloe/reference.py` applies these rules directly, and it defines the right answer.
+- [spec/rules.md](spec/rules.md): exactly what the COMPILER checks. The reference checker in `src/agloe/reference.py` applies these rules directly, and it defines the right answer. The COMPILER in `src/agloe/compiler.py` finds the same answers with a solver.
 - [docs/PRINCIPLES.md](docs/PRINCIPLES.md): how Agloe is built. Follow all eight principles.
 - [docs/decisions/](docs/decisions/): why things are the way they are. When a decision changes, its record is rewritten to the new decision.
 - [docs/ROADMAP.md](docs/ROADMAP.md): what each release contains.
