@@ -6,7 +6,7 @@ AI agents are starting to plan trips. They need three things: a lasting place to
 
 ## Status
 
-Agloe is being built in public, and there is nothing to install yet.
+Agloe is being built in public, and nothing is published to install yet. From a copy of this repository, `uv run agloe check examples/flight-home/works.json` checks one of the example trips.
 
 - **0.1, the COMPILER:** says whether a trip is FEASIBLE, INFEASIBLE or UNDETERMINED, and explains every finding with its evidence.
 - **0.2, the OPTIMIZER:** finds the best version of a trip for the priorities people set.

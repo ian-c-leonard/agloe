@@ -125,6 +125,7 @@ class File:
     options: tuple[Option, ...]
     facts: tuple[Fact, ...]
     locks: tuple[Lock, ...]
+    zone: str = "UTC"  # the time zone of the first time in the FILE; reports show times in it
 
     def option(self, id: str) -> Option:
         return next(option for option in self.options if option.id == id)
@@ -151,6 +152,26 @@ def instant(text: str) -> int:
     """A time as whole seconds since 1970-01-01T00:00:00Z. Raises ValueError if it is not real."""
     moment = datetime.fromisoformat(text[: text.index("[")])
     return (moment - _EPOCH) // timedelta(seconds=1)
+
+
+def written(moment: int, zone: str) -> str:
+    """A time as a FILE writes it: date and time, offset from UTC, and time zone in brackets."""
+    return f"{local(moment, zone).isoformat(timespec='seconds')}[{zone}]"
+
+
+def local(moment: int, zone: str) -> datetime:
+    """A time on the clocks of a time zone, by the time-zone database pinned with Agloe."""
+    return (_EPOCH + timedelta(seconds=moment)).astimezone(_zone(zone))
+
+
+def length_written(seconds: int) -> str:
+    """A length of time as a FILE writes it, such as PT2H30M."""
+    hours, rest = divmod(seconds, 3600)
+    minutes, left = divmod(rest, 60)
+    parts = [
+        f"{amount}{unit}" for amount, unit in ((hours, "H"), (minutes, "M"), (left, "S")) if amount
+    ]
+    return "PT" + ("".join(parts) or "0S")
 
 
 def _zone_problem(text: str) -> str | None:
@@ -291,6 +312,8 @@ def load(document: object) -> File:
             problems.append(f"{where}: {id} is not a {kind} in this FILE")
         return id in ids
 
+    zones: list[str] = []
+
     def when(where: str, text: str) -> int:
         try:
             moment = instant(text)
@@ -300,6 +323,7 @@ def load(document: object) -> File:
         disagreement = _zone_problem(text)
         if disagreement is not None:
             problems.append(f"{where}: {disagreement}")
+        zones.append(text[text.index("[") + 1 : -1])
         return moment
 
     persons = tuple(Person(p["id"], p["name"]) for p in raw["persons"])
@@ -379,7 +403,8 @@ def load(document: object) -> File:
 
     if problems:
         raise FileError(problems)
-    return File(persons, places, tuple(options), tuple(facts), tuple(locks))
+    zone = zones[0] if zones else "UTC"
+    return File(persons, places, tuple(options), tuple(facts), tuple(locks), zone)
 
 
 def _unwritable_characters(value: object, where: str) -> list[str]:
