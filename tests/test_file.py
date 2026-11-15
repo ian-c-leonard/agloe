@@ -102,6 +102,17 @@ def test_a_time_agrees_with_its_time_zone() -> None:
     assert load(document).start("museum-visit") is not None
 
 
+def test_a_time_lies_in_the_years_the_format_can_write() -> None:
+    """One hour ahead of UTC, the first hour of the year 0001 falls before it in UTC."""
+    document = flight_home()
+    document["facts"][0]["starts_at"] = "0001-01-01T00:00:00+01:00[Etc/GMT-1]"
+    assert problems(document) == (
+        "/facts/0: 0001-01-01T00:00:00+01:00[Etc/GMT-1] is outside the years 0001 to 9999 in UTC"
+    )
+    document["facts"][0]["starts_at"] = "0001-01-01T01:00:00+01:00[Etc/GMT-1]"
+    assert load(document).start("museum-visit") is not None
+
+
 def test_a_time_zone_is_one_the_database_knows() -> None:
     for name in ("Made/Up", "America", "..", "America/../UTC"):
         document = flight_home()

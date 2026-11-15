@@ -30,6 +30,10 @@ _DEEPEST = 16  # a FILE that follows the format nests far less deeply than this
 _LENGTH = re.compile(r"PT(?:([0-9]{1,9})H)?(?:([0-9]{1,9})M)?(?:([0-9]{1,9})S)?")
 
 
+class Unwritable(ValueError):
+    """A time outside the years 0001 to 9999, which the format cannot write."""
+
+
 class _Validator(Protocol):
     def iter_errors(self, instance: object) -> Iterable[ValidationError]: ...
 
@@ -178,8 +182,15 @@ def written(moment: int, zone: str) -> str:
 
 
 def local(moment: int, zone: str) -> datetime:
-    """A time on the clocks of a time zone, by the time-zone database pinned with Agloe."""
-    return (_EPOCH + timedelta(seconds=moment)).astimezone(_zone(zone))
+    """A time on the clocks of a time zone, by the time-zone database pinned with Agloe.
+
+    Raises Unwritable for a time outside the years 0001 to 9999, there or in UTC.
+    """
+    try:
+        return (_EPOCH + timedelta(seconds=moment)).astimezone(_zone(zone))
+    except OverflowError:
+        message = f"a time {moment} seconds from 1970 is outside the years 0001 to 9999"
+        raise Unwritable(message) from None
 
 
 def length_written(seconds: int) -> str:
@@ -203,7 +214,10 @@ def _zone_problem(text: str) -> str | None:
     if name not in _zone_names():
         return f"{name} is not a time zone in the time-zone database"
     moment = datetime.fromisoformat(text[:bracket])
-    there = moment.astimezone(_zone(name))
+    try:
+        there = moment.astimezone(_zone(name))
+    except OverflowError:
+        return f"{text} is outside the years 0001 to 9999 in UTC"
     if there.utcoffset() != moment.utcoffset():
         offset = there.isoformat(timespec="seconds")[19:]
         return f"{text} does not agree with its time zone: {name} is at {offset} then"

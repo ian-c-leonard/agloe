@@ -203,3 +203,35 @@ def test_a_trip_with_nothing_to_do_says_so() -> None:
         "FEASIBLE: this trip works.\n\nNobody has to do anything.\n\n"
         "This plan holds however long the uncertain parts take.\n"
     )
+
+
+def test_a_report_with_a_time_past_the_year_9999_is_not_written(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The stay starts in the last second of the year 9999 and ends one second later."""
+    document = {
+        "persons": [{"id": "alex", "name": "Alex"}],
+        "places": [{"id": "pier", "name": "Navy Pier"}],
+        "options": [stays("fireworks", "pier")],
+        "ways": [],
+        "facts": [
+            {
+                "id": "fireworks-time",
+                "option": "fireworks",
+                "starts_at": "9999-12-31T23:59:59+00:00[UTC]",
+            },
+            lasts("fireworks", "PT1S"),
+        ],
+        "decisions": [lock("fireworks", "alex")],
+    }
+    assert compiler.check(load(document)).answer is Answer.FEASIBLE
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(document))
+    for arguments in (["check", str(path)], ["check", str(path), "--json"]):
+        assert main(arguments) == 2
+        printed = capsys.readouterr()
+        assert printed.out == ""
+        assert printed.err == (
+            f"{path}: the report holds a time outside the years 0001 to 9999, "
+            "so it cannot be written\n"
+        )

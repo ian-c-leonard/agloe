@@ -26,7 +26,7 @@ A FACT states one thing:
 
 A FILE states each FACT once. An OPTION has at most one start, one duration and one access cutoff. A WAY has at most one duration.
 
-A time states its date and time to the second, its offset from UTC and the name of its time zone. The offset must be the one that time zone has at that moment. The COMPILER pins one release of the time-zone database, so the same FILE gets the same reading on every machine.
+A time states its date and time to the second, its offset from UTC and the name of its time zone. The offset must be the one that time zone has at that moment. Every time lies in the years 0001 to 9999, on its own clock and in UTC, and a report can be written only when every time in it does too. The COMPILER pins one release of the time-zone database, so the same FILE gets the same reading on every machine.
 
 No text in a FILE holds a control character, a line break or half of a character pair. A name holds at least one character that is not a space.
 

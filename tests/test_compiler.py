@@ -660,3 +660,37 @@ def test_two_quick_ways_are_taken_where_one_slow_way_is_too_late() -> None:
     report = compiler.check(file)
     assert report == reference.check(file)
     assert [step.way for step in report.itinerary if step.way][:2] == ["to-station", "from-station"]
+
+
+def test_the_tie_break_counts_exactly_with_many_options() -> None:
+    """Fifty-four OPTIONs: one more than the whole numbers a floating-point number can hold."""
+    count = 54
+    last = f"o{count - 1}"
+    file = trip(
+        ["alex"],
+        ["a"],
+        [stays(f"o{index}", "a") for index in range(count)],
+        [starts_at("o0", 9), lasts("o0", "PT0S"), starts_at(last, 10), lasts(last, "PT0S")],
+        [lock("o0", "alex"), lock(last, "alex")],
+    )
+    report = compiler.check(file)
+    assert report.answer is Answer.FEASIBLE
+    assert report.robust is True
+    assert [step.option for step in report.itinerary] == ["o0", last]
+
+
+def test_a_choice_is_scheduled_only_if_it_meets_every_constraint() -> None:
+    """The check that every choice of the solver goes through covers all six CONSTRAINTs."""
+    file = trip(
+        ["alex"],
+        ["a"],
+        [stays("dinner", "a"), stays("show", "a")],
+        [starts_at("dinner", 19), lasts("dinner", "PT1H"), lasts("show", "PT1H")],
+        [lock("dinner", "alex")],
+    )
+    world = worst_case(file)
+    assert reference.scheduled(file, world, (("alex",), ()), ((0,),)) is not None
+    # Nobody takes part, so the LOCK is not honored.
+    assert reference.scheduled(file, world, ((), ()), ((),)) is None
+    # The show has no stated start, so in the worst case it cannot be used.
+    assert reference.scheduled(file, world, (("alex",), ("alex",)), ((0, 1),)) is None
