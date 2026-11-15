@@ -7,7 +7,7 @@ and the words name that zone. Where those clocks change during the times shown, 
 gives its offset from UTC.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
 from agloe.answers import Answer, Missing, Report
@@ -22,7 +22,7 @@ from agloe.file import (
     local,
     written,
 )
-from agloe.reference import Broken, Constraint
+from agloe.reference import Broken, Constraint, Itinerary, Step
 
 _DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 _MONTHS = [
@@ -57,7 +57,7 @@ def as_json(file: File, report: Report) -> dict[str, object]:
         out["relies_on"] = list(report.relies_on)
         out["robust"] = report.robust
     if report.at_worst:
-        out["at_worst"] = [_broken_as_json(file, found) for found in report.at_worst]
+        out["at_worst"] = [_broken_as_json(file, report, found) for found in report.at_worst]
     if report.conflict:
         out["conflict"] = list(report.conflict)
     if report.missing:
@@ -67,13 +67,16 @@ def as_json(file: File, report: Report) -> dict[str, object]:
     return out
 
 
-def _broken_as_json(file: File, found: Broken) -> dict[str, object]:
+def _broken_as_json(file: File, report: Report, found: Broken) -> dict[str, object]:
+    """One broken CONSTRAINT. At a WAY, ``step`` is the position of that step in the itinerary."""
     out: dict[str, object] = {"constraint": found.constraint.value}
-    if found.taken is None:
+    if found.step is None:
         out["option"] = found.option
     else:
-        (out["way"], out["from"], out["to"]), start = found.taken
-        out["start"] = written(start, file.zone)
+        step = report.itinerary[found.step]
+        out["step"] = found.step
+        out["way"], out["from"], out["to"] = step.way, step.origin, step.destination
+        out["start"] = written(step.start, file.zone)
     out["persons"] = list(found.persons)
     out["late"] = None if found.late is None else length_written(found.late)
     return out
@@ -152,7 +155,6 @@ def _clock_for(file: File, report: Report) -> _Clock:
     """The clock for one report: with offsets if the times it shows have more than one."""
     moments = [step.start for step in report.itinerary]
     moments += [step.end for step in report.itinerary if step.end is not None]
-    moments += [found.taken[1] for found in report.at_worst if found.taken is not None]
     moments += _times_stated(file, (*report.relies_on, *report.conflict))
     offsets = {local(moment, file.zone).utcoffset() for moment in moments}
     return _Clock(file.zone, len(offsets) > 1)
@@ -191,10 +193,10 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
     lines = [
         "FEASIBLE: this trip works."
         if report.robust
-        else "FEASIBLE, with a WARNING: this trip works, but only if the uncertain parts go well."
+        else "FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold."
     ]
     day = None
-    for step in report.itinerary:
+    for step in together(report.itinerary):
         if clock.day(step.start) != day:
             day = clock.day(step.start)
             lines += ["", f"{clock.day_name(step.start)} (times in {file.zone})"]
@@ -211,7 +213,7 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
             "WARNING: no plan is sure to hold if the uncertain parts take their longest."
             " In this plan:",
         ]
-        lines += [f"  {_broken(file, clock, found)}" for found in report.at_worst]
+        lines += [f"  {_broken(file, clock, report, found)}" for found in report.at_worst]
     elif any(isinstance(fact, Duration) and fact.contingent for fact in relied_on):
         lines += [
             "",
@@ -224,21 +226,37 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
     return lines
 
 
-def _broken(file: File, clock: _Clock, found: Broken) -> str:
+def together(itinerary: Itinerary) -> list[Step]:
+    """The steps as a plan shows them: PERSONs who take the same WAY at the same time share a line.
+
+    This is for reading only. In the ITINERARY each time a PERSON takes a WAY is its own step.
+    """
+    shown: list[Step] = []
+    for step in itinerary:
+        for place, other in enumerate(shown):
+            if step.option is None and replace(other, persons=step.persons) == step:
+                shown[place] = replace(other, persons=(*other.persons, *step.persons))
+                break
+        else:
+            shown.append(step)
+    return shown
+
+
+def _broken(file: File, clock: _Clock, report: Report, found: Broken) -> str:
     """One CONSTRAINT a plan would break at the longest durations, in words."""
     who = _people(file, found.persons)
     rule = f'the rule "{found.constraint.value}"'
-    if found.taken is not None:
-        (way, origin, destination), start = found.taken
+    if found.step is not None:
+        step = report.itinerary[found.step]
         places = {place.id: place.name for place in file.places}
-        name = f"another WAY from {places[origin]} to {places[destination]}"
-        name = name if way is None else _name(file, way)
-        when = f"at {clock.time(start)}, the time to take {name}"
+        name = f"another WAY from {places[step.origin]} to {places[step.destination]}"
+        name = name if step.way is None else _name(file, step.way)
+        when = f"at {clock.time(step.start)}, the time to take {name}"
         if found.constraint is Constraint.PLACE and found.late is not None:
             return f"{who} would still be busy for {_span(found.late)} {when}."
         if found.constraint is Constraint.PLACE:
             return f"{who} would not be free {when}."
-        return f"{name} at {clock.time(start)} would break {rule} for {who}."
+        return f"{name} at {clock.time(step.start)} would break {rule} for {who}."
     name = _name(file, found.option)
     if found.constraint is Constraint.ARRIVAL and found.late is not None:
         return f"{who} would be {_span(found.late)} too late for {name}."
@@ -259,14 +277,16 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
         there = f"there are other WAYs from {places[unknown.origin or '']} to "
         there += places[unknown.destination or ""]
         if limit is not None:
-            return f"{there} that take {_span(limit)} or less"
+            return f"{there} that take {_at_most(limit)}"
         return there if alone else f"{there} that are quick enough"
     name = _name(file, unknown.option or unknown.way)
     if unknown.what == "duration":
         if limit is not None:
-            return f"{name} takes {_span(limit)} or less"
+            return f"{name} takes {_at_most(limit)}"
         return f"the FILE says how long {name} takes" if alone else f"{name} is quick enough"
     place = _starts_at(file, unknown.option)
+    if limit == 0:
+        return f"nobody has to be at {place} before {name} starts"
     if limit is not None:
         return f"people must be at {place} {_span(limit)} or less before {name} starts"
     if alone:
@@ -329,6 +349,11 @@ def _people(file: File, persons: tuple[str, ...]) -> str:
     if len(names) < 2:
         return "".join(names)
     return f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+def _at_most(seconds: int) -> str:
+    """The most a length of time can be: 45 min or less. Nothing is less than no time."""
+    return f"{_span(seconds)} or less" if seconds else "no time"
 
 
 def _span(seconds: int) -> str:

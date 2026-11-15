@@ -45,7 +45,7 @@ A possible world is one way that all the unknown FACTs could turn out.
 
 ## The CONSTRAINTs
 
-An ITINERARY says which OPTIONs happen, which PERSONs take part in each, which WAYs each PERSON takes, and when each of these starts and ends. At least one PERSON takes part in every OPTION that happens. The OPTIONs, the PERSONs, the WAYs and the start times are choices. Each end follows from the start and the duration, so the same choices can end at different times in different possible worlds.
+An ITINERARY says which OPTIONs happen, which PERSONs take part in each, which WAYs each PERSON takes, and when each of these starts and ends. Each time a PERSON takes a WAY counts by itself, even when others take the same WAY at the same time. At least one PERSON takes part in every OPTION that happens. The OPTIONs, the PERSONs, the WAYs and the start times are choices. Each end follows from the start and the duration, so the same choices can end at different times in different possible worlds.
 
 An ITINERARY works in a possible world when it meets every CONSTRAINT below.
 
