@@ -23,6 +23,7 @@ from agloe.reference import (
     in_world,
     itineraries,
     needless,
+    with_these_at_best,
     worst_case,
 )
 from tests.stories import (
@@ -357,8 +358,9 @@ def any_choice(rng: Random, file: File, world: World) -> Itinerary:
         start = seconds(9) + QUARTER * rng.randrange(-4, 8) if fixed is None else fixed
         if persons:
             steps.append(Step(option.id, option.origin, option.destination, persons, start, None))
+    pairs = sorted(world.ways or [(a, b) for a in PLACES for b in PLACES if a != b])
     for _ in range(rng.choice([0, 0, 1, 2])):
-        origin, destination = rng.sample(PLACES, 2)
+        origin, destination = rng.choice(pairs)
         start = seconds(9) + QUARTER * rng.randrange(-4, 8)
         steps.append(Step(None, origin, destination, (rng.choice(people),), start, None))
     return tuple(steps)
@@ -369,7 +371,10 @@ def test_the_best_and_worst_cases_settle_the_answer_for_every_possible_world() -
 
     What works in the worst case works in every possible world. What works in a possible world
     works in the best case with the same start times. And an INFEASIBLE TRIP has nothing that
-    works in any possible world.
+    works in any possible world. Where a choice made by chance works, the search finds one too.
+
+    For an UNDETERMINED TRIP, each set of unknown FACTs the report names is enough, and no
+    part of it is.
     """
     rng = Random(1970)
     answers: set[Answer] = set()
@@ -381,6 +386,13 @@ def test_the_best_and_worst_cases_settle_the_answer_for_every_possible_world() -
         best, worst = best_case(file), worst_case(file)
         always = itineraries(file, worst)
         assert bool(always) == (report.answer is Answer.FEASIBLE)
+        assert bool(report.missing) == (report.answer is Answer.UNDETERMINED)
+        for enough in report.missing:
+            named = [needed.unknown for needed in enough]
+            assert itineraries(file, with_these_at_best(file, named))
+            for left_out in named:
+                fewer = [unknown for unknown in named if unknown != left_out]
+                assert not itineraries(file, with_these_at_best(file, fewer))
         for _ in range(8):
             world = possible_world(rng, file)
             for choice in always:
@@ -390,6 +402,8 @@ def test_the_best_and_worst_cases_settle_the_answer_for_every_possible_world() -
                 each for each in by_chance if not broken(file, world, in_world(world, each))
             ]
             found_by_chance += len(by_chance)
+            if by_chance:
+                assert itineraries(file, world)
             working_here = [*itineraries(file, world), *by_chance]
             for choice in working_here:
                 assert broken(file, best, in_world(best, choice)) == []

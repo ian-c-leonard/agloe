@@ -8,6 +8,7 @@ of seconds since 1970-01-01T00:00:00Z, and a length of time is a whole number of
 
 import json
 import re
+import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -22,7 +23,7 @@ if TYPE_CHECKING:
     from agloe import file_types as shape
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
-_LENGTH = re.compile(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?")
+_LENGTH = re.compile(r"PT(?:([0-9]{1,9})H)?(?:([0-9]{1,9})M)?(?:([0-9]{1,9})S)?")
 
 
 class _Validator(Protocol):
@@ -160,28 +161,46 @@ def length(text: str) -> int:
 def read(path: Path) -> File:
     """Read a FILE from disk. Raises FileError if it is not JSON or does not follow the format."""
 
-    def no_repeats(pairs: list[tuple[str, object]]) -> dict[str, object]:
-        keys = [key for key, _ in pairs]
-        repeated = sorted({key for key in keys if keys.count(key) > 1})
-        if repeated:
-            shown = ", ".join(f"{json.dumps(key)}: {json.dumps(value)}" for key, value in pairs)
-            raise ValueError(
-                f"an object states {', '.join(repeated)} more than once: {{{shown[:120]}}}"
-            )
-        return dict(pairs)
-
     def no_constants(name: str) -> object:
         raise ValueError(f"{name} is not a JSON value")
 
     try:
-        document: object = json.loads(
+        written: object = json.loads(
             path.read_text(encoding="utf-8"),
-            object_pairs_hook=no_repeats,
+            object_pairs_hook=_Pairs,
             parse_constant=no_constants,
         )
     except ValueError as problem:
         raise FileError([f"not readable as JSON: {problem}"]) from problem
+    except RecursionError as problem:
+        raise FileError(["not readable as JSON: it is nested too deeply"]) from problem
+    repeats: list[str] = []
+    document = _stated_once(written, "", repeats)
+    if repeats:
+        raise FileError(repeats)
     return load(document)
+
+
+class _Pairs(list[tuple[str, object]]):
+    """One JSON object as it was written: its keys and values in order, repeats included."""
+
+
+def _stated_once(value: object, where: str, problems: list[str]) -> object:
+    """The document as plain dictionaries and lists, noting every key an object states twice."""
+    if isinstance(value, _Pairs):
+        keys = [key for key, _ in value]
+        for key in sorted({key for key in keys if keys.count(key) > 1}):
+            problems.append(f"{where or 'the FILE'}: states {key} more than once")
+        return {
+            key: _stated_once(inside, f"{where}/{key}".lstrip("/"), problems)
+            for key, inside in value
+        }
+    if isinstance(value, list):
+        return [
+            _stated_once(inside, f"{where}/{index}".lstrip("/"), problems)
+            for index, inside in enumerate(cast("list[object]", value))
+        ]
+    return value
 
 
 def load(document: object) -> File:
@@ -189,7 +208,7 @@ def load(document: object) -> File:
     schema = json.loads(resources.files("agloe").joinpath("schema/file.schema.json").read_text())
     validator = cast("_Validator", Draft202012Validator(schema))
     problems = sorted(_describe(error) for error in validator.iter_errors(document))
-    problems += _control_characters(document, "")
+    problems += _unwritable_characters(document, "")
     if problems:
         raise FileError(problems)
     raw = cast("shape.File", document)
@@ -293,24 +312,28 @@ def load(document: object) -> File:
     return File(persons, places, tuple(options), tuple(facts), tuple(locks))
 
 
-def _control_characters(value: object, where: str) -> list[str]:
-    """Problems for text that holds a line break or another control character.
+def _unwritable_characters(value: object, where: str) -> list[str]:
+    """Problems for text that holds a control character, a line break or half a character.
 
     The schema's patterns end with ``$``. In the schema's own dialect that is the very end of the
-    text, but Python also lets it match before a final line break. Refusing control characters
-    everywhere closes that gap.
+    text, but Python also lets it match before a final line break. Refusing line breaks and
+    control characters everywhere closes that gap. Half of a surrogate pair is refused because it
+    cannot be written back out.
     """
     if isinstance(value, str):
-        if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        kinds = {unicodedata.category(character) for character in value}
+        if kinds & {"Cc", "Zl", "Zp"}:
             return [f"{where or 'the FILE'}: {value!r} holds a control character"]
+        if "Cs" in kinds:
+            return [f"{where or 'the FILE'}: {value!r} holds half of a character"]
         return []
     found: list[str] = []
     if isinstance(value, dict):
         for key, inside in cast("dict[str, object]", value).items():
-            found += _control_characters(inside, f"{where}/{key}".lstrip("/"))
+            found += _unwritable_characters(inside, f"{where}/{key}".lstrip("/"))
     elif isinstance(value, list):
         for index, inside in enumerate(cast("list[object]", value)):
-            found += _control_characters(inside, f"{where}/{index}".lstrip("/"))
+            found += _unwritable_characters(inside, f"{where}/{index}".lstrip("/"))
     return found
 
 

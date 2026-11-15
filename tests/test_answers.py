@@ -465,7 +465,7 @@ def test_a_warning_names_only_what_the_longest_durations_break() -> None:
     assert report.at_worst == (Broken(Constraint.PLACE, "event", ("alex",), late=3600),)
 
 
-def test_unlisted_options_can_join_up() -> None:
+def test_unlisted_options_join_up_one_after_another() -> None:
     """Alex must be at a at 9:00 and at c at 10:00. Unlisted OPTIONs join a to b and b to c."""
     file = trip(
         ["alex"],
@@ -489,8 +489,136 @@ def test_unlisted_options_can_join_up() -> None:
         Step("last", "c", "c", ("alex",), seconds(10), seconds(10)),
     )
     assert broken(file, world, two_legs) == []
-    assert [step.option for step in itineraries(file, world)[0]] == ["first", None, "last"]
+    assert [
+        (step.option, step.origin, step.destination) for step in itineraries(file, world)[0]
+    ] == [
+        ("first", "a", "a"),
+        (None, "a", "b"),
+        (None, "b", "c"),
+        ("last", "c", "c"),
+    ]
     assert itineraries(file, World(world.terms, frozenset({("a", "b")}))) == []
+
+
+def test_a_way_through_another_place_is_not_a_direct_way() -> None:
+    """Alex must get from a to c, and Sam from b to c. Every way from a to b is listed: none.
+
+    Unlisted OPTIONs from a to b and from b to c would not be enough. Alex would have to go
+    through b, and the COMPLETE FACT rules that out.
+    """
+    file = trip(
+        ["alex", "sam"],
+        ["a", "b", "c"],
+        [stays("first", "a"), stays("second", "b"), stays("last", "c")],
+        [
+            starts_at("first", 9),
+            lasts("first", "PT0S"),
+            starts_at("second", 9),
+            lasts("second", "PT0S"),
+            starts_at("last", 10),
+            cutoff("last", "PT0S"),
+            complete("a", "b"),
+        ],
+        [lock("first", "alex"), lock("second", "sam"), lock("last", "alex", "sam")],
+    )
+    report = check(file)
+    assert report.answer is Answer.UNDETERMINED
+
+    def way(origin: str, destination: str) -> Missing:
+        return Missing(Unknown("another way", origin=origin, destination=destination), None)
+
+    assert report.missing == (
+        (way("a", "c"), way("b", "a")),
+        (way("a", "c"), way("b", "c")),
+    )
+
+
+def test_a_free_option_takes_its_time_from_what_comes_before_it() -> None:
+    """The meeting is ten seconds before 1970. Sam's nap follows the ride they share."""
+    before_1970 = {
+        "id": "meeting-time",
+        "option": "meeting",
+        "starts_at": "1969-12-31T23:59:50+00:00[UTC]",
+    }
+    file = trip(
+        ["alex", "sam"],
+        ["a", "b"],
+        [moves("ride", "a", "b"), stays("meeting", "b"), stays("nap", "b")],
+        [
+            any_time("ride"),
+            lasts("ride", "PT0S"),
+            before_1970,
+            lasts("meeting", "PT0S"),
+            cutoff("meeting", "PT0S"),
+            any_time("nap"),
+            lasts("nap", "PT0S"),
+            cutoff("nap", "PT0S"),
+        ],
+        [lock("ride", "alex", "sam"), lock("meeting", "alex"), lock("nap", "sam")],
+    )
+    report = check(file)
+    assert [(step.option, step.start) for step in report.itinerary] == [
+        ("ride", -10),
+        ("meeting", -10),
+        ("nap", -10),
+    ]
+
+
+def test_options_at_one_instant_happen_in_one_order_for_everyone() -> None:
+    """Two rides take no time and leave at 9:30: one from a to b, one from b to a.
+
+    Alex starts at a and Sam at b, and both must take both rides. Alex would need the ride to b
+    first, and Sam the ride to a first. No single order works for both.
+    """
+
+    def with_riders(*riders: str) -> File:
+        return trip(
+            ["alex", "sam"],
+            ["a", "b"],
+            [
+                stays("first", "a"),
+                stays("second", "b"),
+                moves("out", "a", "b"),
+                moves("back", "b", "a"),
+            ],
+            [
+                starts_at("first", 9),
+                lasts("first", "PT30M"),
+                starts_at("second", 9),
+                lasts("second", "PT30M"),
+                starts_at("out", 9, 30),
+                lasts("out", "PT0S"),
+                cutoff("out", "PT0S"),
+                starts_at("back", 9, 30),
+                lasts("back", "PT0S"),
+                cutoff("back", "PT0S"),
+                complete("a", "b"),
+                complete("b", "a"),
+            ],
+            [
+                lock("first", "alex"),
+                lock("second", "sam"),
+                lock("out", *riders),
+                lock("back", *riders),
+            ],
+        )
+
+    assert check(with_riders("alex")).answer is Answer.FEASIBLE
+    assert check(with_riders("sam")).answer is Answer.FEASIBLE
+    report = check(with_riders("alex", "sam"))
+    assert report.answer is Answer.INFEASIBLE
+    assert report.conflict == (
+        "first-time",
+        "second-time",
+        "out-time",
+        "back-time",
+        "ways-a-b",
+        "ways-b-a",
+        "lock-first",
+        "lock-second",
+        "lock-out",
+        "lock-back",
+    )
 
 
 def test_an_empty_file_is_feasible() -> None:

@@ -67,6 +67,16 @@ def test_a_time_is_a_real_date() -> None:
     )
 
 
+def test_a_time_zone_name_starts_each_part_with_a_letter() -> None:
+    for name in ("0", "-", "America/0", "+00:00"):
+        document = flight_home()
+        document["facts"][0]["starts_at"] = f"2027-05-15T14:00:00-05:00[{name}]"
+        assert problems(document).startswith("facts/0:")
+    document = flight_home()
+    document["facts"][0]["starts_at"] = "2027-05-15T14:00:00-05:00[America/Port-au-Prince]"
+    assert load(document).start("museum-visit") is not None
+
+
 def test_an_offset_from_utc_is_a_real_offset() -> None:
     document = flight_home()
     document["facts"][0]["starts_at"] = "2027-05-15T14:00:00+00:99[UTC]"
@@ -82,6 +92,31 @@ def test_text_holds_no_line_break() -> None:
     assert "persons/0/id: 'alex\\n' holds a control character" in found
     assert "facts/0/starts_at:" in found
     assert "facts/1/duration: 'PT1H\\n' holds a control character" in found
+
+
+def test_a_time_of_day_runs_from_midnight_to_one_second_before_it() -> None:
+    document = flight_home()
+    document["facts"][0]["starts_at"] = "2027-05-15T24:00:00-05:00[America/Chicago]"
+    assert problems(document).startswith("facts/0:")
+
+
+def test_a_length_of_time_is_not_endless() -> None:
+    document = flight_home()
+    document["facts"][1]["duration"] = "PT" + "9" * 5000 + "H"
+    assert problems(document).startswith("facts/1:")
+
+
+def test_a_name_can_be_read_and_written() -> None:
+    document = flight_home()
+    document["persons"][0]["name"] = "   "
+    document["persons"][1]["name"] = "Sam\u2028Lee"
+    document["places"][1]["name"] = "O'Hare\u0085"
+    document["places"][0]["name"] = "Art \ud800 Institute"
+    found = problems(document)
+    assert "persons/0/name:" in found
+    assert "persons/1/name: 'Sam\\u2028Lee' holds a control character" in found
+    assert "places/0/name: 'Art \\ud800 Institute' holds half of a character" in found
+    assert 'places/1/name: "O\'Hare\\x85" holds a control character' in found
 
 
 def test_a_fact_states_one_thing() -> None:
@@ -161,19 +196,30 @@ def test_a_file_on_disk_states_each_key_once(tmp_path: Path) -> None:
     path.write_text(
         '{"persons": [], "persons": [], "places": [], "options": [], "facts": [], "decisions": []}'
     )
-    with pytest.raises(FileError, match="states persons more than once"):
+    with pytest.raises(FileError, match="the FILE: states persons more than once"):
         read(path)
 
 
-def test_a_repeated_key_is_reported_with_its_object(tmp_path: Path) -> None:
+def test_a_repeated_key_is_reported_where_it_is(tmp_path: Path) -> None:
     path = tmp_path / "trip.json"
     path.write_text(
-        '{"persons": [{"id": "alex", "id": "sam", "name": "Alex"}],'
-        ' "places": [], "options": [], "facts": [], "decisions": []}'
+        '{"persons": [{"id": "alex", "name": "Alex"}, {"id": "sam", "id": "sam", "name": "Sam"}],'
+        ' "places": [], "options": [], "decisions": [], "facts": [{"id": "ways", "complete":'
+        ' {"from": "a", "to": "b", "leaving": {"earliest": "x", "earliest": "y", "latest": "z"}}}]}'
     )
     with pytest.raises(FileError) as refused:
         read(path)
-    assert 'states id more than once: {"id": "alex", "id": "sam"' in str(refused.value)
+    assert refused.value.problems == (
+        "persons/1: states id more than once",
+        "facts/0/complete/leaving: states earliest more than once",
+    )
+
+
+def test_a_file_on_disk_is_not_nested_without_end(tmp_path: Path) -> None:
+    path = tmp_path / "trip.json"
+    path.write_text("[" * 200_000)
+    with pytest.raises(FileError, match="nested too deeply"):
+        read(path)
 
 
 def test_an_empty_file_is_a_file() -> None:
