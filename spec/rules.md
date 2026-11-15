@@ -73,7 +73,7 @@ Two cases settle the answer. For the same OPTIONs, PERSONs, WAYs and start times
 
 An ITINERARY is ROBUST when its OPTIONs, PERSONs, WAYs and start times work in every possible world, for every value of every CONTINGENT duration. A longer duration is never easier, so it is enough to check the longest value of each.
 
-A FEASIBLE TRIP with no ROBUST ITINERARY gets a WARNING. The WARNING names each CONSTRAINT that the ITINERARY shown would break if every CONTINGENT duration ran longest, with the OPTION or the time a WAY is taken, the PERSONs and how late they would be.
+A FEASIBLE TRIP with no ROBUST ITINERARY gets a WARNING. The WARNING names each CONSTRAINT that the ITINERARY shown would break, with its steps in the order shown, if every CONTINGENT duration ran longest, with the OPTION or the time a WAY is taken, the PERSONs and how late they would be.
 
 ## Which ITINERARY is shown
 

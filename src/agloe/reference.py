@@ -266,17 +266,24 @@ def broken(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
     return [*_each_alone(file, world, itinerary), *(fewest or [])]
 
 
+def broken_as_listed(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
+    """The CONSTRAINTs this ITINERARY does not meet with its steps in the order it lists them.
+
+    This says what one particular plan breaks. ``broken`` may put steps that share an instant
+    in another order, and that would describe a different plan.
+    """
+    _well_formed(file, itinerary)
+    placed = list(enumerate(itinerary))
+    return [*_each_alone(file, world, itinerary), *_along_each_path(file, world, itinerary, placed)]
+
+
 def works_as_listed(file: File, world: World, itinerary: Itinerary) -> bool:
     """Whether this ITINERARY meets every CONSTRAINT with its steps in the order it lists them.
 
     The steps must be listed in an order their times allow: earlier starts first.
     """
-    _well_formed(file, itinerary)
-    placed = list(enumerate(itinerary))
-    if any(before.start > after.start for before, after in pairwise(itinerary)):
-        return False
-    alone = _each_alone(file, world, itinerary)
-    return not alone and not _along_each_path(file, world, itinerary, placed)
+    in_order = all(before.start <= after.start for before, after in pairwise(itinerary))
+    return in_order and not broken_as_listed(file, world, itinerary)
 
 
 def _each_alone(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
@@ -473,13 +480,23 @@ def _sharing_persons(steps: list[_Placed]) -> list[list[_Placed]]:
 
 
 def _places(path: list[_Placed]) -> _Found:
-    """Each PERSON is in one place at a time: no overlap, and each step starts where they are."""
+    """Each PERSON is in one place at a time: no overlap, and each step starts where they are.
+
+    A PERSON is busy until the latest end of the steps they have started. So a step is found
+    to overlap even when the step it overlaps is not the one just before it.
+    """
     found: _Found = []
+    busy_until: int | None = None  # the latest end so far
+    endless = False  # whether a step so far has no end that anybody knows
     for (_, before), after in pairwise(path):
         if before.end is None:
+            endless = True
+        else:
+            busy_until = before.end if busy_until is None else max(busy_until, before.end)
+        if endless:
             found.append((Constraint.PLACE, after, None))
-        elif before.end > after[1].start:
-            found.append((Constraint.PLACE, after, before.end - after[1].start))
+        elif busy_until is not None and busy_until > after[1].start:
+            found.append((Constraint.PLACE, after, busy_until - after[1].start))
         elif before.destination != after[1].origin:
             found.append((Constraint.PLACE, after, None))
     return found

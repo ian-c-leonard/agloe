@@ -124,7 +124,10 @@ class _Clock:
         return f"{_DAYS[there.weekday()]} {there.day} {_MONTHS[there.month - 1]} {there.year}"
 
     def time(self, moment: int, day: date | None = None) -> str:
-        """A time of day: 2:00 pm. The date is added when it is not the day given."""
+        """A time of day: 2:00 pm. The date is added when it is not the day given.
+
+        The year is added too when it is not that day's year.
+        """
         there = local(moment, self.zone)
         seconds = f":{there.second:02d}" if there.second else ""
         half = "am" if there.hour < 12 else "pm"
@@ -133,7 +136,8 @@ class _Clock:
             clock += f" ({_offset(there.utcoffset() or timedelta())})"
         if day is None or there.date() == day:
             return clock
-        return f"{clock} on {there.day} {_MONTHS[there.month - 1]}"
+        year = "" if there.year == day.year else f" {there.year}"
+        return f"{clock} on {there.day} {_MONTHS[there.month - 1]}{year}"
 
     def moment(self, moment: int) -> str:
         """A time with its day: 2:00 pm on Saturday 15 May 2027."""
@@ -141,10 +145,16 @@ class _Clock:
 
 
 def _offset(ahead: timedelta) -> str:
-    """An offset from UTC: UTC-5, UTC+5:30."""
-    minutes = ahead // timedelta(minutes=1)
-    hours, rest = divmod(abs(minutes), 60)
-    return f"UTC{'-' if minutes < 0 else '+'}{hours}" + (f":{rest:02d}" if rest else "")
+    """An offset from UTC, to the second where it has seconds: UTC-5, UTC+5:30, UTC+0:09:21."""
+    seconds = round(ahead.total_seconds())
+    hours, rest = divmod(abs(seconds), 3600)
+    minutes, left = divmod(rest, 60)
+    shown = f"UTC{'-' if seconds < 0 else '+'}{hours}"
+    if minutes or left:
+        shown += f":{minutes:02d}"
+    if left:
+        shown += f":{left:02d}"
+    return shown
 
 
 def _times_stated(file: File, records: tuple[str, ...]) -> list[int]:
@@ -208,7 +218,7 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
         if report.robust
         else "FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold."
     ]
-    marks, elsewhere = _marks(file, report)
+    marks = _marks(file, report)
     day = None
     for number, (step, _) in enumerate(_lines(report.itinerary)):
         if clock.day(step.start) != day:
@@ -228,7 +238,6 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
             "WARNING: no plan is sure to hold if the uncertain parts take their longest."
             ' Each line marked "!" says what would go wrong at the step above it.',
         ]
-        lines += [f"  {mark}" for mark in elsewhere]
     elif any(isinstance(fact, Duration) and fact.contingent for fact in relied_on):
         lines += [
             "",
@@ -266,46 +275,37 @@ def _lines(itinerary: Itinerary) -> list[tuple[Step, list[int]]]:
     return lines
 
 
-def _marks(file: File, report: Report) -> tuple[dict[int, list[str]], list[str]]:
+def _marks(file: File, report: Report) -> dict[int, list[str]]:
     """What the plan would break at the longest durations, in words, for each line of the plan.
 
     A line is known by its number, counting from zero. PERSONs who share a line and are in the
-    same trouble are named together. The second list holds anything that belongs to no line,
-    with the OPTION named.
+    same trouble are named together. Everything a plan can break happens at one of its steps,
+    so a finding with no line is a fault in this program, and it stops here.
     """
     lines = _lines(report.itinerary)
     line_of = {
         position: number for number, (_, positions) in enumerate(lines) for position in positions
     }
-    line_of_option = {
+    line_of_option: dict[str | None, int] = {
         step.option: number for number, (step, _) in enumerate(lines) if step.option is not None
     }
-    together: dict[tuple[int | None, str | None, Constraint, int | None], list[str]] = {}
+    together: dict[tuple[int, Constraint, int | None], list[str]] = {}
     for found in report.at_worst:
-        if found.step is not None:
-            number = line_of.get(found.step)
-        else:
-            number = line_of_option.get(found.option or "")
-        named = None if number is not None else found.option
-        together.setdefault((number, named, found.constraint, found.late), []).extend(found.persons)
+        number = line_of[found.step] if found.step is not None else line_of_option[found.option]
+        together.setdefault((number, found.constraint, found.late), []).extend(found.persons)
     marks: dict[int, list[str]] = {}
-    elsewhere: list[str] = []
-    for (number, named, constraint, late), persons in together.items():
+    for (number, constraint, late), persons in together.items():
         who = _people(file, tuple(persons))
-        rule = f'the rule "{constraint.value}"'
-        if number is None:
-            elsewhere.append(f"{_name(file, named)} would break {rule} for {who}.")
-        elif constraint is Constraint.ARRIVAL and late is not None:
-            marks.setdefault(number, []).append(f"{who} would be {_span(late)} too late for this.")
+        if constraint is Constraint.ARRIVAL and late is not None:
+            mark = f"{who} would be {_span(late)} too late for this."
         elif constraint is Constraint.PLACE and late is not None:
-            marks.setdefault(number, []).append(
-                f"{who} would still be busy for {_span(late)} when this starts."
-            )
+            mark = f"{who} would still be busy for {_span(late)} when this starts."
         elif constraint is Constraint.PLACE:
-            marks.setdefault(number, []).append(f"{who} would not be free when this starts.")
+            mark = f"{who} would not be free when this starts."
         else:
-            marks.setdefault(number, []).append(f"This would break {rule} for {who}.")
-    return marks, elsewhere
+            mark = f'This would break the rule "{constraint.value}" for {who}.'
+        marks.setdefault(number, []).append(mark)
+    return marks
 
 
 def _wanted(file: File, needed: Missing, alone: bool) -> str:
