@@ -1,0 +1,10 @@
+INFEASIBLE: this trip cannot work.
+
+These FACTs and DECISIONs clash. Each one is needed for the clash. Times are in America/Chicago.
+  skydeck-time: Skydeck visit starts at 10:30 am on Saturday 15 May 2027
+  skydeck-length: Skydeck visit takes 1 h 30 min
+  lunch-time: Lunch in the park starts at 12:15 pm on Saturday 15 May 2027
+  walk-from-tower-length: the walk between Willis Tower and Millennium Park takes 20 min
+  all-ways: every way from one PLACE straight to another that leaves between 12:00 am on Saturday 15 May 2027 and 11:59 pm is listed
+  lock-skydeck: Alex and Sam take part in Skydeck visit
+  lock-lunch: Alex, Sam and Jo take part in Lunch in the park

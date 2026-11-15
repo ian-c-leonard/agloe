@@ -1,0 +1,12 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "skydeck-time",
+    "skydeck-length",
+    "lunch-time",
+    "walk-from-tower-length",
+    "all-ways",
+    "lock-skydeck",
+    "lock-lunch"
+  ]
+}

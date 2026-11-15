@@ -1,0 +1,71 @@
+{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "skydeck",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T10:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T11:30:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "gallery-talk",
+      "persons": [
+        "jo"
+      ],
+      "start": "2027-05-15T10:30:00-05:00[America/Chicago]",
+      "end": "2027-05-15T11:30:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "walk-from-tower",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T11:30:00-05:00[America/Chicago]",
+      "end": "2027-05-15T11:50:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "walk-from-tower",
+      "persons": [
+        "sam"
+      ],
+      "start": "2027-05-15T11:30:00-05:00[America/Chicago]",
+      "end": "2027-05-15T11:50:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "walk-from-museum",
+      "persons": [
+        "jo"
+      ],
+      "start": "2027-05-15T11:30:00-05:00[America/Chicago]",
+      "end": "2027-05-15T11:35:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "lunch",
+      "persons": [
+        "alex",
+        "sam",
+        "jo"
+      ],
+      "start": "2027-05-15T12:15:00-05:00[America/Chicago]",
+      "end": "2027-05-15T13:15:00-05:00[America/Chicago]"
+    }
+  ],
+  "relies_on": [
+    "skydeck-time",
+    "skydeck-length",
+    "talk-time",
+    "talk-length",
+    "lunch-time",
+    "lunch-length",
+    "lunch-table",
+    "walk-from-tower-length",
+    "walk-from-museum-length",
+    "lock-skydeck",
+    "lock-gallery-talk",
+    "lock-lunch"
+  ],
+  "robust": true
+}

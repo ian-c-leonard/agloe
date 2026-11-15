@@ -48,6 +48,7 @@ from tests.test_answers import (
     two_who_swap_places,
 )
 from tests.test_cross_check import (
+    a_group_that_meets,
     a_shared_ride,
     possible_world,
     random_trip,
@@ -773,3 +774,18 @@ def test_an_unlisted_way_can_leave_in_the_opening_between_two_spans() -> None:
     assert report == answers.check(shut)
     assert [len(enough) for enough in report.missing] == [2, 2]
     assert all(other_ways not in [needed.unknown for needed in enough] for enough in report.missing)
+
+
+def test_the_two_checkers_agree_on_a_group_that_splits_up_and_meets_again() -> None:
+    """The same Report for three PERSONs who do two things apart and one thing together."""
+    rng = Random(15)
+    seen: set[Answer] = set()
+    for _ in range(30):
+        file = a_group_that_meets(rng)
+        report = compiler.check(file)
+        assert report == answers.check(file)
+        if report.answer is Answer.FEASIBLE:
+            shown = tuple(together(report.itinerary))
+            assert reference.works_as_listed(file, worst_case(file), shown)
+        seen.add(report.answer)
+    assert seen == set(Answer)
