@@ -11,9 +11,11 @@ from agloe.reference import (
     Step,
     Unknown,
     World,
+    best_case,
     broken,
     in_world,
     itineraries,
+    routes,
     works_as_listed,
     worst_case,
 )
@@ -1206,3 +1208,37 @@ def test_a_warning_points_at_one_use_of_a_way() -> None:
         Broken(Constraint.PLACE, None, ("alex",), step=3),
         Broken(Constraint.PLACE, "last", ("alex",), late=3600),
     )
+
+
+def test_a_route_is_left_out_where_one_unlisted_way_is_never_worse() -> None:
+    """Three PLACEs in a row, with a listed walk from a to b and one from b to c.
+
+    With no COMPLETE FACT, an unlisted WAY straight from a to c is never worse than a route
+    through b that takes an unlisted WAY. A FACT about a and c alone can rule the straight WAY
+    out, so then the routes through b are tried. A FACT that is also about the unlisted WAY
+    through b rules both out at the same times, so that route is left out again.
+    """
+
+    def tried(*more: dict[str, object]) -> list[list[tuple[str | None, str]]]:
+        """The routes from a to c in the best case: each WAY, and the PLACE it leads to."""
+        file = trip(
+            ["alex"],
+            ["a", "b", "c"],
+            [stays("first", "a"), stays("last", "c")],
+            [starts_at("first", 9), starts_at("last", 10), takes("ab", "PT10M"), *more],
+            [lock("first", "alex"), lock("last", "alex")],
+            [way_between("ab", "a", "b"), way_between("bc", "b", "c")],
+        )
+        found = routes(file, best_case(file), "a", "c")
+        return [[(name, place) for name, _, place in route] for route in found]
+
+    straight = [(None, "c")]
+    walks = [("ab", "b"), ("bc", "c")]
+    walk_then_other = [("ab", "b"), (None, "c")]
+    other_then_walk = [(None, "b"), ("bc", "c")]
+    others = [(None, "b"), (None, "c")]
+    assert tried() == [straight, walks]
+    assert tried(complete("a", "c")) == [straight, walks, walk_then_other, other_then_walk, others]
+    assert tried(complete(None, "c")) == [straight, walks, other_then_walk]
+    assert tried(complete("a", None)) == [straight, walks, walk_then_other]
+    assert tried(complete(None, None)) == [straight, walks]
