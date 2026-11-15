@@ -12,6 +12,7 @@ from agloe.reference import (
     best_case,
     broken,
     needless,
+    works_as_listed,
     worst_case,
 )
 from tests.stories import (
@@ -46,10 +47,9 @@ def unlisted(origin: str, destination: str, start: int, *persons: str) -> Step:
     return Step(None, origin, destination, persons or BOTH, start, start)
 
 
-def at_way(constraint: Constraint, step: Step) -> Broken:
-    """A CONSTRAINT broken at a WAY: the Broken names the WAY and the time it is taken."""
-    taken = ((step.way, step.origin, step.destination), step.start)
-    return Broken(constraint, None, step.persons, None, taken)
+def at_way(constraint: Constraint, itinerary: Itinerary, step: Step) -> Broken:
+    """A CONSTRAINT broken at a WAY: the Broken gives the position of that step."""
+    return Broken(constraint, None, step.persons, None, itinerary.index(step))
 
 
 def visit(end: int = seconds(15)) -> Step:
@@ -133,7 +133,9 @@ def test_a_person_who_was_there_all_along_is_in_time() -> None:
 
 def test_an_unlisted_option_needs_a_world_that_has_it() -> None:
     shortcut = (visit(), unlisted("art-institute", "ohare", seconds(15)), flight())
-    assert broken(STORY, worst_case(STORY), shortcut) == [at_way(Constraint.LISTED, shortcut[1])]
+    assert broken(STORY, worst_case(STORY), shortcut) == [
+        at_way(Constraint.LISTED, shortcut, shortcut[1])
+    ]
     assert broken(STORY, best_case(STORY), shortcut) == []
 
 
@@ -147,7 +149,9 @@ def with_complete_ways() -> File:
 def test_a_complete_set_is_the_whole_set() -> None:
     file = with_complete_ways()
     shortcut = (visit(), unlisted("art-institute", "ohare", seconds(15)), flight())
-    assert broken(file, best_case(file), shortcut) == [at_way(Constraint.LISTED, shortcut[1])]
+    assert broken(file, best_case(file), shortcut) == [
+        at_way(Constraint.LISTED, shortcut, shortcut[1])
+    ]
 
 
 def through_midway() -> Itinerary:
@@ -175,7 +179,7 @@ def test_a_complete_set_can_cover_every_place() -> None:
         document["facts"].append(complete(origin, destination))
         file = load(document)
         assert broken(file, best_case(file), through_midway()) == [
-            at_way(Constraint.LISTED, leg) for leg in legs
+            at_way(Constraint.LISTED, through_midway(), leg) for leg in legs
         ]
     document = flight_home()
     document["places"].append({"id": "midway", "name": "Midway"})
@@ -208,9 +212,9 @@ def test_a_complete_span_includes_both_of_its_ends() -> None:
     file = load(document)
 
     def ruled_out_at(moment: int) -> bool:
-        leg = unlisted("art-institute", "ohare", moment)
-        found = broken(file, best_case(file), (visit(), leg, flight()))
-        assert found in ([], [at_way(Constraint.LISTED, leg)])
+        shortcut = (visit(), unlisted("art-institute", "ohare", moment), flight())
+        found = broken(file, best_case(file), shortcut)
+        assert found in ([], [at_way(Constraint.LISTED, shortcut, shortcut[1])])
         return bool(found)
 
     assert ruled_out_at(seconds(15))
@@ -345,7 +349,7 @@ def test_a_complete_set_covers_one_direction_between_its_two_places() -> None:
     there_and_back = (*to_midway[:2], unlisted("ohare", "art-institute", seconds(16), *alex))
     again = unlisted("art-institute", "ohare", seconds(16, 30), *alex)
     found = broken(file, best_case(file), (*there_and_back, again))
-    assert at_way(Constraint.LISTED, again) in found
+    assert at_way(Constraint.LISTED, (*there_and_back, again), again) in found
 
 
 def with_walks() -> File:
@@ -381,13 +385,13 @@ def test_a_way_takes_as_long_as_it_takes_each_time() -> None:
     assert broken(file, world, (breakfast, there, museum)) == []
     too_quick = walk("hotel", "gallery", seconds(9, 30), minutes=5)
     assert broken(file, world, (breakfast, too_quick, museum)) == [
-        at_way(Constraint.DURATION, too_quick)
+        at_way(Constraint.DURATION, (breakfast, too_quick, museum), too_quick)
     ]
     stroll = walk("gallery", "cafe", seconds(12), minutes=20, name="stroll")
     assert broken(file, world, (breakfast, there, museum, stroll)) == []
     too_long = walk("gallery", "cafe", seconds(12), minutes=25, name="stroll")
     assert broken(file, world, (breakfast, there, museum, too_long)) == [
-        at_way(Constraint.DURATION, too_long)
+        at_way(Constraint.DURATION, (breakfast, there, museum, too_long), too_long)
     ]
 
 
@@ -441,3 +445,25 @@ def test_an_itinerary_names_things_from_the_file() -> None:
         found(step(STORY, "flight", seconds(17), seconds(19, 30), "jo"))
     with pytest.raises(ValueError, match="where the FILE says"):
         found(Step("flight", "home", "ohare", BOTH, seconds(17), seconds(19, 30)))
+
+
+def test_an_itinerary_lists_its_steps_in_the_order_they_happen() -> None:
+    """Alex's stay at 9:00 and Sam's at 10:00 work in either listing, but only one is in order."""
+    file = trip(
+        ["alex", "sam"],
+        ["a"],
+        [stays("early", "a"), stays("late", "a")],
+        [
+            starts_at("early", 9),
+            lasts("early", "PT1H"),
+            starts_at("late", 10),
+            lasts("late", "PT1H"),
+        ],
+        [lock("early", "alex"), lock("late", "sam")],
+    )
+    early = Step("early", "a", "a", ("alex",), seconds(9), seconds(10))
+    late = Step("late", "a", "a", ("sam",), seconds(10), seconds(11))
+    world = worst_case(file)
+    assert broken(file, world, (late, early)) == []
+    assert works_as_listed(file, world, (early, late))
+    assert not works_as_listed(file, world, (late, early))

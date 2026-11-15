@@ -169,6 +169,7 @@ def a_walk_to_dinner(*facts: dict[str, object]) -> File:
 
 
 def test_a_plan_shows_the_ways_people_take() -> None:
+    """In words, Alex and Sam share a line for the walk. As JSON, each one's walk is a step."""
     file = a_walk_to_dinner(takes_between("walk", "PT10M", "PT20M"))
     found = compiler.check(file)
     words = report.as_text(file, found).splitlines()
@@ -181,7 +182,8 @@ def test_a_plan_shows_the_ways_people_take() -> None:
     assert "  walk-length: walk takes between 10 min and 20 min" in words
     assert report.as_json(file, found)["itinerary"] == [
         {"option": "drink", "persons": ["alex", "sam"], "start": at(18), "end": at(18, 30)},
-        {"way": "walk", "persons": ["alex", "sam"], "start": at(18, 30), "end": at(18, 50)},
+        {"way": "walk", "persons": ["alex"], "start": at(18, 30), "end": at(18, 50)},
+        {"way": "walk", "persons": ["sam"], "start": at(18, 30), "end": at(18, 50)},
         {"option": "dinner", "persons": ["alex", "sam"], "start": at(19), "end": at(21)},
     ]
 
@@ -287,6 +289,7 @@ def test_a_warning_names_the_way_and_the_time_it_is_taken() -> None:
     assert report.as_json(file, found)["at_worst"] == [
         {
             "constraint": "Each PERSON is in one place at a time",
+            "step": 1,
             "way": "walk",
             "from": "gallery",
             "to": "pier",
@@ -341,3 +344,71 @@ def test_times_show_their_offset_when_the_clocks_change() -> None:
     assert lines[6] == (
         "  night-shift-time: night-shift starts at 1:45 am (UTC-5) on Sunday 7 November 2027"
     )
+
+
+def test_the_same_way_taken_twice_has_a_line_each_time() -> None:
+    """Alex and Sam walk to dinner and walk back for a nightcap at the hotel."""
+    file = trip(
+        ["alex", "sam"],
+        ["hotel", "restaurant"],
+        [stays("dinner", "restaurant"), stays("nightcap", "hotel")],
+        [
+            starts_at("dinner", 19),
+            lasts("dinner", "PT2H"),
+            starts_at("nightcap", 21, 30),
+            lasts("nightcap", "PT30M"),
+            cutoff("nightcap", "PT0S"),
+            takes("walk", "PT20M"),
+        ],
+        [lock("dinner", "alex", "sam"), lock("nightcap", "alex", "sam")],
+        [way_between("walk", "hotel", "restaurant")],
+    )
+    assert report.as_text(file, compiler.check(file)).splitlines()[3:6] == [
+        "  7:00 pm to 9:00 pm: dinner, alex and sam",
+        "  9:00 pm to 9:20 pm: walk, alex and sam",
+        "  9:30 pm to 10:00 pm: nightcap, alex and sam",
+    ]
+    earlier = [starts_at("nightcap", 18), lasts("nightcap", "PT30M"), starts_at("dinner", 19)]
+    there_and_back = trip(
+        ["alex", "sam"],
+        ["hotel", "restaurant"],
+        [stays("nightcap", "hotel"), stays("dinner", "restaurant"), stays("bed", "hotel")],
+        [
+            *earlier,
+            lasts("dinner", "PT2H"),
+            cutoff("dinner", "PT0S"),
+            starts_at("bed", 22),
+            cutoff("bed", "PT0S"),
+            takes("walk", "PT20M"),
+        ],
+        [lock(name, "alex", "sam") for name in ("nightcap", "dinner", "bed")],
+        [way_between("walk", "hotel", "restaurant")],
+    )
+    lines = report.as_text(there_and_back, compiler.check(there_and_back)).splitlines()
+    assert [line for line in lines if ": walk, " in line] == [
+        "  6:30 pm to 6:50 pm: walk, alex and sam",
+        "  9:00 pm to 9:20 pm: walk, alex and sam",
+    ]
+
+
+def test_a_way_that_must_take_no_time_is_put_plainly() -> None:
+    """Alex is at the hotel and at the restaurant at the same instant."""
+    file = trip(
+        ["alex"],
+        ["hotel", "restaurant"],
+        [stays("call", "hotel"), stays("toast", "restaurant")],
+        [
+            starts_at("call", 19),
+            lasts("call", "PT0S"),
+            starts_at("toast", 19),
+            lasts("toast", "PT0S"),
+            cutoff("toast", "PT0S"),
+            cutoff("call", "PT0S"),
+        ],
+        [lock("call", "alex"), lock("toast", "alex")],
+    )
+    assert report.as_text(file, compiler.check(file)).splitlines()[2:] == [
+        "The trip works in any of these cases:",
+        "  1. There are other WAYs from hotel to restaurant that take no time.",
+        "  2. There are other WAYs from restaurant to hotel that take no time.",
+    ]

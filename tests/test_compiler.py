@@ -20,6 +20,7 @@ from agloe.reference import (
     with_these_at_best,
     worst_case,
 )
+from agloe.report import together
 from tests.stories import (
     EXAMPLES,
     Document,
@@ -44,6 +45,7 @@ from tests.test_answers import (
     a_morning,
     a_ride_there_and_back,
     lunch_away_from_the_museum,
+    two_who_swap_places,
 )
 from tests.test_cross_check import (
     a_shared_ride,
@@ -80,6 +82,8 @@ def test_the_compiler_and_the_reference_checker_agree_on_random_trips() -> None:
     for file in trips:
         report = answers.check(file)
         assert compiler.check(file) == report
+        if report.answer is Answer.FEASIBLE:
+            assert reference.broken(file, worst_case(file), report.itinerary) == []
         seen.add(report.answer)
         robust.add(report.robust)
     assert seen == set(Answer)
@@ -617,7 +621,8 @@ def test_the_compiler_plans_a_day_with_ways() -> None:
     report = compiler.check(file)
     assert report.answer is Answer.FEASIBLE
     assert report.robust is True
-    assert [(step.option or step.way, step.persons, step.start) for step in report.itinerary] == [
+    shown = together(report.itinerary)
+    assert [(step.option or step.way, step.persons, step.start) for step in shown] == [
         ("breakfast", ("alex", "sam", "jo"), seconds(8)),
         ("walk-to-museum", ("alex", "sam"), seconds(9)),
         ("cab-to-river", ("jo",), seconds(9)),
@@ -670,7 +675,8 @@ def test_two_quick_ways_are_taken_where_one_slow_way_is_too_late() -> None:
     )
     report = compiler.check(file)
     assert report == answers.check(file)
-    assert [step.way for step in report.itinerary if step.way][:2] == ["to-station", "from-station"]
+    ways = [step.way for step in together(report.itinerary) if step.way]
+    assert ways[:2] == ["to-station", "from-station"]
 
 
 def test_the_tie_break_counts_exactly_with_many_options() -> None:
@@ -713,3 +719,11 @@ def test_the_compiler_agrees_where_a_stop_nobody_needs_is_listed() -> None:
     files += [lunch_away_from_the_museum(), lunch_away_from_the_museum(complete(None, "ohare"))]
     for file in files:
         assert compiler.check(file) == answers.check(file)
+
+
+def test_the_compiler_keeps_each_use_of_a_way_apart() -> None:
+    """Two PERSONs take one WAY at one instant in opposite orders, and both checkers agree."""
+    file = two_who_swap_places()
+    report = compiler.check(file)
+    assert report == answers.check(file)
+    assert reference.broken(file, longest_case(file), report.itinerary) == []

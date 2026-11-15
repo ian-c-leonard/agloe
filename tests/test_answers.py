@@ -14,8 +14,10 @@ from agloe.reference import (
     broken,
     in_world,
     itineraries,
+    works_as_listed,
     worst_case,
 )
+from agloe.report import together
 from tests.stories import (
     any_time,
     at,
@@ -586,14 +588,14 @@ def test_an_option_can_be_there_for_the_possible_worlds_that_need_it() -> None:
     report = check(file)
     assert report.answer is Answer.FEASIBLE
     assert [(step.option, step.end) for step in report.itinerary] == [
-        ("ride", None),
         ("event", seconds(9)),
         ("back", seconds(9)),
+        ("ride", None),
     ]
     for time in (0, 60, 86400):
         world = when_it_takes(file, "ride", time)
         assert broken(file, world, in_world(world, report.itinerary)) == []
-    without_the_ride_back = report.itinerary[:2]
+    without_the_ride_back = tuple(step for step in report.itinerary if step.option != "back")
     world = when_it_takes(file, "ride", 60)
     assert broken(file, world, in_world(world, without_the_ride_back)) != []
 
@@ -603,7 +605,7 @@ def test_a_robust_itinerary_works_at_the_shortest_durations_too() -> None:
     report = check(file)
     assert report.answer is Answer.FEASIBLE
     assert report.robust is True
-    assert [step.option for step in report.itinerary] == ["ride", "event", "back"]
+    assert [step.option for step in report.itinerary] == ["event", "back", "ride"]
     for time in (0, 30, 60):
         world = when_it_takes(file, "ride", time)
         assert broken(file, world, in_world(world, report.itinerary)) == []
@@ -873,11 +875,11 @@ BOTH = ("alex", "sam")
 
 def taken(file: File) -> list[tuple[str | None, tuple[str, ...], int, int | None]]:
     """The WAYs in the ITINERARY shown: which, who, from when, until when."""
-    report = check(file)
-    assert report.answer is Answer.FEASIBLE
+    found = check(file)
+    assert found.answer is Answer.FEASIBLE
     return [
         (step.way, step.persons, step.start, step.end)
-        for step in report.itinerary
+        for step in together(found.itinerary)
         if step.option is None
     ]
 
@@ -888,7 +890,8 @@ def test_persons_take_ways_between_their_options() -> None:
     )
     report = check(file)
     assert report.robust is True
-    assert [(step.option or step.way, step.persons, step.start) for step in report.itinerary] == [
+    shown = together(report.itinerary)
+    assert [(step.option or step.way, step.persons, step.start) for step in shown] == [
         ("breakfast", BOTH, seconds(8)),
         ("walk-to-gallery", BOTH, seconds(9)),
         ("museum", BOTH, seconds(10)),
@@ -1117,3 +1120,89 @@ def test_a_side_trip_is_not_travel_between_the_places_of_a_complete_fact() -> No
         report = check(lunch_away_from_the_museum(*more))
         assert report.answer is Answer.UNDETERMINED
         assert report.missing == ((Missing(there, at_most=None), Missing(back, at_most=None)),)
+
+
+def two_who_swap_places() -> File:
+    """Alex is at a and Sam at b until 9:00. At 9:00 each does a stop at the other PLACE.
+
+    Each is back for an hour at their own PLACE from 9:00. A WAY between a and b takes no time.
+    So at 9:00 Alex goes to b and back, and Sam goes to a and back.
+    """
+    rows = [("a0", "a", "alex", 8, "PT1H"), ("a1", "b", "alex", 9, "PT0S")]
+    rows += [("a2", "a", "alex", 9, "PT1H"), ("s0", "b", "sam", 8, "PT1H")]
+    rows += [("s1", "a", "sam", 9, "PT0S"), ("s2", "b", "sam", 9, "PT1H")]
+    facts = [
+        fact
+        for name, _, _, hour, length in rows
+        for fact in (starts_at(name, hour), lasts(name, length), cutoff(name, "PT0S"))
+    ]
+    return trip(
+        ["alex", "sam"],
+        ["a", "b"],
+        [stays(name, place) for name, place, _, _, _ in rows],
+        [*facts, takes("ab", "PT0S")],
+        [lock(name, person) for name, _, person, _, _ in rows],
+        [way_between("ab", "a", "b")],
+    )
+
+
+def test_each_time_a_person_takes_a_way_is_a_step_of_its_own() -> None:
+    """Alex and Sam take the same WAY at the same instant, in opposite orders.
+
+    Shown as two shared steps, no order of those steps would suit them both. As four steps, one
+    for each PERSON each time, the ITINERARY works.
+    """
+    file = two_who_swap_places()
+    found = check(file)
+    assert found.answer is Answer.FEASIBLE
+    assert found.robust is True
+    assert [(step.persons, step.origin) for step in found.itinerary if step.way] == [
+        (("alex",), "a"),
+        (("alex",), "b"),
+        (("sam",), "b"),
+        (("sam",), "a"),
+    ]
+    assert broken(file, worst_case(file), found.itinerary) == []
+    assert works_as_listed(file, worst_case(file), found.itinerary)
+    back_first = tuple(sorted(found.itinerary, key=lambda step: (step.start, step.origin != "b")))
+    assert not works_as_listed(file, worst_case(file), back_first)
+
+
+def test_a_warning_points_at_one_use_of_a_way() -> None:
+    """Alex takes the same WAY twice at 9:00, before and after a ride that can take an hour.
+
+    If the ride runs long, Alex is not back at a for the second time. The warning gives the
+    position of that step, since the two steps look the same.
+    """
+    file = trip(
+        ["alex"],
+        ["a", "b"],
+        [stays("first", "a"), moves("ride", "b", "a"), stays("last", "b")],
+        [
+            starts_at("first", 8),
+            lasts("first", "PT1H"),
+            starts_at("ride", 9),
+            lasts_between("ride", "PT0S", "PT1H"),
+            cutoff("ride", "PT0S"),
+            starts_at("last", 9),
+            lasts("last", "PT1H"),
+            cutoff("last", "PT0S"),
+            takes("ab", "PT0S"),
+        ],
+        [lock("first", "alex"), lock("ride", "alex"), lock("last", "alex")],
+        [way("ab", "a", "b")],
+    )
+    found = check(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [step.option or step.way for step in found.itinerary] == [
+        "first",
+        "ab",
+        "ride",
+        "ab",
+        "last",
+    ]
+    assert found.itinerary[1] == found.itinerary[3]
+    assert found.at_worst == (
+        Broken(Constraint.PLACE, None, ("alex",), step=3),
+        Broken(Constraint.PLACE, "last", ("alex",), late=3600),
+    )

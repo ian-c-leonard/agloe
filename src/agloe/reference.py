@@ -13,6 +13,7 @@ works them out from this module's search or from a faster one.
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from enum import Enum
+from heapq import heapify, heappop, heappush
 from itertools import combinations, groupby, pairwise, permutations, product
 
 from agloe.file import Complete, File
@@ -58,15 +59,14 @@ class Broken:
     """A CONSTRAINT an ITINERARY does not meet: at which step, for whom, by how many seconds.
 
     ``option`` names the OPTION where it happens. Where it happens at a WAY, ``option`` is None
-    and ``taken`` says which WAY and which time it is taken: the WAY with its two PLACEs, and
-    its start.
+    and ``step`` is the position of that step in the ITINERARY, counting from zero.
     """
 
     constraint: Constraint
     option: str | None
     persons: tuple[str, ...]
     late: int | None = None
-    taken: tuple[Leg, int] | None = None
+    step: int | None = None
 
 
 @dataclass(frozen=True)
@@ -249,13 +249,42 @@ def in_world(world: World, itinerary: Itinerary) -> Itinerary:
 
 
 def broken(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
-    """The CONSTRAINTs this ITINERARY does not meet in this world. An empty list means it works."""
+    """The CONSTRAINTs this ITINERARY does not meet in this world. An empty list means it works.
+
+    Steps that take no time and share an instant can happen in any order. The order in which the
+    ITINERARY lists them is tried first, then every other order. The result is that of the order
+    that breaks the least.
+    """
     _well_formed(file, itinerary)
+    fewest: list[Broken] | None = None
+    for order in _in_each_order(itinerary):
+        found = _along_each_path(file, world, itinerary, order)
+        if fewest is None or len(found) < len(fewest):
+            fewest = found
+        if not found:
+            break
+    return [*_each_alone(file, world, itinerary), *(fewest or [])]
+
+
+def works_as_listed(file: File, world: World, itinerary: Itinerary) -> bool:
+    """Whether this ITINERARY meets every CONSTRAINT with its steps in the order it lists them.
+
+    The steps must be listed in an order their times allow: earlier starts first.
+    """
+    _well_formed(file, itinerary)
+    placed = list(enumerate(itinerary))
+    if any(before.start > after.start for before, after in pairwise(itinerary)):
+        return False
+    alone = _each_alone(file, world, itinerary)
+    return not alone and not _along_each_path(file, world, itinerary, placed)
+
+
+def _each_alone(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
+    """The three CONSTRAINTs about each step by itself, whatever order the steps happen in."""
     return [
         *_locks(file, itinerary),
         *_starts(world, itinerary),
         *_durations(world, itinerary),
-        *_along_each_path(file, world, itinerary),
     ]
 
 
@@ -292,29 +321,20 @@ def _well_formed(file: File, itinerary: Itinerary) -> None:
             raise ValueError("a step ends before it starts")
 
 
-def _where(step: Step) -> tuple[str | None, tuple[Leg, int] | None]:
-    """How a Broken names a step: an OPTION by its id, a WAY by what it is and when it starts."""
-    if step.option is not None:
-        return step.option, None
-    return None, ((step.way, step.origin, step.destination), step.start)
+type _Placed = tuple[int, Step]  # a step with its position in the ITINERARY
+
+
+def _at(
+    constraint: Constraint, placed: _Placed, persons: tuple[str, ...], late: int | None
+) -> Broken:
+    """A Broken at one step: an OPTION by its id, a WAY by its position in the ITINERARY."""
+    position, step = placed
+    return Broken(constraint, step.option, persons, late, None if step.option else position)
 
 
 def _in_file_order_of_persons(file: File, persons: Iterable[str]) -> tuple[str, ...]:
     order = [person.id for person in file.persons]
     return tuple(sorted(set(persons), key=order.index))
-
-
-def _gathered(
-    file: File, constraint: Constraint, found: list[tuple[Step, int | None, str]]
-) -> list[Broken]:
-    """One Broken for each step and amount, naming every PERSON it affects in the FILE's order."""
-    groups: dict[tuple[str | None, tuple[Leg, int] | None, int | None], list[str]] = {}
-    for step, late, person in found:
-        groups.setdefault((*_where(step), late), []).append(person)
-    return [
-        Broken(constraint, option, _in_file_order_of_persons(file, people), late, taken)
-        for (option, taken, late), people in groups.items()
-    ]
 
 
 def _locks(file: File, itinerary: Itinerary) -> list[Broken]:
@@ -347,7 +367,7 @@ def _starts(world: World, itinerary: Itinerary) -> list[Broken]:
 def _durations(world: World, itinerary: Itinerary) -> list[Broken]:
     """Each OPTION and WAY takes as long as it takes: it ends after a duration the FACTs allow."""
     out: list[Broken] = []
-    for step in itinerary:
+    for position, step in enumerate(itinerary):
         if step.option is not None:
             terms = world.terms[step.option]
             shortest, longest = terms.shortest, terms.longest
@@ -360,63 +380,57 @@ def _durations(world: World, itinerary: Itinerary) -> list[Broken]:
         else:
             fits = shortest <= step.end - step.start <= longest
         if not fits:
-            option, taken = _where(step)
-            out.append(Broken(Constraint.DURATION, option, step.persons, None, taken))
+            out.append(_at(Constraint.DURATION, (position, step), step.persons, None))
     return out
 
 
-type _Found = list[tuple[Constraint, Step, int | None]]  # which, at which step, how late
+type _Found = list[tuple[Constraint, _Placed, int | None]]  # which, at which step, how late
 
 
-def _along_each_path(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
-    """The three CONSTRAINTs about what each PERSON does in order.
+def _along_each_path(
+    file: File, world: World, itinerary: Itinerary, order: list[_Placed]
+) -> list[Broken]:
+    """The three CONSTRAINTs about what each PERSON does, with the steps in one order.
 
-    The ITINERARY meets them if one of the orders its times allow works for every PERSON.
+    One Broken for each step and amount, naming every PERSON it affects in the FILE's order.
     """
-    fewest: list[tuple[Constraint, Step, int | None, str]] | None = None
-    for order in _in_each_order(itinerary):
-        found = [
-            (constraint, step, late, person.id)
-            for person in file.persons
-            for path in [[step for step in order if person.id in step.persons]]
-            for constraint, step, late in (
-                *_places(path),
-                *_arrivals(world, path),
-                *_listed(file, world, path),
-            )
-        ]
-        if fewest is None or len(found) < len(fewest):
-            fewest = found
-        if not found:
-            break
+    groups: dict[tuple[Constraint, int, int | None], list[str]] = {}
+    for person in file.persons:
+        path = [placed for placed in order if person.id in placed[1].persons]
+        for constraint, (position, _), late in (
+            *_places(path),
+            *_arrivals(world, path),
+            *_listed(file, world, path),
+        ):
+            groups.setdefault((constraint, position, late), []).append(person.id)
+    kinds = [Constraint.PLACE, Constraint.ARRIVAL, Constraint.LISTED]
     return [
-        broken
-        for kind in (Constraint.PLACE, Constraint.ARRIVAL, Constraint.LISTED)
-        for broken in _gathered(
-            file,
-            kind,
-            [(step, late, person) for which, step, late, person in fewest or [] if which is kind],
-        )
+        _at(kind, (position, itinerary[position]), _in_file_order_of_persons(file, people), late)
+        for kind in kinds
+        for (constraint, position, late), people in groups.items()
+        if constraint is kind
     ]
 
 
-def _in_each_order(itinerary: Itinerary) -> Iterator[list[Step]]:
+def _in_each_order(itinerary: Itinerary) -> Iterator[list[_Placed]]:
     """The steps of an ITINERARY, in each order that their times allow.
 
     Steps that take no time and share an instant can happen in any order. The order is one order
     for the whole ITINERARY, so every PERSON sees those steps happen in the same order. Only the
     order among steps that share a PERSON, directly or through other steps, can matter, so only
-    those are tried in every order. The orders are made one at a time.
+    those are tried in every order. The orders are made one at a time, and the first keeps such
+    steps in the order the ITINERARY lists them.
     """
 
-    def moment(step: Step) -> tuple[int, bool, int]:
+    def moment(placed: _Placed) -> tuple[int, bool, int]:
+        step = placed[1]
         return (step.start, step.end is None, step.end or 0)
 
-    groups: list[list[Step]] = []
-    for _, steps in groupby(sorted(itinerary, key=moment), key=moment):
+    groups: list[list[_Placed]] = []
+    for _, steps in groupby(sorted(enumerate(itinerary), key=moment), key=moment):
         same = list(steps)
-        instant = same[0].end == same[0].start
-        groups += _sharing_persons(same) if instant else [[step] for step in same]
+        instant = same[0][1].end == same[0][1].start
+        groups += _sharing_persons(same) if instant else [[placed] for placed in same]
 
     chosen = [tuple(group) for group in groups]
     choices = [number for number, group in enumerate(groups) if len(group) > 1]
@@ -424,7 +438,7 @@ def _in_each_order(itinerary: Itinerary) -> Iterator[list[Step]]:
     for place, number in enumerate(choices):
         chosen[number] = next(orders[place])
     while True:
-        yield [step for steps in chosen for step in steps]
+        yield [placed for steps in chosen for placed in steps]
         # Move on like a mileage counter: the last group that has another order takes it, and
         # every group after it starts again from its first order.
         place = len(choices) - 1
@@ -440,64 +454,71 @@ def _in_each_order(itinerary: Itinerary) -> Iterator[list[Step]]:
             return
 
 
-def _sharing_persons(steps: list[Step]) -> list[list[Step]]:
-    """These steps in groups: two steps are in one group when PERSONs link them."""
-    groups: list[list[Step]] = []
-    for step in steps:
+def _sharing_persons(steps: list[_Placed]) -> list[list[_Placed]]:
+    """These steps in groups: two steps are in one group when PERSONs link them.
+
+    Each group keeps its steps in the order given.
+    """
+    groups: list[list[_Placed]] = []
+    for placed in steps:
         linked = [
-            group for group in groups if any(set(step.persons) & set(o.persons) for o in group)
+            group
+            for group in groups
+            if any(set(placed[1].persons) & set(other.persons) for _, other in group)
         ]
         for group in linked:
             groups.remove(group)
-        groups.append([member for group in linked for member in group] + [step])
+        groups.append(sorted([member for group in linked for member in group] + [placed]))
     return groups
 
 
-def _places(path: list[Step]) -> _Found:
+def _places(path: list[_Placed]) -> _Found:
     """Each PERSON is in one place at a time: no overlap, and each step starts where they are."""
     found: _Found = []
-    for before, after in pairwise(path):
+    for (_, before), after in pairwise(path):
         if before.end is None:
             found.append((Constraint.PLACE, after, None))
-        elif before.end > after.start:
-            found.append((Constraint.PLACE, after, before.end - after.start))
-        elif before.destination != after.origin:
+        elif before.end > after[1].start:
+            found.append((Constraint.PLACE, after, before.end - after[1].start))
+        elif before.destination != after[1].origin:
             found.append((Constraint.PLACE, after, None))
     return found
 
 
-def _arrivals(world: World, path: list[Step]) -> _Found:
+def _arrivals(world: World, path: list[_Placed]) -> _Found:
     """Each PERSON arrives in time: whoever travels to an OPTION gets there before its cutoff."""
     found: _Found = []
     arrived: Step | None = None  # the step that last brought this PERSON to a new PLACE
-    for step in path:
+    for placed in path:
+        step = placed[1]
         margin = 0 if step.option is None else world.terms[step.option].margin
         if arrived is not None and margin != 0:
             if arrived.end is None or margin is None:
-                found.append((Constraint.ARRIVAL, step, None))
+                found.append((Constraint.ARRIVAL, placed, None))
             elif arrived.end + margin > step.start:
-                found.append((Constraint.ARRIVAL, step, arrived.end + margin - step.start))
+                found.append((Constraint.ARRIVAL, placed, arrived.end + margin - step.start))
         if step.origin != step.destination:
             arrived = step
     return found
 
 
-def _listed(file: File, world: World, path: list[Step]) -> _Found:
+def _listed(file: File, world: World, path: list[_Placed]) -> _Found:
     """A COMPLETE set is the whole set: an unlisted WAY needs a world that has it.
 
     No world has one that goes straight between the PLACEs of a COMPLETE FACT and starts within
     its span. The span includes both of its ends.
     """
     found: _Found = []
-    for step in path:
+    for placed in path:
+        step = placed[1]
         if step.option is not None or step.way is not None:
             continue
         here = (step.origin, step.destination)
         if world.unlisted is not None and here not in world.unlisted:
-            found.append((Constraint.LISTED, step, None))
+            found.append((Constraint.LISTED, placed, None))
         for fact in file.facts:
             if isinstance(fact, Complete) and fact.rules_out(*here, step.start):
-                found.append((Constraint.LISTED, step, None))
+                found.append((Constraint.LISTED, placed, None))
     return found
 
 
@@ -576,6 +597,9 @@ def scheduled(
     by: Mapping[tuple[int, int], Route] | None = None,
 ) -> Itinerary | None:
     """The ITINERARY for one choice of PERSONs and orders, or None when it breaks a CONSTRAINT.
+
+    Each time a PERSON takes a WAY is a step of its own, and the steps are listed in the order
+    they happen. Every ITINERARY returned has passed ``works_as_listed``.
 
     ``who`` names the PERSONs in each OPTION, in the FILE's order of OPTIONs. ``orders`` gives,
     for each PERSON in the FILE's order, the OPTIONs they do, by position in the FILE, in the
@@ -849,38 +873,39 @@ def _timings(
             steps[listed + number] = Step(
                 None, start_place, end_place, (person_id,), start, end, way
             )
-        paths = [[steps[node] for node in line] for line in lines]
-        if any(
-            [*_places(path), *_arrivals(world, path), *_listed(file, world, path)] for path in paths
-        ):
-            continue
-        itinerary = tuple(
-            sorted(
-                _together(file, steps.values()), key=lambda step: _step_in_file_order(file, step)
-            )
-        )
-        if _locks(file, itinerary) or _starts(world, itinerary) or _durations(world, itinerary):
-            continue
-        yield itinerary
+        itinerary = _in_the_order_they_happen(file, steps, gaps)
+        if works_as_listed(file, world, itinerary):
+            yield itinerary
 
 
-def _together(file: File, steps: Iterable[Step]) -> list[Step]:
-    """The steps, with PERSONs who take the same WAY at the same time shown as one step.
+def _in_the_order_they_happen(
+    file: File, steps: Mapping[int, Step], gaps: list[tuple[int, int, int]]
+) -> Itinerary:
+    """These steps as an ITINERARY: earlier steps first, each after whatever must come before it.
 
-    A PERSON who takes the same WAY twice in one instant still has two steps.
+    A gap from one step to another says the first comes before the second. Steps that could
+    come in either order follow the FILE's order.
     """
-    order = [person.id for person in file.persons]
-    merged: list[Step] = []
-    for step in steps:
-        for place, other in enumerate(merged):
-            same = replace(other, persons=step.persons) == step
-            if same and not set(step.persons) & set(other.persons):
-                persons = tuple(sorted((*other.persons, *step.persons), key=order.index))
-                merged[place] = replace(other, persons=persons)
-                break
-        else:
-            merged.append(step)
-    return merged
+
+    def rank(node: int) -> tuple[_StepOrder, int]:
+        return (_step_in_file_order(file, steps[node]), node)
+
+    waiting = dict.fromkeys(steps, 0)
+    later: dict[int, list[int]] = {node: [] for node in steps}
+    for before, after, _ in gaps:
+        waiting[after] += 1
+        later[before].append(after)
+    ready = [(rank(node), node) for node in steps if not waiting[node]]
+    heapify(ready)
+    listed: list[Step] = []
+    while ready:
+        _, node = heappop(ready)
+        listed.append(steps[node])
+        for after in later[node]:
+            waiting[after] -= 1
+            if not waiting[after]:
+                heappush(ready, (rank(after), after))
+    return tuple(listed)
 
 
 def _goes_round(count: int, gaps: list[tuple[int, int, int]]) -> bool:

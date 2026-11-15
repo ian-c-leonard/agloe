@@ -1,4 +1,4 @@
-FEASIBLE, with a WARNING: this trip works, but only if the uncertain parts go well.
+FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold.
 
 Saturday 15 May 2027 (times in America/Chicago)
   2:00 pm to 3:00 pm: Museum visit, Alex and Sam
