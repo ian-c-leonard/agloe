@@ -519,7 +519,7 @@ def test_the_conflict_named_is_the_one_found_in_the_files_order() -> None:
 
     Alex cannot make the flight, as in the story. Going through the records in the FILE's order
     takes Sam's out first, since Alex's still clash without them. So the conflict named is
-    Alex's, though a search from the other end would find Sam's.
+    Alex's. The solver's own search may find either one: that depends on its proof.
     """
     document = json.loads((EXAMPLES / "flight-home" / "cannot-work.json").read_text())
     document["options"] = [stays("call", "home"), stays("nap", "home"), *document["options"]]
@@ -533,7 +533,7 @@ def test_the_conflict_named_is_the_one_found_in_the_files_order() -> None:
     document["decisions"] = [lock("call", "sam"), lock("nap", "sam"), *document["decisions"]]
     file = load(document)
     report = compiler.check(file)
-    assert report.conflict == (
+    of_alex = (
         "visit-time",
         "visit-length",
         "train-length",
@@ -543,9 +543,9 @@ def test_the_conflict_named_is_the_one_found_in_the_files_order() -> None:
         "lock-visit",
         "lock-flight",
     )
-    assert compiler.stuck(file) == frozenset(
-        {"call-time", "call-length", "nap-time", "lock-call", "lock-nap"}
-    )
+    of_sam = {"call-time", "call-length", "nap-time", "lock-call", "lock-nap"}
+    assert report.conflict == of_alex
+    assert compiler.stuck(file) in (frozenset(of_alex), frozenset(of_sam))
 
 
 def test_two_conflicts_at_once_give_the_reference_checkers_report() -> None:
