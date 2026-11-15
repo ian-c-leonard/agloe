@@ -9,6 +9,7 @@ from agloe import compiler, report
 from agloe.answers import Answer
 from agloe.cli import main
 from agloe.file import File, load
+from agloe.reference import Step, works_as_listed, worst_case
 from tests.stories import (
     EXAMPLES,
     any_time,
@@ -28,6 +29,7 @@ from tests.stories import (
     way,
     way_between,
 )
+from tests.test_answers import two_who_swap_places
 
 FILES = sorted(
     path for path in EXAMPLES.rglob("*.json") if not path.name.endswith(".expected.json")
@@ -411,4 +413,124 @@ def test_a_way_that_must_take_no_time_is_put_plainly() -> None:
         "The trip works in any of these cases:",
         "  1. There are other WAYs from hotel to restaurant that take no time.",
         "  2. There are other WAYs from restaurant to hotel that take no time.",
+    ]
+
+
+def test_the_plan_in_words_keeps_every_step_in_its_order() -> None:
+    """Alex takes the same WAY twice at 9:00, before and after a ride that takes no time.
+
+    Both times are printed. Read back as an ITINERARY, the printed plan still works.
+    """
+    file = trip(
+        ["alex"],
+        ["a", "b"],
+        [stays("first", "a"), moves("ride", "b", "a"), stays("last", "b")],
+        [
+            starts_at("first", 8),
+            lasts("first", "PT1H"),
+            starts_at("ride", 9),
+            lasts("ride", "PT0S"),
+            cutoff("ride", "PT0S"),
+            starts_at("last", 9),
+            lasts("last", "PT1H"),
+            cutoff("last", "PT0S"),
+            takes("ab", "PT0S"),
+        ],
+        [lock("first", "alex"), lock("ride", "alex"), lock("last", "alex")],
+        [way("ab", "a", "b")],
+    )
+    found = compiler.check(file)
+    assert report.as_text(file, found).splitlines()[3:8] == [
+        "  8:00 am to 9:00 am: first, alex",
+        "  9:00 am to 9:00 am: ab, alex",
+        "  9:00 am to 9:00 am: ride, alex",
+        "  9:00 am to 9:00 am: ab, alex",
+        "  9:00 am to 10:00 am: last, alex",
+    ]
+    assert works_as_listed(file, worst_case(file), tuple(report.together(found.itinerary)))
+
+
+def test_persons_share_a_line_only_where_their_steps_are_next_to_each_other() -> None:
+    """Alex goes to b and back at 9:00 while Sam goes to a and back, by the same WAY.
+
+    Alex's way back and Sam's way there are the same WAY at the same time, but other steps come
+    between them, so they stay on two lines.
+    """
+    file = two_who_swap_places()
+    found = compiler.check(file)
+    shown = report.together(found.itinerary)
+    assert [(step.origin, step.persons) for step in shown if step.way] == [
+        ("a", ("alex",)),
+        ("b", ("alex",)),
+        ("b", ("sam",)),
+        ("a", ("sam",)),
+    ]
+    assert works_as_listed(file, worst_case(file), tuple(shown))
+
+
+def test_a_warning_names_together_the_persons_who_share_a_line() -> None:
+    """The drink can run twenty minutes over, into the time Alex and Sam should start walking."""
+    file = trip(
+        ["alex", "sam"],
+        ["hotel", "restaurant"],
+        [stays("drink", "hotel"), stays("dinner", "restaurant")],
+        [
+            starts_at("drink", 18),
+            lasts_between("drink", "PT30M", "PT50M"),
+            starts_at("dinner", 19),
+            lasts("dinner", "PT2H"),
+            cutoff("dinner", "PT0S"),
+            takes("walk", "PT20M"),
+        ],
+        [lock("drink", "alex", "sam"), lock("dinner", "alex", "sam")],
+        [way_between("walk", "hotel", "restaurant")],
+    )
+    found = compiler.check(file)
+    assert [(broken.step, broken.persons) for broken in found.at_worst] == [
+        (1, ("alex",)),
+        (2, ("sam",)),
+    ]
+    assert report.as_text(file, found).splitlines()[7:9] == [
+        "WARNING: no plan is sure to hold if the uncertain parts take their longest. In this plan:",
+        "  alex and sam would still be busy for 20 min at 6:30 pm, the time to take walk.",
+    ]
+
+
+def test_warnings_on_two_lines_of_the_plan_stay_apart() -> None:
+    """Alex has a drink at the hotel and Sam at a bar. Each drink can run twenty minutes over.
+
+    Both then walk twenty minutes to dinner, by different WAYs. Each walk has its own line in
+    the plan, so each has its own warning.
+    """
+    file = trip(
+        ["alex", "sam"],
+        ["hotel", "bar", "restaurant"],
+        [stays("drink", "hotel"), stays("beer", "bar"), stays("dinner", "restaurant")],
+        [
+            starts_at("drink", 18),
+            lasts_between("drink", "PT30M", "PT50M"),
+            starts_at("beer", 18),
+            lasts_between("beer", "PT30M", "PT50M"),
+            starts_at("dinner", 19),
+            lasts("dinner", "PT2H"),
+            cutoff("dinner", "PT0S"),
+            takes("walk", "PT20M"),
+            takes("stroll", "PT20M"),
+        ],
+        [lock("drink", "alex"), lock("beer", "sam"), lock("dinner", "alex", "sam")],
+        [way("walk", "hotel", "restaurant"), way("stroll", "bar", "restaurant")],
+    )
+    words = report.as_text(file, compiler.check(file)).splitlines()
+    assert [line for line in words if "would still be busy" in line] == [
+        "  alex would still be busy for 20 min at 6:30 pm, the time to take walk.",
+        "  sam would still be busy for 20 min at 6:30 pm, the time to take stroll.",
+    ]
+
+
+def test_a_person_never_shares_a_line_with_themselves() -> None:
+    walk = Step(None, "hotel", "restaurant", ("alex",), 0, 600, "walk")
+    assert report.together((walk, walk)) == [walk, walk]
+    with_sam = Step(None, "hotel", "restaurant", ("sam",), 0, 600, "walk")
+    assert report.together((walk, with_sam)) == [
+        Step(None, "hotel", "restaurant", ("alex", "sam"), 0, 600, "walk")
     ]
