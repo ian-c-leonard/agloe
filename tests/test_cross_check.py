@@ -12,7 +12,7 @@ from itertools import combinations, pairwise, permutations, product
 from random import Random
 
 from agloe.answers import Answer, check
-from agloe.file import Duration, File
+from agloe.file import Complete, Duration, File
 from agloe.reference import (
     Itinerary,
     Step,
@@ -473,12 +473,12 @@ def test_the_best_and_worst_cases_settle_the_answer_for_every_possible_world() -
     assert by_listed_way > 50
 
 
-def a_walk_that_comes_back(rng: Random) -> tuple[File, World, Itinerary, Itinerary] | None:
-    """Two stops with WAYs between them that pass through one PLACE twice.
+def a_walk(rng: Random, passed: list[str]) -> tuple[File, World, Itinerary]:
+    """Two stops with WAYs between them through these PLACEs, some listed and some not.
 
-    Returns the FILE, a world, the ITINERARY, and the same ITINERARY without the WAYs between
-    the two visits to that PLACE. Returns None when the walk made passes through no PLACE twice.
-    Every step starts later than the one before, so the steps can happen in one order only.
+    Returns the FILE, a world and the ITINERARY: the first stop, the WAYs and the last stop.
+    The FILE has up to two COMPLETE FACTs. Every step starts later than the one before, so the
+    steps can happen in one order only.
     """
     listed: list[Document] = []
     facts: list[Document] = []
@@ -493,20 +493,13 @@ def a_walk_that_comes_back(rng: Random) -> tuple[File, World, Itinerary, Itinera
         lengths[origin, destination] = (id, 60 * minutes)
         if both:
             lengths.setdefault((destination, origin), (id, 60 * minutes))
-    passed = [rng.choice(PLACES)]
-    for _ in range(rng.randrange(2, 6)):
-        passed.append(rng.choice([place for place in PLACES if place != passed[-1]]))
-    again = next((place for place in range(len(passed)) if passed[place] in passed[:place]), None)
-    if again is None:
-        return None
-    before = passed.index(passed[again])
 
     unlisted_takes = 300 * rng.randrange(3)
     legs: list[Step] = []
     free = seconds(9)
     for origin, destination in pairwise(passed):
         name, lasts_for = None, unlisted_takes
-        if (origin, destination) in lengths and rng.random() < 0.7:
+        if (origin, destination) in lengths and rng.random() < 0.6:
             name, lasts_for = lengths[origin, destination]
         start = max(free + 300 * rng.randrange(3), seconds(9) + 300 * (len(legs) + 1))
         if legs:
@@ -534,7 +527,8 @@ def a_walk_that_comes_back(rng: Random) -> tuple[File, World, Itinerary, Itinera
             "earliest": at_second(seconds(9) + 60 * first),
             "latest": at_second(seconds(9) + 60 * last),
         }
-        facts.append({"id": f"ways-{number}", "complete": whole})
+        if all(whole != fact.get("complete") for fact in facts):
+            facts.append({"id": f"ways-{number}", "complete": whole})
     file = trip(
         ["alex"],
         PLACES,
@@ -548,9 +542,7 @@ def a_walk_that_comes_back(rng: Random) -> tuple[File, World, Itinerary, Itinera
     first_stop = Step("first", passed[0], passed[0], ("alex",), seconds(9), seconds(9))
     at_last = seconds(9) + 60 * arrive
     last_stop = Step("last", passed[-1], passed[-1], ("alex",), at_last, at_last)
-    whole_walk = (first_stop, *legs, last_stop)
-    shorter = (first_stop, *legs[:before], *legs[again:], last_stop)
-    return file, world, whole_walk, shorter
+    return file, world, (first_stop, *legs, last_stop)
 
 
 def test_going_round_in_a_circle_never_helps() -> None:
@@ -562,11 +554,51 @@ def test_going_round_in_a_circle_never_helps() -> None:
     rng = Random(11)
     worked = 0
     for _ in range(1500):
-        made = a_walk_that_comes_back(rng)
-        if made is None:
+        passed = [rng.choice(PLACES)]
+        for _ in range(rng.randrange(2, 6)):
+            passed.append(rng.choice([place for place in PLACES if place != passed[-1]]))
+        again = next((n for n in range(len(passed)) if passed[n] in passed[:n]), None)
+        if again is None:
             continue
-        file, world, whole_walk, shorter = made
-        if not broken(file, world, whole_walk):
+        before = passed.index(passed[again])
+        file, world, (first, *legs, last) = a_walk(rng, passed)
+        if not broken(file, world, (first, *legs, last)):
             worked += 1
-            assert broken(file, world, shorter) == []
+            assert broken(file, world, (first, *legs[:before], *legs[again:], last)) == []
     assert worked > 500
+
+
+def test_one_unlisted_way_stands_in_for_a_route_that_takes_one() -> None:
+    """Alex goes from one PLACE through a second to a third, and one of the two WAYs is unlisted.
+
+    Say an unlisted WAY also goes straight from the first PLACE to the third, and every COMPLETE
+    FACT about those two PLACEs is also about the two PLACEs of the unlisted WAY taken. Then the
+    ITINERARY still works with the straight WAY, taken when the other would have been. So the
+    searches leave the longer route out.
+    """
+    rng = Random(12)
+    worked = 0
+    for _ in range(4000):
+        passed = rng.sample(PLACES, 3)
+        file, world, (first, there, on, last) = a_walk(rng, passed)
+        ends = (passed[0], passed[2])
+        if world.unlisted is not None and ends not in world.unlisted:
+            continue
+        about_the_ends = {fact.id for fact in file.facts if covers(fact, *ends)}
+        for taken in (there, on):
+            about_this = {
+                fact.id for fact in file.facts if covers(fact, taken.origin, taken.destination)
+            }
+            if taken.way is not None or not about_the_ends <= about_this:
+                continue
+            if not broken(file, world, (first, there, on, last)):
+                worked += 1
+                arrives = taken.start + world.unlisted_takes
+                straight = Step(None, *ends, ("alex",), taken.start, arrives)
+                assert broken(file, world, (first, straight, last)) == []
+    assert worked > 300
+
+
+def covers(fact: object, origin: str, destination: str) -> bool:
+    """Whether a FACT is a COMPLETE FACT about travel straight from one PLACE to another."""
+    return isinstance(fact, Complete) and fact.covers(origin, destination)

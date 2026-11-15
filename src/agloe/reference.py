@@ -654,21 +654,35 @@ type Route = tuple[Leg, ...]
 def routes(file: File, world: World, here: str, there: str) -> list[Route]:
     """Every route from one PLACE to another by WAYs alone that is worth trying, shortest first.
 
-    A route passes through no PLACE twice. A PERSON who came back to a PLACE could have waited
-    there instead: every WAY they take after that starts at the same time either way, and no
-    CONSTRAINT asks how they spent the wait. A listed WAY with no limit to how long it takes is
-    left out, because nothing could follow it. Two unlisted WAYs in a row are left out where one
-    unlisted WAY joins the same two PLACEs at any time: the one is never worse than the two.
+    Three kinds of route are left out, because another route is never worse.
+
+    - A route that passes through a PLACE twice. A PERSON who came back to a PLACE could have
+      waited there instead: every WAY they take after that starts at the same time either way,
+      and no CONSTRAINT asks how they spent the wait.
+    - A route with a listed WAY that has no limit to how long it takes. Nothing could follow it.
+    - A route in which one unlisted WAY could stand in for a stretch of two or more WAYs that
+      takes an unlisted WAY. The PERSON waits where the stretch began, takes the one WAY when
+      they would have taken the other, and arrives no later. For this the one WAY must exist in
+      this world, and every COMPLETE FACT about its two PLACEs must also be about the two PLACEs
+      of the other: then the one is ruled out only at times when the other is too.
     """
     places = [place.id for place in file.places]
     complete = [fact for fact in file.facts if isinstance(fact, Complete)]
+    about = {
+        (origin, destination): {fact.id for fact in complete if fact.covers(origin, destination)}
+        for origin in places
+        for destination in places
+    }
 
     def joined(origin: str, destination: str) -> bool:
         return world.unlisted is None or (origin, destination) in world.unlisted
 
-    def always_joined(origin: str, destination: str) -> bool:
-        limited = any(fact.covers(origin, destination) for fact in complete)
-        return joined(origin, destination) and not limited
+    def stands_in(origin: str, destination: str, stretch: Route) -> bool:
+        """Whether one unlisted WAY between these PLACEs is never worse than this stretch."""
+        return joined(origin, destination) and any(
+            way is None and about[origin, destination] <= about[start, end]
+            for way, start, end in stretch
+        )
 
     def onward(place: str) -> Iterator[tuple[str | None, str]]:
         for way in file.ways:
@@ -688,9 +702,9 @@ def routes(file: File, world: World, here: str, there: str) -> list[Route]:
         for way, place in onward(passed[-1]):
             if place in passed:
                 continue
-            if way is None and legs and legs[-1][0] is None and always_joined(legs[-1][1], place):
-                continue
             longer = (*legs, (way, passed[-1], place))
+            if any(stands_in(passed[first], place, longer[first:]) for first in range(len(legs))):
+                continue
             if place == there:
                 found.append(longer)
             else:
