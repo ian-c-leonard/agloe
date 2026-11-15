@@ -2,6 +2,7 @@
 
 import pytest
 
+from agloe.answers import check
 from agloe.file import File, load
 from agloe.reference import (
     Broken,
@@ -10,7 +11,6 @@ from agloe.reference import (
     Step,
     best_case,
     broken,
-    check,
     needless,
     worst_case,
 )

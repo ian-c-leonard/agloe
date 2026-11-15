@@ -7,8 +7,8 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from agloe import compiler, report
+from agloe.answers import Answer
 from agloe.file import FileError, Unwritable, read
-from agloe.reference import Answer
 
 
 def main(arguments: Sequence[str] | None = None) -> int:

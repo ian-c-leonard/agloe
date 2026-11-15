@@ -6,7 +6,7 @@ and check it against the CONSTRAINTs. So whenever this module says that somethin
 rules as the reference checker applies them have agreed.
 
 Only the search is different. The three answers, ROBUST and the evidence are worked out by
-``reference.check``, with this module's search in place of its own.
+``answers.check``, with this module's search in place of the reference checker's.
 
 For INFEASIBLE, the solver also names the FACTs and DECISIONs its proof used. The reference
 checker then looks for the conflict among those alone.
@@ -16,9 +16,10 @@ from collections.abc import Sequence
 
 from ortools.sat.python import cp_model
 
-from agloe import reference
+from agloe import answers, reference
+from agloe.answers import Report
 from agloe.file import Complete, Cutoff, Duration, File, Start
-from agloe.reference import Itinerary, Report, World
+from agloe.reference import Itinerary, World
 
 _MOST_AT_ONCE = 60  # yes-or-no choices ranked in one solve: their weights must fit in 64 bits
 
@@ -30,8 +31,8 @@ type _Amount = cp_model.LinearExpr | int  # seconds: a plain number, or one the 
 
 
 def check(file: File) -> Report:
-    """The answer for this TRIP, with its evidence. The same Report as ``reference.check``."""
-    return reference.check(file, shown=shown, works=works, stuck=stuck)
+    """The answer for this TRIP, with its evidence. The same Report as the reference checker's."""
+    return answers.check(file, shown=shown, works=works, stuck=stuck)
 
 
 def shown(file: File, world: World) -> Itinerary | None:
@@ -146,78 +147,102 @@ class _Search:
         A FACT that is switched off is unknown, and turns out as in the best case. So the world
         must be the best case when ``switched`` is set.
         """
-        self.file = file
+        self.file, self.world = file, world
         self.model = cp_model.CpModel()
-        model = self.model
-        options, persons = file.options, file.persons
-        count = len(options)
-        terms = [world.terms[option.id] for option in options]
-        usable = [each.fixed_start is not None or each.free_start for each in terms]
-        endless = [each.longest is None for each in terms]
         self.switch: dict[str, cp_model.IntVar] = {}
         if switched:
             for record in (*file.facts, *file.locks):
-                self.switch[record.id] = model.new_bool_var(f"given {record.id}")
+                self.switch[record.id] = self.model.new_bool_var(f"given {record.id}")
+        self._read_the_world()
+        self._count_time()
+        self._choose_who_takes_part()
+        self.follows: list[dict[tuple[int, int], cp_model.IntVar]] = []
+        self.nothing: list[cp_model.IntVar] = []
+        # For each PERSON, the routes between two OPTIONs in different PLACEs, each with the
+        # choice that takes it.
+        self.routes: list[dict[tuple[int, int], list[tuple[cp_model.IntVar, reference.Route]]]] = []
+        self.legs: list[tuple[cp_model.IntVar, int]] = []  # a route taken, and how many WAYs it has
+        self._worth_trying: dict[tuple[str, str], list[reference.Route]] = {}
+        for number in range(len(file.persons)):
+            self._lay_out_path(number)
+
+    def _read_the_world(self) -> None:
+        """What the world says about each OPTION and WAY.
+
+        How long each one takes and how early a PERSON must arrive are plain numbers, or numbers
+        that count only when their FACT is switched on.
+        """
+        file, world = self.file, self.world
+        self.terms = [world.terms[option.id] for option in file.options]
+        self.usable = [each.fixed_start is not None or each.free_start for each in self.terms]
+        self.endless = [each.longest is None for each in self.terms]
+        self.moves = [option.origin != option.destination for option in file.options]
 
         def switch_of(record: Start | Duration | Cutoff | None) -> cp_model.IntVar | None:
             return None if record is None else self.switch.get(record.id)
 
-        # How long each OPTION takes and how early a PERSON must arrive: plain numbers, or
-        # numbers that count only when their FACT is switched on.
-        lasts: list[_Amount] = []
-        margins: list[_Amount | None] = []
-        for option, each in zip(options, terms, strict=True):
+        self.lasts: list[_Amount] = []
+        self.margins: list[_Amount | None] = []
+        for option, each in zip(file.options, self.terms, strict=True):
             given = switch_of(file.duration(option.id))
-            lasts.append(each.shortest if given is None else each.shortest * given)
+            self.lasts.append(each.shortest if given is None else each.shortest * given)
             given = switch_of(file.cutoff(option.id))
-            margins.append(each.margin if given is None or not each.margin else each.margin * given)
-        when_fixed = [switch_of(file.start(option.id)) for option in options]
-        way_lasts: dict[str | None, _Amount] = {None: world.unlisted_takes}
+            margin = each.margin if given is None or not each.margin else each.margin * given
+            self.margins.append(margin)
+        self.when_fixed = [switch_of(file.start(option.id)) for option in file.options]
+        self.way_lasts: dict[str | None, _Amount] = {None: world.unlisted_takes}
         for way in file.ways:
             given = switch_of(file.duration(way.id))
             shortest = world.takes[way.id][0]
-            way_lasts[way.id] = shortest if given is None else shortest * given
-        moves = [option.origin != option.destination for option in options]
+            self.way_lasts[way.id] = shortest if given is None else shortest * given
         unlisted = world.unlisted is None or bool(world.unlisted)
         self.facts = [fact for fact in file.facts if isinstance(fact, Complete)] if unlisted else []
-        facts = self.facts
+        self.given = [self.switch.get(fact.id) for fact in self.facts]
 
-        # The model counts time from the earliest fixed time, to keep its numbers small. Every
-        # start that matters lies within ``room`` of a fixed start or of the end of a span.
+    def _count_time(self) -> None:
+        """When each OPTION starts, and its turn among OPTIONs that share an instant.
+
+        The model counts time from the earliest fixed time, to keep its numbers small. Every
+        start that matters lies within ``room`` of a fixed start or of the end of a span. A start
+        is a plain number where a FACT fixes it for good, and the solver's otherwise.
+        """
+        model, options, terms, world = self.model, self.file.options, self.terms, self.world
         fixed = [each.fixed_start for each in terms if each.fixed_start is not None]
-        spans = [moment for fact in facts for moment in (fact.earliest - 1, fact.latest + 1)]
+        spans = [moment for fact in self.facts for moment in (fact.earliest - 1, fact.latest + 1)]
         self.zero = min([*fixed, *spans], default=0)
-        self.given = [self.switch.get(fact.id) for fact in facts]
         room = sum(each.shortest for each in terms) + sum(each.margin or 0 for each in terms) + 1
         slowest = max([world.unlisted_takes, *(shortest for shortest, _ in world.takes.values())])
-        room += count * max(len(file.places), 1) * slowest
-        earliest, latest = -room, max([*fixed, *spans], default=0) - self.zero + room
+        room += len(options) * max(len(self.file.places), 1) * slowest
+        self.room = room
+        self.earliest, self.latest = -room, max([*fixed, *spans], default=0) - self.zero + room
 
-        self.takes = [
-            [model.new_bool_var(f"takes {person.id} {option.id}") for option in options]
-            for person in persons
-        ]
-        self.used = [model.new_bool_var(f"used {option.id}") for option in options]
-        self.legs: list[tuple[cp_model.IntVar, int]] = []  # a route taken, and how many WAYs it has
-        # A start is a plain number where a FACT fixes it for good, and the solver's otherwise.
         known = [
             each.fixed_start if given is None else None
-            for each, given in zip(terms, when_fixed, strict=True)
+            for each, given in zip(terms, self.when_fixed, strict=True)
         ]
-        start = [
-            model.new_int_var(earliest, latest, f"start {option.id}")
+        self.start = [
+            model.new_int_var(self.earliest, self.latest, f"start {option.id}")
             if moment is None
             else model.new_constant(moment - self.zero)
             for option, moment in zip(options, known, strict=True)
         ]
-        for index, (each, given) in enumerate(zip(terms, when_fixed, strict=True)):
+        for index, (each, given) in enumerate(zip(terms, self.when_fixed, strict=True)):
             if given is not None and each.fixed_start is not None:
-                _when(model.add(start[index] == each.fixed_start - self.zero), given)
-        turn = [model.new_int_var(0, max(count - 1, 0), f"turn {option.id}") for option in options]
+                _when(model.add(self.start[index] == each.fixed_start - self.zero), given)
+        last = max(len(options) - 1, 0)
+        self.turn = [model.new_int_var(0, last, f"turn {option.id}") for option in options]
 
-        for index, option in enumerate(options):
+    def _choose_who_takes_part(self) -> None:
+        """Who takes part in each OPTION. LOCKs are honored, and an unusable OPTION is left out."""
+        model, file = self.model, self.file
+        self.takes = [
+            [model.new_bool_var(f"takes {person.id} {option.id}") for option in file.options]
+            for person in file.persons
+        ]
+        self.used = [model.new_bool_var(f"used {option.id}") for option in file.options]
+        for index, option in enumerate(file.options):
             model.add_max_equality(self.used[index], [0, *(row[index] for row in self.takes)])
-            for number, person in enumerate(persons):
+            for number, person in enumerate(file.persons):
                 takes = self.takes[number][index]
                 asking = [
                     self.switch.get(lock.id)
@@ -232,108 +257,138 @@ class _Search:
                 # A PERSON whom no LOCK asks to stay somewhere gains nothing by staying. Without
                 # the stay they are in the same PLACE at the same times, and every CONSTRAINT is
                 # as easy to meet or easier. So the model leaves such stays out.
-                if not usable[index] or (not moves[index] and not asking):
+                if not self.usable[index] or (not self.moves[index] and not asking):
                     model.add(takes == 0)
-                elif not moves[index] and all(given is not None for given in asking):
+                elif not self.moves[index] and all(given is not None for given in asking):
                     model.add_bool_or(
                         [takes.negated(), *(given for given in asking if given is not None)]
                     )
 
-        home = count  # the starting point of every PERSON's circuit
-        self.follows: list[dict[tuple[int, int], cp_model.IntVar]] = []
-        self.nothing: list[cp_model.IntVar] = []
-        # For each PERSON, the routes between two OPTIONs in different PLACEs, each with the
-        # choice that takes it.
-        self.routes: list[dict[tuple[int, int], list[tuple[cp_model.IntVar, reference.Route]]]] = []
-        for number, person in enumerate(persons):
-            takes = self.takes[number]
-            nothing = model.new_bool_var(f"{person.id} takes part in nothing")
-            self.nothing.append(nothing)
-            arcs: list[tuple[int, int, cp_model.LiteralT]] = [(home, home, nothing)]
-            follows: dict[tuple[int, int], cp_model.IntVar] = {}
-            between: dict[tuple[int, int], list[tuple[cp_model.IntVar, reference.Route]]] = {}
-            # Whether this PERSON has moved by the end of an OPTION, and when they last arrived.
-            # These are only ever pushed one way: towards "has moved" and "arrived later". That
-            # way is the one that forbids more, so the solver gains nothing by going further
-            # than the truth.
-            moved = [model.new_bool_var(f"{person.id} moved by {o.id}") for o in options]
-            arrived = [
-                model.new_int_var(earliest, latest + room, f"{person.id} arrived by {o.id}")
-                for o in options
-            ]
+    def _lay_out_path(self, number: int) -> None:
+        """One PERSON's path: a circuit through a starting point and the OPTIONs they do.
 
-            for index, option in enumerate(options):
-                model.add_implication(takes[index], nothing.negated())
-                arcs.append((index, index, takes[index].negated()))
-                first = model.new_bool_var(f"{person.id} starts with {option.id}")
-                last = model.new_bool_var(f"{person.id} ends with {option.id}")
-                follows[home, index], follows[index, home] = first, last
-                arcs += [(home, index, first), (index, home, last)]
-                if moves[index]:
-                    _when(model.add(moved[index] == 1), takes[index])
-                    if not endless[index]:
-                        _when(
-                            model.add(arrived[index] >= start[index] + lasts[index]), takes[index]
-                        )
+        ``moved`` says whether the PERSON has moved by the end of an OPTION, and ``arrived``
+        when they last arrived. These are only ever pushed one way: towards "has moved" and
+        "arrived later". That way is the one that forbids more, so the solver gains nothing by
+        going further than the truth.
+        """
+        model, options = self.model, self.file.options
+        person, takes = self.file.persons[number], self.takes[number]
+        home = len(options)  # the starting point of the circuit
+        nothing = model.new_bool_var(f"{person.id} takes part in nothing")
+        arcs: list[tuple[int, int, cp_model.LiteralT]] = [(home, home, nothing)]
+        follows: dict[tuple[int, int], cp_model.IntVar] = {}
+        between: dict[tuple[int, int], list[tuple[cp_model.IntVar, reference.Route]]] = {}
+        moved = [model.new_bool_var(f"{person.id} moved by {o.id}") for o in options]
+        arrived = [
+            model.new_int_var(self.earliest, self.latest + self.room, f"{person.id} at {o.id}")
+            for o in options
+        ]
+        for index, option in enumerate(options):
+            model.add_implication(takes[index], nothing.negated())
+            arcs.append((index, index, takes[index].negated()))
+            first = model.new_bool_var(f"{person.id} starts with {option.id}")
+            last = model.new_bool_var(f"{person.id} ends with {option.id}")
+            follows[home, index], follows[index, home] = first, last
+            arcs += [(home, index, first), (index, home, last)]
+            if self.moves[index]:
+                _when(model.add(moved[index] == 1), takes[index])
+                if not self.endless[index]:
+                    done = self.start[index] + self.lasts[index]
+                    _when(model.add(arrived[index] >= done), takes[index])
 
-            for before, earlier in enumerate(options):
-                for after, later in enumerate(options):
-                    if before == after or endless[before]:
+        for before, earlier in enumerate(options):
+            for after, later in enumerate(options):
+                if before == after or self.endless[before]:
+                    continue
+                if not (self.usable[before] and self.usable[after]):
+                    continue
+                name = f"{person.id}: {later.id} after {earlier.id}"
+                if earlier.destination == later.origin:
+                    next_ = self._goes_straight_on(name, before, after, moved, arrived)
+                else:
+                    taken = self._goes_by_ways(name, before, after, moved, arrived)
+                    if taken is None:
                         continue
-                    if not (usable[before] and usable[after]):
-                        continue
-                    margin = margins[after]
-                    ready = start[before] + lasts[before]
-                    if earlier.destination == later.origin:
-                        next_ = model.new_bool_var(f"{person.id}: {later.id} after {earlier.id}")
-                        _when(model.add(start[after] >= ready), next_)
-                        if not moves[after]:
-                            _when(model.add(moved[after] >= moved[before]), next_)
-                            _when(model.add(arrived[after] >= arrived[before]), next_)
-                        if margin is None:
-                            model.add_implication(next_, moved[before].negated())
-                        elif not (isinstance(margin, int) and margin == 0):
-                            _when(
-                                model.add(start[after] >= arrived[before] + margin),
-                                next_,
-                                moved[before],
-                            )
-                    else:
-                        possible = reference.routes(file, world, earlier.destination, later.origin)
-                        if not possible or margin is None:
-                            continue  # no way there, or no way to be in time after travelling
-                        if not facts and not switched:
-                            possible = _quickest(world, possible)
-                        next_ = model.new_bool_var(f"{person.id}: {later.id} after {earlier.id}")
-                        if not moves[after]:
-                            _when(model.add(moved[after] == 1), next_)
-                        via = [next_]
-                        if len(possible) > 1:
-                            via = [
-                                model.new_bool_var(f"{next_.name} by route {place}")
-                                for place in range(len(possible))
-                            ]
-                            model.add(sum(via) == next_)
-                        between[before, after] = list(zip(via, possible, strict=True))
-                        for route, chosen in zip(possible, via, strict=True):
-                            free: _Amount = ready
-                            for place, (way, origin, destination) in enumerate(route):
-                                name = f"{chosen.name} leg {place}"
-                                moment = model.new_int_var(earliest, latest, name)
-                                _when(model.add(moment >= free), chosen)
-                                if way is None:
-                                    self._outside_every_span(moment, origin, destination, chosen)
-                                free = moment + way_lasts[way]
-                            _when(model.add(start[after] >= free + margin), chosen)
-                            if not moves[after]:
-                                _when(model.add(arrived[after] >= free), chosen)
-                            self.legs.append((chosen, len(route)))
-                    follows[before, after] = next_
-                    arcs.append((before, after, next_))
-                    _when(model.add(turn[after] >= turn[before] + 1), next_)
-            model.add_circuit(arcs)
-            self.follows.append(follows)
-            self.routes.append(between)
+                    next_, between[before, after] = taken
+                follows[before, after] = next_
+                arcs.append((before, after, next_))
+                _when(model.add(self.turn[after] >= self.turn[before] + 1), next_)
+        model.add_circuit(arcs)
+        self.nothing.append(nothing)
+        self.follows.append(follows)
+        self.routes.append(between)
+
+    def _goes_straight_on(
+        self,
+        name: str,
+        before: int,
+        after: int,
+        moved: Sequence[cp_model.IntVar],
+        arrived: Sequence[cp_model.IntVar],
+    ) -> cp_model.IntVar:
+        """The choice that a PERSON does one OPTION right after another in the same PLACE."""
+        model, margin = self.model, self.margins[after]
+        next_ = model.new_bool_var(name)
+        _when(model.add(self.start[after] >= self.start[before] + self.lasts[before]), next_)
+        if not self.moves[after]:
+            _when(model.add(moved[after] >= moved[before]), next_)
+            _when(model.add(arrived[after] >= arrived[before]), next_)
+        if margin is None:
+            model.add_implication(next_, moved[before].negated())
+        elif not (isinstance(margin, int) and margin == 0):
+            _when(model.add(self.start[after] >= arrived[before] + margin), next_, moved[before])
+        return next_
+
+    def _goes_by_ways(
+        self,
+        name: str,
+        before: int,
+        after: int,
+        moved: Sequence[cp_model.IntVar],
+        arrived: Sequence[cp_model.IntVar],
+    ) -> tuple[cp_model.IntVar, list[tuple[cp_model.IntVar, reference.Route]]] | None:
+        """The choice that a PERSON goes from one OPTION to the next by WAYs, and by which route.
+
+        None when no route leads there, or when no PERSON who travels could be in time.
+        """
+        model, options, margin = self.model, self.file.options, self.margins[after]
+        possible = self._routes(options[before].destination, options[after].origin)
+        if not possible or margin is None:
+            return None
+        next_ = model.new_bool_var(name)
+        if not self.moves[after]:
+            _when(model.add(moved[after] == 1), next_)
+        via = [next_]
+        if len(possible) > 1:
+            via = [model.new_bool_var(f"{name} by route {place}") for place in range(len(possible))]
+            model.add(sum(via) == next_)
+        for route, chosen in zip(possible, via, strict=True):
+            free: _Amount = self.start[before] + self.lasts[before]
+            for place, (way, origin, destination) in enumerate(route):
+                moment = model.new_int_var(self.earliest, self.latest, f"{chosen.name} leg {place}")
+                _when(model.add(moment >= free), chosen)
+                if way is None:
+                    self._outside_every_span(moment, origin, destination, chosen)
+                free = moment + self.way_lasts[way]
+            _when(model.add(self.start[after] >= free + margin), chosen)
+            if not self.moves[after]:
+                _when(model.add(arrived[after] >= free), chosen)
+            self.legs.append((chosen, len(route)))
+        return next_, list(zip(via, possible, strict=True))
+
+    def _routes(self, here: str, there: str) -> list[reference.Route]:
+        """The routes from one PLACE to another worth choosing between, worked out once.
+
+        Where no COMPLETE FACT can rule a WAY out and no FACT can be switched off, only the time
+        and the number of WAYs of a route matter, so the quickest of each length is enough.
+        """
+        if (here, there) not in self._worth_trying:
+            possible = reference.routes(self.file, self.world, here, there)
+            if not self.facts and not self.switch:
+                possible = _quickest(self.world, possible)
+            self._worth_trying[here, there] = possible
+        return self._worth_trying[here, there]
 
     def clash(self, given: Sequence[str]) -> tuple[_Choice | None, frozenset[str]]:
         """A choice that works with only these FACTs and DECISIONs, or the ones that rule one out.

@@ -8,11 +8,10 @@ from random import Random
 
 import pytest
 
-from agloe import compiler, reference
+from agloe import answers, compiler, reference
+from agloe.answers import Answer, Missing
 from agloe.file import File, load, read
 from agloe.reference import (
-    Answer,
-    Missing,
     Unknown,
     World,
     best_case,
@@ -61,7 +60,7 @@ FILES = sorted(
 @pytest.mark.parametrize("path", FILES, ids=lambda path: f"{path.parent.name}/{path.stem}")
 def test_the_compiler_gives_the_reference_checkers_report(path: Path) -> None:
     file = read(path)
-    assert compiler.check(file) == reference.check(file)
+    assert compiler.check(file) == answers.check(file)
 
 
 def test_the_compiler_and_the_reference_checker_agree_on_random_trips() -> None:
@@ -76,14 +75,14 @@ def test_the_compiler_and_the_reference_checker_agree_on_random_trips() -> None:
     trips += [
         random_trip(rng, 0.2, contingent=0.3, with_complete=0.4, with_ways=0.9) for _ in range(120)
     ]
-    answers: set[Answer] = set()
+    seen: set[Answer] = set()
     robust: set[bool | None] = set()
     for file in trips:
-        report = reference.check(file)
+        report = answers.check(file)
         assert compiler.check(file) == report
-        answers.add(report.answer)
+        seen.add(report.answer)
         robust.add(report.robust)
-    assert answers == set(Answer)
+    assert seen == set(Answer)
     assert robust == {True, False, None}
 
 
@@ -145,7 +144,7 @@ def test_a_limit_does_not_depend_on_how_far_the_solver_can_count() -> None:
         [lock("option-1", "alex"), lock("option-2", "alex")],
     )
     report = compiler.check(file)
-    assert report == reference.check(file)
+    assert report == answers.check(file)
     assert [needed.at_most for enough in report.missing for needed in enough] == [None, None, None]
     years = with_these_at_best(file, [Unknown("other ways", origin="a", destination="b")])
     for seconds_taken in (262_223_455, 262_223_456, 268_435_456, 2**40):
@@ -359,7 +358,7 @@ def test_a_cutoff_counts_from_the_arrival_however_long_ago() -> None:
     in_time, too_late = with_ride_at(8, 45), with_ride_at(9, 0)
     assert compiler.check(in_time).answer is Answer.FEASIBLE
     assert compiler.shown(too_late, worst_case(too_late)) is None
-    assert compiler.check(too_late) == reference.check(too_late)
+    assert compiler.check(too_late) == answers.check(too_late)
 
 
 def two_ways_through(*ids: str) -> File:
@@ -399,7 +398,7 @@ def test_the_options_listed_first_matter_more_than_the_order_they_are_done_in() 
         "early-to-c",
         "finish",
     ]
-    assert report == reference.check(file)
+    assert report == answers.check(file)
 
 
 def a_day_in_chicago(*more: dict[str, object], flight_at: int = 17) -> File:
@@ -560,7 +559,7 @@ def test_two_conflicts_at_once_give_the_reference_checkers_report() -> None:
         [lock(name, person) for name, person in stops],
     )
     report = compiler.check(file)
-    assert report == reference.check(file)
+    assert report == answers.check(file)
     assert report.conflict == ("swim-time", "swim-length", "lunch-time", "lock-swim", "lock-lunch")
     assert compiler.stuck(file) == frozenset(
         {"call-time", "call-length", "nap-time", "lock-call", "lock-nap"}
@@ -670,7 +669,7 @@ def test_two_quick_ways_are_taken_where_one_slow_way_is_too_late() -> None:
         ],
     )
     report = compiler.check(file)
-    assert report == reference.check(file)
+    assert report == answers.check(file)
     assert [step.way for step in report.itinerary if step.way][:2] == ["to-station", "from-station"]
 
 
@@ -713,4 +712,4 @@ def test_the_compiler_agrees_where_a_stop_nobody_needs_is_listed() -> None:
     files = [a_ride_there_and_back(), a_ride_there_and_back(stays("pause", "b"))]
     files += [lunch_away_from_the_museum(), lunch_away_from_the_museum(complete(None, "ohare"))]
     for file in files:
-        assert compiler.check(file) == reference.check(file)
+        assert compiler.check(file) == answers.check(file)
