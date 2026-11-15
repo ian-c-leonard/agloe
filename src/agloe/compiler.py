@@ -573,4 +573,4 @@ class _Search:
             return None
         if status != cp_model.OPTIMAL:
             raise AssertionError(f"the solver stopped early: {solver.status_name(status)}")
-        return round(solver.objective_value)
+        return solver.value(amount)

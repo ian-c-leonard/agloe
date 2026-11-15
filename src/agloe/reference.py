@@ -604,7 +604,7 @@ def scheduled(
     orders: tuple[tuple[int, ...], ...],
     by: Mapping[tuple[int, int], Route] | None = None,
 ) -> Itinerary | None:
-    """The ITINERARY for one choice of PERSONs and orders, or None when that choice does not work.
+    """The ITINERARY for one choice of PERSONs and orders, or None when it breaks a CONSTRAINT.
 
     ``who`` names the PERSONs in each OPTION, in the FILE's order of OPTIONs. ``orders`` gives,
     for each PERSON in the FILE's order, the OPTIONs they do, by position in the FILE, in the
@@ -895,11 +895,14 @@ def _timings(
             [*_places(path), *_arrivals(world, path), *_listed(file, world, path)] for path in paths
         ):
             continue
-        yield tuple(
+        itinerary = tuple(
             sorted(
                 _together(file, steps.values()), key=lambda step: _step_in_file_order(file, step)
             )
         )
+        if _locks(file, itinerary) or _starts(world, itinerary) or _durations(world, itinerary):
+            continue
+        yield itinerary
 
 
 def _together(file: File, steps: Iterable[Step]) -> list[Step]:

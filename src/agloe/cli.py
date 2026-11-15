@@ -7,12 +7,12 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from agloe import compiler, report
-from agloe.file import FileError, read
+from agloe.file import FileError, Unwritable, read
 from agloe.reference import Answer
 
 
 def main(arguments: Sequence[str] | None = None) -> int:
-    """Run the command. Returns 0 for FEASIBLE, 1 for another answer, 2 when nothing was checked."""
+    """Run the command. Returns 0 for FEASIBLE, 1 for another answer, 2 when there is no report."""
     parser = argparse.ArgumentParser(
         prog="agloe",
         description="Check a trip: does it work, can it not work, or can nobody tell yet?",
@@ -24,7 +24,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
         description=(
             "Reads one FILE and prints the COMPILER's report. "
             "Ends with 0 for FEASIBLE, 1 for INFEASIBLE or UNDETERMINED, "
-            "and 2 when the FILE could not be read."
+            "and 2 when the FILE could not be read or its report could not be written."
         ),
     )
     check.add_argument("file", type=Path, help="the trip, as a JSON FILE")
@@ -42,8 +42,17 @@ def main(arguments: Sequence[str] | None = None) -> int:
             print(f"  {problem}", file=sys.stderr)
         return 2
     found = compiler.check(file)
-    if chosen.json:
-        print(json.dumps(report.as_json(file, found), indent=2, ensure_ascii=False))
-    else:
-        print(report.as_text(file, found), end="")
+    try:
+        if chosen.json:
+            printed = json.dumps(report.as_json(file, found), indent=2, ensure_ascii=False) + "\n"
+        else:
+            printed = report.as_text(file, found)
+    except Unwritable:
+        print(
+            f"{chosen.file}: the report holds a time outside the years 0001 to 9999, "
+            "so it cannot be written",
+            file=sys.stderr,
+        )
+        return 2
+    print(printed, end="")
     return 0 if found.answer is Answer.FEASIBLE else 1
