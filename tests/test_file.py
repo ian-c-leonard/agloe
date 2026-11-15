@@ -77,8 +77,45 @@ def test_a_time_zone_name_starts_each_part_with_a_letter() -> None:
         document["facts"][0]["starts_at"] = f"2027-05-15T14:00:00-05:00[{name}]"
         assert problems(document).startswith("/facts/0:")
     document = flight_home()
-    document["facts"][0]["starts_at"] = "2027-05-15T14:00:00-05:00[America/Port-au-Prince]"
+    document["facts"][0]["starts_at"] = "2027-05-15T14:00:00-04:00[America/Port-au-Prince]"
     assert load(document).start("museum-visit") is not None
+
+
+def test_a_time_agrees_with_its_time_zone() -> None:
+    """Chicago is six hours behind UTC in January, and five in May."""
+    document = flight_home()
+    document["facts"][0]["starts_at"] = "2027-01-15T14:00:00-05:00[America/Chicago]"
+    assert problems(document) == (
+        "/facts/0: 2027-01-15T14:00:00-05:00[America/Chicago] does not agree with its time zone:"
+        " America/Chicago is at -06:00 then"
+    )
+    document["facts"][0]["starts_at"] = "2027-01-15T14:00:00-06:00[America/Chicago]"
+    assert load(document).start("museum-visit") is not None
+
+
+def test_a_time_zone_is_one_the_database_knows() -> None:
+    for name in ("Made/Up", "America", "..", "America/../UTC"):
+        document = flight_home()
+        document["facts"][0]["starts_at"] = f"2027-05-15T14:00:00-05:00[{name}]"
+        assert problems(document) == (
+            f"/facts/0: {name} is not a time zone in the time-zone database"
+        )
+
+
+def test_clocks_that_change_are_read_exactly() -> None:
+    """Chicago skips 2:00 to 3:00 on 14 March 2027, and repeats 1:00 to 2:00 on 7 November."""
+    document = flight_home()
+    document["facts"][0]["starts_at"] = "2027-03-14T02:30:00-06:00[America/Chicago]"
+    assert "does not agree with its time zone" in problems(document)
+    earlier = "2027-11-07T01:30:00-05:00[America/Chicago]"
+    later = "2027-11-07T01:30:00-06:00[America/Chicago]"
+    document["facts"] = [{"id": "visit-time", "option": "museum-visit", "starts_at": earlier}]
+    first = load(document).start("museum-visit")
+    document["facts"][0]["starts_at"] = later
+    second = load(document).start("museum-visit")
+    assert first is not None and second is not None
+    assert first.at is not None and second.at is not None
+    assert second.at - first.at == 3600
 
 
 def test_an_offset_from_utc_is_a_real_offset() -> None:
