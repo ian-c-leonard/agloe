@@ -80,7 +80,7 @@ When several ITINERARIES work, the report shows one, chosen by a fixed rule:
 2. then one in which PERSONs take part the fewest times, counting each PERSON once for every OPTION they take part in;
 3. then one with the fewest OPTIONs;
 4. then one that uses the OPTIONs listed first in the FILE;
-5. then, comparing the OPTIONs one by one in order of time: first the earlier start, then the OPTION listed first in the FILE, then the PERSONs listed first in the FILE.
+5. then one in which each PERSON does the OPTIONs listed first, in the FILE's order where they can. Going through the PERSONs in the FILE's order, and through each PERSON's OPTIONs in the order they do them, the ITINERARY with the OPTION listed first comes first. A PERSON with nothing more to do comes before one with more.
 
 The second rule keeps out anything nobody needs. If any OPTION were taken out of the ITINERARY shown, or any PERSON out of one of its OPTIONs, it would stop working in some possible world, or stop being ROBUST.
 

@@ -298,6 +298,89 @@ def test_the_itinerary_shown_uses_the_options_listed_first() -> None:
     assert report.robust is True
 
 
+def test_a_person_takes_the_option_listed_first() -> None:
+    """Two shuttles run to the airport, and each already has a rider. Alex can take either."""
+
+    def with_shuttles(*shuttles: str) -> File:
+        return trip(
+            ["alex", "carol", "dave"],
+            ["hotel", "airport"],
+            [
+                stays("breakfast", "hotel"),
+                *(moves(shuttle, "hotel", "airport") for shuttle in shuttles),
+                stays("check-in", "airport"),
+            ],
+            [
+                starts_at("breakfast", 8),
+                lasts("breakfast", "PT30M"),
+                starts_at("early-shuttle", 9),
+                lasts("early-shuttle", "PT30M"),
+                cutoff("early-shuttle", "PT0S"),
+                starts_at("late-shuttle", 10),
+                lasts("late-shuttle", "PT30M"),
+                cutoff("late-shuttle", "PT0S"),
+                starts_at("check-in", 11),
+                lasts("check-in", "PT10M"),
+                cutoff("check-in", "PT0S"),
+            ],
+            [
+                lock("breakfast", "alex"),
+                lock("check-in", "alex"),
+                lock("early-shuttle", "carol"),
+                lock("late-shuttle", "dave"),
+            ],
+        )
+
+    def riders(file: File) -> dict[str | None, tuple[str, ...]]:
+        return {step.option: step.persons for step in check(file).itinerary}
+
+    early_first = riders(with_shuttles("early-shuttle", "late-shuttle"))
+    assert early_first["early-shuttle"] == ("alex", "carol")
+    assert early_first["late-shuttle"] == ("dave",)
+    late_first = riders(with_shuttles("late-shuttle", "early-shuttle"))
+    assert late_first["late-shuttle"] == ("alex", "dave")
+    assert late_first["early-shuttle"] == ("carol",)
+
+
+def test_each_person_does_their_options_in_the_files_order_where_they_can() -> None:
+    """Lunch and a call can happen at any time, in either order."""
+
+    def in_order(*ids: str) -> list[str | None]:
+        file = trip(
+            ["alex"],
+            ["hotel"],
+            [stays(id, "hotel") for id in ids],
+            [fact for id in ids for fact in (any_time(id), lasts(id, "PT30M"))],
+            [lock(id, "alex") for id in ids],
+        )
+        return [step.option for step in check(file).itinerary]
+
+    assert in_order("lunch", "call") == ["lunch", "call"]
+    assert in_order("call", "lunch") == ["call", "lunch"]
+
+
+def test_the_files_order_decides_before_the_clock_does() -> None:
+    """An errand takes half an hour and fits before or after a 10:00 meeting at the same PLACE."""
+
+    def starts(*ids: str) -> list[tuple[str | None, int]]:
+        file = trip(
+            ["alex"],
+            ["office"],
+            [stays(id, "office") for id in ids],
+            [
+                starts_at("meeting", 10),
+                lasts("meeting", "PT30M"),
+                any_time("errand"),
+                lasts("errand", "PT30M"),
+            ],
+            [lock(id, "alex") for id in ids],
+        )
+        return [(step.option, step.start) for step in check(file).itinerary]
+
+    assert starts("errand", "meeting") == [("errand", seconds(9, 30)), ("meeting", seconds(10))]
+    assert starts("meeting", "errand") == [("meeting", seconds(10)), ("errand", seconds(10, 30))]
+
+
 def test_a_robust_itinerary_is_shown_before_any_other() -> None:
     """The cab is listed first but can take 90 minutes. The train always makes it."""
     report = check(load(with_a_cab_listed_first(lasts_between("cab", "PT30M", "PT1H30M"))))
