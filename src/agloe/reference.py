@@ -165,6 +165,11 @@ def worst_case(file: File) -> World:
     return _world(file, frozenset())
 
 
+def longest_case(file: File) -> World:
+    """The worst case, with every CONTINGENT duration at its longest value."""
+    return _world(file, frozenset(), longest=True)
+
+
 def with_these_at_best(file: File, unknown: Iterable[Unknown]) -> World:
     """These unknown FACTs as in the best case, and every other unknown FACT as in the worst."""
     return _world(file, frozenset(unknown))
@@ -509,16 +514,17 @@ def needless(file: File, world: World, itinerary: Itinerary) -> list[tuple[str |
 def itineraries(file: File, world: World) -> list[Itinerary]:
     """The ITINERARIES that work in this world with PERSONs taking part the fewest times.
 
-    It tries every choice of who takes part in which OPTION and in what order. One unlisted OPTION
-    can join two listed ones. Each OPTION starts as early as the CONSTRAINTs allow, and one with
-    nothing before it starts as late as they allow. Where a COMPLETE FACT covers a span of leaving
-    times, leaving before the span and leaving after it are tried too.
+    It tries every choice of who takes part in which OPTION and in what order. Where a PERSON's
+    next OPTION starts somewhere else, unlisted OPTIONs take them there. The start times follow
+    the rule of "Which ITINERARY is shown". Where a COMPLETE FACT covers a span of leaving times,
+    leaving before the span and leaving after it are tried too. A choice works when the orders
+    it names work: no other order is tried in their place.
 
     Nothing can be taken out of an ITINERARY in which PERSONs take part the fewest times, so
     ``needless`` finds nothing in any ITINERARY returned. They come in the order of "Which
     ITINERARY is shown".
     """
-    best: list[Itinerary] = []
+    best: list[tuple[_Shown, Itinerary]] = []
     fewest: int | None = None
     for who in _who_takes_part(file, world):
         if fewest is not None and sum(len(persons) for persons in who) > fewest:
@@ -527,16 +533,34 @@ def itineraries(file: File, world: World) -> list[Itinerary]:
             [i for i, persons in enumerate(who) if person.id in persons] for person in file.persons
         ]
         for orders in product(*(list(_orders(file, world, indexes)) for indexes in mine)):
-            for found in _schedules(file, world, who, orders):
-                if broken(file, world, found):
-                    continue
-                taking_part = sum(len(step.persons) for step in found)
-                if fewest is None or taking_part < fewest:
-                    best, fewest = [found], taking_part
-                elif taking_part == fewest and found not in best:
-                    best.append(found)
-                break
-    return sorted(best, key=lambda itinerary: _in_file_order(file, itinerary))
+            found = scheduled(file, world, who, orders)
+            if found is None:
+                continue
+            taking_part = sum(len(step.persons) for step in found)
+            if fewest is None or taking_part < fewest:
+                best, fewest = [], taking_part
+            if taking_part == fewest:
+                best.append((_in_file_order(file, found, orders), found))
+    shown: list[Itinerary] = []
+    for _, found in sorted(best, key=lambda each: each[0]):
+        if found not in shown:
+            shown.append(found)
+    return shown
+
+
+def scheduled(
+    file: File,
+    world: World,
+    who: tuple[tuple[str, ...], ...],
+    orders: tuple[tuple[int, ...], ...],
+) -> Itinerary | None:
+    """The ITINERARY for one choice of PERSONs and orders, or None when that choice does not work.
+
+    ``who`` names the PERSONs in each OPTION, in the FILE's order of OPTIONs. ``orders`` gives,
+    for each PERSON in the FILE's order, the OPTIONs they do, by position in the FILE, in the
+    order they do them. The start times are those of "Which ITINERARY is shown".
+    """
+    return next(_schedules(file, world, who, orders), None)
 
 
 def _who_takes_part(file: File, world: World) -> list[tuple[tuple[str, ...], ...]]:
@@ -688,6 +712,8 @@ def _timings(
                 arrived = node
 
     count = listed + len(ways)
+    if _goes_round(count, gaps):
+        return  # two PERSONs would do the same OPTIONs at one instant in opposite orders
     zero = count  # one more start, pinned at time zero, to measure the spans from
     fixed: dict[int, int] = {zero: 0}
     for index, option in enumerate(file.options):
@@ -713,21 +739,44 @@ def _timings(
         starts = _times(count + 1, [*gaps, *outside], fixed)
         if starts is None:
             continue
-        steps: list[Step] = []
+        steps: dict[int, Step] = {}
         for index, option in enumerate(file.options):
             if who[index]:
                 lasts = takes(index)
                 start = starts[index]
                 end = None if lasts is None else start + lasts
-                steps.append(
-                    Step(option.id, option.origin, option.destination, who[index], start, end)
+                steps[index] = Step(
+                    option.id, option.origin, option.destination, who[index], start, end
                 )
         for number, (person_id, start_place, end_place) in enumerate(ways):
             start = starts[listed + number]
-            steps.append(
-                Step(None, start_place, end_place, (person_id,), start, start + world.way_takes)
+            steps[listed + number] = Step(
+                None, start_place, end_place, (person_id,), start, start + world.way_takes
             )
-        yield tuple(sorted(steps, key=lambda step: _step_in_file_order(file, step)))
+        paths = [[steps[node] for node in line] for line in lines]
+        if any(
+            [*_places(path), *_arrivals(world, path), *_listed(file, world, path)] for path in paths
+        ):
+            continue
+        yield tuple(sorted(steps.values(), key=lambda step: _step_in_file_order(file, step)))
+
+
+def _goes_round(count: int, gaps: list[tuple[int, int, int]]) -> bool:
+    """Whether the order these gaps give goes round in a circle."""
+    waiting = [0] * count
+    for _, after, _ in gaps:
+        waiting[after] += 1
+    ready = [node for node in range(count) if not waiting[node]]
+    done = 0
+    while ready:
+        node = ready.pop()
+        done += 1
+        for before, after, _ in gaps:
+            if before == node:
+                waiting[after] -= 1
+                if not waiting[after]:
+                    ready.append(after)
+    return done < count
 
 
 def _times(
@@ -814,13 +863,21 @@ def _step_in_file_order(file: File, step: Step) -> _StepOrder:
     return (step.start, index, persons, origin, destination, end)
 
 
-def _in_file_order(file: File, itinerary: Itinerary) -> tuple[int, list[int], list[_StepOrder]]:
-    """Fewest OPTIONs, then the OPTIONs listed first in the FILE, then earlier steps."""
+type _Shown = tuple[int, list[int], tuple[tuple[int, ...], ...], list[_StepOrder]]
+
+
+def _in_file_order(file: File, itinerary: Itinerary, orders: tuple[tuple[int, ...], ...]) -> _Shown:
+    """The order of "Which ITINERARY is shown" among ITINERARIES that tie on its first two rules.
+
+    Fewest OPTIONs; then the OPTIONs listed first in the FILE; then, PERSON by PERSON, the
+    OPTIONs each one does, in the order they do them, with the OPTIONs listed first coming first.
+    """
     options = [option.id for option in file.options]
     used = sorted(
         len(options) if step.option is None else options.index(step.option) for step in itinerary
     )
-    return (len(itinerary), used, [_step_in_file_order(file, step) for step in itinerary])
+    steps = [_step_in_file_order(file, step) for step in itinerary]
+    return (len(itinerary), used, orders, steps)
 
 
 # ------------------------------- The three answers -------------------------------
@@ -830,7 +887,7 @@ def check(file: File) -> Report:
     """The answer for this TRIP, with its evidence."""
     works = itineraries(file, worst_case(file))
     if works:
-        longest = _world(file, frozenset(), longest=True)
+        longest = longest_case(file)
         robust = itineraries(file, longest)
         shown = robust[0] if robust else works[0]
         used = {step.option for step in shown}
