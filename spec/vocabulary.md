@@ -56,7 +56,7 @@ A newer FACT that contradicts an older one about the same thing: the 15:55 saili
 
 ### COMPLETE
 
-Describes a set of OPTIONs that a FACT states the FILE holds in full: every OPTION between two PLACEs starting within a stated time span. A COMPLETE set that is empty means "we looked, and there is nothing". A FACT that one set is COMPLETE says nothing about any other set.
+Describes a set of OPTIONs that a FACT states the FILE holds in full: the ways from one PLACE to another, directly or through other PLACEs, within a stated time span. A PERSON who leaves the first PLACE within the span and later reaches the second uses only OPTIONs the FILE lists, from that departure to their first arrival. The FACT does not limit a PERSON who never reaches the second PLACE. A COMPLETE set that is empty means "we looked, and there is nothing". A FACT that one set is COMPLETE says nothing about any other set.
 
 *Uses:* OPTION, FACT, FILE, → PLACE.
 
@@ -249,7 +249,7 @@ The program that reads one FILE and reports, for the TRIP and for each VARIANT, 
 
 ### ITINERARY
 
-One complete way the TRIP could go: which OPTIONs happen, the exact start and end of each, the value chosen or assumed for each duration, which PERSONs and OBJECTs take part in each, and, for each OPTION that needs a right, the BOOKING or OFFER that covers it, which price is paid and from which BUDGET. In constraint-solving terms, an ITINERARY is a complete assignment of the TRIP's choices. An ITINERARY is derived by the COMPILER; it is never stored in the FILE.
+One complete way the TRIP could go: which OPTIONs happen, the exact start of each, the value chosen or assumed for each duration and the end that follows from it, which PERSONs and OBJECTs take part in each, and, for each OPTION that needs a right, the BOOKING or OFFER that covers it, which price is paid and from which BUDGET. Where a duration is unknown, no value is assumed and the end is unknown too. In constraint-solving terms, an ITINERARY is a complete assignment of the TRIP's choices. An ITINERARY is derived by the COMPILER; it is never stored in the FILE.
 
 *Uses:* TRIP, OPTION, PERSON, OBJECT, BOOKING, OFFER, BUDGET, COMPILER, FILE.
 
@@ -337,7 +337,7 @@ A dated point at which something about the TRIP changes unless a DECISION comes 
 
 ### ROBUST
 
-An ITINERARY is ROBUST when one fixed set of clock times meets every CONSTRAINT for every value of every CONTINGENT duration.
+An ITINERARY is ROBUST when its OPTIONs, PERSONs and start times meet every CONSTRAINT for every value of every CONTINGENT duration.
 
 *Uses:* ITINERARY, CONSTRAINT, CONTINGENT.
 

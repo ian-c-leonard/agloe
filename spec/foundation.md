@@ -1,6 +1,6 @@
 # Foundation
 
-This document states what a TRIP means and what the COMPILER and the OPTIMIZER answer. Terms in capitals are defined in the [vocabulary](vocabulary.md). Each principle names the qualities from the [vision](../docs/VISION.md) it serves, and cites the original source of the idea where one exists; "to be verified" marks a source still being checked against the original. Later sections of the specification turn these principles into rules with runnable examples.
+This document states what a TRIP means and what the COMPILER and the OPTIMIZER answer. Terms in capitals are defined in the [vocabulary](vocabulary.md). Each principle names the qualities from the [vision](../docs/VISION.md) it serves, and cites the original source of the idea where one exists; "to be verified" marks a source still being checked against the original. The [rules](rules.md) turn these principles into CONSTRAINTs with runnable examples.
 
 ## The foundation
 
@@ -136,7 +136,7 @@ Starter WANTs are never hidden rules; they sit in the FILE like any other WANT. 
 **E1. A TRIP is FEASIBLE if at least one ITINERARY meets every CONSTRAINT.** Checking pieces separately is not enough: the drive and the ferry can each be possible and still not fit together.
 *Serves:* compiler, trustworthy. *Source:* the constraint satisfaction problem (Montanari, 1974; Mackworth, 1977): an ITINERARY is a complete assignment, and a FEASIBLE one is a solution.
 
-**E2. Every check returns FEASIBLE, INFEASIBLE or UNDETERMINED.** FEASIBLE: an ITINERARY works however the unknown FACTs turn out. INFEASIBLE: no ITINERARY works however they turn out. UNDETERMINED: the answer depends on FACTs the FILE does not hold, and the report names them ("FEASIBLE only if a route under 2 h 15 min exists"). An undecided choice never makes a TRIP UNDETERMINED; only missing FACTs or a search limit do.
+**E2. Every check returns FEASIBLE, INFEASIBLE or UNDETERMINED.** FEASIBLE: an ITINERARY works however the unknown FACTs turn out. INFEASIBLE: no ITINERARY works however they turn out. UNDETERMINED: the answer depends on FACTs the FILE does not hold, and the report names them ("FEASIBLE if a route under 2 h 15 min exists"). An undecided choice never makes a TRIP UNDETERMINED; only missing FACTs or a search limit do.
 *Serves:* trustworthy, self-explaining. *Source:* solver result statuses (SMT-LIB; CP-SAT); certain answers over incomplete information (Imieliński and Lipski, 1984; Libkin, 2016).
 
 **E3. INFEASIBLE needs a COMPLETE set.** An INFEASIBLE result that rests on an OPTION not existing ("no OPTION gets you from Craignure to Fionnphort before 17:50") needs a FACT saying that set of OPTIONs is COMPLETE. Not finding an OPTION is no proof that none exists.
@@ -145,13 +145,13 @@ Starter WANTs are never hidden rules; they sit in the FILE like any other WANT. 
 **E4. SETTINGs, never assumed FACTs.** Thresholds such as the minimum connection time are SETTINGs with defaults pinned in the COMPILER, and every report names any override. The COMPILER never assumes a FACT it is not given; it returns UNDETERMINED and states the condition instead ("FEASIBLE if the walk needs no BOOKING"). An assumed ferry time is exactly how a real trip goes wrong.
 *Serves:* trustworthy, deterministic.
 
-**E5. Every result shows its evidence.** FEASIBLE: the ITINERARY and the FACTs and DECISIONs it relies on. INFEASIBLE: the smallest set of FACTs and DECISIONs that conflict. UNDETERMINED: the missing FACTs. A fixed rule picks among equal explanations, so the same FILE always gives the same one.
+**E5. Every result shows its evidence.** FEASIBLE: the ITINERARY and the FACTs and DECISIONs it relies on. INFEASIBLE: a set of FACTs and DECISIONs that conflict, from which none can be removed. UNDETERMINED: the missing FACTs. A fixed rule picks among equal explanations, so the same FILE always gives the same one.
 *Serves:* self-explaining, deterministic. *Source:* QuickXplain (Junker, 2004); why-provenance (Buneman, Khanna and Tan, 2001).
 
 **E6. Every FINDING is visible.** A DISMISSAL silences an ERROR, WARNING or NOTE as it stood, and the FINDING returns if it gets worse. UNDETERMINED FINDINGs, and ERRORs meaning the FILE cannot be read, cannot be dismissed.
 *Serves:* trustworthy, self-explaining.
 
-**E7. An OPTION belongs only if something needs it.** An ITINERARY includes an OPTION only if a WANT or a LOCK needs it, directly or through a chain: the drive to reach the ferry, the ferry to reach Iona. Detours and loops cannot justify themselves.
+**E7. An OPTION belongs only if something needs it.** The ITINERARY a report shows includes an OPTION only if a WANT or a LOCK needs it, directly or through a chain: the drive to reach the ferry, the ferry to reach Iona. Detours and loops cannot justify themselves.
 *Serves:* optimizer, self-explaining.
 
 **E8. Every DEADLINE is listed.** OFFERs and BOOKINGs record their dated terms: when an OFFER expires, and what cancelling or changing costs on each date. Before and during the trip, the COMPILER lists every upcoming DEADLINE at which cost or availability changes, or by which a DECISION is due, with its STAKE, earliest first: "Hotel C becomes non-refundable Friday: £420 at STAKE."
@@ -178,12 +178,12 @@ A BET never makes the TRIP INFEASIBLE.
 If ARRIVAL <= DEADLINE: no BET. Advice: wait.
 ```
 
-**F2. ROBUST and RECOVERABLE.** An ITINERARY is ROBUST if every clock time can be fixed now and it still works however long the CONTINGENT durations, such as traffic, turn out. It is RECOVERABLE if, when any one BOOKING it relies on fails, a FEASIBLE ITINERARY exists within a stated number of changes, set by a SETTING. The report warns when a FEASIBLE TRIP is not ROBUST or not RECOVERABLE.
+**F2. ROBUST and RECOVERABLE.** An ITINERARY is ROBUST if every start time can be fixed now and it still works however long the CONTINGENT durations, such as traffic, turn out. It is RECOVERABLE if, when any one BOOKING it relies on fails, a FEASIBLE ITINERARY exists within a stated number of changes, set by a SETTING. The report warns when a FEASIBLE TRIP is not ROBUST or not RECOVERABLE.
 *Serves:* trustworthy, whole-lifecycle. *Source:* strong controllability (Vidal and Fargier, 1999); supermodels (Ginsberg, Parkes and Roy, 1998), adapted as super solutions by Hebrard, Hnich and Walsh (2004).
 
 ```
 ROBUST(ITINERARY) iff
-  one set of clock times meets every CONSTRAINT
+  one set of start times meets every CONSTRAINT
   for every value of every CONTINGENT duration
 RECOVERABLE(ITINERARY) iff
   for each BOOKING it relies on:

@@ -18,6 +18,7 @@ See the [roadmap](docs/ROADMAP.md) for what each release contains.
 - [Vision](docs/VISION.md): the problem, the product and what it must be.
 - [Foundation](spec/foundation.md): what a trip file means and what the compiler answers.
 - [Vocabulary](spec/vocabulary.md): the protected terms, written in capitals throughout.
+- [Rules](spec/rules.md): exactly what the compiler checks, with examples that run as tests.
 - [Engineering principles](docs/PRINCIPLES.md): how Agloe is built.
 - [Decisions](docs/decisions/): why it is built this way.
 

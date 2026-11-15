@@ -1,0 +1,13 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "visit-time",
+    "visit-length",
+    "train-length",
+    "flight-time",
+    "bag-drop",
+    "ways-to-ohare",
+    "lock-visit",
+    "lock-flight"
+  ]
+}
