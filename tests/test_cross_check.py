@@ -53,7 +53,7 @@ def random_trip(
     """
     count = count or rng.choice([2, 3])
     if persons is None:
-        persons = ["alex", "sam"] if count == 2 and rng.random() < 0.4 else ["alex"]
+        persons = ["alex", "sam"] if rng.random() < (0.4 if count == 2 else 0.25) else ["alex"]
     options: list[Document] = []
     facts: list[Document] = []
     decisions: list[Document] = []
@@ -127,13 +127,44 @@ def works_on_the_grid(file: File) -> bool:
     return False
 
 
+def a_shared_ride(rng: Random) -> File:
+    """Alex and Sam may share a ride from a to b, then each has their own plans at b.
+
+    One PERSON's fixed time then decides when the ride leaves, and the other's plans follow.
+    """
+    options = [moves("ride", "a", "b"), stays("first", "b"), stays("second", "b")]
+    facts: list[Document] = []
+    decisions: list[Document] = []
+    free = 0
+    for option in options:
+        id = option["id"]
+        if rng.random() < 0.5 or free == 2:
+            quarter = rng.randrange(6)
+            facts.append(starts_at(id, 9 + quarter // 4, 15 * (quarter % 4)))
+        else:
+            facts.append(any_time(id))
+            free += 1
+        facts += [
+            lasts(id, f"PT{15 * rng.randrange(2)}M"),
+            cutoff(id, f"PT{15 * rng.randrange(2)}M"),
+        ]
+        who = rng.choice([["alex"], ["sam"], ["alex", "sam"]])
+        if id == "ride" or rng.random() < 0.8:
+            decisions.append(lock(id, *who))
+    return trip(["alex", "sam"], PLACES, options, facts, decisions)
+
+
 def test_starting_as_early_as_possible_finds_an_itinerary_whenever_one_exists() -> None:
     rng = Random(2027)
     answers: set[bool] = set()
-    for _ in range(150):
-        file = random_trip(rng, leave_out=0)
-        feasible = check(file).answer is Answer.FEASIBLE
+    trips = [random_trip(rng, leave_out=0) for _ in range(150)]
+    trips += [a_shared_ride(rng) for _ in range(150)]
+    for file in trips:
+        report = check(file)
+        feasible = report.answer is Answer.FEASIBLE
         assert feasible == works_on_the_grid(file)
+        if feasible:
+            assert broken(file, worst_case(file), report.itinerary) == []
         answers.add(feasible)
     assert answers == {True, False}
 

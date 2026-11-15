@@ -284,6 +284,45 @@ def test_a_complete_set_that_covers_every_leaving_time_makes_it_infeasible() -> 
     )
 
 
+def test_a_step_after_a_shared_step_takes_its_time_from_it() -> None:
+    """Alex's meeting fixes when both finish packing. Sam's tram and nap follow from that."""
+    file = trip(
+        ["alex", "sam"],
+        ["hotel", "office", "beach"],
+        [
+            stays("pack", "hotel"),
+            moves("walk", "hotel", "office"),
+            stays("meeting", "office"),
+            moves("tram", "hotel", "beach"),
+            stays("nap", "beach"),
+        ],
+        [
+            any_time("pack"),
+            lasts("pack", "PT30M"),
+            any_time("walk"),
+            lasts("walk", "PT15M"),
+            starts_at("meeting", 10),
+            lasts("meeting", "PT1H"),
+            cutoff("meeting", "PT0S"),
+            any_time("tram"),
+            lasts("tram", "PT20M"),
+            any_time("nap"),
+            lasts("nap", "PT1H"),
+            cutoff("nap", "PT0S"),
+        ],
+        [lock("pack", "alex", "sam"), lock("meeting", "alex"), lock("nap", "sam")],
+    )
+    report = check(file)
+    assert report.answer is Answer.FEASIBLE
+    assert [(step.option, step.persons, step.start) for step in report.itinerary] == [
+        ("pack", ("alex", "sam"), seconds(9, 15)),
+        ("walk", ("alex",), seconds(9, 45)),
+        ("tram", ("sam",), seconds(9, 45)),
+        ("meeting", ("alex",), seconds(10)),
+        ("nap", ("sam",), seconds(10, 5)),
+    ]
+
+
 def test_an_empty_file_is_feasible() -> None:
     report = check(load({"persons": [], "places": [], "options": [], "facts": [], "decisions": []}))
     assert report.answer is Answer.FEASIBLE

@@ -633,17 +633,13 @@ def _times(
     else:
         return None
 
-    starts = [
-        0 if moment is None else moment for moment in late
-    ]  # with no fixed time anywhere, count from zero
+    # What is left has nothing to hurry it. It follows whatever comes before it, and counts from
+    # zero if nothing does.
+    starts = [0 if moment is None else moment for moment in late]
     for _ in range(count + 1):
         moved = False
         for before, after, gap in gaps:
-            if (
-                late[before] is None
-                and late[after] is None
-                and starts[before] + gap > starts[after]
-            ):
+            if late[after] is None and starts[before] + gap > starts[after]:
                 starts[after] = starts[before] + gap
                 moved = True
         if not moved:
