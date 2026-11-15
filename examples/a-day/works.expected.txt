@@ -1,0 +1,37 @@
+FEASIBLE: this trip works.
+
+Friday 14 May 2027 (times in America/Chicago)
+  8:00 am to 8:45 am: Breakfast, Alex
+  8:45 am to 8:55 am: the walk between the hotel and the Art Institute, Alex
+  10:00 am to 12:00 pm: Museum visit, Alex
+  12:00 pm to 12:05 pm: the walk between the Art Institute and Millennium Park, Alex
+  12:30 pm to 1:30 pm: Lunch in the park, Alex
+  1:30 pm to 1:50 pm: the walk between Millennium Park and the Riverwalk dock, Alex
+  3:00 pm to 4:30 pm: Architecture boat tour, Alex
+  4:30 pm to 4:45 pm: the walk between the Riverwalk dock and River North, Alex
+  7:00 pm to 8:30 pm: Dinner, Alex
+
+The plan relies on these FACTs and DECISIONs:
+  breakfast-time: Breakfast starts at 8:00 am on Friday 14 May 2027
+  breakfast-length: Breakfast takes 45 min
+  museum-time: Museum visit starts at 10:00 am on Friday 14 May 2027
+  museum-length: Museum visit takes 2 h
+  museum-entry: nobody has to be at the Art Institute before Museum visit starts
+  lunch-time: Lunch in the park starts at 12:30 pm on Friday 14 May 2027
+  lunch-length: Lunch in the park takes 1 h
+  lunch-table: nobody has to be at Millennium Park before Lunch in the park starts
+  boat-time: Architecture boat tour starts at 3:00 pm on Friday 14 May 2027
+  boat-length: Architecture boat tour takes 1 h 30 min
+  boat-boarding: people must be at the Riverwalk dock 15 min before Architecture boat tour starts
+  dinner-time: Dinner starts at 7:00 pm on Friday 14 May 2027
+  dinner-length: Dinner takes 1 h 30 min
+  dinner-table: nobody has to be at River North before Dinner starts
+  walk-to-museum-length: the walk between the hotel and the Art Institute takes 10 min
+  walk-to-park-length: the walk between the Art Institute and Millennium Park takes 5 min
+  walk-to-dock-length: the walk between Millennium Park and the Riverwalk dock takes 20 min
+  walk-to-dinner-length: the walk between the Riverwalk dock and River North takes 15 min
+  lock-breakfast: Alex takes part in Breakfast
+  lock-museum: Alex takes part in Museum visit
+  lock-lunch: Alex takes part in Lunch in the park
+  lock-boat-tour: Alex takes part in Architecture boat tour
+  lock-dinner: Alex takes part in Dinner

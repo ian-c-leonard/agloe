@@ -1,0 +1,11 @@
+INFEASIBLE: this trip cannot work.
+
+These FACTs and DECISIONs clash. Each one is needed for the clash. Times are in America/Chicago.
+  lunch-time: Lunch in the park starts at 12:30 pm on Friday 14 May 2027
+  lunch-length: Lunch in the park takes 1 h
+  boat-time: Architecture boat tour starts at 2:00 pm on Friday 14 May 2027
+  boat-boarding: people must be at the Riverwalk dock 15 min before Architecture boat tour starts
+  walk-to-dock-length: the walk between Millennium Park and the Riverwalk dock takes 20 min
+  all-ways: every way from one PLACE straight to another that leaves between 12:00 am on Friday 14 May 2027 and 11:59 pm is listed
+  lock-lunch: Alex takes part in Lunch in the park
+  lock-boat-tour: Alex takes part in Architecture boat tour

@@ -119,4 +119,13 @@ Alex and Sam spend their last afternoon in Chicago at the Art Institute, then fl
 | [depends on the cab](../examples/flight-home/depends-on-the-cab.json) | They leave at 3:30 pm. A cab is listed, but nobody has recorded how long it takes. | UNDETERMINED. It works if the cab takes 45 minutes or less. |
 | [works, but risky](../examples/flight-home/works-but-risky.json) | They leave at 3:00 pm, and the Blue Line can take up to 80 minutes. | FEASIBLE, with a WARNING that no ITINERARY is ROBUST. At 80 minutes they reach O'Hare five minutes after bag drop closes. |
 
+The day before, Alex spends Friday in Chicago alone: breakfast at the hotel at 8:00 am, the Art Institute at 10:00 am, lunch in Millennium Park at 12:30 pm, an architecture boat tour, and dinner in River North at 7:00 pm. Alex walks from each stop to the next, and the FILE lists each walk as a WAY. Lunch takes an hour. The walk from the park to the dock takes 20 minutes, and boarding closes 15 minutes before the boat leaves.
+
+| FILE | What it says | Answer |
+|---|---|---|
+| [works](../examples/a-day/works.json) | The boat leaves at 3:00 pm. | FEASIBLE. The plan shows each stop and each walk. |
+| [cannot work](../examples/a-day/cannot-work.json) | The boat leaves at 2:00 pm, and a FACT says the FILE lists every way. | INFEASIBLE. Alex would reach the dock five minutes after boarding closes. Eight FACTs and DECISIONs conflict. |
+| [depends on the walk](../examples/a-day/depends-on-the-walk.json) | The boat leaves at 2:00 pm, and nobody has recorded how long the walk to the dock takes. | UNDETERMINED. It works if that walk takes 15 minutes or less. |
+| [works, but risky](../examples/a-day/works-but-risky.json) | The boat leaves at 2:15 pm, and lunch can take up to 90 minutes. | FEASIBLE, with a WARNING that no ITINERARY is ROBUST. At 90 minutes Alex is still at lunch when the walk to the dock should start. |
+
 Each FILE has its expected result beside it, as JSON and in words, and the tests compare the reference checker's answer with it. The command `agloe check` prints the same result for any FILE.

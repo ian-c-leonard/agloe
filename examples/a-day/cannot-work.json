@@ -1,0 +1,53 @@
+{
+  "persons": [
+    { "id": "alex", "name": "Alex" }
+  ],
+  "places": [
+    { "id": "hotel", "name": "the hotel" },
+    { "id": "art-institute", "name": "the Art Institute" },
+    { "id": "park", "name": "Millennium Park" },
+    { "id": "dock", "name": "the Riverwalk dock" },
+    { "id": "river-north", "name": "River North" }
+  ],
+  "options": [
+    { "id": "breakfast", "name": "Breakfast", "place": "hotel" },
+    { "id": "museum", "name": "Museum visit", "place": "art-institute" },
+    { "id": "lunch", "name": "Lunch in the park", "place": "park" },
+    { "id": "boat-tour", "name": "Architecture boat tour", "place": "dock" },
+    { "id": "dinner", "name": "Dinner", "place": "river-north" }
+  ],
+  "ways": [
+    { "id": "walk-to-museum", "name": "the walk between the hotel and the Art Institute", "between": ["hotel", "art-institute"] },
+    { "id": "walk-to-park", "name": "the walk between the Art Institute and Millennium Park", "between": ["art-institute", "park"] },
+    { "id": "walk-to-dock", "name": "the walk between Millennium Park and the Riverwalk dock", "between": ["park", "dock"] },
+    { "id": "walk-to-dinner", "name": "the walk between the Riverwalk dock and River North", "between": ["dock", "river-north"] }
+  ],
+  "facts": [
+    { "id": "breakfast-time", "option": "breakfast", "starts_at": "2027-05-14T08:00:00-05:00[America/Chicago]" },
+    { "id": "breakfast-length", "option": "breakfast", "duration": "PT45M" },
+    { "id": "museum-time", "option": "museum", "starts_at": "2027-05-14T10:00:00-05:00[America/Chicago]" },
+    { "id": "museum-length", "option": "museum", "duration": "PT2H" },
+    { "id": "museum-entry", "option": "museum", "arrive_before_start": "PT0S" },
+    { "id": "lunch-time", "option": "lunch", "starts_at": "2027-05-14T12:30:00-05:00[America/Chicago]" },
+    { "id": "lunch-length", "option": "lunch", "duration": "PT1H" },
+    { "id": "lunch-table", "option": "lunch", "arrive_before_start": "PT0S" },
+    { "id": "boat-time", "option": "boat-tour", "starts_at": "2027-05-14T14:00:00-05:00[America/Chicago]" },
+    { "id": "boat-length", "option": "boat-tour", "duration": "PT1H30M" },
+    { "id": "boat-boarding", "option": "boat-tour", "arrive_before_start": "PT15M" },
+    { "id": "dinner-time", "option": "dinner", "starts_at": "2027-05-14T19:00:00-05:00[America/Chicago]" },
+    { "id": "dinner-length", "option": "dinner", "duration": "PT1H30M" },
+    { "id": "dinner-table", "option": "dinner", "arrive_before_start": "PT0S" },
+    { "id": "walk-to-museum-length", "way": "walk-to-museum", "duration": "PT10M" },
+    { "id": "walk-to-park-length", "way": "walk-to-park", "duration": "PT5M" },
+    { "id": "walk-to-dock-length", "way": "walk-to-dock", "duration": "PT20M" },
+    { "id": "walk-to-dinner-length", "way": "walk-to-dinner", "duration": "PT15M" },
+    { "id": "all-ways", "complete": { "leaving": { "earliest": "2027-05-14T00:00:00-05:00[America/Chicago]", "latest": "2027-05-14T23:59:00-05:00[America/Chicago]" } } }
+  ],
+  "decisions": [
+    { "id": "lock-breakfast", "lock": "breakfast", "persons": ["alex"] },
+    { "id": "lock-museum", "lock": "museum", "persons": ["alex"] },
+    { "id": "lock-lunch", "lock": "lunch", "persons": ["alex"] },
+    { "id": "lock-boat-tour", "lock": "boat-tour", "persons": ["alex"] },
+    { "id": "lock-dinner", "lock": "dinner", "persons": ["alex"] }
+  ]
+}

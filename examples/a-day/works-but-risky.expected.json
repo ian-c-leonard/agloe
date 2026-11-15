@@ -1,0 +1,117 @@
+{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "breakfast",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-14T08:00:00-05:00[America/Chicago]",
+      "end": "2027-05-14T08:45:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "walk-to-museum",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-14T08:45:00-05:00[America/Chicago]",
+      "end": "2027-05-14T08:55:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "museum",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-14T10:00:00-05:00[America/Chicago]",
+      "end": "2027-05-14T12:00:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "walk-to-park",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-14T12:00:00-05:00[America/Chicago]",
+      "end": "2027-05-14T12:05:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "lunch",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-14T12:30:00-05:00[America/Chicago]",
+      "end": "2027-05-14T13:30:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "walk-to-dock",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-14T13:30:00-05:00[America/Chicago]",
+      "end": "2027-05-14T13:50:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "boat-tour",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-14T14:15:00-05:00[America/Chicago]",
+      "end": "2027-05-14T15:45:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "walk-to-dinner",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-14T15:45:00-05:00[America/Chicago]",
+      "end": "2027-05-14T16:00:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "dinner",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-14T19:00:00-05:00[America/Chicago]",
+      "end": "2027-05-14T20:30:00-05:00[America/Chicago]"
+    }
+  ],
+  "relies_on": [
+    "breakfast-time",
+    "breakfast-length",
+    "museum-time",
+    "museum-length",
+    "museum-entry",
+    "lunch-time",
+    "lunch-length",
+    "lunch-table",
+    "boat-time",
+    "boat-length",
+    "boat-boarding",
+    "dinner-time",
+    "dinner-length",
+    "dinner-table",
+    "walk-to-museum-length",
+    "walk-to-park-length",
+    "walk-to-dock-length",
+    "walk-to-dinner-length",
+    "lock-breakfast",
+    "lock-museum",
+    "lock-lunch",
+    "lock-boat-tour",
+    "lock-dinner"
+  ],
+  "robust": false,
+  "at_worst": [
+    {
+      "constraint": "Each PERSON is in one place at a time",
+      "step": 5,
+      "way": "walk-to-dock",
+      "from": "park",
+      "to": "dock",
+      "start": "2027-05-14T13:30:00-05:00[America/Chicago]",
+      "persons": [
+        "alex"
+      ],
+      "late": "PT30M"
+    }
+  ]
+}
