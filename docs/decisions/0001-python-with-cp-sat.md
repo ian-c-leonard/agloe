@@ -28,6 +28,7 @@ Agloe is written in Python, and CP-SAT is the engine for both the COMPILER and t
 - Python 3.14 is pinned, because the current OR-Tools release (9.15) ships builds up to Python 3.14.
 - Agloe is distributed through PyPI. Its command line and MCP tool run with one command; other languages reach it through the MCP tool or the command line rather than in a browser.
 - OR-Tools is a large native dependency, pinned to an exact version.
+- CP-SAT runs with its presolve step switched off. In OR-Tools 9.15 that step reported INFEASIBLE for a small model that has a solution. A wrong "nothing works" is the one solver mistake the reference checker's rules cannot catch, because they check only the ITINERARIES the solver finds.
 - A single-threaded CP-SAT run is deterministic, provided Agloe builds the model in a fixed order. That results match across machines is tested on Linux and macOS before it is relied on.
 
 ## Confirmation
