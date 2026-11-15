@@ -1,11 +1,13 @@
 {
   "answer": "UNDETERMINED",
   "missing": [
-    {
-      "what": "another way",
-      "from": "art-institute",
-      "to": "ohare",
-      "at_most": "PT45M"
-    }
+    [
+      {
+        "what": "another way",
+        "from": "art-institute",
+        "to": "ohare",
+        "at_most": "PT45M"
+      }
+    ]
   ]
 }

@@ -337,7 +337,7 @@ A dated point at which something about the TRIP changes unless a DECISION comes 
 
 ### ROBUST
 
-An ITINERARY is ROBUST when its OPTIONs and start times meet every CONSTRAINT for every value of every CONTINGENT duration.
+An ITINERARY is ROBUST when its OPTIONs, PERSONs and start times meet every CONSTRAINT for every value of every CONTINGENT duration.
 
 *Uses:* ITINERARY, CONSTRAINT, CONTINGENT.
 

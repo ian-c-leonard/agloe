@@ -3,7 +3,16 @@
 import pytest
 
 from agloe.file import File, load
-from agloe.reference import Broken, Constraint, Itinerary, Step, best_case, broken, worst_case
+from agloe.reference import (
+    Broken,
+    Constraint,
+    Itinerary,
+    Step,
+    best_case,
+    broken,
+    needless,
+    worst_case,
+)
 from tests.stories import (
     any_time,
     at,
@@ -152,15 +161,50 @@ def test_a_complete_set_says_nothing_outside_its_span() -> None:
     assert broken(file, best_case(file), shortcut) == []
 
 
-def test_nothing_happens_without_need() -> None:
+def test_a_complete_span_includes_both_of_its_ends() -> None:
+    document = flight_home()
+    ways = {
+        "from": "art-institute",
+        "to": "ohare",
+        "leaving": {"earliest": at(15), "latest": at(15, 10)},
+    }
+    document["facts"].append({"id": "ways-at-three", "complete": ways})
+    file = load(document)
+
+    def leaving_at(moment: int) -> list[Broken]:
+        shortcut = (visit(), unlisted("art-institute", "ohare", moment), flight())
+        return broken(file, best_case(file), shortcut)
+
+    covered = [Broken(Constraint.LISTED, None, BOTH)]
+    assert leaving_at(seconds(15)) == covered
+    assert leaving_at(seconds(15, 10)) == covered
+    assert leaving_at(seconds(15, 10) + 1) == []
+
+
+def test_a_complete_set_covers_only_ways_that_reach_the_second_place() -> None:
+    """Sam takes an unlisted way to Midway and stays there. Nothing says those ways are listed."""
+    file = with_complete_ways()
+    alex = ("alex",)
+    alone = (
+        step(file, "museum-visit", seconds(14), seconds(15)),
+        unlisted("art-institute", "midway", seconds(15), "sam"),
+        step(file, "blue-line", seconds(15), seconds(16), *alex),
+        step(file, "flight", seconds(17), seconds(19, 30), *alex),
+    )
+    assert broken(file, best_case(file), alone) == [Broken(Constraint.LOCK, "flight", ("sam",))]
+
+
+def test_what_nobody_needs_can_be_taken_out() -> None:
     document = flight_home()
     document["options"].append(stays("coffee", "art-institute"))
     document["facts"] += [any_time("coffee"), lasts("coffee", "PT10M")]
     file = load(document)
+    world = worst_case(file)
     coffee = step(file, "coffee", seconds(13), seconds(13, 10), "alex")
-    assert found(coffee, visit(), train(), flight(), file=file) == [
-        Broken(Constraint.NEED, "coffee", ("alex",))
-    ]
+    with_coffee = (coffee, visit(), train(), flight())
+    assert broken(file, world, with_coffee) == []
+    assert needless(file, world, with_coffee) == [("coffee", "alex")]
+    assert needless(file, world, (visit(), train(), flight())) == []
 
 
 def test_an_itinerary_names_things_from_the_file() -> None:

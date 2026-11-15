@@ -136,7 +136,7 @@ Starter WANTs are never hidden rules; they sit in the FILE like any other WANT. 
 **E1. A TRIP is FEASIBLE if at least one ITINERARY meets every CONSTRAINT.** Checking pieces separately is not enough: the drive and the ferry can each be possible and still not fit together.
 *Serves:* compiler, trustworthy. *Source:* the constraint satisfaction problem (Montanari, 1974; Mackworth, 1977): an ITINERARY is a complete assignment, and a FEASIBLE one is a solution.
 
-**E2. Every check returns FEASIBLE, INFEASIBLE or UNDETERMINED.** FEASIBLE: an ITINERARY works however the unknown FACTs turn out. INFEASIBLE: no ITINERARY works however they turn out. UNDETERMINED: the answer depends on FACTs the FILE does not hold, and the report names them ("FEASIBLE only if a route under 2 h 15 min exists"). An undecided choice never makes a TRIP UNDETERMINED; only missing FACTs or a search limit do.
+**E2. Every check returns FEASIBLE, INFEASIBLE or UNDETERMINED.** FEASIBLE: an ITINERARY works however the unknown FACTs turn out. INFEASIBLE: no ITINERARY works however they turn out. UNDETERMINED: the answer depends on FACTs the FILE does not hold, and the report names them ("FEASIBLE if a route under 2 h 15 min exists"). An undecided choice never makes a TRIP UNDETERMINED; only missing FACTs or a search limit do.
 *Serves:* trustworthy, self-explaining. *Source:* solver result statuses (SMT-LIB; CP-SAT); certain answers over incomplete information (Imieliński and Lipski, 1984; Libkin, 2016).
 
 **E3. INFEASIBLE needs a COMPLETE set.** An INFEASIBLE result that rests on an OPTION not existing ("no OPTION gets you from Craignure to Fionnphort before 17:50") needs a FACT saying that set of OPTIONs is COMPLETE. Not finding an OPTION is no proof that none exists.
@@ -151,7 +151,7 @@ Starter WANTs are never hidden rules; they sit in the FILE like any other WANT. 
 **E6. Every FINDING is visible.** A DISMISSAL silences an ERROR, WARNING or NOTE as it stood, and the FINDING returns if it gets worse. UNDETERMINED FINDINGs, and ERRORs meaning the FILE cannot be read, cannot be dismissed.
 *Serves:* trustworthy, self-explaining.
 
-**E7. An OPTION belongs only if something needs it.** An ITINERARY includes an OPTION only if a WANT or a LOCK needs it, directly or through a chain: the drive to reach the ferry, the ferry to reach Iona. Detours and loops cannot justify themselves.
+**E7. An OPTION belongs only if something needs it.** The ITINERARY a report shows includes an OPTION only if a WANT or a LOCK needs it, directly or through a chain: the drive to reach the ferry, the ferry to reach Iona. Detours and loops cannot justify themselves.
 *Serves:* optimizer, self-explaining.
 
 **E8. Every DEADLINE is listed.** OFFERs and BOOKINGs record their dated terms: when an OFFER expires, and what cancelling or changing costs on each date. Before and during the trip, the COMPILER lists every upcoming DEADLINE at which cost or availability changes, or by which a DECISION is due, with its STAKE, earliest first: "Hotel C becomes non-refundable Friday: £420 at STAKE."

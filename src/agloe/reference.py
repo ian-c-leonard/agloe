@@ -1,10 +1,11 @@
-"""The reference checker: the CONSTRAINTs of spec/rules.md applied directly, with no solver.
+"""The reference checker: the rules of spec/rules.md applied directly, with no solver.
 
 It is slow on purpose and meant for small TRIPs. It defines the right answer, and anything faster
-must agree with it.
+must agree with it. It refuses an ITINERARY too large for it to try everything.
 
-Read it beside spec/rules.md. ``broken`` is the section "The CONSTRAINTs". ``check`` is the
-sections "The three answers", "ROBUST", "Which ITINERARY is shown" and "Evidence".
+Read it beside spec/rules.md. ``broken`` is the section "The CONSTRAINTs". ``itineraries`` is
+the section "Which ITINERARY is shown". ``check`` is the sections "The three answers", "ROBUST"
+and "Evidence".
 """
 
 from collections.abc import Iterator, Mapping
@@ -14,7 +15,7 @@ from itertools import combinations, groupby, pairwise, permutations, product
 
 from agloe.file import Complete, File, Option
 
-_MOST_TO_DROP = 12  # "Nothing happens without need" tries every way to take things out
+_MOST_TO_TAKE_OUT = 12  # ``needless`` tries every combination of things to take out
 
 
 class Constraint(Enum):
@@ -26,7 +27,6 @@ class Constraint(Enum):
     PLACE = "Each PERSON is in one place at a time"
     ARRIVAL = "Each PERSON arrives in time"
     LISTED = "A COMPLETE set is the whole set"
-    NEED = "Nothing happens without need"
 
 
 class Answer(Enum):
@@ -37,14 +37,18 @@ class Answer(Enum):
 
 @dataclass(frozen=True)
 class Step:
-    """One OPTION as it happens in an ITINERARY."""
+    """One OPTION in an ITINERARY: who takes part and when it starts.
 
-    option: str | None  # None: an OPTION the FILE does not list
+    ``option`` is None for an OPTION the FILE does not list. ``end`` follows from the duration, and
+    is None when nobody knows how long the OPTION takes.
+    """
+
+    option: str | None
     origin: str
     destination: str
     persons: tuple[str, ...]
     start: int
-    end: int | None  # None: nobody knows how long it takes
+    end: int | None
 
 
 type Itinerary = tuple[Step, ...]
@@ -62,26 +66,45 @@ class Broken:
 
 @dataclass(frozen=True)
 class Terms:
-    """What a world says about one OPTION."""
+    """What a world says about one OPTION.
 
-    fixed_start: int | None  # it can start only then
-    free_start: bool  # it can start at any time; false with no fixed start means nobody knows when
+    With no ``fixed_start``, ``free_start`` says whether it can start at any time; if not, nobody
+    knows when it starts. ``longest`` is None when there is no limit to how long it can take.
+    ``margin`` is the access cutoff, and None when there is no limit to how early a PERSON must
+    arrive.
+    """
+
+    fixed_start: int | None
+    free_start: bool
     shortest: int
-    longest: int | None  # None: there is no limit to how long it can take
-    margin: (
-        int | None
-    )  # the access cutoff; None: there is no limit to how early a PERSON must arrive
+    longest: int | None
+    margin: int | None
 
 
 @dataclass(frozen=True)
 class World:
-    """One way the unknown FACTs turn out, or the worst of all the ways at once."""
+    """One way the unknown FACTs turn out, or the worst of all the ways at once.
+
+    ``ways`` holds the pairs of PLACEs that an unlisted OPTION joins, and None means every pair.
+    If unlisted OPTIONs join a to b and b to c, they join a to c as well, so the pairs are always
+    completed that way. Every unlisted OPTION takes ``way_takes`` seconds, starts at any time and
+    has no access cutoff.
+    """
 
     terms: Mapping[str, Terms]
-    ways: (
-        frozenset[tuple[str, str]] | None
-    )  # pairs of PLACEs an unlisted OPTION joins; None: every pair
-    way_takes: int = 0  # how long an unlisted OPTION takes
+    ways: frozenset[tuple[str, str]] | None
+    way_takes: int = 0
+
+    def __post_init__(self) -> None:
+        if self.ways is None:
+            return
+        joined = set(self.ways)
+        while True:
+            more = {(a, d) for a, b in joined for c, d in joined if b == c and a != d} - joined
+            if not more:
+                break
+            joined |= more
+        object.__setattr__(self, "ways", frozenset(joined))
 
 
 @dataclass(frozen=True)
@@ -107,15 +130,20 @@ class Missing:
 
 @dataclass(frozen=True)
 class Report:
+    """The answer and its evidence.
+
+    FEASIBLE: the ITINERARY shown, the FACTs and DECISIONs it relies on, whether it is ROBUST, and
+    what it breaks when every CONTINGENT duration runs longest. INFEASIBLE: FACTs and DECISIONs
+    that conflict. UNDETERMINED: each smallest set of unknown FACTs that would be enough.
+    """
+
     answer: Answer
-    itinerary: Itinerary = ()  # FEASIBLE: the ITINERARY shown
-    relies_on: tuple[str, ...] = ()  # FEASIBLE: the FACTs and DECISIONs it relies on
-    robust: bool | None = None  # FEASIBLE: whether the ITINERARY shown is ROBUST
-    at_worst: tuple[
-        Broken, ...
-    ] = ()  # FEASIBLE: what breaks when every CONTINGENT duration runs longest
-    conflict: tuple[str, ...] = ()  # INFEASIBLE: FACTs and DECISIONs that conflict
-    missing: tuple[Missing, ...] = ()  # UNDETERMINED: the unknown FACTs it depends on
+    itinerary: Itinerary = ()
+    relies_on: tuple[str, ...] = ()
+    robust: bool | None = None
+    at_worst: tuple[Broken, ...] = ()
+    conflict: tuple[str, ...] = ()
+    missing: tuple[tuple[Missing, ...], ...] = ()
 
 
 # ------------------------------- What is unknown -------------------------------
@@ -171,11 +199,9 @@ def _world(
 
     terms: dict[str, Terms] = {}
     for option in file.options:
-        start, duration, cutoff = (
-            file.start(option.id),
-            file.duration(option.id),
-            file.cutoff(option.id),
-        )
+        start = file.start(option.id)
+        duration = file.duration(option.id)
+        cutoff = file.cutoff(option.id)
         if start is not None:
             fixed, free = start.at, start.at is None
         else:
@@ -202,13 +228,24 @@ def _world(
 # ------------------------------- The CONSTRAINTs -------------------------------
 
 
+def in_world(world: World, itinerary: Itinerary) -> Itinerary:
+    """The same OPTIONs, PERSONs and start times, with each end as this world makes it.
+
+    An end is None when the world sets no limit to how long the OPTION takes.
+    """
+
+    def end(step: Step) -> int | None:
+        if step.option is None:
+            return step.start + world.way_takes
+        terms = world.terms[step.option]
+        return None if terms.longest is None else step.start + terms.shortest
+
+    return tuple(replace(step, end=end(step)) for step in itinerary)
+
+
 def broken(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
     """The CONSTRAINTs this ITINERARY does not meet in this world. An empty list means it works."""
     _well_formed(file, itinerary)
-    return _broken_before_need(file, world, itinerary) or _needless(file, world, itinerary)
-
-
-def _broken_before_need(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
     return [
         *_locks(file, itinerary),
         *_starts(world, itinerary),
@@ -226,43 +263,20 @@ def _well_formed(file: File, itinerary: Itinerary) -> None:
     if len(listed) != len(set(listed)):
         raise ValueError("an OPTION happens at most once")
     for step in itinerary:
-        if (
-            not step.persons
-            or len(set(step.persons)) != len(step.persons)
-            or not persons.issuperset(step.persons)
-        ):
+        named_once = len(set(step.persons)) == len(step.persons)
+        if not step.persons or not named_once or not persons.issuperset(step.persons):
             raise ValueError("each step needs PERSONs from the FILE, each named once")
         if step.option is None:
             if not {step.origin, step.destination} <= places:
                 raise ValueError("an unlisted OPTION still joins PLACEs from the FILE")
         elif step.option not in options:
             raise ValueError(f"{step.option} is not an OPTION in the FILE")
-        elif (step.origin, step.destination) != (
-            options[step.option].origin,
-            options[step.option].destination,
-        ):
-            raise ValueError(f"{step.option} does not happen where the FILE says")
+        else:
+            option = options[step.option]
+            if (step.origin, step.destination) != (option.origin, option.destination):
+                raise ValueError(f"{step.option} does not happen where the FILE says")
         if step.end is not None and step.end < step.start:
             raise ValueError("a step ends before it starts")
-
-
-def _paths(itinerary: Itinerary, person: str) -> Iterator[list[Step]]:
-    """What one PERSON does, in each order that their times allow.
-
-    Steps that take no time and share an instant can happen in any order.
-    """
-
-    def moment(step: Step) -> tuple[int, bool, int]:
-        return (step.start, step.end is None, step.end or 0)
-
-    mine = sorted((step for step in itinerary if person in step.persons), key=moment)
-    together = [list(steps) for _, steps in groupby(mine, key=moment)]
-    orders = [
-        list(permutations(steps)) if steps[0].end == steps[0].start else [tuple(steps)]
-        for steps in together
-    ]
-    for order in product(*orders):
-        yield [step for steps in order for step in steps]
 
 
 def _gathered(
@@ -351,6 +365,25 @@ def _along_each_path(file: File, world: World, itinerary: Itinerary) -> list[Bro
     ]
 
 
+def _paths(itinerary: Itinerary, person: str) -> Iterator[list[Step]]:
+    """What one PERSON does, in each order that their times allow.
+
+    Steps that take no time and share an instant can happen in any order.
+    """
+
+    def moment(step: Step) -> tuple[int, bool, int]:
+        return (step.start, step.end is None, step.end or 0)
+
+    mine = sorted((step for step in itinerary if person in step.persons), key=moment)
+    together = [list(steps) for _, steps in groupby(mine, key=moment)]
+    orders = [
+        list(permutations(steps)) if steps[0].end == steps[0].start else [tuple(steps)]
+        for steps in together
+    ]
+    for order in product(*orders):
+        yield [step for steps in order for step in steps]
+
+
 def _places(path: list[Step]) -> _Found:
     """Each PERSON is in one place at a time: no overlap, and each OPTION starts where they are."""
     found: _Found = []
@@ -381,7 +414,11 @@ def _arrivals(world: World, path: list[Step]) -> _Found:
 
 
 def _listed(file: File, world: World, path: list[Step]) -> _Found:
-    """A COMPLETE set is the whole set: an unlisted OPTION needs a world that has it."""
+    """A COMPLETE set is the whole set: an unlisted OPTION needs a world that has it.
+
+    No world has one on a way between the PLACEs of a COMPLETE FACT that leaves within its span.
+    The span includes both of its ends, and a way counts only if it reaches the second PLACE.
+    """
     found: _Found = []
     for step in path:
         here = (step.origin, step.destination)
@@ -402,8 +439,15 @@ def _listed(file: File, world: World, path: list[Step]) -> _Found:
     return found
 
 
-def _needless(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
-    """Nothing happens without need: taking out what no LOCK requires breaks another CONSTRAINT."""
+# ------------------------------- Which ITINERARY is shown -------------------------------
+
+
+def needless(file: File, world: World, itinerary: Itinerary) -> list[tuple[str | None, str]]:
+    """What could be taken out of an ITINERARY that works: each an OPTION and a PERSON in it.
+
+    It tries every combination of PERSONs in OPTIONs that no LOCK requires, with all the times
+    left as they are. An empty list means the ITINERARY works without none of them.
+    """
     locked = {(lock.option, person) for lock in file.locks for person in lock.persons}
     free = [
         (index, person)
@@ -411,33 +455,31 @@ def _needless(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
         for person in step.persons
         if (step.option, person) not in locked
     ]
-    if len(free) > _MOST_TO_DROP:
+    if len(free) > _MOST_TO_TAKE_OUT:
         raise ValueError("this ITINERARY is too large for the reference checker")
     for size in range(1, len(free) + 1):
-        for dropped in combinations(free, size):
+        for out in combinations(free, size):
             smaller: list[Step] = []
             for index, step in enumerate(itinerary):
-                staying = tuple(person for person in step.persons if (index, person) not in dropped)
+                staying = tuple(person for person in step.persons if (index, person) not in out)
                 if staying:
                     smaller.append(replace(step, persons=staying))
-            if not _broken_before_need(file, world, tuple(smaller)):
-                index, person = dropped[0]
-                return [Broken(Constraint.NEED, itinerary[index].option, (person,))]
+            if not broken(file, world, tuple(smaller)):
+                return [(itinerary[index].option, person) for index, person in out]
     return []
 
 
-# ------------------------------- Finding ITINERARIES -------------------------------
-
-
 def itineraries(file: File, world: World) -> list[Itinerary]:
-    """The ITINERARIES that work in this world with the fewest PERSONs taking part in OPTIONs.
+    """The ITINERARIES that work in this world with PERSONs taking part the fewest times.
 
-    It tries every choice of who takes part in which OPTION and in what order. An unlisted OPTION
-    is used only to join two listed ones. Each OPTION starts as early as the CONSTRAINTs allow, and
-    one with nothing before it starts as late as they allow. Where a COMPLETE FACT covers a span of
-    leaving times, leaving before the span and leaving after it are tried too. An ITINERARY with
-    the fewest PERSONs taking part cannot have anything taken out, so every ITINERARY returned
-    also meets "Nothing happens without need".
+    It tries every choice of who takes part in which OPTION and in what order. One unlisted OPTION
+    can join two listed ones. Each OPTION starts as early as the CONSTRAINTs allow, and one with
+    nothing before it starts as late as they allow. Where a COMPLETE FACT covers a span of leaving
+    times, leaving before the span and leaving after it are tried too.
+
+    Nothing can be taken out of an ITINERARY in which PERSONs take part the fewest times, so
+    ``needless`` finds nothing in any ITINERARY returned. They come in the order of "Which
+    ITINERARY is shown".
     """
     best: list[Itinerary] = []
     fewest: int | None = None
@@ -449,7 +491,7 @@ def itineraries(file: File, world: World) -> list[Itinerary]:
         ]
         for orders in product(*(list(_orders(file, world, indexes)) for indexes in mine)):
             for found in _schedules(file, world, who, orders):
-                if _broken_before_need(file, world, found):
+                if broken(file, world, found):
                     continue
                 taking_part = sum(len(step.persons) for step in found)
                 if fewest is None or taking_part < fewest:
@@ -579,11 +621,10 @@ def _schedules(
         for index, option in enumerate(file.options):
             if who[index]:
                 lasts = takes(index)
-                end = None if lasts is None else starts[index] + lasts
+                start = starts[index]
+                end = None if lasts is None else start + lasts
                 steps.append(
-                    Step(
-                        option.id, option.origin, option.destination, who[index], starts[index], end
-                    )
+                    Step(option.id, option.origin, option.destination, who[index], start, end)
                 )
         for number, (person_id, start_place, end_place) in enumerate(ways):
             start = starts[listed + number]
@@ -599,7 +640,7 @@ def _times(
     """Start times that keep every gap and every fixed start, or None when there are none.
 
     Each start is as early as the gaps allow. A start with nothing before it is as late as they
-    allow.
+    allow. With no fixed start to measure from, the times count from zero.
     """
     early: list[int | None] = [fixed.get(node) for node in range(count)]
     for _ in range(count + 1):
@@ -621,11 +662,9 @@ def _times(
         moved = False
         for before, after, gap in gaps:
             limit, current = late[after], late[before]
-            if (
-                early[before] is None
-                and limit is not None
-                and (current is None or limit - gap < current)
-            ):
+            if early[before] is not None or limit is None:
+                continue
+            if current is None or limit - gap < current:
                 late[before] = limit - gap
                 moved = True
         if not moved:
@@ -647,25 +686,23 @@ def _times(
     return None
 
 
-def _step_in_file_order(file: File, step: Step) -> tuple[int, int, str, str, tuple[int, ...], int]:
+type _StepOrder = tuple[int, int, tuple[int, ...], int, int, int]
+
+
+def _step_in_file_order(file: File, step: Step) -> _StepOrder:
+    """Earlier steps first, then the FILE's order of OPTIONs, PERSONs and PLACEs."""
     options = [option.id for option in file.options]
     people = [person.id for person in file.persons]
+    places = [place.id for place in file.places]
     index = len(options) if step.option is None else options.index(step.option)
     persons = tuple(people.index(person) for person in step.persons)
-    return (
-        step.start,
-        index,
-        step.origin,
-        step.destination,
-        persons,
-        -1 if step.end is None else step.end,
-    )
+    origin, destination = places.index(step.origin), places.index(step.destination)
+    end = -1 if step.end is None else step.end
+    return (step.start, index, persons, origin, destination, end)
 
 
-def _in_file_order(
-    file: File, itinerary: Itinerary
-) -> tuple[int, list[int], list[tuple[int, int, str, str, tuple[int, ...], int]]]:
-    """Fewest OPTIONs first, then the ITINERARIES that use the OPTIONs listed first in the FILE."""
+def _in_file_order(file: File, itinerary: Itinerary) -> tuple[int, list[int], list[_StepOrder]]:
+    """Fewest OPTIONs, then the OPTIONs listed first in the FILE, then earlier steps."""
     options = [option.id for option in file.options]
     used = sorted(
         len(options) if step.option is None else options.index(step.option) for step in itinerary
@@ -688,21 +725,11 @@ def check(file: File) -> Report:
             fact.id for fact in file.facts if not isinstance(fact, Complete) and fact.option in used
         ]
         relies_on += [lock.id for lock in file.locks]
-        at_worst = () if robust else tuple(broken(file, longest, _running_longest(longest, shown)))
+        at_worst = () if robust else tuple(broken(file, longest, in_world(longest, shown)))
         return Report(Answer.FEASIBLE, shown, tuple(relies_on), bool(robust), at_worst)
     if not itineraries(file, best_case(file)):
         return Report(Answer.INFEASIBLE, conflict=_conflict(file))
     return Report(Answer.UNDETERMINED, missing=_missing(file))
-
-
-def _running_longest(longest: World, itinerary: Itinerary) -> Itinerary:
-    """The same OPTIONs at the same start times, with every CONTINGENT duration at its longest."""
-    return tuple(
-        step
-        if step.option is None
-        else replace(step, end=step.start + longest.terms[step.option].shortest)
-        for step in itinerary
-    )
 
 
 def _conflict(file: File) -> tuple[str, ...]:
@@ -715,16 +742,24 @@ def _conflict(file: File) -> tuple[str, ...]:
     return tuple([fact.id for fact in kept.facts] + [lock.id for lock in kept.locks])
 
 
-def _missing(file: File) -> tuple[Missing, ...]:
-    """The fewest unknown FACTs that would have to turn out well for the TRIP to be FEASIBLE."""
+def _missing(file: File) -> tuple[tuple[Missing, ...], ...]:
+    """Every smallest set of unknown FACTs that would be enough if they turned out well.
+
+    Each set makes the TRIP FEASIBLE with every other unknown FACT at its worst. A set of one
+    length of time comes with its limit.
+    """
     every = unknowns(file)
     for size in range(1, len(every) + 1):
-        for some in combinations(every, size):
-            if itineraries(file, _world(file, frozenset(some))):
-                return tuple(
-                    Missing(unknown, _limit(file, unknown) if size == 1 else None)
-                    for unknown in some
-                )
+        enough = [
+            some
+            for some in combinations(every, size)
+            if itineraries(file, _world(file, frozenset(some)))
+        ]
+        if enough:
+            return tuple(
+                tuple(Missing(u, _limit(file, u) if size == 1 else None) for u in some)
+                for some in enough
+            )
     raise AssertionError("the best case works, so some unknown FACTs make it work")
 
 

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from agloe.file import FileError, instant, length, load, read
-from tests.stories import Document, at, flight_home
+from tests.stories import Document, at, complete, flight_home
 
 
 def problems(document: Document) -> str:
@@ -67,6 +67,23 @@ def test_a_time_is_a_real_date() -> None:
     )
 
 
+def test_an_offset_from_utc_is_a_real_offset() -> None:
+    document = flight_home()
+    document["facts"][0]["starts_at"] = "2027-05-15T14:00:00+00:99[UTC]"
+    assert problems(document).startswith("facts/0:")
+
+
+def test_text_holds_no_line_break() -> None:
+    document = flight_home()
+    document["persons"][0]["id"] = "alex\n"
+    document["facts"][0]["starts_at"] += "\n"
+    document["facts"][1]["duration"] = "PT1H\n"
+    found = problems(document)
+    assert "persons/0/id: 'alex\\n' holds a control character" in found
+    assert "facts/0/starts_at:" in found
+    assert "facts/1/duration: 'PT1H\\n' holds a control character" in found
+
+
 def test_a_fact_states_one_thing() -> None:
     document = flight_home()
     document["facts"][0]["duration"] = "PT1H"
@@ -106,6 +123,13 @@ def test_each_fact_is_stated_once() -> None:
     assert "facts/7: another FACT already states this about museum-visit" in problems(document)
 
 
+def test_a_complete_fact_is_stated_once() -> None:
+    document = flight_home()
+    document["facts"] += [complete("art-institute", "ohare"), complete("art-institute", "ohare")]
+    document["facts"][8]["id"] = "ways-again"
+    assert "facts/8: another FACT already states this" in problems(document)
+
+
 def test_a_range_and_a_span_run_forward() -> None:
     document = flight_home()
     backwards = {"shortest": "PT2H", "longest": "PT1H"}
@@ -139,6 +163,17 @@ def test_a_file_on_disk_states_each_key_once(tmp_path: Path) -> None:
     )
     with pytest.raises(FileError, match="states persons more than once"):
         read(path)
+
+
+def test_a_repeated_key_is_reported_with_its_object(tmp_path: Path) -> None:
+    path = tmp_path / "trip.json"
+    path.write_text(
+        '{"persons": [{"id": "alex", "id": "sam", "name": "Alex"}],'
+        ' "places": [], "options": [], "facts": [], "decisions": []}'
+    )
+    with pytest.raises(FileError) as refused:
+        read(path)
+    assert 'states id more than once: {"id": "alex", "id": "sam"' in str(refused.value)
 
 
 def test_an_empty_file_is_a_file() -> None:

@@ -7,7 +7,7 @@ from typing import Any, cast
 import pytest
 
 from agloe.file import instant, length, read
-from agloe.reference import Report, broken, check, worst_case
+from agloe.reference import Report, broken, check, needless, worst_case
 from tests.stories import EXAMPLES
 
 FILES = sorted(
@@ -60,17 +60,20 @@ def as_written(report: Report) -> dict[str, Any]:
     if report.conflict:
         out["conflict"] = list(report.conflict)
     if report.missing:
-        missing: list[dict[str, Any]] = []
-        for needed in report.missing:
-            unknown = needed.unknown
-            entry: dict[str, Any] = {"what": unknown.what}
-            if unknown.option is not None:
-                entry["option"] = unknown.option
-            else:
-                entry["from"], entry["to"] = unknown.origin, unknown.destination
-            entry["at_most"] = needed.at_most
-            missing.append(entry)
-        out["missing"] = missing
+        alternatives: list[list[dict[str, Any]]] = []
+        for enough in report.missing:
+            entries: list[dict[str, Any]] = []
+            for needed in enough:
+                unknown = needed.unknown
+                entry: dict[str, Any] = {"what": unknown.what}
+                if unknown.option is not None:
+                    entry["option"] = unknown.option
+                else:
+                    entry["from"], entry["to"] = unknown.origin, unknown.destination
+                entry["at_most"] = needed.at_most
+                entries.append(entry)
+            alternatives.append(entries)
+        out["missing"] = alternatives
     return out
 
 
@@ -94,11 +97,12 @@ def test_example_gives_the_same_result_every_time(path: Path) -> None:
 
 
 @pytest.mark.parametrize("path", FILES, ids=lambda path: f"{path.parent.name}/{path.stem}")
-def test_the_itinerary_shown_meets_every_constraint(path: Path) -> None:
+def test_the_itinerary_shown_works_and_has_nothing_needless(path: Path) -> None:
     file = read(path)
     report = check(file)
     if report.itinerary:
         assert broken(file, worst_case(file), report.itinerary) == []
+        assert needless(file, worst_case(file), report.itinerary) == []
 
 
 def test_every_expected_result_has_its_file() -> None:

@@ -1,10 +1,26 @@
 """The three answers, ROBUST, the ITINERARY shown and the evidence, on small TRIPs."""
 
-from agloe.file import load
-from agloe.reference import Answer, Missing, Unknown, check
+from dataclasses import replace
+
+from agloe.file import File, load
+from agloe.reference import (
+    Answer,
+    Broken,
+    Constraint,
+    Missing,
+    Step,
+    Unknown,
+    World,
+    broken,
+    check,
+    in_world,
+    itineraries,
+    worst_case,
+)
 from tests.stories import (
     any_time,
     at,
+    complete,
     cutoff,
     flight_home,
     lasts,
@@ -34,19 +50,55 @@ MORNING_LOCKS = [lock("breakfast", "alex"), lock("meeting", "alex")]
 
 
 def test_an_unrecorded_duration_is_not_a_choice() -> None:
-    """Nobody recorded how long the walk takes, so the COMPILER does not pick a length."""
+    """Nobody recorded how long the walk takes, so the COMPILER does not pick a length.
+
+    Either of two unknown FACTs would be enough: a short walk, or another way to the office.
+    """
     facts = [*MORNING_FACTS, cutoff("meeting", "PT0S")]
     report = check(trip(["alex"], ["hotel", "office"], MORNING, facts, MORNING_LOCKS))
     assert report.answer is Answer.UNDETERMINED
-    assert report.missing == (Missing(Unknown("duration", "walk"), at_most=3600),)
+    another = Unknown("another way", origin="hotel", destination="office")
+    assert report.missing == (
+        (Missing(Unknown("duration", "walk"), at_most=3600),),
+        (Missing(another, at_most=3600),),
+    )
 
 
 def test_two_unknown_facts_can_both_matter() -> None:
     report = check(trip(["alex"], ["hotel", "office"], MORNING, MORNING_FACTS, MORNING_LOCKS))
     assert report.answer is Answer.UNDETERMINED
+    another = Unknown("another way", origin="hotel", destination="office")
     assert report.missing == (
-        Missing(Unknown("duration", "walk"), at_most=None),
-        Missing(Unknown("cutoff", "meeting"), at_most=None),
+        (
+            Missing(Unknown("duration", "walk"), at_most=None),
+            Missing(Unknown("cutoff", "meeting"), at_most=None),
+        ),
+        (
+            Missing(Unknown("cutoff", "meeting"), at_most=None),
+            Missing(another, at_most=None),
+        ),
+    )
+
+
+def test_each_unknown_fact_that_would_be_enough_is_named() -> None:
+    """A cab and a bus both go to the office, and nobody recorded how long either takes."""
+    options = [*MORNING[:1], moves("cab", "hotel", "office"), moves("bus", "hotel", "office")]
+    facts = [
+        starts_at("breakfast", 8),
+        lasts("breakfast", "PT1H"),
+        any_time("cab"),
+        any_time("bus"),
+        starts_at("meeting", 10),
+        lasts("meeting", "PT30M"),
+        cutoff("meeting", "PT0S"),
+        complete("hotel", "office"),
+    ]
+    file = trip(["alex"], ["hotel", "office"], [*options, MORNING[2]], facts, MORNING_LOCKS)
+    report = check(file)
+    assert report.answer is Answer.UNDETERMINED
+    assert report.missing == (
+        (Missing(Unknown("duration", "cab"), at_most=3600),),
+        (Missing(Unknown("duration", "bus"), at_most=3600),),
     )
 
 
@@ -60,14 +112,14 @@ def test_an_unrecorded_start_is_not_a_choice() -> None:
     )
     report = check(file)
     assert report.answer is Answer.UNDETERMINED
-    assert report.missing == (Missing(Unknown("start", "dinner"), at_most=None),)
+    assert report.missing == ((Missing(Unknown("start", "dinner"), at_most=None),),)
 
 
 def test_an_unrecorded_cutoff_matters_to_someone_who_travels() -> None:
     """With no FACT about bag drop, it works only if bag drop closes at most an hour before."""
     report = check(load(without(flight_home(), "bag-drop")))
     assert report.answer is Answer.UNDETERMINED
-    assert report.missing == (Missing(Unknown("cutoff", "flight"), at_most=3600),)
+    assert report.missing == ((Missing(Unknown("cutoff", "flight"), at_most=3600),),)
 
 
 def test_an_unrecorded_duration_does_not_matter_when_nothing_follows() -> None:
@@ -232,7 +284,7 @@ def test_a_complete_set_says_nothing_after_its_span() -> None:
     report = check(load(document))
     assert report.answer is Answer.UNDETERMINED
     another = Unknown("another way", origin="art-institute", destination="ohare")
-    assert report.missing == (Missing(another, at_most=2 * 3600 + 14 * 60 + 59),)
+    assert report.missing == ((Missing(another, at_most=2 * 3600 + 14 * 60 + 59),),)
 
 
 def test_a_complete_set_says_nothing_before_its_span() -> None:
@@ -254,7 +306,9 @@ def test_a_complete_set_says_nothing_before_its_span() -> None:
     )
     report = check(file)
     assert report.answer is Answer.UNDETERMINED
-    assert report.missing == (Missing(Unknown("another way", origin="a", destination="b"), None),)
+    assert report.missing == (
+        (Missing(Unknown("another way", origin="a", destination="b"), None),),
+    )
 
 
 def test_a_complete_set_that_covers_every_leaving_time_makes_it_infeasible() -> None:
@@ -321,6 +375,122 @@ def test_a_step_after_a_shared_step_takes_its_time_from_it() -> None:
         ("meeting", ("alex",), seconds(10)),
         ("nap", ("sam",), seconds(10, 5)),
     ]
+
+
+def there_and_back(*more: dict[str, object]) -> File:
+    """Alex must ride from a to b at 9:00 and be at b for an event at 9:00 that takes no time.
+
+    A ride back leaves b at 9:00 and takes no time. Whether Alex needs it depends on how long the
+    first ride takes.
+    """
+    return trip(
+        ["alex"],
+        ["a", "b"],
+        [moves("ride", "a", "b"), stays("event", "b"), moves("back", "b", "a")],
+        [
+            starts_at("ride", 9),
+            cutoff("ride", "PT0S"),
+            *more,
+            starts_at("event", 9),
+            lasts("event", "PT0S"),
+            cutoff("event", "PT0S"),
+            starts_at("back", 9),
+            lasts("back", "PT0S"),
+        ],
+        [lock("ride", "alex"), lock("event", "alex")],
+    )
+
+
+def when_it_takes(file: File, option: str, time: int) -> World:
+    """The worst case, except that this OPTION takes exactly this many seconds."""
+    world = worst_case(file)
+    terms = {**world.terms, option: replace(world.terms[option], shortest=time, longest=time)}
+    return replace(world, terms=terms)
+
+
+def test_an_option_can_be_there_for_the_possible_worlds_that_need_it() -> None:
+    """If the ride takes any time at all, Alex must do the event first and ride back to a.
+
+    If it takes no time, the ride back is not needed, but taking it does no harm. So one choice
+    of OPTIONs and start times works however long the ride takes.
+    """
+    file = there_and_back()
+    report = check(file)
+    assert report.answer is Answer.FEASIBLE
+    assert [(step.option, step.end) for step in report.itinerary] == [
+        ("ride", None),
+        ("event", seconds(9)),
+        ("back", seconds(9)),
+    ]
+    for time in (0, 60, 86400):
+        world = when_it_takes(file, "ride", time)
+        assert broken(file, world, in_world(world, report.itinerary)) == []
+    without_the_ride_back = report.itinerary[:2]
+    world = when_it_takes(file, "ride", 60)
+    assert broken(file, world, in_world(world, without_the_ride_back)) != []
+
+
+def test_a_robust_itinerary_works_at_the_shortest_durations_too() -> None:
+    file = there_and_back(lasts_between("ride", "PT0S", "PT1M"))
+    report = check(file)
+    assert report.answer is Answer.FEASIBLE
+    assert report.robust is True
+    assert [step.option for step in report.itinerary] == ["ride", "event", "back"]
+    for time in (0, 30, 60):
+        world = when_it_takes(file, "ride", time)
+        assert broken(file, world, in_world(world, report.itinerary)) == []
+
+
+def test_a_warning_names_only_what_the_longest_durations_break() -> None:
+    """The ride can take two hours, and the event at b starts an hour after the ride leaves.
+
+    Nobody recorded how long the event takes. That is not part of the WARNING.
+    """
+    file = trip(
+        ["alex"],
+        ["a", "b"],
+        [moves("ride", "a", "b"), stays("event", "b")],
+        [
+            starts_at("ride", 9),
+            lasts_between("ride", "PT0S", "PT2H"),
+            cutoff("ride", "PT0S"),
+            starts_at("event", 10),
+            cutoff("event", "PT0S"),
+        ],
+        [lock("ride", "alex"), lock("event", "alex")],
+    )
+    report = check(file)
+    assert report.answer is Answer.FEASIBLE
+    assert report.robust is False
+    assert report.at_worst == (Broken(Constraint.PLACE, "event", ("alex",), late=3600),)
+
+
+def test_unlisted_options_can_join_up() -> None:
+    """Alex must be at a at 9:00 and at c at 10:00. Unlisted OPTIONs join a to b and b to c."""
+    file = trip(
+        ["alex"],
+        ["a", "b", "c"],
+        [stays("first", "a"), stays("last", "c")],
+        [
+            starts_at("first", 9),
+            lasts("first", "PT0S"),
+            cutoff("first", "PT0S"),
+            starts_at("last", 10),
+            lasts("last", "PT0S"),
+            cutoff("last", "PT0S"),
+        ],
+        [lock("first", "alex"), lock("last", "alex")],
+    )
+    world = World(worst_case(file).terms, frozenset({("a", "b"), ("b", "c")}))
+    two_legs = (
+        Step("first", "a", "a", ("alex",), seconds(9), seconds(9)),
+        Step(None, "a", "b", ("alex",), seconds(9, 20), seconds(9, 20)),
+        Step(None, "b", "c", ("alex",), seconds(9, 40), seconds(9, 40)),
+        Step("last", "c", "c", ("alex",), seconds(10), seconds(10)),
+    )
+    assert broken(file, world, two_legs) == []
+    assert [step.option for step in itineraries(file, world)[0]] == ["first", None, "last"]
+    assert itineraries(file, World(world.terms, frozenset({("a", "b")}))) == []
 
 
 def test_an_empty_file_is_feasible() -> None:

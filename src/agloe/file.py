@@ -164,7 +164,10 @@ def read(path: Path) -> File:
         keys = [key for key, _ in pairs]
         repeated = sorted({key for key in keys if keys.count(key) > 1})
         if repeated:
-            raise ValueError(f"an object states {', '.join(repeated)} more than once")
+            shown = ", ".join(f"{json.dumps(key)}: {json.dumps(value)}" for key, value in pairs)
+            raise ValueError(
+                f"an object states {', '.join(repeated)} more than once: {{{shown[:120]}}}"
+            )
         return dict(pairs)
 
     def no_constants(name: str) -> object:
@@ -186,6 +189,7 @@ def load(document: object) -> File:
     schema = json.loads(resources.files("agloe").joinpath("schema/file.schema.json").read_text())
     validator = cast("_Validator", Draft202012Validator(schema))
     problems = sorted(_describe(error) for error in validator.iter_errors(document))
+    problems += _control_characters(document, "")
     if problems:
         raise FileError(problems)
     raw = cast("shape.File", document)
@@ -234,6 +238,7 @@ def load(document: object) -> File:
 
     facts: list[Fact] = []
     stated: set[tuple[str, type]] = set()
+    complete: set[tuple[str, str, int, int]] = set()
     for index, fact in enumerate(raw["facts"]):
         where = f"facts/{index}"
         claim(where, fact["id"])
@@ -247,6 +252,9 @@ def load(document: object) -> File:
             latest = when(where, ways["leaving"]["latest"])
             if earliest > latest:
                 problems.append(f"{where}: the span ends before it starts")
+            if (ways["from"], ways["to"], earliest, latest) in complete:
+                problems.append(f"{where}: another FACT already states this")
+            complete.add((ways["from"], ways["to"], earliest, latest))
             facts.append(Complete(fact["id"], ways["from"], ways["to"], earliest, latest))
             continue
         known(where, fact["option"], "OPTION", option_ids)
@@ -283,6 +291,27 @@ def load(document: object) -> File:
     if problems:
         raise FileError(problems)
     return File(persons, places, tuple(options), tuple(facts), tuple(locks))
+
+
+def _control_characters(value: object, where: str) -> list[str]:
+    """Problems for text that holds a line break or another control character.
+
+    The schema's patterns end with ``$``. In the schema's own dialect that is the very end of the
+    text, but Python also lets it match before a final line break. Refusing control characters
+    everywhere closes that gap.
+    """
+    if isinstance(value, str):
+        if any(ord(character) < 32 or ord(character) == 127 for character in value):
+            return [f"{where or 'the FILE'}: {value!r} holds a control character"]
+        return []
+    found: list[str] = []
+    if isinstance(value, dict):
+        for key, inside in cast("dict[str, object]", value).items():
+            found += _control_characters(inside, f"{where}/{key}".lstrip("/"))
+    elif isinstance(value, list):
+        for index, inside in enumerate(cast("list[object]", value)):
+            found += _control_characters(inside, f"{where}/{index}".lstrip("/"))
+    return found
 
 
 def _describe(error: ValidationError) -> str:
