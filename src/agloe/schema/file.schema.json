@@ -226,7 +226,7 @@
     },
     "complete_set": {
       "title": "CompleteSet",
-      "description": "A FACT: a PERSON who leaves one PLACE within the stated span and later reaches the other uses only OPTIONs the FILE lists, from that departure to their first arrival.",
+      "description": "A FACT: the FILE lists every OPTION and WAY that goes straight from one PLACE to another and starts within the stated span. Without `from` the FACT covers every PLACE of departure, and without `to` every PLACE of arrival.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "complete"],
@@ -236,7 +236,7 @@
           "title": "Ways",
           "type": "object",
           "additionalProperties": false,
-          "required": ["from", "to", "leaving"],
+          "required": ["leaving"],
           "properties": {
             "from": { "$ref": "#/$defs/id" },
             "to": { "$ref": "#/$defs/id" },

@@ -54,9 +54,17 @@ def cutoff(option: str, margin: str) -> Document:
     return {"id": f"{option}-cutoff", "option": option, "arrive_before_start": margin}
 
 
-def complete(origin: str, destination: str) -> Document:
-    ways = {"from": origin, "to": destination, "leaving": {"earliest": at(0), "latest": at(23, 59)}}
-    return {"id": f"ways-{origin}-{destination}", "complete": ways}
+def complete(origin: str | None, destination: str | None) -> Document:
+    """Every way straight from one PLACE to another is listed, all day. None is every PLACE."""
+    ways: Document = {"leaving": {"earliest": at(0), "latest": at(23, 59)}}
+    name = "ways"
+    if origin is not None:
+        ways["from"] = origin
+        name += f"-{origin}" if destination is not None else f"-from-{origin}"
+    if destination is not None:
+        ways["to"] = destination
+        name += f"-{destination}" if origin is not None else f"-to-{destination}"
+    return {"id": name, "complete": ways}
 
 
 def lock(option: str, *persons: str) -> Document:

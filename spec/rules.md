@@ -22,7 +22,7 @@ A FACT states one thing:
 | a CONTINGENT duration | The world decides how long the OPTION takes, between a shortest and a longest value. |
 | an access cutoff | Each PERSON must reach the PLACE where the OPTION starts at least that long before it starts. |
 | how long a WAY takes | Each time a PERSON takes the WAY, it takes that long. The FACT gives an exact value, or a CONTINGENT range from which the world decides each time. |
-| a COMPLETE set | The FILE lists the ways from one PLACE to another for a stated span of time. A PERSON who leaves the first PLACE within the span and later reaches the second uses only listed OPTIONs and WAYs, from that departure to their first arrival. The span includes both of its ends. |
+| a COMPLETE set | The FILE lists every OPTION and WAY that goes straight from one PLACE to another and starts within a stated span of time. So no unlisted WAY does. The span includes both of its ends. The FACT can leave out the first PLACE, the second, or both. A PLACE it leaves out stands for every PLACE. The FACT says nothing about travel through a third PLACE. |
 
 A FILE states each FACT once. An OPTION has at most one start, one duration and one access cutoff. A WAY has at most one duration.
 
@@ -39,7 +39,7 @@ A FACT that the FILE does not state is unknown. The COMPILER never fills one in.
 - With no stated start, an OPTION might start only at some time nobody has recorded.
 - With no stated duration, an OPTION or a WAY might take any length of time.
 - With no stated access cutoff, an OPTION might need any margin.
-- WAYs that the FILE does not list might exist between any two PLACEs, and take any length of time. A COMPLETE FACT rules them out for the journeys it covers.
+- WAYs that the FILE does not list might exist between any two PLACEs, and take any length of time. A COMPLETE FACT says that none goes straight from its first PLACE to its second within its span.
 
 A possible world is one way that all the unknown FACTs could turn out.
 
@@ -52,9 +52,9 @@ An ITINERARY works in a possible world when it meets every CONSTRAINT below.
 1. **LOCKs are honored.** Every LOCKed OPTION happens, and the PERSONs its LOCK names take part.
 2. **Each OPTION starts when it can.** An OPTION with a fixed start starts at that time. A WAY can be taken at any time.
 3. **Each OPTION and WAY takes as long as it takes.** It ends at its start plus its duration. A CONTINGENT duration is one value in its range, and for a WAY it can be a different value each time.
-4. **Each PERSON is in one place at a time.** A PERSON's OPTIONs and WAYs do not overlap, and each one starts at the PLACE where the one before it ended. A PERSON's path begins at the PLACE where the first of them starts. A PERSON who takes several WAYs in a row passes through no PLACE twice. OPTIONs and WAYs that take no time and share an instant happen one after another, in any order, and that order is the same for every PERSON.
+4. **Each PERSON is in one place at a time.** A PERSON's OPTIONs and WAYs do not overlap, and each one starts at the PLACE where the one before it ended. A PERSON's path begins at the PLACE where the first of them starts. OPTIONs and WAYs that take no time and share an instant happen one after another, in any order, and that order is the same for every PERSON.
 5. **Each PERSON arrives in time.** A PERSON who travels to the PLACE where an OPTION starts gets there at least its access cutoff before it starts. A PERSON whose path has no movement before the OPTION was there all along, and is in time. A WAY has no access cutoff.
-6. **A COMPLETE set is the whole set.** A PERSON takes an unlisted WAY only in a possible world that has it. Where a FACT says the ways from one PLACE to another are COMPLETE, a PERSON who leaves the first PLACE within the stated span and later reaches the second takes no unlisted WAY, from that departure to their first arrival. A PERSON leaves a PLACE when an OPTION or a WAY that takes them away from it starts. The FACT does not limit a PERSON who never reaches the second PLACE.
+6. **A COMPLETE set is the whole set.** A PERSON takes an unlisted WAY only in a possible world that has it. Where a FACT says the ways from one PLACE to another are COMPLETE, no PERSON takes an unlisted WAY that goes straight from the first PLACE to the second and starts within the stated span.
 
 ## The three answers
 
@@ -66,7 +66,7 @@ A CONTINGENT duration has a stated range, so it is not unknown, and a possible w
 
 Two cases settle the answer. For the same OPTIONs, PERSONs, WAYs and start times, every CONSTRAINT is at least as easy to meet when an OPTION can start more freely or needs less margin, when an OPTION or a WAY takes less time, and when more WAYs exist.
 
-- **The best case.** Every unknown start is free, and every unknown duration and access cutoff is zero. An unlisted WAY joins any two PLACEs and takes no time. A choice that works in any possible world works here too, so the TRIP is INFEASIBLE when nothing works here.
+- **The best case.** Every unknown start is free, and every unknown duration and access cutoff is zero. An unlisted WAY joins any two PLACEs and takes no time, except where a COMPLETE FACT says there is none. A choice that works in any possible world works here too, so the TRIP is INFEASIBLE when nothing works here.
 - **The worst case.** An OPTION with an unknown start cannot be used. An unknown duration has no limit, so no PERSON does anything after that OPTION or WAY. An unknown access cutoff has no limit, so only a PERSON who was at the PLACE all along is in time. No unlisted WAY exists. A choice works here exactly when it works in every possible world, so the TRIP is FEASIBLE when something works here.
 
 ## ROBUST
@@ -86,7 +86,7 @@ When several ITINERARIES work, the report shows one, chosen by a fixed rule:
 5. then one in which each PERSON does the OPTIONs listed first, in the FILE's order where they can. Going through the PERSONs in the FILE's order, and through each PERSON's OPTIONs in the order they do them, the ITINERARY with the OPTION listed first comes first. A PERSON with nothing more to do comes before one with more;
 6. then one in which each PERSON takes the WAYs listed first. Going through the PERSONs in the FILE's order, and through the WAYs each PERSON takes in the order they take them, the ITINERARY with the WAY listed first comes first. An unlisted WAY comes after every listed one.
 
-The second rule keeps out anything nobody needs. If any OPTION were taken out of the ITINERARY shown, or any PERSON out of one of its OPTIONs, or any WAY a PERSON takes, it would stop working in some possible world, or stop being ROBUST.
+The second rule keeps out anything nobody needs. If any OPTION were taken out of the ITINERARY shown, or any PERSON out of one of its OPTIONs, or any WAY a PERSON takes, it would stop working in some possible world, or stop being ROBUST. So no PERSON in it goes round in a circle by WAYs alone: they could wait where they are and take fewer WAYs.
 
 The start times follow a fixed rule too. It treats each time a PERSON takes a WAY as an OPTION of its own. Here one OPTION comes before another when a PERSON does it earlier, or when a chain of such OPTIONs links the two. At first, only the OPTIONs with a fixed start are timed.
 

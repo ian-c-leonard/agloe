@@ -26,9 +26,7 @@ type _Who = tuple[tuple[str, ...], ...]  # the PERSONs in each OPTION
 type _Orders = tuple[tuple[int, ...], ...]  # the OPTIONs each PERSON does, in order
 type _By = dict[tuple[int, int], reference.Route]  # the WAYs a PERSON takes after an OPTION
 type _Choice = tuple[_Who, _Orders, _By | None]
-type _Flag = cp_model.IntVar | bool  # something true or false: decided by the solver, or known
 type _Amount = cp_model.LinearExpr | int  # seconds: a plain number, or one the solver works out
-type _Journey = Sequence[tuple[_Flag, _Flag]]  # for each COMPLETE FACT: on its way, by unlisted
 
 
 def check(file: File) -> Report:
@@ -216,16 +214,6 @@ class _Search:
             if given is not None and each.fixed_start is not None:
                 _when(model.add(start[index] == each.fixed_start - self.zero), given)
         turn = [model.new_int_var(0, max(count - 1, 0), f"turn {option.id}") for option in options]
-        # Whether each OPTION leaves the first PLACE of each COMPLETE FACT within its span.
-        leaves: list[list[_Flag]] = [
-            [
-                option.origin == fact.origin
-                and option.destination != fact.origin
-                and self._inside(start[index] if moment is None else moment, fact, option.id)
-                for fact in facts
-            ]
-            for index, (option, moment) in enumerate(zip(options, known, strict=True))
-        ]
 
         for index, option in enumerate(options):
             model.add_max_equality(self.used[index], [0, *(row[index] for row in self.takes)])
@@ -241,7 +229,9 @@ class _Search:
                         model.add(takes == 1)
                     else:
                         _when(model.add(takes == 1), given)
-                # Staying somewhere changes nothing for a PERSON whom no LOCK asks to stay.
+                # A PERSON whom no LOCK asks to stay somewhere gains nothing by staying. Without
+                # the stay they are in the same PLACE at the same times, and every CONSTRAINT is
+                # as easy to meet or easier. So the model leaves such stays out.
                 if not usable[index] or (not moves[index] and not asking):
                     model.add(takes == 0)
                 elif not moves[index] and all(given is not None for given in asking):
@@ -263,41 +253,14 @@ class _Search:
             follows: dict[tuple[int, int], cp_model.IntVar] = {}
             between: dict[tuple[int, int], list[tuple[cp_model.IntVar, reference.Route]]] = {}
             # Whether this PERSON has moved by the end of an OPTION, and when they last arrived.
-            # These, and the journeys below, are only ever pushed one way: towards "has moved",
-            # "arrived later" and "is on the way". That way is the one that forbids more, so the
-            # solver gains nothing by going further than the truth.
+            # These are only ever pushed one way: towards "has moved" and "arrived later". That
+            # way is the one that forbids more, so the solver gains nothing by going further
+            # than the truth.
             moved = [model.new_bool_var(f"{person.id} moved by {o.id}") for o in options]
             arrived = [
                 model.new_int_var(earliest, latest + room, f"{person.id} arrived by {o.id}")
                 for o in options
             ]
-            # Where this PERSON stands with each COMPLETE FACT at the end of an OPTION.
-            journey = [
-                [
-                    (
-                        model.new_bool_var(f"{person.id} on the way of {fact.id} after {o.id}"),
-                        model.new_bool_var(f"{person.id} by unlisted on {fact.id} after {o.id}"),
-                    )
-                    for fact in facts
-                ]
-                for o in options
-            ]
-
-            def after_option(
-                before: _Journey,
-                index: int,
-                when: cp_model.IntVar,
-                journey: list[list[tuple[cp_model.IntVar, cp_model.IntVar]]] = journey,
-            ) -> None:
-                """What each COMPLETE FACT makes of a listed OPTION done under ``when``."""
-                for place, fact in enumerate(facts):
-                    on_the_way, by_unlisted = before[place]
-                    on_the_way = self._either(on_the_way, leaves[index][place], when)
-                    if options[index].destination == fact.destination:
-                        self._never(by_unlisted, when, place)
-                        on_the_way, by_unlisted = False, False
-                    _when(model.add(journey[index][place][0] >= on_the_way), when)
-                    _when(model.add(journey[index][place][1] >= by_unlisted), when)
 
             for index, option in enumerate(options):
                 model.add_implication(takes[index], nothing.negated())
@@ -306,7 +269,6 @@ class _Search:
                 last = model.new_bool_var(f"{person.id} ends with {option.id}")
                 follows[home, index], follows[index, home] = first, last
                 arcs += [(home, index, first), (index, home, last)]
-                after_option([(False, False)] * len(facts), index, first)
                 if moves[index]:
                     _when(model.add(moved[index] == 1), takes[index])
                     if not endless[index]:
@@ -336,7 +298,6 @@ class _Search:
                                 next_,
                                 moved[before],
                             )
-                        after_option(journey[before], after, next_)
                     else:
                         possible = reference.routes(file, world, earlier.destination, later.origin)
                         if not possible or margin is None:
@@ -355,20 +316,17 @@ class _Search:
                             model.add(sum(via) == next_)
                         between[before, after] = list(zip(via, possible, strict=True))
                         for route, chosen in zip(possible, via, strict=True):
-                            there: _Journey = journey[before]
                             free: _Amount = ready
                             for place, (way, origin, destination) in enumerate(route):
                                 name = f"{chosen.name} leg {place}"
                                 moment = model.new_int_var(earliest, latest, name)
                                 _when(model.add(moment >= free), chosen)
-                                there = self._after_way(
-                                    there, origin, destination, moment, chosen, way is not None
-                                )
+                                if way is None:
+                                    self._outside_every_span(moment, origin, destination, chosen)
                                 free = moment + way_lasts[way]
                             _when(model.add(start[after] >= free + margin), chosen)
                             if not moves[after]:
                                 _when(model.add(arrived[after] >= free), chosen)
-                            after_option(there, after, chosen)
                             self.legs.append((chosen, len(route)))
                     follows[before, after] = next_
                     arcs.append((before, after, next_))
@@ -488,69 +446,22 @@ class _Search:
             for index in range(len(self.file.options))
         )
 
-    def _inside(self, moment: cp_model.IntVar | int, fact: Complete, name: str) -> _Flag:
-        """Whether a start falls within the span of a COMPLETE FACT, both ends included."""
-        if isinstance(moment, int):
-            return fact.earliest <= moment <= fact.latest
-        model = self.model
-        inside = model.new_bool_var(f"{name} leaves within the span of {fact.id}")
-        sooner = model.new_bool_var(f"{name} leaves before the span of {fact.id}")
-        _when(model.add(moment <= fact.earliest - 1 - self.zero), inside.negated(), sooner)
-        _when(model.add(moment >= fact.latest + 1 - self.zero), inside.negated(), sooner.negated())
-        return inside
+    def _outside_every_span(
+        self, moment: cp_model.IntVar, origin: str, destination: str, when: cp_model.IntVar
+    ) -> None:
+        """An unlisted WAY taken under ``when`` starts outside the span of each COMPLETE FACT.
 
-    def _after_way(
-        self,
-        before: _Journey,
-        origin: str,
-        destination: str,
-        moment: cp_model.IntVar,
-        when: cp_model.IntVar,
-        listed: bool,
-    ) -> _Journey:
-        """What each COMPLETE FACT makes of one WAY taken under ``when``.
-
-        A PERSON on the way from the first PLACE of a FACT, who left within its span, cannot
-        reach the second PLACE by an unlisted WAY, or after one.
+        Only the FACTs about travel straight between these two PLACEs count, and only those that
+        are given.
         """
-        after: list[tuple[_Flag, _Flag]] = []
-        for place, (state, fact) in enumerate(zip(before, self.facts, strict=True)):
-            on_the_way, by_unlisted = state
-            if origin == fact.origin:
-                on_the_way = self._either(on_the_way, self._inside(moment, fact, when.name), when)
-            if not listed:
-                by_unlisted = on_the_way
-            if destination == fact.destination:
-                self._never(by_unlisted, when, place)
-                after.append((False, False))
-            else:
-                after.append((on_the_way, by_unlisted))
-        return after
-
-    def _either(self, first: _Flag, second: _Flag, when: cp_model.IntVar) -> _Flag:
-        """Something true exactly when one of two things is, wherever ``when`` holds."""
-        if first is True or second is True:
-            return True
-        if first is False:
-            return second
-        if second is False:
-            return first
-        either = self.model.new_bool_var(f"{first.name} or {second.name}")
-        _when(self.model.add(either >= first), when)
-        _when(self.model.add(either >= second), when)
-        return either
-
-    def _never(self, flag: _Flag, when: cp_model.IntVar, place: int) -> None:
-        """Rule out ``when`` together with something being true, if this COMPLETE FACT is given."""
-        if flag is False:
-            return
-        together: list[cp_model.LiteralT] = [when.negated()]
-        if flag is not True:
-            together.append(flag.negated())
-        given = self.given[place]
-        if given is not None:
-            together.append(given.negated())
-        self.model.add_bool_or(together)
+        model = self.model
+        for fact, given in zip(self.facts, self.given, strict=True):
+            if not fact.covers(origin, destination):
+                continue
+            applies = [when] if given is None else [when, given]
+            sooner = model.new_bool_var(f"{moment.name} starts before the span of {fact.id}")
+            _when(model.add(moment <= fact.earliest - 1 - self.zero), *applies, sooner)
+            _when(model.add(moment >= fact.latest + 1 - self.zero), *applies, sooner.negated())
 
     def _settle(self, choices: Sequence[cp_model.IntVar]) -> None:
         """Fix these yes-or-no choices: "yes" wherever it can be, the earlier choices first."""

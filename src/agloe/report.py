@@ -184,10 +184,15 @@ def _record(file: File, record: str) -> str:
         places = {place.id: place.name for place in file.places}
         first = local(found.earliest, file.zone).date()
         span = f"{_moment(file, found.earliest)} and {_clock(file, found.latest, first)}"
-        return (
-            f"every way from {places[found.origin]} to {places[found.destination]}"
-            f" that leaves between {span} is listed"
-        )
+        if found.origin is None and found.destination is None:
+            ways = "every way from one PLACE straight to another"
+        elif found.origin is None:
+            ways = f"every way straight to {places[found.destination or '']}"
+        elif found.destination is None:
+            ways = f"every way straight from {places[found.origin]}"
+        else:
+            ways = f"every way straight from {places[found.origin]} to {places[found.destination]}"
+        return f"{ways} that leaves between {span} is listed"
     name = _name(file, found.option)
     if isinstance(found, Lock):
         verb = "takes" if len(found.persons) == 1 else "take"

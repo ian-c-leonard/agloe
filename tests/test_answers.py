@@ -635,8 +635,8 @@ def test_a_warning_names_only_what_the_longest_durations_break() -> None:
     assert report.at_worst == (Broken(Constraint.PLACE, "event", ("alex",), late=3600),)
 
 
-def test_unlisted_options_join_up_one_after_another() -> None:
-    """Alex must be at a at 9:00 and at c at 10:00. Unlisted OPTIONs join a to b and b to c."""
+def test_unlisted_ways_join_up_one_after_another() -> None:
+    """Alex must be at a at 9:00 and at c at 10:00. Unlisted WAYs join a to b and b to c."""
     file = trip(
         ["alex"],
         ["a", "b", "c"],
@@ -673,8 +673,8 @@ def test_unlisted_options_join_up_one_after_another() -> None:
 def test_a_way_through_another_place_is_not_a_direct_way() -> None:
     """Alex must get from a to c, and Sam from b to c. Every way from a to b is listed: none.
 
-    Unlisted OPTIONs from a to b and from b to c would not be enough. Alex would have to go
-    through b, and the COMPLETE FACT rules that out.
+    Unlisted WAYs from a to b and from b to c would not be enough. Alex would have to go
+    straight from a to b, and the COMPLETE FACT rules that out.
     """
     file = trip(
         ["alex", "sam"],
@@ -1023,9 +1023,9 @@ def test_a_way_that_can_run_long_is_checked_at_its_longest_every_time() -> None:
 
 
 def test_a_listed_way_counts_as_listed_for_a_complete_fact() -> None:
-    """Every way from the hotel to the gallery is listed: the walk, and it takes too long."""
+    """Every way from the hotel is listed: the walk to the gallery, and it takes too long."""
     lengths = [takes("walk-to-gallery", "PT1H10M"), takes("walk-to-cafe", "PT10M")]
-    file = a_morning(*WALKS, more=[*lengths, complete("hotel", "gallery")])
+    file = a_morning(*WALKS, more=[*lengths, complete("hotel", None)])
     report = check(file)
     assert report.answer is Answer.INFEASIBLE
     assert report.conflict == (
@@ -1033,12 +1033,12 @@ def test_a_listed_way_counts_as_listed_for_a_complete_fact() -> None:
         "breakfast-length",
         "museum-time",
         "walk-to-gallery-length",
-        "ways-hotel-gallery",
+        "ways-from-hotel",
         "lock-breakfast",
         "lock-museum",
     )
     in_time = [takes("walk-to-gallery", "PT1H"), takes("walk-to-cafe", "PT10M")]
-    file = a_morning(*WALKS, more=[*in_time, complete("hotel", "gallery")])
+    file = a_morning(*WALKS, more=[*in_time, complete("hotel", None)])
     assert check(file).answer is Answer.FEASIBLE
 
 
@@ -1048,3 +1048,74 @@ def test_an_empty_file_is_feasible() -> None:
     )
     assert report.answer is Answer.FEASIBLE
     assert report.itinerary == ()
+
+
+def a_ride_there_and_back(*more: dict[str, object]) -> File:
+    """Alex rides from c to a at 8:00, must ride from c to b at 9:00, and be at a at 10:00.
+
+    The FILE lists a WAY between a and b that takes no time, and nothing that leads to c. Every
+    way straight from c to b is listed, and every way straight from b to a.
+    """
+    options = [moves("start", "c", "a"), *more, moves("finish", "c", "b"), stays("last", "a")]
+    facts = [starts_at("start", 8), starts_at("finish", 9), starts_at("last", 10)]
+    facts += [any_time(str(option["id"])) for option in more]
+    for option in options:
+        facts += [lasts(str(option["id"]), "PT0S"), cutoff(str(option["id"]), "PT0S")]
+    facts += [takes("ab", "PT0S"), complete("c", "b"), complete("b", "a")]
+    return trip(
+        ["alex"],
+        ["a", "b", "c"],
+        options,
+        facts,
+        [lock(name, "alex") for name in ("start", "finish", "last")],
+        [way_between("ab", "a", "b")],
+    )
+
+
+def test_a_stop_nobody_needs_does_not_change_which_travel_is_allowed() -> None:
+    """The answer is the same with a pause listed at b, which no LOCK asks for, and without it."""
+    from_a = Unknown("other ways", origin="a", destination="c")
+    from_b = Unknown("other ways", origin="b", destination="c")
+    for file in (a_ride_there_and_back(), a_ride_there_and_back(stays("pause", "b"))):
+        report = check(file)
+        assert report.answer is Answer.UNDETERMINED
+        assert report.missing == (
+            (Missing(from_a, at_most=3600),),
+            (Missing(from_b, at_most=3600),),
+        )
+
+
+def lunch_away_from_the_museum(*more: dict[str, object]) -> File:
+    """Alex walks from the museum to lunch and back, then takes the Blue Line to O'Hare.
+
+    Nobody listed the walk to the cafe.
+    """
+    stops = [("visit", "museum", 10, "PT2H30M"), ("lunch", "cafe", 13, "PT1H")]
+    stops += [("more-art", "museum", 15, "PT30M"), ("flight", "ohare", 18, "PT0S")]
+    facts = [
+        fact
+        for name, _, hour, length in stops
+        for fact in (starts_at(name, hour), lasts(name, length), cutoff(name, "PT0S"))
+    ]
+    return trip(
+        ["alex"],
+        ["museum", "cafe", "ohare"],
+        [stays(name, place) for name, place, _, _ in stops],
+        [*facts, takes("blue-line", "PT1H"), *more],
+        [lock(name, "alex") for name, _, _, _ in stops],
+        [way("blue-line", "museum", "ohare")],
+    )
+
+
+def test_a_side_trip_is_not_travel_between_the_places_of_a_complete_fact() -> None:
+    """A FACT says the Blue Line is the only way straight from the museum to O'Hare.
+
+    The walk to lunch and back is not such a way. So the FACT changes nothing, and neither does
+    a FACT that every way to O'Hare is listed.
+    """
+    there = Unknown("other ways", origin="museum", destination="cafe")
+    back = Unknown("other ways", origin="cafe", destination="museum")
+    for more in ([], [complete("museum", "ohare")], [complete(None, "ohare")]):
+        report = check(lunch_away_from_the_museum(*more))
+        assert report.answer is Answer.UNDETERMINED
+        assert report.missing == ((Missing(there, at_most=None), Missing(back, at_most=None)),)

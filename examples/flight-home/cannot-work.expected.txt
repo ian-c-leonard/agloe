@@ -6,6 +6,6 @@ These FACTs and DECISIONs clash. Each one is needed for the clash.
   train-length: Blue Line to O'Hare takes 1 h
   flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
   bag-drop: people must be at O'Hare 45 min before Flight home starts
-  ways-to-ohare: every way from the Art Institute to O'Hare that leaves between 12:00 pm on Saturday 15 May 2027 and 6:00 pm is listed
+  ways-to-ohare: every way straight to O'Hare that leaves between 12:00 pm on Saturday 15 May 2027 and 6:00 pm is listed
   lock-visit: Alex and Sam take part in Museum visit
   lock-flight: Alex and Sam take part in Flight home

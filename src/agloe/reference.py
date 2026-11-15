@@ -458,11 +458,7 @@ def _sharing_persons(steps: list[Step]) -> list[list[Step]]:
 
 
 def _places(path: list[Step]) -> _Found:
-    """Each PERSON is in one place at a time.
-
-    Nothing overlaps, each step starts where the PERSON is, and several WAYs in a row pass
-    through no PLACE twice.
-    """
+    """Each PERSON is in one place at a time: no overlap, and each step starts where they are."""
     found: _Found = []
     for before, after in pairwise(path):
         if before.end is None:
@@ -471,15 +467,6 @@ def _places(path: list[Step]) -> _Found:
             found.append((Constraint.PLACE, after.option, before.end - after.start))
         elif before.destination != after.origin:
             found.append((Constraint.PLACE, after.option, None))
-    passed: list[str] = []  # the PLACEs of the WAYs taken in a row so far
-    for step in path:
-        if step.option is not None:
-            passed = []
-            continue
-        passed = passed or [step.origin]
-        if step.destination in passed:
-            found.append((Constraint.PLACE, None, None))
-        passed.append(step.destination)
     return found
 
 
@@ -502,31 +489,19 @@ def _arrivals(world: World, path: list[Step]) -> _Found:
 def _listed(file: File, world: World, path: list[Step]) -> _Found:
     """A COMPLETE set is the whole set: an unlisted WAY needs a world that has it.
 
-    No world has one on a journey between the PLACEs of a COMPLETE FACT that leaves within its
-    span. The span includes both of its ends, and a journey counts only if it reaches the second
-    PLACE.
+    No world has one that goes straight between the PLACEs of a COMPLETE FACT and starts within
+    its span. The span includes both of its ends.
     """
-
-    def unlisted(step: Step) -> bool:
-        return step.option is None and step.way is None
-
     found: _Found = []
     for step in path:
-        here = (step.origin, step.destination)
-        if unlisted(step) and world.unlisted is not None and here not in world.unlisted:
-            found.append((Constraint.LISTED, None, None))
-    for fact in file.facts:
-        if not isinstance(fact, Complete):
+        if step.option is not None or step.way is not None:
             continue
-        for first, step in enumerate(path):
-            leaves = step.origin == fact.origin and step.destination != fact.origin
-            if not (leaves and fact.earliest <= step.start <= fact.latest):
-                continue
-            for last in range(first, len(path)):
-                if path[last].destination == fact.destination:
-                    if any(unlisted(part) for part in path[first : last + 1]):
-                        found.append((Constraint.LISTED, None, None))
-                    break
+        here = (step.origin, step.destination)
+        if world.unlisted is not None and here not in world.unlisted:
+            found.append((Constraint.LISTED, None, None))
+        for fact in file.facts:
+            if isinstance(fact, Complete) and fact.rules_out(*here, step.start):
+                found.append((Constraint.LISTED, None, None))
     return found
 
 
@@ -564,10 +539,10 @@ def itineraries(file: File, world: World) -> list[Itinerary]:
     """The ITINERARIES that work in this world with PERSONs taking part the fewest times.
 
     It tries every choice of who takes part in which OPTION and in what order. Where a PERSON's
-    next OPTION starts somewhere else, unlisted OPTIONs take them there. The start times follow
-    the rule of "Which ITINERARY is shown". Where a COMPLETE FACT covers a span of leaving times,
-    leaving before the span and leaving after it are tried too. A choice works when the orders
-    it names work: no other order is tried in their place.
+    next OPTION starts somewhere else, WAYs take them there, listed or not. The start times follow
+    the rule of "Which ITINERARY is shown". Where a COMPLETE FACT rules out an unlisted WAY for a
+    span of time, taking it before the span and after it are tried too. A choice works when the
+    orders it names work: no other order is tried in their place.
 
     Nothing can be taken out of an ITINERARY in which PERSONs take part the fewest times, so
     ``needless`` finds nothing in any ITINERARY returned. They come in the order of "Which
@@ -658,16 +633,23 @@ type Route = tuple[Leg, ...]
 
 
 def routes(file: File, world: World, here: str, there: str) -> list[Route]:
-    """Every route from one PLACE to another by WAYs alone, shortest first.
+    """Every route from one PLACE to another by WAYs alone that is worth trying, shortest first.
 
-    A route passes through no PLACE twice. A listed WAY with no limit to how long it takes is
+    A route passes through no PLACE twice. A PERSON who came back to a PLACE could have waited
+    there instead: every WAY they take after that starts at the same time either way, and no
+    CONSTRAINT asks how they spent the wait. A listed WAY with no limit to how long it takes is
     left out, because nothing could follow it. Two unlisted WAYs in a row are left out where one
-    unlisted WAY joins the same two PLACEs: the one is never worse than the two.
+    unlisted WAY joins the same two PLACEs at any time: the one is never worse than the two.
     """
     places = [place.id for place in file.places]
+    complete = [fact for fact in file.facts if isinstance(fact, Complete)]
 
     def joined(origin: str, destination: str) -> bool:
         return world.unlisted is None or (origin, destination) in world.unlisted
+
+    def always_joined(origin: str, destination: str) -> bool:
+        limited = any(fact.covers(origin, destination) for fact in complete)
+        return joined(origin, destination) and not limited
 
     def onward(place: str) -> Iterator[tuple[str | None, str]]:
         for way in file.ways:
@@ -687,7 +669,7 @@ def routes(file: File, world: World, here: str, there: str) -> list[Route]:
         for way, place in onward(passed[-1]):
             if place in passed:
                 continue
-            if way is None and legs and legs[-1][0] is None and joined(legs[-1][1], place):
+            if way is None and legs and legs[-1][0] is None and always_joined(legs[-1][1], place):
                 continue
             longer = (*legs, (way, passed[-1], place))
             if place == there:
@@ -776,9 +758,9 @@ def _timings(
 ) -> Iterator[Itinerary]:
     """The ITINERARIES for one choice of PERSONs, orders and routes, one for each timing.
 
-    Start times are as early as the CONSTRAINTs allow. A COMPLETE FACT covers a span of leaving
-    times, and leaving outside that span can let an unlisted WAY in. So each departure from the
-    PLACE of such a FACT is tried as it falls, then before the span, then after it.
+    Start times are as early as the CONSTRAINTs allow. A COMPLETE FACT rules out an unlisted WAY
+    only within its span. So each unlisted WAY between the PLACEs of such a FACT is tried as it
+    falls, then before the span, then after it.
     """
     listed = len(file.options)
     legs: list[tuple[str, Leg]] = []  # each WAY taken: who takes it, and which one
@@ -811,23 +793,6 @@ def _timings(
     def unlisted(node: int) -> bool:
         return node >= listed and legs[node - listed][1][0] is None
 
-    def matters(node: int, fact: Complete) -> bool:
-        """Whether when this step leaves can decide if a COMPLETE FACT is kept.
-
-        It can if some PERSON goes on from it to the second PLACE of the FACT and takes an
-        unlisted WAY before they first get there.
-        """
-        for line in lines:
-            if node not in line:
-                continue
-            onward = line[line.index(node) :]
-            for place, later in enumerate(onward):
-                if destination(later) == fact.destination:
-                    if any(unlisted(each) for each in onward[: place + 1]):
-                        return True
-                    break
-        return False
-
     gaps: list[tuple[int, int, int]] = []  # (before, after, least seconds between their starts)
     for line in lines:
         arrived: int | None = None  # the step that last brought this PERSON to a new PLACE
@@ -856,13 +821,12 @@ def _timings(
         if who[index] and at is not None:
             fixed[index] = at
 
-    happening = [node for node in range(count) if node >= listed or who[node]]
     leaving = [
         (node, fact)
         for fact in file.facts
         if isinstance(fact, Complete)
-        for node in happening
-        if moves(node) and origin(node) == fact.origin and matters(node, fact)
+        for node in range(listed, count)
+        if unlisted(node) and fact.covers(origin(node), destination(node))
     ]
     for choice in product(("as it falls", "before", "after"), repeat=len(leaving)):
         outside: list[tuple[int, int, int]] = []

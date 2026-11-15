@@ -40,7 +40,12 @@ from tests.stories import (
     way,
     way_between,
 )
-from tests.test_answers import WALKS, a_morning
+from tests.test_answers import (
+    WALKS,
+    a_morning,
+    a_ride_there_and_back,
+    lunch_away_from_the_museum,
+)
 from tests.test_cross_check import (
     a_shared_ride,
     possible_world,
@@ -172,45 +177,52 @@ def same_in_both(file: File, world: World) -> bool:
     return first is not None
 
 
-def test_a_listed_option_cannot_finish_a_journey_that_used_an_unlisted_one() -> None:
-    """Every way from a to b is listed, and there is none. A listed ride runs from c to b."""
-    ride = [moves("ride", "c", "b"), starts_at("ride", 9, 30), lasts("ride", "PT10M")]
-    with_ride = trip(
-        ["alex"],
-        ["a", "b", "c", "d"],
-        [stays("first", "a"), stays("last", "b"), ride[0]],
-        [
-            starts_at("first", 9),
-            lasts("first", "PT0S"),
-            cutoff("first", "PT0S"),
-            starts_at("last", 10),
-            lasts("last", "PT0S"),
-            cutoff("last", "PT0S"),
-            *ride[1:],
-            cutoff("ride", "PT0S"),
-            complete("a", "b"),
-        ],
-        [lock("first", "alex"), lock("last", "alex")],
-    )
-    assert not same_in_both(with_ride, best_case(with_ride))
-    freed = with_ride.without("ways-a-b")
+def test_a_complete_set_about_two_places_leaves_the_way_through_a_third_open() -> None:
+    """Every way straight from a to b is listed: there is none. A listed ride runs from c to b."""
+
+    def with_ride(ways: Document) -> File:
+        return trip(
+            ["alex"],
+            ["a", "b", "c", "d"],
+            [stays("first", "a"), stays("last", "b"), moves("ride", "c", "b")],
+            [
+                starts_at("first", 9),
+                lasts("first", "PT0S"),
+                cutoff("first", "PT0S"),
+                starts_at("last", 10),
+                lasts("last", "PT0S"),
+                cutoff("last", "PT0S"),
+                starts_at("ride", 9, 30),
+                lasts("ride", "PT10M"),
+                cutoff("ride", "PT0S"),
+                ways,
+            ],
+            [lock("first", "alex"), lock("last", "alex")],
+        )
+
+    through_c = with_ride(complete("a", "b"))
+    assert same_in_both(through_c, best_case(through_c))
+    # Every way from a is listed, and there is none. So Alex cannot leave a at all.
+    shut_in = with_ride(complete("a", None))
+    assert not same_in_both(shut_in, best_case(shut_in))
+    freed = shut_in.without("ways-from-a")
     assert same_in_both(freed, best_case(freed))
 
 
 def test_a_span_starts_on_its_first_second() -> None:
-    """Every way from a to b that leaves from 9:00:00 on is listed, and there is none.
+    """Every way from a that leaves from 9:00:00 on is listed, and there is none.
 
-    No way leads back from b to a either, so Alex cannot do the stop at b first.
+    No way leads to a either, so Alex cannot do the stop at b first.
     """
-    from_nine = {"from": "a", "to": "b", "leaving": {"earliest": at(9), "latest": at(12)}}
-    ways = [{"id": "ways", "complete": from_nine}, complete("b", "a")]
+    from_nine = {"from": "a", "leaving": {"earliest": at(9), "latest": at(12)}}
+    ways = [{"id": "ways", "complete": from_nine}, complete(None, "a")]
     on_the_dot = stops(("first", "a", 9, 0), ("last", "b", 9, 0), more=ways)
     assert not same_in_both(on_the_dot, best_case(on_the_dot))
     a_minute_before = stops(("first", "a", 8, 59), ("last", "b", 9, 0), more=ways)
     assert same_in_both(a_minute_before, best_case(a_minute_before))
 
 
-def test_a_journey_ends_when_the_person_arrives() -> None:
+def test_other_ways_can_follow_a_listed_one() -> None:
     """Alex takes the listed ride from a to b, then goes on to c and back to b by other ways."""
     ride = [
         moves("ride", "a", "b"),
@@ -240,7 +252,7 @@ def test_a_journey_ends_when_the_person_arrives() -> None:
 
 
 def test_every_route_between_two_places_is_tried() -> None:
-    """Unlisted OPTIONs lead from a to d through b or through c. Only the way through c is open."""
+    """Unlisted WAYs lead from a to d through b or through c. Only the way through c is open."""
     file = stops(("first", "a", 9, 0), ("last", "d", 10, 0), more=[complete("a", "b")])
     ways = frozenset({("a", "b"), ("b", "d"), ("a", "c"), ("c", "d")})
     assert same_in_both(file, World(worst_case(file).terms, ways))
@@ -481,21 +493,21 @@ def test_the_compiler_names_what_is_missing_from_a_day() -> None:
 
 
 def test_the_compiler_names_the_conflict_in_a_day() -> None:
-    """The same day, with a FACT that the cab is the only way from the pier to O'Hare."""
-    file = a_day_in_chicago(lasts("cab-to-ohare", "PT50M"), complete("pier", "ohare"), flight_at=15)
+    """The same day, with a FACT that the cab from the pier is the only way to O'Hare."""
+    file = a_day_in_chicago(lasts("cab-to-ohare", "PT50M"), complete(None, "ohare"), flight_at=15)
     report = compiler.check(file)
     assert report.answer is Answer.INFEASIBLE
     assert report.conflict == (
         "lunch-time",
         "lunch-length",
         "cab-to-ohare-length",
-        "ways-pier-ohare",
+        "ways-to-ohare",
         "flight-time",
         "flight-cutoff",
         "lock-lunch",
         "lock-flight",
     )
-    without_the_fact = file.without("ways-pier-ohare")
+    without_the_fact = file.without("ways-to-ohare")
     assert compiler.works(without_the_fact, best_case(without_the_fact))
 
 
@@ -629,14 +641,14 @@ def test_the_compiler_names_what_is_missing_from_a_day_with_ways() -> None:
 
 
 def test_the_compiler_names_the_conflict_in_a_day_with_ways() -> None:
-    file = a_day_on_foot(complete("pier", "ohare"), flight_at=15)
+    file = a_day_on_foot(complete(None, "ohare"), flight_at=15)
     report = compiler.check(file)
     assert report.answer is Answer.INFEASIBLE
     assert report.conflict == (
         "lunch-time",
         "lunch-length",
         "cab-to-ohare-length",
-        "ways-pier-ohare",
+        "ways-to-ohare",
         "flight-time",
         "flight-cutoff",
         "lock-lunch",
@@ -694,3 +706,11 @@ def test_a_choice_is_scheduled_only_if_it_meets_every_constraint() -> None:
     assert reference.scheduled(file, world, ((), ()), ((),)) is None
     # The show has no stated start, so in the worst case it cannot be used.
     assert reference.scheduled(file, world, (("alex",), ("alex",)), ((0, 1),)) is None
+
+
+def test_the_compiler_agrees_where_a_stop_nobody_needs_is_listed() -> None:
+    """The solver leaves out a stop that no LOCK asks for. That must never change the answer."""
+    files = [a_ride_there_and_back(), a_ride_there_and_back(stays("pause", "b"))]
+    files += [lunch_away_from_the_museum(), lunch_away_from_the_museum(complete(None, "ohare"))]
+    for file in files:
+        assert compiler.check(file) == reference.check(file)

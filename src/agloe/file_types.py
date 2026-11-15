@@ -3,7 +3,7 @@
 Generated from schema/file.schema.json by tools/generate_file_types.py. Do not edit.
 """
 
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 type Id = str
 
@@ -116,8 +116,8 @@ class Span(TypedDict):
 Ways = TypedDict(
     "Ways",
     {
-        "from": Id,
-        "to": Id,
+        "from": NotRequired[Id],
+        "to": NotRequired[Id],
         "leaving": Span,
     },
 )
