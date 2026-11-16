@@ -17,6 +17,7 @@
     { "id": "walk-to-hotel", "name": "the walk between River North and the hotel", "between": ["river-north", "hotel"] },
     { "id": "walk-to-tower", "name": "the walk between the hotel and Willis Tower", "between": ["hotel", "willis-tower"] }
   ],
+  "wants": [],
   "facts": [
     { "id": "dinner-time", "option": "dinner", "starts_at": "2027-05-14T19:00:00-05:00[America/Chicago]" },
     { "id": "dinner-length", "option": "dinner", "duration": "PT1H30M" },

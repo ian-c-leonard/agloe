@@ -224,6 +224,7 @@ def test_a_report_with_a_time_past_the_year_9999_is_not_written(
         "places": [{"id": "pier", "name": "Navy Pier"}],
         "options": [stays("fireworks", "pier")],
         "ways": [],
+        "wants": [],
         "facts": [
             {
                 "id": "fireworks-time",
@@ -335,6 +336,7 @@ def test_times_show_their_offset_when_the_clocks_change() -> None:
         "places": [{"id": "hotel", "name": "Hotel"}],
         "options": [stays("night-shift", "hotel")],
         "ways": [],
+        "wants": [],
         "facts": [
             {
                 "id": "night-shift-time",
@@ -594,6 +596,7 @@ def test_records_with_the_same_name_show_their_ids() -> None:
         "places": [{"id": "hotel", "name": "the hotel"}],
         "options": [stays("call", "hotel"), stays("nap", "hotel")],
         "ways": [],
+        "wants": [],
         "facts": [
             starts_at("call", 9),
             lasts_between("call", "PT30M", "PT1H"),
@@ -650,6 +653,7 @@ def test_a_warning_follows_the_order_the_plan_shows() -> None:
         "places": [{"id": "a", "name": "a"}, {"id": "b", "name": "b"}],
         "options": [moves("back", "b", "a"), stays("last", "b")],
         "ways": [way("ab", "a", "b")],
+        "wants": [],
         "facts": [
             {
                 "id": "back-time",
@@ -689,6 +693,7 @@ def test_an_offset_is_shown_to_the_second() -> None:
         "places": [{"id": "cafe", "name": "the cafe"}],
         "options": [stays("coffee", "cafe"), stays("paper", "cafe")],
         "ways": [],
+        "wants": [],
         "facts": [
             any_time("coffee"),
             lasts("coffee", "PT1H"),
@@ -712,6 +717,7 @@ def test_an_end_in_another_year_shows_its_year() -> None:
         "places": [{"id": "cabin", "name": "the cabin"}],
         "options": [stays("stay", "cabin")],
         "ways": [],
+        "wants": [],
         "facts": [
             {"id": "stay-time", "option": "stay", "starts_at": "2027-05-14T23:30:00+00:00[UTC]"},
             lasts("stay", "PT8784H"),
@@ -737,6 +743,7 @@ def test_no_two_records_are_shown_by_the_same_name() -> None:
         "places": [{"id": "hotel", "name": "the hotel"}],
         "options": [stays("call", "hotel")],
         "ways": [],
+        "wants": [],
         "facts": [starts_at("call", 9), lasts("call", "PT30M")],
         "decisions": [lock("call", "a", "b", "c")],
     }
@@ -761,6 +768,7 @@ def test_a_warning_falls_under_the_day_it_is_about() -> None:
             stays("sail", "pier"),
         ],
         "ways": [way("walk", "hotel", "pier")],
+        "wants": [],
         "facts": [
             {"id": "coffee-time", "option": "coffee", "starts_at": on(15, 8)},
             lasts("coffee", "PT1H"),

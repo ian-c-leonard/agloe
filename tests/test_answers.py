@@ -1046,9 +1046,7 @@ def test_a_listed_way_counts_as_listed_for_a_complete_fact() -> None:
 
 
 def test_an_empty_file_is_feasible() -> None:
-    report = check(
-        load({"persons": [], "places": [], "options": [], "ways": [], "facts": [], "decisions": []})
-    )
+    report = check(trip([], [], [], [], []))
     assert report.answer is Answer.FEASIBLE
     assert report.itinerary == ()
 

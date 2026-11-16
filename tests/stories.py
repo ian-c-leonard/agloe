@@ -71,6 +71,18 @@ def lock(option: str, *persons: str) -> Document:
     return {"id": f"lock-{option}", "lock": option, "persons": list(persons)}
 
 
+def must(id: str, *persons: str) -> Document:
+    """A WANT that is a must for these PERSONs."""
+    holders = [{"person": person, "degree": 10} for person in persons]
+    return {"id": id, "name": id, "holders": holders}
+
+
+def satisfies(option: str, want: str, degree: int = 10) -> Document:
+    """A FACT about how fully an OPTION delivers a WANT. A degree of zero says it does not."""
+    about = {"want": want, "degree": degree}
+    return {"id": f"{option}-gives-{want}", "option": option, "satisfies": about}
+
+
 def way(id: str, origin: str, destination: str) -> Document:
     """A WAY in one direction."""
     return {"id": id, "name": id, "from": origin, "to": destination}
@@ -97,6 +109,7 @@ def trip(
     facts: list[Document],
     decisions: list[Document],
     ways: Sequence[Document] = (),
+    wants: Sequence[Document] = (),
 ) -> File:
     return load(
         {
@@ -104,6 +117,7 @@ def trip(
             "places": named(*places),
             "options": options,
             "ways": list(ways),
+            "wants": list(wants),
             "facts": facts,
             "decisions": decisions,
         }

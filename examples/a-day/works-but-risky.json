@@ -22,6 +22,7 @@
     { "id": "walk-to-dock", "name": "the walk between Millennium Park and the Riverwalk dock", "between": ["park", "dock"] },
     { "id": "walk-to-dinner", "name": "the walk between the Riverwalk dock and River North", "between": ["dock", "river-north"] }
   ],
+  "wants": [],
   "facts": [
     { "id": "breakfast-time", "option": "breakfast", "starts_at": "2027-05-14T08:00:00-05:00[America/Chicago]" },
     { "id": "breakfast-length", "option": "breakfast", "duration": "PT45M" },

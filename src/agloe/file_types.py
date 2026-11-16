@@ -61,6 +61,17 @@ class WayBothWays(TypedDict):
     between: list[Id]
 
 
+class Holder(TypedDict):
+    person: Id
+    degree: Literal[10]
+
+
+class Want(TypedDict):
+    id: Id
+    name: Name
+    holders: list[Holder]
+
+
 class Range(TypedDict):
     shortest: Length
     longest: Length
@@ -128,6 +139,17 @@ class CompleteSet(TypedDict):
     complete: Ways
 
 
+class Satisfaction(TypedDict):
+    want: Id
+    degree: int
+
+
+class Satisfies(TypedDict):
+    id: Id
+    option: Id
+    satisfies: Satisfaction
+
+
 class Lock(TypedDict):
     id: Id
     lock: Id
@@ -139,6 +161,7 @@ class File(TypedDict):
     places: list[Place]
     options: list[OptionAtAPlace | OptionBetweenPlaces]
     ways: list[WayOneWay | WayBothWays]
+    wants: list[Want]
     facts: list[
         FixedStart
         | FreeStart
@@ -148,5 +171,6 @@ class File(TypedDict):
         | WayDuration
         | WayContingentDuration
         | CompleteSet
+        | Satisfies
     ]
     decisions: list[Lock]

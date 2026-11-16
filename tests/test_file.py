@@ -6,12 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from agloe.file import Complete, FileError, instant, length, load, read
+from agloe.file import Complete, FileError, Satisfies, Want, instant, length, load, read
 from tests.stories import (
     Document,
     at,
     complete,
     flight_home,
+    must,
+    satisfies,
     takes,
     takes_between,
     way,
@@ -409,8 +411,8 @@ def test_every_problem_can_be_written_out(tmp_path: Path) -> None:
         '{"\\ud800": 1, "\\ud800": 2}',
         '{"\\ud800": {"x": 1, "x": 2}}',
         '{"\\n": 1, "\\n": 2}',
-        '{"persons": [], "places": [], "options": [], "ways": [], "facts": [], "decisions": [],'
-        ' "\\ud800": {"caf\\u00e9": "\\u0007"}}',
+        '{"persons": [], "places": [], "options": [], "ways": [], "wants": [], "facts": [],'
+        ' "decisions": [], "\\ud800": {"caf\\u00e9": "\\u0007"}}',
     ):
         path.write_text(text)
         with pytest.raises(FileError) as refused:
@@ -421,8 +423,167 @@ def test_every_problem_can_be_written_out(tmp_path: Path) -> None:
     assert refused.value.problems[-1] == "/\\ud800/caf\\xe9: '\\x07' holds a control character"
 
 
+def trip_with_nothing() -> Document:
+    parts = ("persons", "places", "options", "ways", "wants", "facts", "decisions")
+    return {part: [] for part in parts}
+
+
 def test_an_empty_file_is_a_file() -> None:
-    file = load(
-        {"persons": [], "places": [], "options": [], "ways": [], "facts": [], "decisions": []}
-    )
+    file = load(trip_with_nothing())
     assert file.options == ()
+
+
+def with_a_window_seat() -> Document:
+    """The story, in which a window seat is a must for Alex, and the flight has one."""
+    document = flight_home()
+    document["wants"] = [must("window-seat", "alex")]
+    document["facts"].append(satisfies("flight", "window-seat", 7))
+    return document
+
+
+def test_a_want_names_its_holders_and_a_fact_says_what_satisfies_it() -> None:
+    file = load(with_a_window_seat())
+    assert file.wants == (Want("window-seat", "window-seat", ("alex",)),)
+    stated = Satisfies("flight-gives-window-seat", "flight", "window-seat", 7)
+    assert file.satisfies("flight", "window-seat") == stated
+    assert file.satisfies("blue-line", "window-seat") is None
+
+
+def test_a_file_lists_its_wants() -> None:
+    document = flight_home()
+    del document["wants"]
+    assert "'wants' is a required property" in problems(document)
+
+
+def test_a_holder_is_a_person_of_the_file() -> None:
+    document = with_a_window_seat()
+    document["wants"][0]["holders"][0]["person"] = "jo"
+    assert problems(document) == "/wants/0: jo is not a PERSON in this FILE"
+
+
+def test_a_want_names_each_person_once() -> None:
+    document = with_a_window_seat()
+    document["wants"] = [must("window-seat", "alex", "sam", "alex")]
+    assert problems(document) == "/wants/0: alex is a holder more than once"
+
+
+def test_a_want_has_a_holder() -> None:
+    document = with_a_window_seat()
+    document["wants"][0]["holders"] = []
+    assert problems(document).startswith("/wants/0/holders:")
+
+
+@pytest.mark.parametrize("degree", [9, 0, -10, 10.5, "10", None, True])
+def test_a_degree_of_want_in_a_file_is_ten(degree: object) -> None:
+    document = with_a_window_seat()
+    document["wants"][0]["holders"][0]["degree"] = degree
+    assert problems(document).startswith("/wants/0/holders/0/degree:")
+
+
+def test_a_holder_states_a_degree_of_want() -> None:
+    document = with_a_window_seat()
+    del document["wants"][0]["holders"][0]["degree"]
+    assert "'degree' is a required property" in problems(document)
+
+
+def test_a_want_has_an_id_of_its_own() -> None:
+    document = with_a_window_seat()
+    document["wants"][0]["id"] = "flight"
+    assert "/wants/0: the id flight is used more than once" in problems(document)
+
+
+def test_a_satisfies_fact_names_an_option_and_a_want_of_the_file() -> None:
+    document = with_a_window_seat()
+    document["facts"][-1]["satisfies"]["want"] = "aisle-seat"
+    assert (
+        problems(document)
+        == f"/facts/{len(document['facts']) - 1}: aisle-seat is not a WANT in this FILE"
+    )
+    document = with_a_window_seat()
+    document["facts"][-1]["option"] = "ferry"
+    assert "ferry is not an OPTION in this FILE" in problems(document)
+
+
+@pytest.mark.parametrize("degree", [-1, 11, 2.5, "8", None, True])
+def test_a_degree_of_satisfaction_is_a_whole_number_from_zero_to_ten(degree: object) -> None:
+    document = with_a_window_seat()
+    document["facts"][-1]["satisfies"]["degree"] = degree
+    assert problems(document).startswith(f"/facts/{len(document['facts']) - 1}:")
+
+
+@pytest.mark.parametrize("degree", [0, 1, 10, 8.0])
+def test_every_whole_degree_of_satisfaction_from_zero_to_ten_is_read(degree: float) -> None:
+    document = with_a_window_seat()
+    document["facts"][-1]["satisfies"]["degree"] = degree
+    stated = load(document).satisfies("flight", "window-seat")
+    assert stated is not None
+    assert (stated.degree, type(stated.degree)) == (int(degree), int)
+
+
+def test_an_option_has_one_satisfies_fact_for_each_want() -> None:
+    document = with_a_window_seat()
+    again = satisfies("flight", "window-seat", 0)
+    again["id"] = "flight-has-no-window-seat"
+    document["facts"].append(again)
+    last = len(document["facts"]) - 1
+    said = f"/facts/{last}: another FACT already states this about flight and window-seat"
+    assert problems(document) == said
+    document = with_a_window_seat()
+    document["facts"].append(satisfies("blue-line", "window-seat", 0))
+    assert load(document).satisfies("blue-line", "window-seat") is not None
+
+
+def written_with(tmp_path: Path, degree: str, of: str) -> Path:
+    """The story on disk, with one degree written exactly as given."""
+    document = with_a_window_seat()
+    if of == "want":
+        document["wants"][0]["holders"][0]["degree"] = "DEGREE"
+    else:
+        document["facts"][-1]["satisfies"]["degree"] = "DEGREE"
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(document).replace('"DEGREE"', degree))
+    return path
+
+
+@pytest.mark.parametrize("degree", ["9.9999999999999999", "10.000000000000000000001", "1e1000"])
+def test_a_degree_of_want_is_not_rounded_to_ten(tmp_path: Path, degree: str) -> None:
+    with pytest.raises(FileError, match="/wants/0/holders/0/degree: 10 was expected"):
+        read(written_with(tmp_path, degree, of="want"))
+
+
+@pytest.mark.parametrize("degree", ["10", "10.0", "1e1", "100e-1"])
+def test_ten_can_be_written_in_any_way_that_is_exactly_ten(tmp_path: Path, degree: str) -> None:
+    assert read(written_with(tmp_path, degree, of="want")).wants[0].musts == ("alex",)
+
+
+@pytest.mark.parametrize(
+    "degree",
+    ["1.0000000000000001", "-1e-4000", "1e-999999999", "0.5", "1e400", "1e999999999", "11.0"],
+)
+def test_a_degree_of_satisfaction_is_not_rounded_to_a_whole_number(
+    tmp_path: Path, degree: str
+) -> None:
+    with pytest.raises(FileError) as refused:
+        read(written_with(tmp_path, degree, of="fact"))
+    assert str(refused.value).startswith("/facts/")
+
+
+@pytest.mark.parametrize(("degree", "whole"), [("8.0", 8), ("0.5e1", 5), ("0.0", 0), ("-0.0", 0)])
+def test_a_whole_degree_of_satisfaction_can_be_written_with_a_fraction(
+    tmp_path: Path, degree: str, whole: int
+) -> None:
+    stated = read(written_with(tmp_path, degree, of="fact")).satisfies("flight", "window-seat")
+    assert stated is not None
+    assert (stated.degree, type(stated.degree)) == (whole, int)
+
+
+def test_a_number_too_large_to_read_is_refused(tmp_path: Path) -> None:
+    path = written_with(tmp_path, "1e99999999999999999999", of="fact")
+    with pytest.raises(FileError, match="is not a number the format can read"):
+        read(path)
+
+
+def test_a_number_that_is_not_whole_is_shown_as_written(tmp_path: Path) -> None:
+    with pytest.raises(FileError) as refused:
+        read(written_with(tmp_path, "1.0000000000000001", of="fact"))
+    assert "1.0000000000000001 is not of type 'integer'" in str(refused.value)

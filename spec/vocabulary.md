@@ -287,7 +287,7 @@ A TRIP, VARIANT or individual check is UNDETERMINED when it is neither FEASIBLE 
 
 ### FINDING
 
-Anything the COMPILER reports about a TRIP. Every FINDING is an ERROR, a WARNING, a NOTE or UNDETERMINED, and shows its evidence: the FACTs and DECISIONs it rests on.
+Anything the COMPILER reports about a TRIP. Every FINDING is an ERROR, a WARNING, a NOTE or UNDETERMINED, and shows its evidence: the FACTs, WANTs and DECISIONs it rests on.
 
 *Uses:* COMPILER, TRIP, FACT, DECISION, → ERROR, → WARNING, → NOTE, UNDETERMINED.
 

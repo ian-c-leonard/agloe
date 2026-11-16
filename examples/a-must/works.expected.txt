@@ -1,0 +1,19 @@
+FEASIBLE: this trip works.
+
+Friday 14 May 2027 (times in America/Chicago)
+  7:00 pm to 8:30 pm: Dinner at the deep-dish place, Alex
+  8:30 pm to 8:45 pm: the walk between River North and the blues club, Alex
+  9:00 pm to 11:00 pm: Blues show, Alex
+
+The plan relies on these FACTs, WANTs and DECISIONs:
+  pizzeria-time: Dinner at the deep-dish place starts at 7:00 pm on Friday 14 May 2027
+  pizzeria-length: Dinner at the deep-dish place takes 1 h 30 min
+  pizzeria-arrival: nobody has to be at River North before Dinner at the deep-dish place starts
+  pizzeria-serves-it: Dinner at the deep-dish place SATISFIES deep-dish pizza, 9 out of 10
+  show-time: Blues show starts at 9:00 pm on Friday 14 May 2027
+  show-length: Blues show takes 2 h
+  show-doors: people must be at the blues club 10 min before Blues show starts
+  show-does-not-serve-it: Blues show does not SATISFY deep-dish pizza
+  walk-to-club-length: the walk between River North and the blues club takes 15 min
+  deep-dish: deep-dish pizza is a must for Alex
+  lock-show: Alex takes part in Blues show

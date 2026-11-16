@@ -115,7 +115,8 @@ def _quickest(world: World, routes: Sequence[reference.Route]) -> list[reference
     """The routes worth choosing between when only their time and their number of WAYs matter.
 
     For each number of WAYs the quickest route is kept, unless a route with fewer WAYs is at
-    least as quick. The reference checker still names the WAYs of the ITINERARY shown.
+    least as quick. A WAY SATISFIES no WANT, so nothing else about a route can matter. The
+    reference checker still names the WAYs of the ITINERARY shown.
     """
 
     def time(route: reference.Route) -> int:
@@ -238,8 +239,26 @@ class _Search:
         self.turn = [model.new_int_var(0, last, f"turn {option.id}") for option in options]
 
     def _choose_who_takes_part(self) -> None:
-        """Who takes part in each OPTION. LOCKs are honored, and an unusable OPTION is left out."""
-        model, file = self.model, self.file
+        """Who takes part in each OPTION. LOCKs are honored, and an unusable OPTION is left out.
+
+        Every must is met: the PERSON takes part in an OPTION that SATISFIES the WANT, unless
+        the world has another OPTION for the WANT and the PERSON.
+        """
+        model, file, world = self.model, self.file, self.world
+        # For each PERSON, the OPTIONs that would meet a must of theirs in this world.
+        meets: list[set[int]] = [set() for _ in file.persons]
+        needed: list[list[int]] = []  # for each must of each PERSON, the OPTIONs that meet it
+        for want in file.wants:
+            would = [
+                index
+                for index, option in enumerate(file.options)
+                if world.satisfies[option.id, want.id]
+            ]
+            for number, person in enumerate(file.persons):
+                elsewhere = (want.id, person.id) in world.another_option
+                if person.id in want.musts and not elsewhere:
+                    meets[number].update(would)
+                    needed.append([number, *would])
         self.takes = [
             [model.new_bool_var(f"takes {person.id} {option.id}") for option in file.options]
             for person in file.persons
@@ -259,15 +278,19 @@ class _Search:
                         model.add(takes == 1)
                     else:
                         _when(model.add(takes == 1), given)
-                # A PERSON whom no LOCK asks to stay somewhere gains nothing by staying. Without
-                # the stay they are in the same PLACE at the same times, and every CONSTRAINT is
-                # as easy to meet or easier. So the model leaves such stays out.
-                if not self.usable[index] or (not self.moves[index] and not asking):
+                # A PERSON gains nothing by staying somewhere unless a LOCK asks them to, or
+                # the stay meets a must of theirs. Without the stay they are in the same PLACE at
+                # the same times, and every CONSTRAINT is as easy to meet or easier. So the model
+                # leaves such stays out.
+                wanted = index in meets[number]
+                if not self.usable[index] or (not self.moves[index] and not asking and not wanted):
                     model.add(takes == 0)
-                elif not self.moves[index] and all(given is not None for given in asking):
-                    model.add_bool_or(
-                        [takes.negated(), *(given for given in asking if given is not None)]
-                    )
+                elif not self.moves[index] and not wanted:
+                    switches = [each for each in asking if each is not None]
+                    if len(switches) == len(asking):
+                        model.add_bool_or([takes.negated(), *switches])
+        for number, *would in needed:
+            model.add_bool_or([self.takes[number][index] for index in would])
 
     def _lay_out_path(self, number: int) -> None:
         """One PERSON's path: a circuit through a starting point and the OPTIONs they do.

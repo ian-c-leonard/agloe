@@ -1,0 +1,43 @@
+{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "dinner-pizzeria",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-14T19:00:00-05:00[America/Chicago]",
+      "end": "2027-05-14T20:30:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "walk-to-club",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-14T20:30:00-05:00[America/Chicago]",
+      "end": "2027-05-14T20:45:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "blues-show",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-14T21:00:00-05:00[America/Chicago]",
+      "end": "2027-05-14T23:00:00-05:00[America/Chicago]"
+    }
+  ],
+  "relies_on": [
+    "pizzeria-time",
+    "pizzeria-length",
+    "pizzeria-arrival",
+    "pizzeria-serves-it",
+    "show-time",
+    "show-length",
+    "show-doors",
+    "show-does-not-serve-it",
+    "walk-to-club-length",
+    "deep-dish",
+    "lock-show"
+  ],
+  "robust": true
+}

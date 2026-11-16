@@ -4,7 +4,7 @@
   "description": "One TRIP in the Agloe format. Terms in capitals are defined in spec/vocabulary.md. spec/rules.md says what each part means.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["persons", "places", "options", "ways", "facts", "decisions"],
+  "required": ["persons", "places", "options", "ways", "wants", "facts", "decisions"],
   "properties": {
     "persons": { "type": "array", "items": { "$ref": "#/$defs/person" } },
     "places": { "type": "array", "items": { "$ref": "#/$defs/place" } },
@@ -16,6 +16,7 @@
       "type": "array",
       "items": { "oneOf": [{ "$ref": "#/$defs/way_one_way" }, { "$ref": "#/$defs/way_both_ways" }] }
     },
+    "wants": { "type": "array", "items": { "$ref": "#/$defs/want" } },
     "facts": {
       "type": "array",
       "items": {
@@ -27,7 +28,8 @@
           { "$ref": "#/$defs/access_cutoff" },
           { "$ref": "#/$defs/way_duration" },
           { "$ref": "#/$defs/way_contingent_duration" },
-          { "$ref": "#/$defs/complete_set" }
+          { "$ref": "#/$defs/complete_set" },
+          { "$ref": "#/$defs/satisfies" }
         ]
       }
     },
@@ -127,6 +129,34 @@
           "maxItems": 2,
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/id" }
+        }
+      }
+    },
+    "want": {
+      "title": "Want",
+      "description": "A WANT: something PERSONs want from the TRIP that an OPTION can deliver. Each holder is a PERSON with their own DEGREE OF WANT, and a WANT names each PERSON at most once.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "holders"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "$ref": "#/$defs/name" },
+        "holders": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "title": "Holder",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["person", "degree"],
+            "properties": {
+              "person": { "$ref": "#/$defs/id" },
+              "degree": {
+                "description": "The DEGREE OF WANT. 10 makes the WANT a must for this PERSON.",
+                "const": 10
+              }
+            }
+          }
         }
       }
     },
@@ -249,6 +279,32 @@
                 "earliest": { "$ref": "#/$defs/time" },
                 "latest": { "$ref": "#/$defs/time" }
               }
+            }
+          }
+        }
+      }
+    },
+    "satisfies": {
+      "title": "Satisfies",
+      "description": "A FACT: how fully the OPTION delivers what a WANT describes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "option", "satisfies"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "option": { "$ref": "#/$defs/id" },
+        "satisfies": {
+          "title": "Satisfaction",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["want", "degree"],
+          "properties": {
+            "want": { "$ref": "#/$defs/id" },
+            "degree": {
+              "description": "The DEGREE OF SATISFACTION. Zero says that the OPTION does not deliver it. Any value above zero says that it does.",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10
             }
           }
         }

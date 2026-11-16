@@ -18,6 +18,7 @@
     { "id": "walk-from-tower", "name": "the walk between Willis Tower and Millennium Park", "between": ["willis-tower", "park"] },
     { "id": "walk-from-museum", "name": "the walk between the Art Institute and Millennium Park", "between": ["art-institute", "park"] }
   ],
+  "wants": [],
   "facts": [
     { "id": "skydeck-time", "option": "skydeck", "starts_at": "2027-05-15T10:00:00-05:00[America/Chicago]" },
     { "id": "skydeck-length", "option": "skydeck", "duration": "PT1H30M" },

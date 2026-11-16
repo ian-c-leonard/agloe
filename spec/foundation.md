@@ -145,7 +145,7 @@ Starter WANTs are never hidden rules; they sit in the FILE like any other WANT. 
 **E4. SETTINGs, never assumed FACTs.** Thresholds such as the minimum connection time are SETTINGs with defaults pinned in the COMPILER, and every report names any override. The COMPILER never assumes a FACT it is not given; it returns UNDETERMINED and states the condition instead ("FEASIBLE if the walk needs no BOOKING"). An assumed ferry time is exactly how a real trip goes wrong.
 *Serves:* trustworthy, deterministic.
 
-**E5. Every result shows its evidence.** FEASIBLE: the ITINERARY and the FACTs and DECISIONs it relies on. INFEASIBLE: a set of FACTs and DECISIONs that conflict, from which none can be removed. UNDETERMINED: the missing FACTs. A fixed rule picks among equal explanations, so the same FILE always gives the same one.
+**E5. Every result shows its evidence.** FEASIBLE: the ITINERARY and the FACTs, WANTs and DECISIONs it relies on. INFEASIBLE: a set of FACTs and DECISIONs that conflict, from which none can be removed. UNDETERMINED: the missing FACTs. A fixed rule picks among equal explanations, so the same FILE always gives the same one.
 *Serves:* self-explaining, deterministic. *Source:* the deletion filter (Chinneck and Dravnieks, 1991) and QuickXplain (Junker, 2004); why-provenance (Buneman, Khanna and Tan, 2001).
 
 **E6. Every FINDING is visible.** A DISMISSAL silences an ERROR, WARNING or NOTE as it stood, and the FINDING returns if it gets worse. UNDETERMINED FINDINGs, and ERRORs meaning the FILE cannot be read, cannot be dismissed.
