@@ -60,6 +60,7 @@ def random_trip(
     contingent: float = 0,
     with_ways: float = 0,
     with_wants: float = 0,
+    must_nots: float = 0,
 ) -> File:
     """Two or three OPTIONs on a quarter-hour grid.
 
@@ -67,8 +68,9 @@ def random_trip(
     is added. Its span starts one second after a grid time and ends one second before another, so
     the times just outside it are on the grid. ``contingent`` is how often a duration is a range.
     ``with_ways`` is how often the FILE lists one or two WAYs. ``with_wants`` is how often it
-    has one or two WANTs, each a must for some PERSONs. For each OPTION and WANT, a FACT says
-    that the OPTION SATISFIES the WANT, or that it does not, or the FILE says nothing.
+    has one or two WANTs, each a must for some PERSONs. ``must_nots`` is how often a holder
+    has the WANT as a must-not instead. For each OPTION and WANT, a FACT says that the OPTION
+    SATISFIES the WANT, or that it does not, or the FILE says nothing.
     """
     count = count or rng.choice([2, 3])
     if persons is None:
@@ -129,7 +131,9 @@ def random_trip(
     if with_wants and rng.random() < with_wants:
         for number in range(rng.choice([1, 1, 2])):
             id = f"want-{number}"
-            wants.append(must(id, *rng.sample(persons, rng.randrange(1, len(persons) + 1))))
+            holders = rng.sample(persons, rng.randrange(1, len(persons) + 1))
+            never = [person for person in holders if must_nots and rng.random() < must_nots]
+            wants.append(must(id, *(p for p in holders if p not in never), never=never))
             for option in options:
                 degree = rng.choice([None, None, 0, 0, 3, 10, 10])
                 if degree is not None:
@@ -392,16 +396,18 @@ def possible_world(rng: Random, file: File) -> World:
             (guess, guess) if duration is None else (duration.shortest, duration.longest)
         )
     slow = QUARTER * rng.choice([0, 1, 2])
-    delivers: dict[tuple[str, str], bool | None] = {}
+    delivers: set[tuple[str, str]] = set()
     for option in file.options:
         for want in file.wants:
             stated = file.satisfies(option.id, want.id)
             guessed = rng.random() < 0.5
-            delivers[option.id, want.id] = guessed if stated is None else stated.degree > 0
+            if guessed if stated is None else stated.degree > 0:
+                delivers.add((option.id, want.id))
     elsewhere = frozenset(
         (want.id, person) for want in file.wants for person in want.musts if rng.random() < 0.3
     )
-    return World(terms, unlisted, slow, takes, delivers, elsewhere)
+    # One possible world: what SATISFIES a WANT is the same for a must and for a must-not.
+    return World(terms, unlisted, slow, takes, frozenset(delivers), frozenset(delivers), elsewhere)
 
 
 def any_choice(rng: Random, file: File, world: World) -> Itinerary:

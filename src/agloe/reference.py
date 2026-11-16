@@ -3,11 +3,14 @@
 It is slow on purpose and meant for small TRIPs. It defines the right answer, and anything faster
 must agree with it. It refuses an ITINERARY too large for it to try everything.
 
-Read it beside spec/rules.md. The worlds are the section "What is unknown". ``broken`` is the
-section "The CONSTRAINTs": it checks a finished ITINERARY against all seven, and nothing here or
-in the solver counts as working unless it passes. ``itineraries`` is the section "Which ITINERARY
-is shown". The sections "The three answers", "ROBUST" and "Evidence" are in ``answers``, which
-works them out from this module's search or from a faster one.
+Read it beside spec/rules.md. The worlds are the section "What is unknown". No world here has
+an unlisted WAY that SATISFIES a WANT. Such a world only rules choices out, the best case has
+none, and the worst case has no unlisted WAY at all, so the answers do not need one.
+
+``broken`` is the section "The CONSTRAINTs": it checks a finished ITINERARY against all eight,
+and nothing here or in the solver counts as working unless it passes. ``itineraries`` is the
+section "Which ITINERARY is shown". The sections "The three answers", "ROBUST" and "Evidence"
+are in ``answers``, which works them out from this module's search or from a faster one.
 """
 
 from collections.abc import Iterable, Iterator, Mapping
@@ -31,6 +34,7 @@ class Constraint(Enum):
     ARRIVAL = "Each PERSON arrives in time"
     LISTED = "A COMPLETE set is the whole set"
     MUST = "Every must is met"
+    MUST_NOT = "Every must-not is kept"
 
 
 @dataclass(frozen=True)
@@ -63,7 +67,8 @@ class Broken:
     and ``step`` is the position of that step in the ITINERARY, counting from zero.
 
     A must that is not met happens at no step. Then ``want`` names the WANT, and ``option`` and
-    ``step`` are both None.
+    ``step`` are both None. A must-not that is broken names the WANT and the OPTION that
+    SATISFIES it.
     """
 
     constraint: Constraint
@@ -99,8 +104,11 @@ class World:
     every pair. Each unlisted WAY takes ``unlisted_takes`` seconds. ``takes`` gives the shortest
     and the longest time of each listed WAY, and the longest is None when there is no limit.
 
-    ``satisfies`` says, for an OPTION and a WANT, whether the OPTION SATISFIES the WANT. None
-    means that nobody knows. ``another_option`` holds each WANT and PERSON for whom another
+    ``satisfies`` holds each OPTION and WANT where the OPTION SATISFIES the WANT, and a must can
+    count on it. ``might_satisfy`` holds each OPTION and WANT where it SATISFIES the WANT or
+    nobody knows, and a must-not has to stay clear of it. In one possible world the two are the
+    same. In the worst of all the ways at once they differ: an OPTION with no FACT about a WANT
+    is only in the second. ``another_option`` holds each WANT and PERSON for whom another
     OPTION is found: one outside the FILE that SATISFIES the WANT, and that the PERSON can take
     part in whatever else they do. It holds conditions, one for each WANT and PERSON. It does
     not say how many OPTIONs meet them: one OPTION can be found for several.
@@ -112,9 +120,8 @@ class World:
     takes: Mapping[str, tuple[int, int | None]] = field(
         default_factory=dict[str, tuple[int, int | None]]
     )
-    satisfies: Mapping[tuple[str, str], bool | None] = field(
-        default_factory=dict[tuple[str, str], bool | None]
-    )
+    satisfies: frozenset[tuple[str, str]] = frozenset()
+    might_satisfy: frozenset[tuple[str, str]] = frozenset()
     another_option: frozenset[tuple[str, str]] = frozenset()
 
 
@@ -123,8 +130,9 @@ class Unknown:
     """A FACT the FILE does not state.
 
     ``what`` is "start", "duration" or "cutoff" for an OPTION, "duration" for a WAY, or "other
-    ways" from one PLACE to another: unlisted WAYs that go straight there. It is "satisfies" for
-    an OPTION and a WANT, or "another option" for a WANT and a PERSON: an OPTION outside the FILE
+    ways" from one PLACE to another: unlisted WAYs that go straight there. For an OPTION and a
+    WANT it is "satisfies" or "does not satisfy": the two ways the one unknown can turn out. It
+    is "another option" for a WANT and a PERSON: an OPTION outside the FILE
     that SATISFIES the WANT, and that the PERSON can take part in. That is one condition for one
     WANT and one PERSON, whichever OPTION meets it.
     """
@@ -144,8 +152,9 @@ class Unknown:
 def unknowns(file: File) -> tuple[Unknown, ...]:
     """Every FACT the FILE leaves out that could help, in the order of the rules page.
 
-    A FACT about a WANT can help only where the WANT is a must for some PERSON, so only those
-    are listed.
+    That an OPTION SATISFIES a WANT can help only where the WANT is a must for some PERSON,
+    and that it does not only where the WANT is a must-not for some PERSON. So only those are
+    listed.
     """
     musts = [want for want in file.wants if want.musts]
     out: list[Unknown] = []
@@ -156,9 +165,12 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
             out.append(Unknown("duration", option.id))
         if file.cutoff(option.id) is None:
             out.append(Unknown("cutoff", option.id))
-        for want in musts:
+        for want in file.wants:
             if file.satisfies(option.id, want.id) is None:
-                out.append(Unknown("satisfies", option.id, want=want.id))
+                if want.musts:
+                    out.append(Unknown("satisfies", option.id, want=want.id))
+                if want.must_nots:
+                    out.append(Unknown("does not satisfy", option.id, want=want.id))
     for way in file.ways:
         if file.duration(way.id) is None:
             out.append(Unknown("duration", way=way.id))
@@ -255,22 +267,41 @@ def _world(
             if u.what == "other ways" and u.origin is not None and u.destination is not None
         )
     unlisted_takes = pinned[1] if pinned is not None and pinned[0].what == "other ways" else 0
-    satisfies: dict[tuple[str, str], bool | None] = {}
+    # Whether an OPTION SATISFIES a WANT helps a must and hurts a must-not. So an unknown one
+    # counts for a must only where ``kind`` says it does, and against a must-not unless
+    # ``kind`` says it does not. In the best case it does not: another OPTION meets every must.
+    satisfies: set[tuple[str, str]] = set()
+    might_satisfy: set[tuple[str, str]] = set()
     for option in file.options:
         for want in file.wants:
-            stated = file.satisfies(option.id, want.id)
+            pair = (option.id, want.id)
+            stated = file.satisfies(*pair)
             if stated is not None:
-                satisfies[option.id, want.id] = stated.degree > 0
-            else:
-                turns_out_well = well(Unknown("satisfies", option.id, want=want.id))
-                satisfies[option.id, want.id] = True if turns_out_well else None
+                if stated.degree > 0:
+                    satisfies.add(pair)
+                    might_satisfy.add(pair)
+                continue
+            does = kind is not None and Unknown("satisfies", option.id, want=want.id) in kind
+            does_not = kind is None or Unknown("does not satisfy", option.id, want=want.id) in kind
+            if does:
+                satisfies.add(pair)
+            if not does_not:
+                might_satisfy.add(pair)
     another_option = frozenset(
         (want.id, person)
         for want in file.wants
         for person in want.musts
         if well(Unknown("another option", want=want.id, person=person))
     )
-    return World(terms, unlisted, unlisted_takes, takes, satisfies, another_option)
+    return World(
+        terms,
+        unlisted,
+        unlisted_takes,
+        takes,
+        frozenset(satisfies),
+        frozenset(might_satisfy),
+        another_option,
+    )
 
 
 # ------------------------------- The CONSTRAINTs -------------------------------
@@ -333,13 +364,14 @@ def works_as_listed(file: File, world: World, itinerary: Itinerary) -> bool:
 
 
 def _each_alone(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
-    """The four CONSTRAINTs that hold or not whatever order the steps happen in."""
+    """The five CONSTRAINTs that hold or not whatever order the steps happen in."""
     taking_part = {step.option: step.persons for step in itinerary if step.option is not None}
     return [
         *_locks(file, itinerary),
         *_starts(world, itinerary),
         *_durations(world, itinerary),
         *_musts(file, world, taking_part),
+        *_must_nots(file, world, taking_part),
     ]
 
 
@@ -418,7 +450,7 @@ def _musts(file: File, world: World, taking_part: Mapping[str, tuple[str, ...]])
         met = {
             person
             for option, persons in taking_part.items()
-            if world.satisfies[option, want.id]
+            if (option, want.id) in world.satisfies
             for person in persons
         }
         met |= {person for wanted, person in world.another_option if wanted == want.id}
@@ -426,6 +458,26 @@ def _musts(file: File, world: World, taking_part: Mapping[str, tuple[str, ...]])
         if unmet:
             who = _in_file_order_of_persons(file, unmet)
             out.append(Broken(Constraint.MUST, None, who, want=want.id))
+    return out
+
+
+def _must_nots(
+    file: File, world: World, taking_part: Mapping[str, tuple[str, ...]]
+) -> list[Broken]:
+    """Every must-not is kept: the PERSON takes part in no OPTION that SATISFIES the WANT.
+
+    Where nobody knows whether an OPTION SATISFIES the WANT, the PERSON stays clear of it too.
+    One Broken for each OPTION and WANT, naming every PERSON it affects in the FILE's order.
+    """
+    out: list[Broken] = []
+    for option, persons in taking_part.items():
+        for want in file.wants:
+            if (option, want.id) not in world.might_satisfy:
+                continue
+            who = [person for person in persons if person in want.must_nots]
+            if who:
+                named = _in_file_order_of_persons(file, who)
+                out.append(Broken(Constraint.MUST_NOT, option, named, want=want.id))
     return out
 
 
@@ -662,8 +714,8 @@ def itineraries(file: File, world: World) -> list[Itinerary]:
         happening = {
             option.id: persons for option, persons in zip(file.options, who, strict=True) if persons
         }
-        if _musts(file, world, happening):
-            continue  # no order and no timing can meet a must: only who takes part counts
+        if _musts(file, world, happening) or _must_nots(file, world, happening):
+            continue  # no order and no timing changes these: only who takes part counts
         mine = [
             [i for i, persons in enumerate(who) if person.id in persons] for person in file.persons
         ]

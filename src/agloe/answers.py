@@ -7,7 +7,7 @@ reference checker's, which tries everything. The COMPILER passes its solver sear
 the answers and the evidence are worked out here in either case.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum
 from itertools import combinations
@@ -86,7 +86,7 @@ def check(
         def every_record(given: File) -> frozenset[str] | None:
             if works(given, best_case(given)):
                 return None
-            return frozenset([fact.id for fact in given.facts] + [lock.id for lock in given.locks])
+            return frozenset(_records(given))
 
         stuck = every_record
     plain = shown(file, worst_case(file))
@@ -98,7 +98,7 @@ def check(
         relies_on = [
             fact.id for fact in file.facts if not isinstance(fact, Complete) and fact.option in used
         ]
-        relies_on += [want.id for want in file.wants if want.musts]
+        relies_on += [want.id for want in file.wants if want.musts or want.must_nots]
         relies_on += [lock.id for lock in file.locks]
         at_worst: tuple[Broken, ...] = ()
         if robust is None:
@@ -123,7 +123,7 @@ def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[str, ..
     """
     kept = file
     skipped = False
-    for record in [fact.id for fact in file.facts] + [lock.id for lock in file.locks]:
+    for record in _records(file):
         without = kept.without(record)
         if record not in enough:
             kept, skipped = without, True
@@ -133,7 +133,13 @@ def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[str, ..
             kept, enough = without, smaller
     if skipped and stuck(kept) is None:
         raise AssertionError("records said to rule out every ITINERARY do not")
-    return tuple([fact.id for fact in kept.facts] + [lock.id for lock in kept.locks])
+    return tuple(_records(kept))
+
+
+def _records(file: File) -> list[str]:
+    """The FACTs, then the WANTs that ask something of a PERSON, then the DECISIONs."""
+    wants = [want.id for want in file.wants if want.musts or want.must_nots]
+    return [*(fact.id for fact in file.facts), *wants, *(lock.id for lock in file.locks)]
 
 
 def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
@@ -152,7 +158,8 @@ def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
     facts = [unknown for unknown in every if unknown.what != "another option"]
     to_find = [unknown for unknown in every if unknown.what == "another option"]
     for count in range(len(to_find) + 1):
-        # Asking for these can be enough only if it is with every FACT at its best.
+        # Asking for these can be enough only if it is with every FACT at its best. Here an
+        # unknown about an OPTION and a WANT turns out both ways at once, each where it helps.
         hopeful = [
             some
             for some in combinations(to_find, count)
@@ -163,7 +170,7 @@ def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
                 (*stated, *some)
                 for stated in combinations(facts, size)
                 for some in hopeful
-                if works(file, with_these_at_best(file, (*stated, *some)))
+                if _one_way_each(stated) and works(file, with_these_at_best(file, (*stated, *some)))
             ]
             if enough:
                 alone = count + size == 1
@@ -174,12 +181,18 @@ def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
     raise AssertionError("the best case works, so some unknown FACTs make it work")
 
 
+def _one_way_each(some: Iterable[Unknown]) -> bool:
+    """Whether no two of these say opposite things about one OPTION and one WANT."""
+    about = [(unknown.option, unknown.want) for unknown in some if unknown.want is not None]
+    return len(about) == len(set(about))
+
+
 def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
     """The most seconds this one unknown can be for the TRIP to work.
 
     None for an unknown that is not a length of time, and None when any length would do.
     """
-    if unknown.what in ("start", "satisfies", "another option"):
+    if unknown.what in ("start", "satisfies", "does not satisfy", "another option"):
         return None
 
     def enough(seconds: int) -> bool:

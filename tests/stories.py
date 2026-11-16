@@ -71,10 +71,16 @@ def lock(option: str, *persons: str) -> Document:
     return {"id": f"lock-{option}", "lock": option, "persons": list(persons)}
 
 
-def must(id: str, *persons: str) -> Document:
-    """A WANT that is a must for these PERSONs."""
+def must(id: str, *persons: str, never: Sequence[str] = ()) -> Document:
+    """A WANT that is a must for these PERSONs, and a must-not for those in ``never``."""
     holders = [{"person": person, "degree": 10} for person in persons]
+    holders += [{"person": person, "degree": -10} for person in never]
     return {"id": id, "name": id, "holders": holders}
+
+
+def must_not(id: str, *persons: str) -> Document:
+    """A WANT that is a must-not for these PERSONs."""
+    return must(id, never=persons)
 
 
 def satisfies(option: str, want: str, degree: int = 10) -> Document:

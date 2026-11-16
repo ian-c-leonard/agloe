@@ -473,11 +473,23 @@ def test_a_want_has_a_holder() -> None:
     assert problems(document).startswith("/wants/0/holders:")
 
 
-@pytest.mark.parametrize("degree", [9, 0, -10, 10.5, "10", None, True])
-def test_a_degree_of_want_in_a_file_is_ten(degree: object) -> None:
+@pytest.mark.parametrize("degree", [9, 0, -9, 11, 10.5, "10", None, True])
+def test_a_degree_of_want_in_a_file_is_ten_or_minus_ten(degree: object) -> None:
     document = with_a_window_seat()
     document["wants"][0]["holders"][0]["degree"] = degree
     assert problems(document).startswith("/wants/0/holders/0/degree:")
+
+
+def test_minus_ten_makes_a_want_a_must_not() -> None:
+    document = with_a_window_seat()
+    document["wants"] = [must("window-seat", "alex", never=["sam"])]
+    assert load(document).wants == (Want("window-seat", "window-seat", ("alex",), ("sam",)),)
+
+
+def test_a_person_holds_a_want_as_a_must_or_as_a_must_not() -> None:
+    document = with_a_window_seat()
+    document["wants"] = [must("window-seat", "alex", never=["alex"])]
+    assert problems(document) == "/wants/0: alex is a holder more than once"
 
 
 def test_a_holder_states_a_degree_of_want() -> None:
@@ -545,15 +557,25 @@ def written_with(tmp_path: Path, degree: str, of: str) -> Path:
     return path
 
 
-@pytest.mark.parametrize("degree", ["9.9999999999999999", "10.000000000000000000001", "1e1000"])
+@pytest.mark.parametrize(
+    "degree",
+    ["9.9999999999999999", "10.000000000000000000001", "-9.9999999999999999", "1e1000"],
+)
 def test_a_degree_of_want_is_not_rounded_to_ten(tmp_path: Path, degree: str) -> None:
-    with pytest.raises(FileError, match="/wants/0/holders/0/degree: 10 was expected"):
+    with pytest.raises(FileError, match=r"/wants/0/holders/0/degree: .* is not one of"):
         read(written_with(tmp_path, degree, of="want"))
 
 
 @pytest.mark.parametrize("degree", ["10", "10.0", "1e1", "100e-1"])
 def test_ten_can_be_written_in_any_way_that_is_exactly_ten(tmp_path: Path, degree: str) -> None:
     assert read(written_with(tmp_path, degree, of="want")).wants[0].musts == ("alex",)
+
+
+@pytest.mark.parametrize("degree", ["-10", "-10.0", "-1e1"])
+def test_minus_ten_can_be_written_in_any_way_that_is_exactly_it(
+    tmp_path: Path, degree: str
+) -> None:
+    assert read(written_with(tmp_path, degree, of="want")).wants[0].must_nots == ("alex",)
 
 
 @pytest.mark.parametrize(

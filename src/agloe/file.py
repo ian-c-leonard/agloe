@@ -83,11 +83,12 @@ class Way:
 
 @dataclass(frozen=True)
 class Want:
-    """Something PERSONs want from the TRIP that an OPTION can deliver."""
+    """Something PERSONs want, or want to avoid, from the TRIP that an OPTION can deliver."""
 
     id: str
     name: str
     musts: tuple[str, ...]  # the PERSONs for whom it is a must: a DEGREE OF WANT of +10
+    must_nots: tuple[str, ...] = ()  # those for whom it is a must-not: a DEGREE OF WANT of -10
 
 
 @dataclass(frozen=True)
@@ -206,9 +207,17 @@ class File:
         return None
 
     def without(self, record: str) -> File:
-        """The same FILE with one FACT or DECISION taken out, so that what it stated is unknown."""
+        """The same FILE with one FACT, WANT or DECISION taken out.
+
+        What a FACT stated is then unknown. A WANT that is taken out stays in the FILE with no
+        holders, so it asks nothing of anyone and the FACTs about it still name a WANT.
+        """
         return replace(
             self,
+            wants=tuple(
+                replace(want, musts=(), must_nots=()) if want.id == record else want
+                for want in self.wants
+            ),
             facts=tuple(fact for fact in self.facts if fact.id != record),
             locks=tuple(lock for lock in self.locks if lock.id != record),
         )
@@ -472,7 +481,9 @@ def load(document: object) -> File:
             known(where, person, "PERSON", person_ids)
         for person in sorted({person for person in holders if holders.count(person) > 1}):
             problems.append(f"{where}: {person} is a holder more than once")
-        wants.append(Want(want["id"], want["name"], tuple(holders)))
+        musts = tuple(each["person"] for each in want["holders"] if each["degree"] == 10)
+        must_nots = tuple(each["person"] for each in want["holders"] if each["degree"] == -10)
+        wants.append(Want(want["id"], want["name"], musts, must_nots))
     want_ids = {want.id for want in wants}
 
     facts: list[Fact] = []

@@ -184,9 +184,9 @@ Describes a WANT too big for one OPTION, split into pieces along its natural uni
 
 ### SATISFIES
 
-The relation between a WANT and what delivers it. An OPTION SATISFIES a WANT when it delivers the thing the WANT describes; for a WANT about the whole ITINERARY, the ITINERARY SATISFIES it when the property holds. Each SATISFIES relation from an OPTION carries a DEGREE OF SATISFACTION.
+The relation between a WANT and what delivers it. An OPTION SATISFIES a WANT when it delivers the thing the WANT describes. An ITINERARY SATISFIES that WANT for a holder when the holder takes part in such an OPTION. For a WANT about the whole ITINERARY, the ITINERARY SATISFIES it when the property holds. Each SATISFIES relation from an OPTION carries a DEGREE OF SATISFACTION.
 
-Whether delivery is good or bad comes from the DEGREE OF WANT, not from SATISFIES. An overnight bus SATISFIES a WANT about overnight travel; for a holder at −7, that counts against the ITINERARY, and it always counts when the bus is in the ITINERARY for any reason.
+Whether delivery is good or bad comes from the DEGREE OF WANT, not from SATISFIES. An overnight bus SATISFIES a WANT about overnight travel; for a holder at −7, that counts against the ITINERARY, and it always counts when the holder takes the bus for any reason.
 
 No stated relation means unknown, never "does not satisfy". A relation may be stated directly, or derived from an OPTION's FACTs: a WANT about departures before 06:00 applies to every OPTION that departs earlier.
 
@@ -293,7 +293,7 @@ Anything the COMPILER reports about a TRIP. Every FINDING is an ERROR, a WARNING
 
 ### ERROR
 
-A FINDING that something is broken: the FILE does not follow the format, or a CONSTRAINT cannot be met under the current FACTs and DECISIONs.
+A FINDING that something is broken: the FILE does not follow the format, or a CONSTRAINT cannot be met under the current FACTs, WANTs and DECISIONs.
 
 *Uses:* FINDING, FILE, CONSTRAINT, FACT, DECISION.
 

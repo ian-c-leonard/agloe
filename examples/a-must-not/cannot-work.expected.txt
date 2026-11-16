@@ -1,0 +1,6 @@
+INFEASIBLE: this trip cannot work.
+
+These FACTs, WANTs and DECISIONs clash. Each one is needed for the clash. Times are in America/Chicago.
+  skydeck-is-high-up: Skydeck visit SATISFIES a view from high up, 9 out of 10
+  view: a view from high up is a must for Alex and a must-not for Jo
+  lock-skydeck: Alex, Sam and Jo take part in Skydeck visit

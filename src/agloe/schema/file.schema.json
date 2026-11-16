@@ -134,7 +134,7 @@
     },
     "want": {
       "title": "Want",
-      "description": "A WANT: something PERSONs want from the TRIP that an OPTION can deliver. Each holder is a PERSON with their own DEGREE OF WANT, and a WANT names each PERSON at most once.",
+      "description": "A WANT: something PERSONs want, or want to avoid, from the TRIP that an OPTION can deliver. Each holder is a PERSON with their own DEGREE OF WANT, and a WANT names each PERSON at most once.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "name", "holders"],
@@ -152,8 +152,8 @@
             "properties": {
               "person": { "$ref": "#/$defs/id" },
               "degree": {
-                "description": "The DEGREE OF WANT. 10 makes the WANT a must for this PERSON.",
-                "const": 10
+                "description": "The DEGREE OF WANT. 10 makes the WANT a must for this PERSON, and -10 makes it a must-not.",
+                "enum": [10, -10]
               }
             }
           }

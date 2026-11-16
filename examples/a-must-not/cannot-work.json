@@ -1,0 +1,36 @@
+{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" },
+    { "id": "jo", "name": "Jo" }
+  ],
+  "places": [
+    { "id": "willis-tower", "name": "Willis Tower" },
+    { "id": "park", "name": "Millennium Park" }
+  ],
+  "options": [
+    { "id": "skydeck", "name": "Skydeck visit", "place": "willis-tower" },
+    { "id": "lunch", "name": "Lunch in the park", "place": "park" }
+  ],
+  "ways": [
+    { "id": "walk-from-tower", "name": "the walk between Willis Tower and Millennium Park", "between": ["willis-tower", "park"] }
+  ],
+  "wants": [
+    { "id": "view", "name": "a view from high up", "holders": [{ "person": "alex", "degree": 10 }, { "person": "jo", "degree": -10 }] }
+  ],
+  "facts": [
+    { "id": "skydeck-time", "option": "skydeck", "starts_at": "2027-05-15T10:00:00-05:00[America/Chicago]" },
+    { "id": "skydeck-length", "option": "skydeck", "duration": "PT1H30M" },
+    { "id": "skydeck-arrival", "option": "skydeck", "arrive_before_start": "PT0S" },
+    { "id": "skydeck-is-high-up", "option": "skydeck", "satisfies": { "want": "view", "degree": 9 } },
+    { "id": "lunch-time", "option": "lunch", "starts_at": "2027-05-15T12:15:00-05:00[America/Chicago]" },
+    { "id": "lunch-length", "option": "lunch", "duration": "PT1H" },
+    { "id": "lunch-table", "option": "lunch", "arrive_before_start": "PT0S" },
+    { "id": "lunch-is-on-the-ground", "option": "lunch", "satisfies": { "want": "view", "degree": 0 } },
+    { "id": "walk-from-tower-length", "way": "walk-from-tower", "duration": "PT20M" }
+  ],
+  "decisions": [
+    { "id": "lock-skydeck", "lock": "skydeck", "persons": ["alex", "sam", "jo"] },
+    { "id": "lock-lunch", "lock": "lunch", "persons": ["alex", "sam", "jo"] }
+  ]
+}

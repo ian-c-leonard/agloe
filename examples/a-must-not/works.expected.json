@@ -1,0 +1,45 @@
+{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "skydeck",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T10:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T11:30:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "walk-from-tower",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T11:30:00-05:00[America/Chicago]",
+      "end": "2027-05-15T11:50:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "lunch",
+      "persons": [
+        "alex",
+        "sam",
+        "jo"
+      ],
+      "start": "2027-05-15T12:15:00-05:00[America/Chicago]",
+      "end": "2027-05-15T13:15:00-05:00[America/Chicago]"
+    }
+  ],
+  "relies_on": [
+    "skydeck-time",
+    "skydeck-length",
+    "skydeck-arrival",
+    "skydeck-is-high-up",
+    "lunch-time",
+    "lunch-length",
+    "lunch-table",
+    "lunch-is-on-the-ground",
+    "walk-from-tower-length",
+    "view",
+    "lock-lunch"
+  ],
+  "robust": true
+}
