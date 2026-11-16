@@ -1,0 +1,8 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "skydeck-is-high-up",
+    "view",
+    "lock-skydeck"
+  ]
+}

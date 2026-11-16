@@ -194,7 +194,7 @@ def as_text(file: File, report: Report) -> str:
         lines = [
             "INFEASIBLE: this trip cannot work.",
             "",
-            "These FACTs and DECISIONs clash. Each one is needed for the clash."
+            f"These {_kinds(file, report.conflict)} clash. Each one is needed for the clash."
             f" Times are in {file.zone}.",
             *(f"  {record}: {_record(file, clock, record)}" for record in report.conflict),
         ]
@@ -211,6 +211,11 @@ def as_text(file: File, report: Report) -> str:
         kinds = {needed.unknown.what for enough in report.missing for needed in enough}
         if "other ways" in kinds:
             lines += ["", "Other WAYs help only if they can be taken when the plan needs them."]
+            if any(want.must_nots for want in file.wants):
+                lines[-1] = (
+                    "Other WAYs help only if they can be taken when the plan needs them, and"
+                    " only if they SATISFY nothing that is a must-not for a PERSON who takes them."
+                )
         if "another option" in kinds:
             lines += [
                 "",
@@ -259,11 +264,15 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
             " states.",
         ]
     if report.relies_on:
-        wants = any(want.id in report.relies_on for want in file.wants)
-        kinds = "FACTs, WANTs and DECISIONs" if wants else "FACTs and DECISIONs"
-        lines += ["", f"The plan relies on these {kinds}:"]
+        lines += ["", f"The plan relies on these {_kinds(file, report.relies_on)}:"]
         lines += [f"  {record}: {_record(file, clock, record)}" for record in report.relies_on]
     return lines
+
+
+def _kinds(file: File, records: Sequence[str]) -> str:
+    """What a list of records holds: FACTs and DECISIONs, and WANTs where it names one."""
+    wants = any(want.id in records for want in file.wants)
+    return "FACTs, WANTs and DECISIONs" if wants else "FACTs and DECISIONs"
 
 
 def together(itinerary: Itinerary) -> list[Step]:
@@ -353,6 +362,8 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
         return f"{_name(file, unknown.option)} can start at any time"
     if unknown.what == "satisfies":
         return f"{_name(file, unknown.option)} SATISFIES {_want(file, unknown.want)}"
+    if unknown.what == "does not satisfy":
+        return f"{_name(file, unknown.option)} does not SATISFY {_want(file, unknown.want)}"
     if unknown.what == "other ways":
         places = _names(file.places)
         there = f"there are other WAYs from {places[unknown.origin or '']} to "
@@ -379,7 +390,12 @@ def _record(file: File, clock: _Clock, record: str) -> str:
     """One FACT, WANT or DECISION in words."""
     found = next(each for each in (*file.facts, *file.wants, *file.locks) if each.id == record)
     if isinstance(found, Want):
-        return f"{_want(file, found.id)} is a must for {_people(file, found.musts)}"
+        said = [
+            f"a {kind} for {_people(file, persons)}"
+            for kind, persons in (("must", found.musts), ("must-not", found.must_nots))
+            if persons
+        ]
+        return f"{_want(file, found.id)} is {' and '.join(said)}"
     if isinstance(found, Complete):
         places = _names(file.places)
         first = clock.day(found.earliest)

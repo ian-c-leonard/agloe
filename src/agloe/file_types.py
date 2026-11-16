@@ -63,7 +63,7 @@ class WayBothWays(TypedDict):
 
 class Holder(TypedDict):
     person: Id
-    degree: Literal[10]
+    degree: Literal[10, -10]
 
 
 class Want(TypedDict):

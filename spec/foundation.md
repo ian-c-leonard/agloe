@@ -82,7 +82,7 @@ This document states what a TRIP means and what the COMPILER and the OPTIMIZER a
 **C6. WANTs about the whole ITINERARY.** A WANT can be a property of the whole ITINERARY: never starting before 7, at most two hotel changes, a rest day after a long drive. These use the same scale, so each can be a CONSTRAINT or a preference. They are written with a fixed set of operators the COMPILER can check and explain: always, never, at most n times, at most a total amount per day or per TRIP ("at most 4 hours of driving a day"), after, within.
 *Serves:* flexible, optimizer, self-explaining. *Source:* based on PDDL3's trajectory constraints (Gerevini and Long, 2005), extended with "at most n times" and totals; temporal logic (Pnueli, 1977) as the deeper root.
 
-**C7. A dislike cannot be dodged.** A negative WANT never adds an OPTION to the TRIP. But when an OPTION in the ITINERARY SATISFIES it, because someone else wants that OPTION or as a side effect, it always counts against the SCORE.
+**C7. A dislike cannot be dodged.** A negative WANT never adds an OPTION to the TRIP. But when its holder takes part in an OPTION that SATISFIES it, because someone else wants that OPTION or as a side effect, it always counts against the SCORE.
 *Serves:* optimizer, multiplayer.
 
 **C8. Starter WANTs.** Each traveling PERSON starts with a small published set of WANTs for basic needs, each DECOMPOSED by its natural rhythm and stored as an ordinary visible WANT that anyone can re-rank or drop:
@@ -145,7 +145,7 @@ Starter WANTs are never hidden rules; they sit in the FILE like any other WANT. 
 **E4. SETTINGs, never assumed FACTs.** Thresholds such as the minimum connection time are SETTINGs with defaults pinned in the COMPILER, and every report names any override. The COMPILER never assumes a FACT it is not given; it returns UNDETERMINED and states the condition instead ("FEASIBLE if the walk needs no BOOKING"). An assumed ferry time is exactly how a real trip goes wrong.
 *Serves:* trustworthy, deterministic.
 
-**E5. Every result shows its evidence.** FEASIBLE: the ITINERARY and the FACTs, WANTs and DECISIONs it relies on. INFEASIBLE: a set of FACTs and DECISIONs that conflict, from which none can be removed. UNDETERMINED: the missing FACTs. A fixed rule picks among equal explanations, so the same FILE always gives the same one.
+**E5. Every result shows its evidence.** FEASIBLE: the ITINERARY and the FACTs, WANTs and DECISIONs it relies on. INFEASIBLE: a set of FACTs, WANTs and DECISIONs that conflict, from which none can be removed. UNDETERMINED: the missing FACTs. A fixed rule picks among equal explanations, so the same FILE always gives the same one.
 *Serves:* self-explaining, deterministic. *Source:* the deletion filter (Chinneck and Dravnieks, 1991) and QuickXplain (Junker, 2004); why-provenance (Buneman, Khanna and Tan, 2001).
 
 **E6. Every FINDING is visible.** A DISMISSAL silences an ERROR, WARNING or NOTE as it stood, and the FINDING returns if it gets worse. UNDETERMINED FINDINGs, and ERRORs meaning the FILE cannot be read, cannot be dismissed.
