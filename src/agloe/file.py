@@ -30,6 +30,7 @@ _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 _DEEPEST = 16  # a FILE that follows the format nests far less deeply than this
 _LENGTH = re.compile(r"PT(?:([0-9]{1,9})H)?(?:([0-9]{1,9})M)?(?:([0-9]{1,9})S)?")
 _MOST_DIGITS = 9  # a whole number in a FILE has far fewer digits; a longer one stays as written
+_ZERO = re.compile(r"-?0(?:\.0+)?(?:[eE][+-]?[0-9]+)?")  # zero, whatever its sign and exponent
 
 
 class Unwritable(ValueError):
@@ -339,8 +340,10 @@ def _exactly(text: str) -> int | _AsWritten:
 
     Binary floating point would turn 9.9999999999999999 into 10. A whole number such as 10.0
     becomes the same whole number. Anything else stays exactly as written, so that the schema
-    refuses it where it asks for a whole number.
+    refuses it where it asks for a whole number. Zero is zero with any exponent, however large.
     """
+    if _ZERO.fullmatch(text):
+        return 0
     try:
         value = _AsWritten(text)
         # ``adjusted`` is the power of ten of the first digit: no arithmetic, so no overflow.

@@ -1,7 +1,10 @@
 """Must-nots: a PERSON for whom a WANT is a must-not takes part in no OPTION that SATISFIES it."""
 
 from collections.abc import Sequence
+from itertools import combinations
 from random import Random
+
+import pytest
 
 from agloe import answers, compiler, report
 from agloe.answers import Answer, Missing, Report
@@ -17,6 +20,8 @@ from agloe.reference import (
     in_world,
     itineraries,
     needless,
+    no_better_than,
+    one_way_each,
     unknowns,
     with_these_at_best,
     worst_case,
@@ -213,6 +218,52 @@ def both_on_the_rooftop(*more: Document) -> File:
     locks = [lock("rooftop", "alex", "jo")]
     facts = [*at_ten("rooftop"), *more]
     return trip(list(EVERYONE), ["loop"], [stays("rooftop", "loop")], facts, locks, wants=wants)
+
+
+def test_no_possible_world_has_an_option_both_ways_and_only_the_upper_bound_does() -> None:
+    """The upper bound lets the rooftop count for Alex and not against Jo. No world does."""
+    file = both_on_the_rooftop()
+    together: Itinerary = (visit("rooftop", "alex", "jo"),)
+    another = Unknown("another option", want="view", person="alex")
+    bound = no_better_than(file, [])
+    assert broken(file, bound, together) == []
+    assert ("rooftop", "view") in bound.satisfies - bound.might_satisfy
+    with pytest.raises(ValueError, match="cannot both SATISFY"):
+        with_these_at_best(file, [Unknown("satisfies", "rooftop", want="view"), is_not("rooftop")])
+    # The bound shows only that something is not enough: here it cannot rule anything out,
+    # and the report still asks for another OPTION, which the bound alone would not.
+    assert answers.any_works(file, bound)
+    assert checked(file).missing == ((Missing(is_not("rooftop"), None), Missing(another, None)),)
+
+
+def test_the_upper_bound_never_hides_a_set_that_is_enough() -> None:
+    """Every set a slow search of all sets finds is one the report has, with the bound in use."""
+    rng = Random(8080)
+    compared = 0
+    for _ in range(60):
+        file = random_trip(rng, 0.2, ["alex", "sam"], count=2, with_wants=1, must_nots=0.5)
+        found = answers.check(file)
+        if found.answer is not Answer.UNDETERMINED:
+            continue
+        every = unknowns(file)
+        if len(every) > 12:
+            continue
+        enough = [
+            some
+            for size in range(1, len(every) + 1)
+            for some in combinations(every, size)
+            if one_way_each(some) and itineraries(file, with_these_at_best(file, some))
+        ]
+
+        def cost(some: tuple[Unknown, ...]) -> tuple[int, int]:
+            to_find = sum(each.what == "another option" for each in some)
+            return (to_find, len(some) - to_find)
+
+        least = min(cost(some) for some in enough)
+        expected = [some for some in enough if cost(some) == least]
+        assert [tuple(needed.unknown for needed in some) for some in found.missing] == expected
+        compared += 1
+    assert compared > 15
 
 
 def test_a_fact_settles_a_want_held_both_ways() -> None:

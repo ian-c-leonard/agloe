@@ -7,7 +7,7 @@ reference checker's, which tries everything. The COMPILER passes its solver sear
 the answers and the evidence are worked out here in either case.
 """
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from itertools import combinations
@@ -24,6 +24,8 @@ from agloe.reference import (
     first_shown,
     in_world,
     longest_case,
+    no_better_than,
+    one_way_each,
     unknowns,
     with_these_at_best,
     with_this_long,
@@ -158,19 +160,17 @@ def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
     facts = [unknown for unknown in every if unknown.what != "another option"]
     to_find = [unknown for unknown in every if unknown.what == "another option"]
     for count in range(len(to_find) + 1):
-        # Asking for these can be enough only if it is with every FACT at its best. Here an
-        # unknown about an OPTION and a WANT turns out both ways at once, each where it helps.
+        # Asking for these can be enough only if it is in the upper bound, where every FACT
+        # helps whoever needs it. The bound only saves work: nothing is reported from it.
         hopeful = [
-            some
-            for some in combinations(to_find, count)
-            if works(file, with_these_at_best(file, (*facts, *some)))
+            some for some in combinations(to_find, count) if works(file, no_better_than(file, some))
         ]
         for size in range(len(facts) + 1 if hopeful else 0):
             enough = [
                 (*stated, *some)
                 for stated in combinations(facts, size)
                 for some in hopeful
-                if _one_way_each(stated) and works(file, with_these_at_best(file, (*stated, *some)))
+                if one_way_each(stated) and works(file, with_these_at_best(file, (*stated, *some)))
             ]
             if enough:
                 alone = count + size == 1
@@ -179,12 +179,6 @@ def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
                     for some in enough
                 )
     raise AssertionError("the best case works, so some unknown FACTs make it work")
-
-
-def _one_way_each(some: Iterable[Unknown]) -> bool:
-    """Whether no two of these say opposite things about one OPTION and one WANT."""
-    about = [(unknown.option, unknown.want) for unknown in some if unknown.want is not None]
-    return len(about) == len(set(about))
 
 
 def _limit(file: File, unknown: Unknown, works: Works) -> int | None:

@@ -609,3 +609,21 @@ def test_a_number_that_is_not_whole_is_shown_as_written(tmp_path: Path) -> None:
     with pytest.raises(FileError) as refused:
         read(written_with(tmp_path, "1.0000000000000001", of="fact"))
     assert "1.0000000000000001 is not of type 'integer'" in str(refused.value)
+
+
+@pytest.mark.parametrize(
+    "degree",
+    ["0e999999999999999999", "0e1000000000000000000", "-0.000e-1000000000000000000", "0E+5"],
+)
+def test_zero_is_zero_with_any_exponent(tmp_path: Path, degree: str) -> None:
+    stated = read(written_with(tmp_path, degree, of="fact")).satisfies("flight", "window-seat")
+    assert stated is not None
+    assert (stated.degree, type(stated.degree)) == (0, int)
+
+
+@pytest.mark.parametrize("degree", ["1e999999999999999999", "1e1000000000000000000", "0.1e-5"])
+def test_a_number_that_is_not_zero_stays_refused_with_any_exponent(
+    tmp_path: Path, degree: str
+) -> None:
+    with pytest.raises(FileError):
+        read(written_with(tmp_path, degree, of="fact"))

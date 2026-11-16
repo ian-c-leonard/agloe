@@ -4,8 +4,9 @@ It is slow on purpose and meant for small TRIPs. It defines the right answer, an
 must agree with it. It refuses an ITINERARY too large for it to try everything.
 
 Read it beside spec/rules.md. The worlds are the section "What is unknown". No world here has
-an unlisted WAY that SATISFIES a WANT. Such a world only rules choices out, the best case has
-none, and the worst case has no unlisted WAY at all, so the answers do not need one.
+an unlisted WAY that SATISFIES a WANT, and the answers do not need one. In the best case another
+OPTION already meets every must, and no unlisted WAY has to break a must-not. The worst case has
+no unlisted WAY at all.
 
 ``broken`` is the section "The CONSTRAINTs": it checks a finished ITINERARY against all eight,
 and nothing here or in the solver counts as working unless it passes. ``itineraries`` is the
@@ -99,6 +100,8 @@ class Terms:
 @dataclass(frozen=True)
 class World:
     """One way the unknown FACTs turn out, or the worst of all the ways at once.
+
+    ``no_better_than`` makes a third kind, an upper bound that is no possible world at all.
 
     ``unlisted`` holds the pairs of PLACEs that an unlisted WAY joins directly, and None means
     every pair. Each unlisted WAY takes ``unlisted_takes`` seconds. ``takes`` gives the shortest
@@ -200,8 +203,49 @@ def longest_case(file: File) -> World:
 
 
 def with_these_at_best(file: File, unknown: Iterable[Unknown]) -> World:
-    """These unknown FACTs as in the best case, and every other unknown FACT as in the worst."""
-    return _world(file, frozenset(unknown))
+    """These unknown FACTs turned out well, and every other unknown FACT as in the worst case.
+
+    A start, a length of time, other WAYs and another OPTION turn out as in the best case. For
+    an OPTION and a WANT, the unknown says which way it turns out: "satisfies" or "does not
+    satisfy". Saying both about one OPTION and one WANT is refused: no possible world has both.
+    """
+    kind = frozenset(unknown)
+    if not one_way_each(kind):
+        raise ValueError("an OPTION cannot both SATISFY a WANT and not SATISFY it")
+    return _world(file, kind)
+
+
+def one_way_each(unknown: Iterable[Unknown]) -> bool:
+    """Whether no two of these say opposite things about one OPTION and one WANT."""
+    signed = ("satisfies", "does not satisfy")
+    about = [(each.option, each.want) for each in unknown if each.what in signed]
+    return len(about) == len(set(about))
+
+
+def no_better_than(file: File, found: Iterable[Unknown]) -> World:
+    """An upper bound that is no possible world: every unknown FACT helps whoever needs it.
+
+    Everything is as in the best case, with two differences. Another OPTION is found only for
+    the WANTs and PERSONs in ``found``. And an OPTION with no FACT about a WANT counts for a
+    must while it breaks no must-not, which no possible world allows.
+
+    Whatever works in a possible world with those other OPTIONs works here too. So this can
+    show that those other OPTIONs are not enough, whatever else turns out well. It can show
+    nothing else, and no answer and no evidence is ever read from it.
+    """
+    best = best_case(file)
+    unknown = {
+        (option.id, want.id)
+        for option in file.options
+        for want in file.wants
+        if file.satisfies(option.id, want.id) is None
+    }
+    conditions = frozenset(
+        (each.want, each.person)
+        for each in found
+        if each.want is not None and each.person is not None
+    )
+    return replace(best, satisfies=best.satisfies | unknown, another_option=conditions)
 
 
 def with_this_long(file: File, unknown: Unknown, seconds: int) -> World:
