@@ -87,7 +87,7 @@ This document states what a TRIP means and what the COMPILER and the OPTIMIZER a
 
 **C8. Starter WANTs.** Each traveling PERSON starts with a small published set of WANTs for basic needs, each DECOMPOSED by its natural rhythm and stored as an ordinary visible WANT that anyone can re-rank or drop:
 
-- a bed each night, +10: a night without one is an ERROR;
+- a bed each night, as a preference, ranked highest: a night without one counts heavily against the SCORE;
 - getting home at the end of the TRIP, +10;
 - breakfast, lunch and dinner each day, as preferences;
 - rest, with no day overfull, as a preference;
