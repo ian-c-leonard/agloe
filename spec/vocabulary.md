@@ -20,9 +20,9 @@ The trip being planned, lived and recorded: the PERSONs it concerns, their WANTs
 
 ### SCOPE
 
-The TRIP's frame: its dates, the PLACE each traveling PERSON starts from and returns to, what the TRIP is for, and anything explicitly out of bounds. The COMPILER uses the SCOPE to know which days and nights to check.
+The TRIP's frame: its dates, the PLACE each traveling PERSON starts from and returns to, what the TRIP is for, and anything explicitly out of bounds. WANTs use the SCOPE to know which days and nights they cover.
 
-*Uses:* TRIP, PLACE, PERSON, COMPILER.
+*Uses:* TRIP, PLACE, PERSON, → WANT.
 
 ### FILE
 
