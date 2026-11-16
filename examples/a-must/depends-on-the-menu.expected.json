@@ -1,0 +1,13 @@
+{
+  "answer": "UNDETERMINED",
+  "missing": [
+    [
+      {
+        "what": "satisfies",
+        "option": "dinner-tavern",
+        "want": "deep-dish",
+        "at_most": null
+      }
+    ]
+  ]
+}

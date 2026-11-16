@@ -80,6 +80,15 @@ class Way:
 
 
 @dataclass(frozen=True)
+class Want:
+    """Something PERSONs want from the TRIP that an OPTION can deliver."""
+
+    id: str
+    name: str
+    musts: tuple[str, ...]  # the PERSONs for whom it is a must: a DEGREE OF WANT of +10
+
+
+@dataclass(frozen=True)
 class Start:
     """A FACT: when an OPTION can start."""
 
@@ -134,6 +143,20 @@ class Complete:
 
 
 @dataclass(frozen=True)
+class Satisfies:
+    """A FACT: how fully an OPTION delivers what a WANT describes.
+
+    ``degree`` is the DEGREE OF SATISFACTION, from 0 to 10. Zero says that the OPTION does not
+    deliver it, and any value above zero says that it does.
+    """
+
+    id: str
+    option: str
+    want: str
+    degree: int
+
+
+@dataclass(frozen=True)
 class Lock:
     """A DECISION: the TRIP includes this OPTION, and these PERSONs take part."""
 
@@ -142,7 +165,7 @@ class Lock:
     persons: tuple[str, ...]
 
 
-type Fact = Start | Duration | Cutoff | Complete
+type Fact = Start | Duration | Cutoff | Complete | Satisfies
 
 
 @dataclass(frozen=True)
@@ -153,6 +176,7 @@ class File:
     places: tuple[Place, ...]
     options: tuple[Option, ...]
     ways: tuple[Way, ...]
+    wants: tuple[Want, ...]
     facts: tuple[Fact, ...]
     locks: tuple[Lock, ...]
     zone: str = "UTC"  # the time zone of the first time in the FILE; reports show times in it
@@ -171,6 +195,13 @@ class File:
 
     def cutoff(self, option: str) -> Cutoff | None:
         return next((f for f in self.facts if isinstance(f, Cutoff) and f.option == option), None)
+
+    def satisfies(self, option: str, want: str) -> Satisfies | None:
+        """The FACT about whether this OPTION SATISFIES this WANT, if the FILE states one."""
+        for fact in self.facts:
+            if isinstance(fact, Satisfies) and (fact.option, fact.want) == (option, want):
+                return fact
+        return None
 
     def without(self, record: str) -> File:
         """The same FILE with one FACT or DECISION taken out, so that what it stated is unknown."""
@@ -405,9 +436,22 @@ def load(document: object) -> File:
         ways.append(Way(way["id"], way["name"], origin, destination, "between" in way))
     way_ids = {way.id for way in ways}
 
+    wants: list[Want] = []
+    for index, want in enumerate(raw["wants"]):
+        where = f"/wants/{index}"
+        claim(where, want["id"])
+        holders = [holder["person"] for holder in want["holders"]]
+        for person in holders:
+            known(where, person, "PERSON", person_ids)
+        for person in sorted({person for person in holders if holders.count(person) > 1}):
+            problems.append(f"{where}: {person} is a holder more than once")
+        wants.append(Want(want["id"], want["name"], tuple(holders)))
+    want_ids = {want.id for want in wants}
+
     facts: list[Fact] = []
     stated: set[tuple[str, type]] = set()
     complete: set[tuple[str | None, str | None, int, int]] = set()
+    satisfied: set[tuple[str, str]] = set()
     for index, fact in enumerate(raw["facts"]):
         where = f"/facts/{index}"
         claim(where, fact["id"])
@@ -446,6 +490,15 @@ def load(document: object) -> File:
             facts.append(made)
             continue
         known(where, fact["option"], "OPTION", option_ids)
+        if "satisfies" in fact:
+            about = fact["satisfies"]
+            known(where, about["want"], "WANT", want_ids)
+            if (fact["option"], about["want"]) in satisfied:
+                both = f"{fact['option']} and {about['want']}"
+                problems.append(f"{where}: another FACT already states this about {both}")
+            satisfied.add((fact["option"], about["want"]))
+            facts.append(Satisfies(fact["id"], fact["option"], about["want"], int(about["degree"])))
+            continue
         if "starts_at" in fact:
             made = Start(fact["id"], fact["option"], when(where, fact["starts_at"]))
         elif "starts_any_time" in fact:
@@ -478,7 +531,9 @@ def load(document: object) -> File:
     if problems:
         raise FileError(problems)
     zone = zones[0] if zones else "UTC"
-    return File(persons, places, tuple(options), tuple(ways), tuple(facts), tuple(locks), zone)
+    return File(
+        persons, places, tuple(options), tuple(ways), tuple(wants), tuple(facts), tuple(locks), zone
+    )
 
 
 def _unwritable_characters(value: object, where: str) -> list[str]:

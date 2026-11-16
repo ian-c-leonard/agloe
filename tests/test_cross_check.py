@@ -35,6 +35,8 @@ from tests.stories import (
     lasts_between,
     lock,
     moves,
+    must,
+    satisfies,
     seconds,
     starts_at,
     stays,
@@ -57,13 +59,16 @@ def random_trip(
     with_complete: float = 0,
     contingent: float = 0,
     with_ways: float = 0,
+    with_wants: float = 0,
 ) -> File:
     """Two or three OPTIONs on a quarter-hour grid.
 
     ``leave_out`` is how often a FACT is unstated. ``with_complete`` is how often a COMPLETE FACT
     is added. Its span starts one second after a grid time and ends one second before another, so
     the times just outside it are on the grid. ``contingent`` is how often a duration is a range.
-    ``with_ways`` is how often the FILE lists one or two WAYs.
+    ``with_ways`` is how often the FILE lists one or two WAYs. ``with_wants`` is how often it
+    has one or two WANTs, each a must for some PERSONs. For each OPTION and WANT, a FACT says
+    that the OPTION SATISFIES the WANT, or that it does not, or the FILE says nothing.
     """
     count = count or rng.choice([2, 3])
     if persons is None:
@@ -120,7 +125,16 @@ def random_trip(
                 length = takes_between(id, "PT0M", f"PT{15 * rng.randrange(1, 3)}M")
             if rng.random() >= leave_out:
                 facts.append(length)
-    return trip(persons, PLACES, options, facts, decisions, ways)
+    wants: list[Document] = []
+    if with_wants and rng.random() < with_wants:
+        for number in range(rng.choice([1, 1, 2])):
+            id = f"want-{number}"
+            wants.append(must(id, *rng.sample(persons, rng.randrange(1, len(persons) + 1))))
+            for option in options:
+                degree = rng.choice([None, None, 0, 0, 3, 10, 10])
+                if degree is not None:
+                    facts.append(satisfies(option["id"], id, degree))
+    return trip(persons, PLACES, options, facts, decisions, ways, wants)
 
 
 def at_second(moment: int) -> str:
@@ -377,7 +391,17 @@ def possible_world(rng: Random, file: File) -> World:
         takes[each.id] = (
             (guess, guess) if duration is None else (duration.shortest, duration.longest)
         )
-    return World(terms, unlisted, QUARTER * rng.choice([0, 1, 2]), takes)
+    slow = QUARTER * rng.choice([0, 1, 2])
+    delivers: dict[tuple[str, str], bool | None] = {}
+    for option in file.options:
+        for want in file.wants:
+            stated = file.satisfies(option.id, want.id)
+            guessed = rng.random() < 0.5
+            delivers[option.id, want.id] = guessed if stated is None else stated.degree > 0
+    elsewhere = frozenset(
+        (want.id, person) for want in file.wants for person in want.musts if rng.random() < 0.3
+    )
+    return World(terms, unlisted, slow, takes, delivers, elsewhere)
 
 
 def any_choice(rng: Random, file: File, world: World) -> Itinerary:

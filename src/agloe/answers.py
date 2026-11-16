@@ -49,9 +49,9 @@ class Missing:
 class Report:
     """The answer and its evidence.
 
-    FEASIBLE: the ITINERARY shown, the FACTs and DECISIONs it relies on, whether it is ROBUST, and
-    what it breaks when every CONTINGENT duration runs longest. INFEASIBLE: FACTs and DECISIONs
-    that conflict. UNDETERMINED: each smallest set of unknown FACTs that would be enough.
+    FEASIBLE: the ITINERARY shown, the FACTs, WANTs and DECISIONs it relies on, whether it is
+    ROBUST, and what it breaks when every CONTINGENT duration runs longest. INFEASIBLE: FACTs and
+    DECISIONs that conflict. UNDETERMINED: each smallest set of unknown FACTs that would be enough.
     """
 
     answer: Answer
@@ -98,6 +98,7 @@ def check(
         relies_on = [
             fact.id for fact in file.facts if not isinstance(fact, Complete) and fact.option in used
         ]
+        relies_on += [want.id for want in file.wants if want.musts]
         relies_on += [lock.id for lock in file.locks]
         at_worst: tuple[Broken, ...] = ()
         if robust is None:
@@ -116,7 +117,9 @@ def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[str, ..
     It goes through the records in the FILE's order and removes each one that the TRIP stays
     INFEASIBLE without. ``enough`` is a set of records known to make the TRIP INFEASIBLE by
     themselves. A record outside it can go without another search: what is left still holds all
-    of ``enough``, and more records never make a TRIP easier.
+    of ``enough``, and one more record never lets an ITINERARY work in the best case that did
+    not work without it. A FACT that is taken out is unknown, and the best case gives every
+    unknown its most helpful value.
     """
     kept = file
     skipped = False
@@ -134,32 +137,45 @@ def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[str, ..
 
 
 def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
-    """Every smallest set of unknown FACTs that would be enough if they turned out well.
+    """The sets of unknown FACTs that would be enough if they turned out well.
 
-    Each set makes the TRIP FEASIBLE with every other unknown FACT at its worst. A set of one
-    length of time comes with its limit.
+    Each set makes the TRIP FEASIBLE with every other unknown FACT at its worst. Another OPTION
+    stands in for a listed OPTION and every FACT about it, so it is counted apart. The sets
+    returned need the fewest other OPTIONs, and among those they have the fewest FACTs. A set of
+    one length of time comes with its limit.
     """
     every = unknowns(file)
-    for size in range(1, len(every) + 1):
-        enough = [
+    facts = [unknown for unknown in every if unknown.what != "other options"]
+    others = [unknown for unknown in every if unknown.what == "other options"]
+    for count in range(len(others) + 1):
+        # Some other OPTIONs can be enough only if they are with every FACT at its best.
+        hopeful = [
             some
-            for some in combinations(every, size)
-            if works(file, with_these_at_best(file, some))
+            for some in combinations(others, count)
+            if works(file, with_these_at_best(file, (*facts, *some)))
         ]
-        if enough:
-            return tuple(
-                tuple(Missing(u, _limit(file, u, works) if size == 1 else None) for u in some)
-                for some in enough
-            )
+        for size in range(len(facts) + 1 if hopeful else 0):
+            enough = [
+                (*stated, *some)
+                for stated in combinations(facts, size)
+                for some in hopeful
+                if works(file, with_these_at_best(file, (*stated, *some)))
+            ]
+            if enough:
+                alone = count + size == 1
+                return tuple(
+                    tuple(Missing(u, _limit(file, u, works) if alone else None) for u in some)
+                    for some in enough
+                )
     raise AssertionError("the best case works, so some unknown FACTs make it work")
 
 
 def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
     """The most seconds this one unknown can be for the TRIP to work.
 
-    None for an unknown start, and None when any length of time would do.
+    None for an unknown that is not a length of time, and None when any length would do.
     """
-    if unknown.what == "start":
+    if unknown.what in ("start", "satisfies", "other options"):
         return None
 
     def enough(seconds: int) -> bool:

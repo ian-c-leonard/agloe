@@ -25,7 +25,9 @@ from agloe.file import (
     Option,
     Person,
     Place,
+    Satisfies,
     Start,
+    Want,
     Way,
     length_written,
     local,
@@ -98,8 +100,12 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
         out["option"] = unknown.option
     elif unknown.way is not None:
         out["way"] = unknown.way
-    else:
+    elif unknown.origin is not None:
         out["from"], out["to"] = unknown.origin, unknown.destination
+    if unknown.want is not None:
+        out["want"] = unknown.want
+    if unknown.person is not None:
+        out["person"] = unknown.person
     out["at_most"] = None if needed.at_most is None else length_written(needed.at_most)
     return out
 
@@ -194,10 +200,7 @@ def as_text(file: File, report: Report) -> str:
         ]
     else:
         lines = ["UNDETERMINED: the FILE does not say enough to tell.", ""]
-        cases = [
-            " and ".join(_wanted(file, needed, len(enough) == 1) for needed in enough)
-            for enough in report.missing
-        ]
+        cases = [_case(file, enough) for enough in report.missing]
         if len(cases) == 1:
             lines.append(f"The trip works if {cases[0]}.")
         else:
@@ -205,10 +208,15 @@ def as_text(file: File, report: Report) -> str:
             lines += [
                 f"  {number}. {case[0].upper()}{case[1:]}." for number, case in enumerate(cases, 1)
             ]
-        if any(
-            needed.unknown.what == "other ways" for enough in report.missing for needed in enough
-        ):
+        kinds = {needed.unknown.what for enough in report.missing for needed in enough}
+        if "other ways" in kinds:
             lines += ["", "Other WAYs help only if they can be taken when the plan needs them."]
+        if "other options" in kinds:
+            lines += [
+                "",
+                "Another OPTION helps only if the PERSON it is for can take part in it and still"
+                " do everything else the trip asks of them.",
+            ]
     return "\n".join(lines) + "\n"
 
 
@@ -245,7 +253,9 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
             " states.",
         ]
     if report.relies_on:
-        lines += ["", "The plan relies on these FACTs and DECISIONs:"]
+        wants = any(want.id in report.relies_on for want in file.wants)
+        kinds = "FACTs, WANTs and DECISIONs" if wants else "FACTs and DECISIONs"
+        lines += ["", f"The plan relies on these {kinds}:"]
         lines += [f"  {record}: {_record(file, clock, record)}" for record in report.relies_on]
     return lines
 
@@ -279,8 +289,9 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
     """What the plan would break at the longest durations, in words, for each line of the plan.
 
     A line is known by its number, counting from zero. PERSONs who share a line and are in the
-    same trouble are named together. Everything a plan can break happens at one of its steps,
-    so a finding with no line is a fault in this program, and it stops here.
+    same trouble are named together. Longer durations break only CONSTRAINTs about time, and
+    those are broken at one of the plan's steps. So a finding with no line is a fault in this
+    program, and it stops here.
     """
     lines = _lines(report.itinerary)
     line_of = {
@@ -308,11 +319,32 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
     return marks
 
 
+def _case(file: File, enough: Sequence[Missing]) -> str:
+    """One set of unknown FACTs that would be enough, in words.
+
+    PERSONs who need another OPTION for the same WANT are named together.
+    """
+    parts: list[str] = []
+    for_whom: dict[str | None, list[str]] = {}
+    for needed in enough:
+        unknown = needed.unknown
+        if unknown.what == "other options":
+            for_whom.setdefault(unknown.want, []).append(unknown.person or "")
+        else:
+            parts.append(_wanted(file, needed, len(enough) == 1))
+    for want, persons in for_whom.items():
+        who = _people(file, tuple(persons))
+        parts.append(f"another OPTION that SATISFIES {_want(file, want)} is found for {who}")
+    return " and ".join(parts)
+
+
 def _wanted(file: File, needed: Missing, alone: bool) -> str:
     """What one unknown FACT would have to be, in words. ``alone`` means nothing else is needed."""
     unknown, limit = needed.unknown, needed.at_most
     if unknown.what == "start":
         return f"{_name(file, unknown.option)} can start at any time"
+    if unknown.what == "satisfies":
+        return f"{_name(file, unknown.option)} SATISFIES {_want(file, unknown.want)}"
     if unknown.what == "other ways":
         places = _names(file.places)
         there = f"there are other WAYs from {places[unknown.origin or '']} to "
@@ -336,8 +368,10 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
 
 
 def _record(file: File, clock: _Clock, record: str) -> str:
-    """One FACT or DECISION in words."""
-    found = next(each for each in (*file.facts, *file.locks) if each.id == record)
+    """One FACT, WANT or DECISION in words."""
+    found = next(each for each in (*file.facts, *file.wants, *file.locks) if each.id == record)
+    if isinstance(found, Want):
+        return f"{_want(file, found.id)} is a must for {_people(file, found.musts)}"
     if isinstance(found, Complete):
         places = _names(file.places)
         first = clock.day(found.earliest)
@@ -363,6 +397,10 @@ def _record(file: File, clock: _Clock, record: str) -> str:
         if found.contingent:
             return f"{name} takes between {_span(found.shortest)} and {_span(found.longest)}"
         return f"{name} takes {_span(found.shortest)}"
+    if isinstance(found, Satisfies):
+        if not found.degree:
+            return f"{name} does not SATISFY {_want(file, found.want)}"
+        return f"{name} SATISFIES {_want(file, found.want)}, {found.degree} out of 10"
     return _cutoff(file, name, found)
 
 
@@ -379,7 +417,7 @@ def _starts_at(file: File, option: str | None) -> str:
     return _names(file.places)[origin]
 
 
-def _names(records: Sequence[Person | Place | Option | Way]) -> dict[str, str]:
+def _names(records: Sequence[Person | Place | Option | Way | Want]) -> dict[str, str]:
     """The name to show for each record, so that no two records show the same.
 
     A record whose name another record has shows its id too. If two would still show the same,
@@ -398,6 +436,11 @@ def _names(records: Sequence[Person | Place | Option | Way]) -> dict[str, str]:
 def _name(file: File, id: str | None) -> str:
     """The name of an OPTION or a WAY."""
     return _names((*file.options, *file.ways)).get(id or "", "another WAY")
+
+
+def _want(file: File, id: str | None) -> str:
+    """The name of a WANT."""
+    return _names(file.wants)[id or ""]
 
 
 def _people(file: File, persons: tuple[str, ...]) -> str:
