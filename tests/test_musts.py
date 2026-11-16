@@ -42,7 +42,7 @@ from tests.test_cross_check import any_choice, possible_world, random_trip, work
 
 def another(person: str, want: str = "deep-dish") -> Unknown:
     """Another OPTION for a WANT, outside the FILE, that this PERSON can take part in."""
-    return Unknown("other options", want=want, person=person)
+    return Unknown("another option", want=want, person=person)
 
 
 def whether(option: str, want: str = "deep-dish") -> Unknown:
@@ -270,6 +270,27 @@ def test_facts_about_a_listed_option_come_before_another_option() -> None:
     assert compiler.works(file, by_itself)
 
 
+def test_a_report_counts_conditions_and_names_listed_options_first() -> None:
+    """Pizza and a view are both musts for Alex. One listed OPTION might SATISFY pizza.
+
+    The report asks for one FACT about that OPTION and for another OPTION for the view. One
+    OPTION outside the FILE could deliver both, but that would be two conditions.
+    """
+    facts = [*at_seven("supper"), satisfies("supper", "a-view", 0)]
+    wants = [must("deep-dish", "alex"), must("a-view", "alex")]
+    file = trip(["alex"], ["loop"], [stays("supper", "loop")], facts, [], wants=wants)
+    found = checked(file)
+    assert found.missing == (
+        (Missing(whether("supper"), None), Missing(another("alex", "a-view"), None)),
+    )
+    assert report.as_text(file, found).splitlines()[2] == (
+        "The trip works if supper SATISFIES deep-dish and another OPTION that SATISFIES a-view"
+        " is found for alex."
+    )
+    both_found = with_these_at_best(file, [another("alex"), another("alex", "a-view")])
+    assert answers.any_works(file, both_found)
+
+
 def test_a_must_alone_never_makes_a_trip_infeasible() -> None:
     """Nothing is listed at all. Another OPTION might still be found."""
     file = trip(["alex"], [], [], [], [], wants=[must("deep-dish", "alex")])
@@ -371,15 +392,17 @@ def test_the_report_says_for_whom_another_option_would_have_to_be_found() -> Non
     )
     found = checked(file)
     assert report.as_text(file, found).splitlines()[2:] == [
-        "The trip works if another OPTION that SATISFIES deep-dish is found for alex and sam.",
+        "The trip works if another OPTION that SATISFIES deep-dish is found for each of alex"
+        " and sam.",
         "",
         "Another OPTION helps only if the PERSON it is for can take part in it and still do"
-        " everything else the trip asks of them.",
+        " everything else the trip asks of them. One OPTION can be found for several PERSONs"
+        " and several WANTs.",
     ]
     assert report.as_json(file, found)["missing"] == [
         [
-            {"what": "other options", "want": "deep-dish", "person": "alex", "at_most": None},
-            {"what": "other options", "want": "deep-dish", "person": "sam", "at_most": None},
+            {"what": "another option", "want": "deep-dish", "person": "alex", "at_most": None},
+            {"what": "another option", "want": "deep-dish", "person": "sam", "at_most": None},
         ]
     ]
 
@@ -426,7 +449,7 @@ def test_the_two_checkers_agree_on_random_trips_with_musts() -> None:
         found = checked(file)
         seen.add(found.answer)
         kinds = {needed.unknown.what for enough in found.missing for needed in enough}
-        another_option += "other options" in kinds
+        another_option += "another option" in kinds
         satisfying += "satisfies" in kinds
     assert seen == set(Answer)
     assert another_option > 10

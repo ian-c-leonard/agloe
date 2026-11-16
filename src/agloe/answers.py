@@ -139,19 +139,23 @@ def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[str, ..
 def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
     """The sets of unknown FACTs that would be enough if they turned out well.
 
-    Each set makes the TRIP FEASIBLE with every other unknown FACT at its worst. Another OPTION
-    stands in for a listed OPTION and every FACT about it, so it is counted apart. The sets
-    returned need the fewest other OPTIONs, and among those they have the fewest FACTs. A set of
-    one length of time comes with its limit.
+    Each set makes the TRIP FEASIBLE with every other unknown FACT at its worst. A set of one
+    length of time comes with its limit.
+
+    Which sets a report names is a choice, and the rules page states it. A report says first
+    what to find out about the OPTIONs and WAYs the FILE lists. "Another OPTION is found for
+    this WANT and this PERSON" asks for something new, and stands in for a listed OPTION and
+    every FACT about it. So the sets returned ask for the fewest of those, and among them they
+    have the fewest FACTs. The count is of WANTs and PERSONs, whichever OPTIONs are found.
     """
     every = unknowns(file)
-    facts = [unknown for unknown in every if unknown.what != "other options"]
-    others = [unknown for unknown in every if unknown.what == "other options"]
-    for count in range(len(others) + 1):
-        # Some other OPTIONs can be enough only if they are with every FACT at its best.
+    facts = [unknown for unknown in every if unknown.what != "another option"]
+    to_find = [unknown for unknown in every if unknown.what == "another option"]
+    for count in range(len(to_find) + 1):
+        # Asking for these can be enough only if it is with every FACT at its best.
         hopeful = [
             some
-            for some in combinations(others, count)
+            for some in combinations(to_find, count)
             if works(file, with_these_at_best(file, (*facts, *some)))
         ]
         for size in range(len(facts) + 1 if hopeful else 0):
@@ -175,7 +179,7 @@ def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
 
     None for an unknown that is not a length of time, and None when any length would do.
     """
-    if unknown.what in ("start", "satisfies", "other options"):
+    if unknown.what in ("start", "satisfies", "another option"):
         return None
 
     def enough(seconds: int) -> bool:

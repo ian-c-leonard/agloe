@@ -100,9 +100,10 @@ class World:
     and the longest time of each listed WAY, and the longest is None when there is no limit.
 
     ``satisfies`` says, for an OPTION and a WANT, whether the OPTION SATISFIES the WANT. None
-    means that nobody knows. ``other_options`` holds each WANT and PERSON for whom there is
-    another OPTION: one outside the FILE that SATISFIES the WANT, and that the PERSON can take
-    part in whatever else they do.
+    means that nobody knows. ``another_option`` holds each WANT and PERSON for whom another
+    OPTION is found: one outside the FILE that SATISFIES the WANT, and that the PERSON can take
+    part in whatever else they do. It holds conditions, one for each WANT and PERSON. It does
+    not say how many OPTIONs meet them: one OPTION can be found for several.
     """
 
     terms: Mapping[str, Terms]
@@ -114,7 +115,7 @@ class World:
     satisfies: Mapping[tuple[str, str], bool | None] = field(
         default_factory=dict[tuple[str, str], bool | None]
     )
-    other_options: frozenset[tuple[str, str]] = frozenset()
+    another_option: frozenset[tuple[str, str]] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -123,8 +124,9 @@ class Unknown:
 
     ``what`` is "start", "duration" or "cutoff" for an OPTION, "duration" for a WAY, or "other
     ways" from one PLACE to another: unlisted WAYs that go straight there. It is "satisfies" for
-    an OPTION and a WANT, or "other options" for a WANT and a PERSON: an OPTION outside the FILE
-    that SATISFIES the WANT, and that the PERSON can take part in.
+    an OPTION and a WANT, or "another option" for a WANT and a PERSON: an OPTION outside the FILE
+    that SATISFIES the WANT, and that the PERSON can take part in. That is one condition for one
+    WANT and one PERSON, whichever OPTION meets it.
     """
 
     what: str
@@ -166,7 +168,7 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
                 out.append(Unknown("other ways", origin=origin.id, destination=destination.id))
     for want in musts:
         for person in _in_file_order_of_persons(file, want.musts):
-            out.append(Unknown("other options", want=want.id, person=person))
+            out.append(Unknown("another option", want=want.id, person=person))
     return tuple(out)
 
 
@@ -262,13 +264,13 @@ def _world(
             else:
                 turns_out_well = well(Unknown("satisfies", option.id, want=want.id))
                 satisfies[option.id, want.id] = True if turns_out_well else None
-    other_options = frozenset(
+    another_option = frozenset(
         (want.id, person)
         for want in file.wants
         for person in want.musts
-        if well(Unknown("other options", want=want.id, person=person))
+        if well(Unknown("another option", want=want.id, person=person))
     )
-    return World(terms, unlisted, unlisted_takes, takes, satisfies, other_options)
+    return World(terms, unlisted, unlisted_takes, takes, satisfies, another_option)
 
 
 # ------------------------------- The CONSTRAINTs -------------------------------
@@ -419,7 +421,7 @@ def _musts(file: File, world: World, taking_part: Mapping[str, tuple[str, ...]])
             if world.satisfies[option, want.id]
             for person in persons
         }
-        met |= {person for wanted, person in world.other_options if wanted == want.id}
+        met |= {person for wanted, person in world.another_option if wanted == want.id}
         unmet = [person for person in want.musts if person not in met]
         if unmet:
             who = _in_file_order_of_persons(file, unmet)

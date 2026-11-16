@@ -13,6 +13,7 @@ import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from functools import cache
 from importlib import resources
 from pathlib import Path
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 _DEEPEST = 16  # a FILE that follows the format nests far less deeply than this
 _LENGTH = re.compile(r"PT(?:([0-9]{1,9})H)?(?:([0-9]{1,9})M)?(?:([0-9]{1,9})S)?")
+_MOST_DIGITS = 9  # a whole number in a FILE has far fewer digits; a longer one stays as written
 
 
 class Unwritable(ValueError):
@@ -297,6 +299,7 @@ def read(path: Path) -> File:
             path.read_text(encoding="utf-8"),
             object_pairs_hook=_Pairs,
             parse_constant=no_constants,
+            parse_float=_exactly,
         )
     except ValueError as problem:
         raise FileError([f"not readable as JSON: {problem}"]) from problem
@@ -313,6 +316,30 @@ def read(path: Path) -> File:
 
 class _Pairs(list[tuple[str, object]]):
     """One JSON object as it was written: its keys and values in order, repeats included."""
+
+
+class _AsWritten(Decimal):
+    """A number that is not whole, kept exactly as the FILE writes it and shown that way."""
+
+    def __repr__(self) -> str:
+        return str(self)
+
+
+def _exactly(text: str) -> int | _AsWritten:
+    """A number written with a fraction or an exponent, with nothing rounded.
+
+    Binary floating point would turn 9.9999999999999999 into 10. A whole number such as 10.0
+    becomes the same whole number. Anything else stays exactly as written, so that the schema
+    refuses it where it asks for a whole number.
+    """
+    try:
+        value = _AsWritten(text)
+        # ``adjusted`` is the power of ten of the first digit: no arithmetic, so no overflow.
+        small = value.is_zero() or value.adjusted() < _MOST_DIGITS
+        whole = small and value == value.to_integral_value()
+    except ArithmeticError:
+        raise ValueError(f"{text} is not a number the format can read") from None
+    return int(value) if whole else value
 
 
 def _stated_once(value: object, where: str, problems: list[str]) -> object:

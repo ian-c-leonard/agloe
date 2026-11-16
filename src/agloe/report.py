@@ -211,12 +211,18 @@ def as_text(file: File, report: Report) -> str:
         kinds = {needed.unknown.what for enough in report.missing for needed in enough}
         if "other ways" in kinds:
             lines += ["", "Other WAYs help only if they can be taken when the plan needs them."]
-        if "other options" in kinds:
+        if "another option" in kinds:
             lines += [
                 "",
                 "Another OPTION helps only if the PERSON it is for can take part in it and still"
                 " do everything else the trip asks of them.",
             ]
+            most = max(
+                sum(needed.unknown.what == "another option" for needed in enough)
+                for enough in report.missing
+            )
+            if most > 1:
+                lines[-1] += " One OPTION can be found for several PERSONs and several WANTs."
     return "\n".join(lines) + "\n"
 
 
@@ -322,19 +328,21 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
 def _case(file: File, enough: Sequence[Missing]) -> str:
     """One set of unknown FACTs that would be enough, in words.
 
-    PERSONs who need another OPTION for the same WANT are named together.
+    PERSONs who need another OPTION for the same WANT are named together, as "each of". The
+    condition is one for each PERSON: whether one OPTION or several meet it is left open.
     """
     parts: list[str] = []
     for_whom: dict[str | None, list[str]] = {}
     for needed in enough:
         unknown = needed.unknown
-        if unknown.what == "other options":
+        if unknown.what == "another option":
             for_whom.setdefault(unknown.want, []).append(unknown.person or "")
         else:
             parts.append(_wanted(file, needed, len(enough) == 1))
     for want, persons in for_whom.items():
         who = _people(file, tuple(persons))
-        parts.append(f"another OPTION that SATISFIES {_want(file, want)} is found for {who}")
+        each = "each of " if len(persons) > 1 else ""
+        parts.append(f"another OPTION that SATISFIES {_want(file, want)} is found for {each}{who}")
     return " and ".join(parts)
 
 

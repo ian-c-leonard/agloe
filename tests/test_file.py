@@ -531,3 +531,59 @@ def test_an_option_has_one_satisfies_fact_for_each_want() -> None:
     document = with_a_window_seat()
     document["facts"].append(satisfies("blue-line", "window-seat", 0))
     assert load(document).satisfies("blue-line", "window-seat") is not None
+
+
+def written_with(tmp_path: Path, degree: str, of: str) -> Path:
+    """The story on disk, with one degree written exactly as given."""
+    document = with_a_window_seat()
+    if of == "want":
+        document["wants"][0]["holders"][0]["degree"] = "DEGREE"
+    else:
+        document["facts"][-1]["satisfies"]["degree"] = "DEGREE"
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(document).replace('"DEGREE"', degree))
+    return path
+
+
+@pytest.mark.parametrize("degree", ["9.9999999999999999", "10.000000000000000000001", "1e1000"])
+def test_a_degree_of_want_is_not_rounded_to_ten(tmp_path: Path, degree: str) -> None:
+    with pytest.raises(FileError, match="/wants/0/holders/0/degree: 10 was expected"):
+        read(written_with(tmp_path, degree, of="want"))
+
+
+@pytest.mark.parametrize("degree", ["10", "10.0", "1e1", "100e-1"])
+def test_ten_can_be_written_in_any_way_that_is_exactly_ten(tmp_path: Path, degree: str) -> None:
+    assert read(written_with(tmp_path, degree, of="want")).wants[0].musts == ("alex",)
+
+
+@pytest.mark.parametrize(
+    "degree",
+    ["1.0000000000000001", "-1e-4000", "1e-999999999", "0.5", "1e400", "1e999999999", "11.0"],
+)
+def test_a_degree_of_satisfaction_is_not_rounded_to_a_whole_number(
+    tmp_path: Path, degree: str
+) -> None:
+    with pytest.raises(FileError) as refused:
+        read(written_with(tmp_path, degree, of="fact"))
+    assert str(refused.value).startswith("/facts/")
+
+
+@pytest.mark.parametrize(("degree", "whole"), [("8.0", 8), ("0.5e1", 5), ("0.0", 0), ("-0.0", 0)])
+def test_a_whole_degree_of_satisfaction_can_be_written_with_a_fraction(
+    tmp_path: Path, degree: str, whole: int
+) -> None:
+    stated = read(written_with(tmp_path, degree, of="fact")).satisfies("flight", "window-seat")
+    assert stated is not None
+    assert (stated.degree, type(stated.degree)) == (whole, int)
+
+
+def test_a_number_too_large_to_read_is_refused(tmp_path: Path) -> None:
+    path = written_with(tmp_path, "1e99999999999999999999", of="fact")
+    with pytest.raises(FileError, match="is not a number the format can read"):
+        read(path)
+
+
+def test_a_number_that_is_not_whole_is_shown_as_written(tmp_path: Path) -> None:
+    with pytest.raises(FileError) as refused:
+        read(written_with(tmp_path, "1.0000000000000001", of="fact"))
+    assert "1.0000000000000001 is not of type 'integer'" in str(refused.value)

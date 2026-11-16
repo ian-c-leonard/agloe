@@ -255,7 +255,7 @@ class _Search:
                 if world.satisfies[option.id, want.id]
             ]
             for number, person in enumerate(file.persons):
-                elsewhere = (want.id, person.id) in world.other_options
+                elsewhere = (want.id, person.id) in world.another_option
                 if person.id in want.musts and not elsewhere:
                     meets[number].update(would)
                     needed.append([number, *would])
