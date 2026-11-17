@@ -169,7 +169,19 @@ class Lock:
     persons: tuple[str, ...]
 
 
-type Fact = Start | Duration | Cutoff | Complete | Satisfies
+@dataclass(frozen=True)
+class CompleteFor:
+    """A FACT: the FILE states every OPTION that SATISFIES this WANT.
+
+    Each one is listed, with a FACT that it SATISFIES the WANT. So an OPTION with no such FACT
+    does not SATISFY it, and no OPTION outside the FILE does.
+    """
+
+    id: str
+    want: str
+
+
+type Fact = Start | Duration | Cutoff | Complete | Satisfies | CompleteFor
 
 
 @dataclass(frozen=True)
@@ -184,6 +196,9 @@ class File:
     facts: tuple[Fact, ...]
     locks: tuple[Lock, ...]
     zone: str = "UTC"  # the time zone of the first time in the FILE; reports show times in it
+    # Each OPTION and WANT about which a FACT has been taken out. What that FACT stated is then
+    # unknown, even where another FACT says the WANT's set is COMPLETE.
+    unsaid: frozenset[tuple[str, str]] = frozenset()
 
     def option(self, id: str) -> Option:
         return next(option for option in self.options if option.id == id)
@@ -207,14 +222,42 @@ class File:
                 return fact
         return None
 
+    def complete_for(self, want: str) -> CompleteFor | None:
+        """The FACT that the FILE states every OPTION that SATISFIES this WANT, if there is one."""
+        return next((f for f in self.facts if isinstance(f, CompleteFor) and f.want == want), None)
+
+    def says(self, option: str, want: str) -> bool | None:
+        """Whether this OPTION SATISFIES this WANT, as far as the FILE says. None: nobody knows.
+
+        A FACT about the two settles it. Without one, a FACT that the WANT's set is COMPLETE
+        settles it too: the OPTION does not. That does not hold for an OPTION and a WANT about
+        which a FACT has been taken out: there nobody knows.
+        """
+        stated = self.satisfies(option, want)
+        if stated is not None:
+            return stated.degree > 0
+        if self.complete_for(want) is not None and (option, want) not in self.unsaid:
+            return False
+        return None
+
     def without(self, record: str) -> File:
         """The same FILE with one FACT, WANT or DECISION taken out.
 
-        What a FACT stated is then unknown. A WANT that is taken out stays in the FILE with no
-        holders, so it asks nothing of anyone and the FACTs about it still name a WANT.
+        What a FACT stated is then unknown. That is more than leaving the FACT out. Where
+        another FACT says a WANT's set is COMPLETE, an OPTION with no FACT about the WANT does
+        not SATISFY it. An OPTION whose FACT about the WANT was taken out might.
+
+        A WANT that is taken out stays in the FILE with no holders, so it asks nothing of anyone
+        and the FACTs about it still name a WANT.
         """
+        forgotten = {
+            (fact.option, fact.want)
+            for fact in self.facts
+            if isinstance(fact, Satisfies) and fact.id == record
+        }
         return replace(
             self,
+            unsaid=self.unsaid | forgotten,
             wants=tuple(
                 replace(want, musts=(), must_nots=()) if want.id == record else want
                 for want in self.wants
@@ -498,6 +541,14 @@ def load(document: object) -> File:
         claim(where, fact["id"])
         if "complete" in fact:
             whole = fact["complete"]
+            if "satisfies" in whole:
+                known(where, whole["satisfies"], "WANT", want_ids)
+                if (whole["satisfies"], CompleteFor) in stated:
+                    about = whole["satisfies"]
+                    problems.append(f"{where}: another FACT already states this about {about}")
+                stated.add((whole["satisfies"], CompleteFor))
+                facts.append(CompleteFor(fact["id"], whole["satisfies"]))
+                continue
             origin, destination = whole.get("from"), whole.get("to")
             for place in (origin, destination):
                 if place is not None:

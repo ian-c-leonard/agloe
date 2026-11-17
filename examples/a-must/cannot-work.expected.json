@@ -1,0 +1,11 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "pizzeria-time",
+    "pizzeria-length",
+    "show-time",
+    "every-deep-dish-place",
+    "deep-dish",
+    "lock-show"
+  ]
+}

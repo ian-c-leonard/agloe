@@ -51,19 +51,24 @@ def works(file: File, world: World) -> bool:
 
 
 def stuck(file: File) -> frozenset[str] | None:
-    """FACTs and DECISIONs that rule out every ITINERARY by themselves, or None if one works.
+    """FACTs, WANTs and DECISIONs that rule out every ITINERARY by themselves, or None.
 
     The question is asked in the best case. The set returned is small: no record can be taken
     out of it. It need not be the conflict the report names, which is found in the FILE's order.
     This search goes the other way, from the last record to the first. That takes the DECISIONs
     out before the FACTs, and with fewer LOCKs to honor each proof is quick.
+
+    A FILE from which FACTs were taken out can have several best cases. The solver picks one
+    with its choice, and the reference checker must agree that the choice works in one of them.
     """
     world = reference.best_case(file)
     search = _Search(file, world, switched=True)
     records = [record.id for record in (*file.facts, *file.wants, *file.locks)]
     choice, needed = search.clash(records)
     if choice is not None:
-        _checked(file, world, choice)
+        best = reference.best_cases(file)
+        if all(reference.scheduled(file, each, *choice) is None for each in best):
+            raise AssertionError("the solver chose PERSONs and orders that the rules refuse")
         return None
     while True:  # ask again with only the records the proof used, until it uses them all
         choice, fewer = search.clash([record for record in records if record in needed])
@@ -239,36 +244,14 @@ class _Search:
         self.turn = [model.new_int_var(0, last, f"turn {option.id}") for option in options]
 
     def _choose_who_takes_part(self) -> None:
-        """Who takes part in each OPTION. LOCKs are honored, and an unusable OPTION is left out.
-
-        Every must is met: the PERSON takes part in an OPTION that SATISFIES the WANT, unless
-        the world has another OPTION for the WANT and the PERSON. Every must-not is kept: the
-        PERSON takes part in no OPTION that SATISFIES the WANT, or that might.
-
-        With switches, the world is the best case. There another OPTION meets every must, and
-        an OPTION might SATISFY a WANT only where a FACT says it does. So a must-not applies
-        only while that FACT and the WANT are both switched on.
-        """
-        model, file, world = self.model, self.file, self.world
-        # For each PERSON, the OPTIONs that would meet a must of theirs in this world.
-        meets: list[set[int]] = [set() for _ in file.persons]
-        needed: list[list[int]] = []  # for each must of each PERSON, the OPTIONs that meet it
-        for want in file.wants:
-            would = [
-                index
-                for index, option in enumerate(file.options)
-                if (option.id, want.id) in world.satisfies
-            ]
-            for number, person in enumerate(file.persons):
-                elsewhere = (want.id, person.id) in world.another_option
-                if person.id in want.musts and not elsewhere:
-                    meets[number].update(would)
-                    needed.append([number, *would])
+        """Who takes part in each OPTION. LOCKs are honored, and an unusable OPTION is left out."""
+        model, file = self.model, self.file
         self.takes = [
             [model.new_bool_var(f"takes {person.id} {option.id}") for option in file.options]
             for person in file.persons
         ]
         self.used = [model.new_bool_var(f"used {option.id}") for option in file.options]
+        meets = self._hold_to_the_wants()
         for index, option in enumerate(file.options):
             model.add_max_equality(self.used[index], [0, *(row[index] for row in self.takes)])
             for number, person in enumerate(file.persons):
@@ -284,9 +267,9 @@ class _Search:
                     else:
                         _when(model.add(takes == 1), given)
                 # A PERSON gains nothing by staying somewhere unless a LOCK asks them to, or
-                # the stay meets a must of theirs. Without the stay they are in the same PLACE at
-                # the same times, and every CONSTRAINT is as easy to meet or easier. So the model
-                # leaves such stays out.
+                # the stay could meet a must of theirs. Without the stay they are in the same
+                # PLACE at the same times, and every CONSTRAINT is as easy to meet or easier.
+                # So the model leaves such stays out.
                 wanted = index in meets[number]
                 if not self.usable[index] or (not self.moves[index] and not asking and not wanted):
                     model.add(takes == 0)
@@ -294,23 +277,78 @@ class _Search:
                     switches = [each for each in asking if each is not None]
                     if len(switches) == len(asking):
                         model.add_bool_or([takes.negated(), *switches])
-        for number, *would in needed:
-            model.add_bool_or([self.takes[number][index] for index in would])
+
+    def _hold_to_the_wants(self) -> list[set[int]]:
+        """Every must is met and every must-not is kept. Returns what could meet a must.
+
+        That is, for each PERSON, the OPTIONs that could meet a must of theirs.
+        """
+        if self.switch:
+            return self._hold_to_the_wants_with_switches()
+        model, file, world = self.model, self.file, self.world
+        meets: list[set[int]] = [set() for _ in file.persons]
         for want in file.wants:
             for index, option in enumerate(file.options):
-                if (option.id, want.id) not in world.might_satisfy:
-                    continue
+                if (option.id, want.id) in world.might_satisfy:
+                    for number, person in enumerate(file.persons):
+                        if person.id in want.must_nots:
+                            model.add(self.takes[number][index] == 0)
+            would = [
+                index
+                for index, option in enumerate(file.options)
+                if (option.id, want.id) in world.satisfies
+            ]
+            for number, person in enumerate(file.persons):
+                elsewhere = (want.id, person.id) in world.another_option
+                if person.id in want.musts and not elsewhere:
+                    meets[number].update(would)
+                    model.add_bool_or([self.takes[number][index] for index in would])
+        return meets
+
+    def _hold_to_the_wants_with_switches(self) -> list[set[int]]:
+        """The same where each FACT and WANT applies only if switched on, in the best case.
+
+        A FACT that is switched off is unknown. So whether an OPTION SATISFIES a WANT is the
+        solver's to choose here: it picks the possible world as well as the plan. A FACT about
+        the two settles it while that FACT is switched on. So does a FACT that the WANT's set is
+        COMPLETE, for an OPTION that never had a FACT about the WANT: it does not SATISFY it.
+
+        A must needs an OPTION of the FILE only while a FACT says that the WANT's set is
+        COMPLETE. Otherwise another OPTION meets it.
+        """
+        model, file = self.model, self.file
+        meets: list[set[int]] = [set() for _ in file.persons]
+        for want in file.wants:
+            asked = self.switch[want.id]
+            whole = file.complete_for(want.id)
+            closed = None if whole is None else self.switch[whole.id]
+            does: list[cp_model.IntVar] = []
+            for option in file.options:
+                satisfies = model.new_bool_var(f"{option.id} satisfies {want.id}")
+                does.append(satisfies)
                 stated = file.satisfies(option.id, want.id)
-                given = [
-                    self.switch[record.id]
-                    for record in (stated, want)
-                    if record is not None and record.id in self.switch
-                ]
-                for number, person in enumerate(file.persons):
-                    if person.id in want.must_nots:
-                        stays_clear = model.add(self.takes[number][index] == 0)
-                        if given:
-                            _when(stays_clear, *given)
+                if stated is not None:
+                    turns_out = 1 if stated.degree > 0 else 0
+                    _when(model.add(satisfies == turns_out), self.switch[stated.id])
+                elif closed is not None and (option.id, want.id) not in file.unsaid:
+                    _when(model.add(satisfies == 0), closed)
+            for number, person in enumerate(file.persons):
+                takes = self.takes[number]
+                if person.id in want.must_nots:
+                    for index, satisfies in enumerate(does):
+                        model.add_bool_or(
+                            [asked.negated(), takes[index].negated(), satisfies.negated()]
+                        )
+                if person.id in want.musts and closed is not None:
+                    meets[number].update(range(len(file.options)))
+                    met: list[cp_model.IntVar] = []
+                    for index, satisfies in enumerate(does):
+                        here = model.new_bool_var(f"{person.id} gets {want.id} by {index}")
+                        model.add_implication(here, takes[index])
+                        model.add_implication(here, satisfies)
+                        met.append(here)
+                    model.add_bool_or([asked.negated(), closed.negated(), *met])
+        return meets
 
     def _lay_out_path(self, number: int) -> None:
         """One PERSON's path: a circuit through a starting point and the OPTIONs they do.

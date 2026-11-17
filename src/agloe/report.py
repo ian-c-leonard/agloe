@@ -18,6 +18,7 @@ from datetime import date, timedelta
 from agloe.answers import Answer, Missing, Report
 from agloe.file import (
     Complete,
+    CompleteFor,
     Cutoff,
     Duration,
     File,
@@ -409,6 +410,8 @@ def _record(file: File, clock: _Clock, record: str) -> str:
         else:
             ways = f"every way straight from {places[found.origin]} to {places[found.destination]}"
         return f"{ways} that leaves between {span} is listed"
+    if isinstance(found, CompleteFor):
+        return f"every OPTION that SATISFIES {_want(file, found.want)} is listed"
     name = _name(file, found.option)
     if isinstance(found, Lock):
         verb = "takes" if len(found.persons) == 1 else "take"

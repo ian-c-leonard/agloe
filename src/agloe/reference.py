@@ -157,9 +157,9 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
 
     That an OPTION SATISFIES a WANT can help only where the WANT is a must for some PERSON,
     and that it does not only where the WANT is a must-not for some PERSON. So only those are
-    listed.
+    listed. Where a FACT says a WANT's set is COMPLETE, nothing about the WANT is unknown.
     """
-    musts = [want for want in file.wants if want.musts]
+    musts = [want for want in file.wants if want.musts and file.complete_for(want.id) is None]
     out: list[Unknown] = []
     for option in file.options:
         if file.start(option.id) is None:
@@ -169,7 +169,7 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
         if file.cutoff(option.id) is None:
             out.append(Unknown("cutoff", option.id))
         for want in file.wants:
-            if file.satisfies(option.id, want.id) is None:
+            if file.says(option.id, want.id) is None:
                 if want.musts:
                     out.append(Unknown("satisfies", option.id, want=want.id))
                 if want.must_nots:
@@ -190,6 +190,33 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
 def best_case(file: File) -> World:
     """The possible world in which every unknown FACT turns out as well as it can."""
     return _world(file, None)
+
+
+def best_cases(file: File) -> list[World]:
+    """The best case of a FILE from which FACTs may have been taken out: one world or several.
+
+    A FILE as it is read has one best case. An OPTION with no FACT about a WANT does not
+    SATISFY it there, and that is as good as it gets: another OPTION meets every must. Not so
+    once a FACT about an OPTION and a WANT is taken out while the WANT's set stays COMPLETE.
+    No other OPTION can stand in, so whether that OPTION SATISFIES the WANT may be needed by a
+    must and feared by a must-not. Then each way it could turn out is a best case of its own.
+    """
+    best = best_case(file)
+    open_to_both = [
+        (option.id, want.id)
+        for option in file.options
+        for want in file.wants
+        if want.musts
+        and file.complete_for(want.id) is not None
+        and file.says(option.id, want.id) is None
+    ]
+    worlds: list[World] = []
+    for chosen in product([False, True], repeat=len(open_to_both)):
+        does = {pair for pair, yes in zip(open_to_both, chosen, strict=True) if yes}
+        worlds.append(
+            replace(best, satisfies=best.satisfies | does, might_satisfy=best.might_satisfy | does)
+        )
+    return worlds
 
 
 def worst_case(file: File) -> World:
@@ -238,7 +265,7 @@ def no_better_than(file: File, found: Iterable[Unknown]) -> World:
         (option.id, want.id)
         for option in file.options
         for want in file.wants
-        if file.satisfies(option.id, want.id) is None
+        if file.says(option.id, want.id) is None
     }
     conditions = frozenset(
         (each.want, each.person)
@@ -319,9 +346,9 @@ def _world(
     for option in file.options:
         for want in file.wants:
             pair = (option.id, want.id)
-            stated = file.satisfies(*pair)
-            if stated is not None:
-                if stated.degree > 0:
+            said = file.says(*pair)
+            if said is not None:
+                if said:
                     satisfies.add(pair)
                     might_satisfy.add(pair)
                 continue
@@ -335,7 +362,8 @@ def _world(
         (want.id, person)
         for want in file.wants
         for person in want.musts
-        if well(Unknown("another option", want=want.id, person=person))
+        if file.complete_for(want.id) is None
+        and well(Unknown("another option", want=want.id, person=person))
     )
     return World(
         terms,

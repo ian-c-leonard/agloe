@@ -56,9 +56,14 @@ A newer FACT that contradicts an older one about the same thing: the 15:55 saili
 
 ### COMPLETE
 
-Describes a set of OPTIONs and WAYs that a FACT states the FILE holds in full: everything that goes straight from one PLACE to another and starts within a stated time span. Nothing unlisted does. The FACT can name both PLACEs, one of them, or neither, and a PLACE it does not name stands for every PLACE. A COMPLETE set that is empty means "we looked, and there is nothing". A FACT that one set is COMPLETE says nothing about any other set, and so nothing about travel through a third PLACE.
+Describes a set of OPTIONs and WAYs that a FACT states the FILE holds in full. There are two kinds of set.
 
-*Uses:* FACT, FILE, → OPTION, → WAY, → PLACE.
+- Everything that goes straight from one PLACE to another and starts within a stated time span. Nothing unlisted does. The FACT can name both PLACEs, one of them, or neither, and a PLACE it does not name stands for every PLACE.
+- Every OPTION that SATISFIES a stated WANT. Each one is in the FILE, with a FACT that it SATISFIES the WANT. Nothing else does.
+
+A COMPLETE set that is empty means "we looked, and there is nothing". A FACT that one set is COMPLETE says nothing about any other set, and so nothing about travel through a third PLACE.
+
+*Uses:* FACT, FILE, → OPTION, → WAY, → PLACE, → WANT, → SATISFIES.
 
 ### DECISION
 
@@ -188,7 +193,7 @@ The relation between a WANT and what delivers it. An OPTION SATISFIES a WANT whe
 
 Whether delivery is good or bad comes from the DEGREE OF WANT, not from SATISFIES. An overnight bus SATISFIES a WANT about overnight travel; for a holder at −7, that counts against the ITINERARY, and it always counts when the holder takes the bus for any reason.
 
-No stated relation means unknown, never "does not satisfy". A relation may be stated directly, or derived from an OPTION's FACTs: a WANT about departures before 06:00 applies to every OPTION that departs earlier.
+No stated relation means unknown, never "does not satisfy", unless a FACT says that the set of OPTIONs that SATISFY the WANT is COMPLETE. A relation may be stated directly, or derived from an OPTION's FACTs: a WANT about departures before 06:00 applies to every OPTION that departs earlier.
 
 *Uses:* WANT, OPTION, DEGREE OF WANT, FACT, → ITINERARY, → DEGREE OF SATISFACTION.
 

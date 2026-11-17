@@ -12,14 +12,14 @@ from dataclasses import dataclass
 from enum import Enum
 from itertools import combinations
 
-from agloe.file import Complete, File, Start
+from agloe.file import Complete, CompleteFor, File, Start
 from agloe.reference import (
     Broken,
     Itinerary,
     Unknown,
     World,
     any_works,
-    best_case,
+    best_cases,
     broken_as_listed,
     first_shown,
     in_world,
@@ -86,7 +86,7 @@ def check(
     if stuck is None:
 
         def every_record(given: File) -> frozenset[str] | None:
-            if works(given, best_case(given)):
+            if any(works(given, world) for world in best_cases(given)):
                 return None
             return frozenset(_records(given))
 
@@ -98,7 +98,10 @@ def check(
         chosen = plain if robust is None else robust
         used = {step.option or step.way for step in chosen}
         relies_on = [
-            fact.id for fact in file.facts if not isinstance(fact, Complete) and fact.option in used
+            fact.id
+            for fact in file.facts
+            if isinstance(fact, CompleteFor)
+            or (not isinstance(fact, Complete) and fact.option in used)
         ]
         relies_on += [want.id for want in file.wants if want.musts or want.must_nots]
         relies_on += [lock.id for lock in file.locks]
