@@ -325,12 +325,20 @@ class _Search:
                 # So the model leaves such stays out.
                 wanted = index in meets[number]
                 if not self.usable[index] or (not self.moves[index] and not asking and not wanted):
-                    model.add(takes == 0)
-                    self.left_out.add((number, index))
+                    self._rule_out(number, index)
                 elif not self.moves[index] and not wanted:
                     switches = [each for each in asking if each is not None]
                     if len(switches) == len(asking):
                         model.add_bool_or([takes.negated(), *switches])
+
+    def _rule_out(self, number: int, index: int) -> None:
+        """This PERSON takes no part in this OPTION, whatever else is chosen.
+
+        So no travel is built for them to it or from it. An OPTION that is only ruled out while
+        some record is switched on does not come here.
+        """
+        self.model.add(self.takes[number][index] == 0)
+        self.left_out.add((number, index))
 
     def _hold_to_the_wants(self) -> list[set[int]]:
         """Every must is met and every must-not is kept. Returns what could meet a must.
@@ -346,7 +354,7 @@ class _Search:
                 if (option.id, want.id) in world.might_satisfy:
                     for number, person in enumerate(file.persons):
                         if person.id in want.must_nots:
-                            model.add(self.takes[number][index] == 0)
+                            self._rule_out(number, index)
             would = [
                 index
                 for index, option in enumerate(file.options)
@@ -466,7 +474,7 @@ class _Search:
             for after, later in enumerate(options):
                 if before == after or self.endless[before]:
                     continue
-                if not (self.usable[before] and self.usable[after]):
+                if (number, before) in self.left_out or (number, after) in self.left_out:
                     continue
                 name = f"{person.id}: {later.id} after {earlier.id}"
                 if earlier.destination == later.origin:

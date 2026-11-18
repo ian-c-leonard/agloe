@@ -1,7 +1,7 @@
 """Where a PERSON starts from, and where they have to end the TRIP."""
 
 from collections.abc import Iterator, Sequence
-from itertools import combinations_with_replacement, permutations
+from itertools import combinations_with_replacement, pairwise, permutations
 from random import Random
 from time import perf_counter
 
@@ -42,6 +42,7 @@ from tests.stories import (
     lock,
     moves,
     must,
+    must_not,
     named,
     satisfies,
     seconds,
@@ -629,6 +630,48 @@ def test_no_routes_are_looked_for_from_an_option_that_cannot_happen() -> None:
     wants = [ends_at("island", "sam")]
     places = ["island", *towns]
     file = trip(["sam"], places, visit_in_town, facts, [], ways=ways, wants=wants)
+    begun = perf_counter()
+    found = checked(file)
+    assert (found.answer, found.itinerary, found.robust) == (Answer.FEASIBLE, (), True)
+    assert perf_counter() - begun < 20
+
+
+def a_long_line(*options: Document, facts: Sequence[Document], wants: Sequence[Document]) -> File:
+    """Sam, and a line of 64 PLACES from a to b with two WAYs between each two neighbours.
+
+    That gives more routes from one end to the other than a list can hold. Whoever looks for
+    them all never comes back.
+    """
+    places = ["a", *(f"m{number}" for number in range(1, 63)), "b"]
+    ways = [
+        way(f"{here}-{there}-{which}", here, there)
+        for here, there in pairwise(places)
+        for which in ("bus", "tram")
+    ]
+    lengths = [takes(each["id"], "PT1S") for each in ways]
+    return trip(["sam"], places, list(options), [*lengths, *facts], [], ways=ways, wants=wants)
+
+
+def test_no_routes_are_looked_for_from_an_option_that_a_must_not_rules_out() -> None:
+    """Sam has to end the TRIP at b. A ride from b to a SATISFIES what Sam must not have."""
+    ride = moves("ride", "b", "a")
+    facts = [any_time("ride"), lasts("ride", "PT1S"), cutoff("ride", "PT0S")]
+    facts.append(satisfies("ride", "noise"))
+    wants = [ends_at("b", "sam"), must_not("noise", "sam")]
+    file = a_long_line(ride, facts=facts, wants=wants)
+    begun = perf_counter()
+    found = checked(file)
+    assert (found.answer, found.itinerary, found.robust) == (Answer.FEASIBLE, (), True)
+    assert perf_counter() - begun < 20
+
+
+def test_no_routes_are_looked_for_between_stays_that_nobody_needs() -> None:
+    """No LOCK asks for the stay at a or the stay at b, and neither meets a must."""
+    stops = [stays("first", "a"), stays("second", "b")]
+    facts = [any_time("first"), any_time("second")]
+    facts += [lasts("first", "PT1S"), lasts("second", "PT1S")]
+    facts += [cutoff("first", "PT0S"), cutoff("second", "PT0S")]
+    file = a_long_line(*stops, facts=facts, wants=[])
     begun = perf_counter()
     found = checked(file)
     assert (found.answer, found.itinerary, found.robust) == (Answer.FEASIBLE, (), True)

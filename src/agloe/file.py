@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from functools import cache
+from functools import cache, cached_property
 from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
@@ -263,8 +263,17 @@ class File:
 
     def starts_from(self, person: str) -> StartsFrom | None:
         """The FACT about where this PERSON starts from, if the FILE states one."""
-        facts = (fact for fact in self.facts if isinstance(fact, StartsFrom))
-        return next((fact for fact in facts if fact.person == person), None)
+        return self._starts.get(person)
+
+    @cached_property
+    def _starts(self) -> dict[str, StartsFrom]:
+        """The FACT about where each PERSON starts from, looked up once."""
+        return {fact.person: fact for fact in self.facts if isinstance(fact, StartsFrom)}
+
+    @cached_property
+    def _about_the_end(self) -> frozenset[str]:
+        """Each WANT to end the TRIP at a PLACE, looked up once."""
+        return frozenset(want.id for want in self.wants if want.ends_at is not None)
 
     def complete_for(self, want: str) -> CompleteFor | None:
         """The FACT that the FILE states every OPTION that SATISFIES this WANT, if there is one."""
@@ -280,8 +289,9 @@ class File:
         stated = self.satisfies(option, want)
         if stated is not None:
             return stated.degree > 0
-        about_the_end = any(each.id == want and each.ends_at is not None for each in self.wants)
-        return None if self.complete_for(want) is None and not about_the_end else False
+        if want in self._about_the_end:
+            return False
+        return None if self.complete_for(want) is None else False
 
     def without(self, record: str) -> File:
         """The same FILE with one FACT, WANT or DECISION left out.

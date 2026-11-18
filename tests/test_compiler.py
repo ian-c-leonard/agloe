@@ -112,7 +112,7 @@ def test_times_too_far_apart_for_the_solver_get_the_reference_checkers_answer() 
 def test_a_file_with_no_start_and_no_end_leaves_no_room_for_travel_at_the_ends() -> None:
     """Sam is LOCKed for 21 visits at one PLACE, a minute apart, and one WAY elsewhere is very long.
 
-    Two more visits far away can start at any time, and nobody has to make them. The solver
+    Two rides far away can start at any time, and nobody has to take them. The solver
     leaves room for travel after each OPTION. Room for travel at two more ends would be too
     much for its numbers, and no PERSON here has a stated start or end. With the solver's own
     search for every part, the answer comes at once. The reference checker's search would try
@@ -120,7 +120,7 @@ def test_a_file_with_no_start_and_no_end_leaves_no_room_for_travel_at_the_ends()
     """
     places = [f"p{number}" for number in range(30)]
     locked = [stays(f"visit-{number}", "p0") for number in range(21)]
-    far = [stays("far-0", "p27"), stays("far-1", "p27")]
+    far = [moves("far-0", "p27", "p26"), moves("far-1", "p26", "p27")]
     ways = [way_between(f"w{number}", f"p{number}", f"p{number + 1}") for number in range(27)]
     facts = [takes(each["id"], "PT1M") for each in ways]
     facts.append(takes("long", "PT770000000H"))

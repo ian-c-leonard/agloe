@@ -928,7 +928,9 @@ def scheduled(
     WAYs the PERSONs take, unless ``by`` names them.
 
     With ``by``, only one choice of WAYs is tried: for a PERSON, by position in the FILE, and
-    the position of an OPTION in their order, the route they take after that OPTION. Without it,
+    the position of an OPTION in their order, the route they take after that OPTION. The
+    position is -1 for the route before their first OPTION, and for the one route of a PERSON
+    who takes part in no OPTION. Without it,
     ``known`` can hold the routes of this world that are already worked out.
     """
     if by is not None:
