@@ -272,9 +272,9 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
 
 
 def _kinds(file: File, records: Sequence[str]) -> str:
-    """What a list of records holds: FACTs and DECISIONs, and WANTs where it names one."""
-    wants = any(want.id in records for want in file.wants)
-    return "FACTs, WANTs and DECISIONs" if wants else "FACTs and DECISIONs"
+    """The kinds of record in a list, and no kind that is not in it: FACTs, WANTs and DECISIONs."""
+    kinds = (("FACTs", file.facts), ("WANTs", file.wants), ("DECISIONs", file.locks))
+    return _listed([kind for kind, held in kinds if any(each.id in records for each in held)])
 
 
 def together(itinerary: Itinerary) -> list[Step]:

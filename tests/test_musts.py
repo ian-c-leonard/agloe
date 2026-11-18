@@ -364,7 +364,7 @@ def test_the_report_names_the_want_and_what_satisfies_it() -> None:
     file = an_evening()
     words = report.as_text(file, checked(file)).splitlines()
     assert words[-6:] == [
-        "The plan relies on these FACTs, WANTs and DECISIONs:",
+        "The plan relies on these FACTs and WANTs:",
         "  pizzeria-time: pizzeria starts at 7:00 pm on Saturday 15 May 2027",
         "  pizzeria-length: pizzeria takes 1 h",
         "  pizzeria-cutoff: nobody has to be at river-north before pizzeria starts",
