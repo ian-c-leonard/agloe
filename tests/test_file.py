@@ -627,3 +627,18 @@ def test_a_number_that_is_not_zero_stays_refused_with_any_exponent(
 ) -> None:
     with pytest.raises(FileError):
         read(written_with(tmp_path, degree, of="fact"))
+
+
+@pytest.mark.parametrize("part", ["persons", "places", "options", "ways", "wants", "facts"])
+@pytest.mark.parametrize("record", [1, "x", None, True, [], [{"complete": 1}]])
+def test_a_record_that_is_no_object_is_refused_and_never_crashes(part: str, record: object) -> None:
+    document = trip_with_nothing()
+    document[part] = [record]
+    assert problems(document).startswith(f"/{part}/0")
+
+
+@pytest.mark.parametrize("whole", [1, "everything", None, [], {"note": 1}])
+def test_a_complete_fact_of_the_wrong_shape_is_refused_and_never_crashes(whole: object) -> None:
+    document = trip_with_nothing()
+    document["facts"] = [{"id": "x", "complete": whole}]
+    assert problems(document).startswith("/facts/0")

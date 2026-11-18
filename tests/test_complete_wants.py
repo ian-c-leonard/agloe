@@ -326,11 +326,32 @@ def test_every_conflict_is_enough_and_has_no_record_to_spare() -> None:
 def test_the_report_puts_a_complete_set_for_a_want_in_words() -> None:
     file = trip(["alex"], [], [], [every("deep-dish")], [], wants=[must("deep-dish", "alex")])
     assert report.as_text(file, checked(file)).splitlines()[2:] == [
-        "These FACTs, WANTs and DECISIONs clash. Take any one away and the trip might work."
-        " A FACT that is taken away leaves what it said unknown. Times are in UTC.",
+        "These FACTs, WANTs and DECISIONs rule out every plan by themselves. Take any one away"
+        " and they no longer do. A FACT that is taken away leaves what it said unknown."
+        " Times are in UTC.",
         "  every-deep-dish: the FILE states every OPTION that SATISFIES deep-dish: there is none",
         "  deep-dish: deep-dish is a must for alex",
     ]
+
+
+def test_a_conflict_is_one_of_perhaps_several() -> None:
+    """Two musts, each with a COMPLETE set and nothing that SATISFIES it. Either rules the trip out.
+
+    The report names one conflict. Its words claim only that these records rule out every plan
+    by themselves, and that they no longer do with one taken away. The trip still cannot work.
+    """
+    facts = [every("pizza"), every("a-view")]
+    wants = [must("pizza", "alex"), must("a-view", "alex")]
+    file = trip(["alex"], [], [], facts, [], wants=wants)
+    found = checked(file)
+    assert found.conflict == ("every-a-view", "a-view")
+    assert "rule out every plan by themselves" in report.as_text(file, found)
+    still = Remaining(file).without("every-a-view")
+    assert cannot_work(still)
+    alone = Remaining(file).without("every-pizza").without("pizza")
+    assert cannot_work(alone)
+    assert not cannot_work(alone.without("every-a-view"))
+    assert not cannot_work(alone.without("a-view"))
 
 
 def test_a_complete_set_in_words_names_the_options_that_satisfy_the_want() -> None:

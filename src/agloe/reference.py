@@ -236,7 +236,8 @@ def best_cases(remaining: Remaining) -> Iterator[World]:
     """Each best case of what is left of a FILE, one at a time. A FILE as it is read has one.
 
     In that one, an OPTION with no FACT about a WANT does not SATISFY it. That is as good as it
-    gets where another OPTION meets every must, and where the WANT's set is COMPLETE.
+    gets: another OPTION meets every must on a WANT whose set is not COMPLETE, and a COMPLETE
+    set leaves nothing unknown.
 
     An OPTION and a WANT that are reopened are different: nobody knows, and no other OPTION can
     stand in. Where the WANT is a must for some PERSON and a must-not for nobody, the best case
@@ -380,7 +381,8 @@ def _world(
     unlisted_takes = pinned[1] if pinned is not None and pinned[0].what == "other ways" else 0
     # Whether an OPTION SATISFIES a WANT helps a must and hurts a must-not. So an unknown one
     # counts for a must only where ``kind`` says it does, and against a must-not unless
-    # ``kind`` says it does not. In the best case it does not: another OPTION meets every must.
+    # ``kind`` says it does not. In the best case it does not: another OPTION meets every must
+    # on a WANT whose set is not COMPLETE, and a COMPLETE set leaves nothing unknown.
     satisfies: set[tuple[str, str]] = set()
     might_satisfy: set[tuple[str, str]] = set()
     for option in file.options:
