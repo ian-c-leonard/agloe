@@ -61,6 +61,10 @@ class WayBothWays(TypedDict):
     between: list[Id]
 
 
+class Ending(TypedDict):
+    ends_at: Id
+
+
 class Holder(TypedDict):
     person: Id
     degree: Literal[10, -10]
@@ -69,7 +73,7 @@ class Holder(TypedDict):
 class Want(TypedDict):
     id: Id
     name: Name
-    itinerary: NotRequired[Literal["ends_at_home"]]
+    itinerary: NotRequired[Ending]
     holders: list[Holder]
 
 
@@ -166,12 +170,6 @@ class StartsFrom(TypedDict):
     starts_from: Id
 
 
-class ReturnsTo(TypedDict):
-    id: Id
-    person: Id
-    returns_to: Id
-
-
 class TripStart(TypedDict):
     id: Id
     trip_starts_at: Time
@@ -206,6 +204,5 @@ class File(TypedDict):
         | Satisfies
         | CompleteForAWant
         | StartsFrom
-        | ReturnsTo
     ]
     decisions: list[Lock | TripStart | TripEnd]

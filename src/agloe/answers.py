@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 from itertools import combinations
 
-from agloe.file import Complete, CompleteFor, Fact, File, Lock, ReturnsTo, Start, StartsFrom
+from agloe.file import Complete, CompleteFor, Fact, File, Lock, Start, StartsFrom
 from agloe.reference import (
     Broken,
     Itinerary,
@@ -23,12 +23,11 @@ from agloe.reference import (
     best_cases,
     broken_as_listed,
     first_shown,
+    has_to_end_at,
     in_world,
     longest_case,
-    must_end_at_home,
     no_better_than,
     one_way_each,
-    staying,
     unknowns,
     with_these_at_best,
     with_this_long,
@@ -55,10 +54,8 @@ class Report:
     """The answer and its evidence.
 
     FEASIBLE: the ITINERARY shown, the FACTs, WANTs and DECISIONs it relies on, whether it is
-    ROBUST, and what it breaks when every CONTINGENT duration runs longest. ``stays`` holds each
-    PERSON who does nothing and the PLACE where the ITINERARY has them stay, where no FACT says
-    where they start from. INFEASIBLE: FACTs and DECISIONs that conflict. UNDETERMINED: each
-    smallest set of unknown FACTs that would be enough.
+    ROBUST, and what it breaks when every CONTINGENT duration runs longest. INFEASIBLE: FACTs and
+    DECISIONs that conflict. UNDETERMINED: each smallest set of unknown FACTs that would be enough.
     """
 
     answer: Answer
@@ -68,7 +65,6 @@ class Report:
     at_worst: tuple[Broken, ...] = ()
     conflict: tuple[str, ...] = ()
     missing: tuple[tuple[Missing, ...], ...] = ()
-    stays: tuple[tuple[str, str], ...] = ()
 
 
 type Shown = Callable[[File, World], Itinerary | None]
@@ -97,8 +93,7 @@ def check(
             return frozenset(_records(given.file))
 
         stuck = every_record
-    worst = worst_case(file)
-    plain = shown(file, worst)
+    plain = shown(file, worst_case(file))
     if plain is not None:
         longest = longest_case(file)
         robust = shown(file, longest)
@@ -106,16 +101,11 @@ def check(
         relies_on = [fact.id for fact in file.facts if _relied_on(file, chosen, fact)]
         relies_on += [want.id for want in file.wants if want.musts or want.must_nots]
         relies_on += [each.id for each in file.decisions if isinstance(each, Lock) or chosen]
-        stays = staying(file, worst, chosen)
         at_worst: tuple[Broken, ...] = ()
         if robust is None:
             # The steps keep the order the ITINERARY lists them in: that is the plan shown.
-            at_worst = tuple(broken_as_listed(file, longest, in_world(longest, chosen), stays))
-        at_home = tuple((person, place) for person, place in stays.items() if place is not None)
-        robust_too = robust is not None
-        return Report(
-            Answer.FEASIBLE, chosen, tuple(relies_on), robust_too, at_worst, stays=at_home
-        )
+            at_worst = tuple(broken_as_listed(file, longest, in_world(longest, chosen)))
+        return Report(Answer.FEASIBLE, chosen, tuple(relies_on), robust is not None, at_worst)
     enough = stuck(Remaining(file))
     if enough is not None:
         return Report(Answer.INFEASIBLE, conflict=_conflict(file, stuck, enough))
@@ -127,16 +117,14 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact) -> bool:
 
     It relies on every FACT about an OPTION or a WAY it has in it. It relies on no COMPLETE set
     of travel: it takes no unlisted WAY. It relies on where a PERSON starts from where the
-    PERSON is in it, or must end the TRIP at home: the start is then where their path begins,
-    or where they stay. It relies on where a PERSON returns to where they must end at home.
+    PERSON is in it, or has to end the TRIP at a PLACE: their path begins there, or they stay
+    there.
     """
     if isinstance(fact, CompleteFor):
         return _settles(file, itinerary, fact)
-    if isinstance(fact, ReturnsTo):
-        return must_end_at_home(file, fact.person)
     if isinstance(fact, StartsFrom):
         in_it = any(fact.person in step.persons for step in itinerary)
-        return in_it or must_end_at_home(file, fact.person)
+        return in_it or bool(has_to_end_at(file, fact.person))
     if isinstance(fact, Complete):
         return False
     return fact.option in {step.option or step.way for step in itinerary}
@@ -230,7 +218,7 @@ def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
 
     None for an unknown that is not a length of time, and None when any length would do.
     """
-    if unknown.what in ("start", "satisfies", "does not satisfy", "another option", "returns to"):
+    if unknown.what in ("start", "satisfies", "does not satisfy", "another option"):
         return None
 
     def enough(seconds: int) -> bool:

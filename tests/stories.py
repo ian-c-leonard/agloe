@@ -88,15 +88,10 @@ def starts_from(person: str, place: str) -> Document:
     return {"id": f"{person}-start", "person": person, "starts_from": place}
 
 
-def returns_to(person: str, place: str) -> Document:
-    """A FACT about where a PERSON returns to."""
-    return {"id": f"{person}-home", "person": person, "returns_to": place}
-
-
-def ends_at_home(*persons: str) -> Document:
-    """The WANT to end the TRIP at home, as a must for these PERSONs."""
+def ends_at(place: str, *persons: str, id: str = "ending") -> Document:
+    """The WANT to end the TRIP at a PLACE, as a must for these PERSONs."""
     holders = [{"person": person, "degree": 10} for person in persons]
-    return {"id": "home", "name": "home", "itinerary": "ends_at_home", "holders": holders}
+    return {"id": id, "name": id, "itinerary": {"ends_at": place}, "holders": holders}
 
 
 def trip_starts(hour: int, minute: int = 0) -> Document:

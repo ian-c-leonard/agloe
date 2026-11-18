@@ -20,7 +20,7 @@ The trip being planned, lived and recorded: the PERSONs it concerns, their WANTs
 
 ### SCOPE
 
-The TRIP's frame: its dates, the PLACE each traveling PERSON starts from and returns to, what the TRIP is for, and anything explicitly out of bounds. WANTs use the SCOPE to know which days and nights they cover. The dates are DECISIONs: one can say the time at which the TRIP starts, and one the time at which it ends. A TRIP can have either, both or neither. Nothing in an ITINERARY starts before the first or ends after the second. The two PLACEs are FACTs about a PERSON: one says where they start from, and one where they return to.
+The TRIP's frame: its dates, the PLACE each traveling PERSON starts from and returns to, what the TRIP is for, and anything explicitly out of bounds. WANTs use the SCOPE to know which days and nights they cover. The dates are DECISIONs: one can say the time at which the TRIP starts, and one the time at which it ends. A TRIP can have either, both or neither. Nothing in an ITINERARY starts before the first or ends after the second. The PLACE a PERSON starts from is a FACT. The PLACE they return to is named by a WANT to end the TRIP there.
 
 *Uses:* TRIP, PLACE, PERSON, → WANT, → DECISION, → FACT, → ITINERARY.
 
@@ -163,7 +163,7 @@ Something PERSONs want, or want to avoid, from the TRIP: a bed each night, seein
 A WANT is about one of two things:
 
 - something an OPTION can deliver, such as dinner, a bed or a visit; or
-- a property of the whole ITINERARY, such as "at most two hotel changes", written with a fixed set of operators (always, never, at most n times, at most a total amount per day or per TRIP, after, within). Ending the TRIP at the PLACE the holder returns to is such a property.
+- a property of the whole ITINERARY, such as "at most two hotel changes", written with a fixed set of operators (always, never, at most n times, at most a total amount per day or per TRIP, after, within). Ending the TRIP at a named PLACE is such a property.
 
 Each PERSON's ranking of their WANTs is recorded as a full snapshot; the latest applies. A negative WANT never adds an OPTION to a TRIP. Every traveling PERSON starts with a published set of starter WANTs for basic needs (a bed each night, getting home, meals, rest, staying together); they are stored like any other WANT and can be re-ranked or dropped.
 
@@ -260,7 +260,7 @@ The program that reads one FILE and reports, for the TRIP and for each VARIANT, 
 
 ### ITINERARY
 
-One complete way the TRIP could go: which OPTIONs happen, the exact start of each, the value chosen or assumed for each duration and the end that follows from it, which PERSONs and OBJECTs take part in each, which WAYs each PERSON takes and when, where a PERSON's path begins if no FACT says so, and, for each OPTION that needs a right, the BOOKING or OFFER that covers it, which price is paid and from which BUDGET. Where a duration is unknown, no value is assumed and the end is unknown too. In constraint-solving terms, an ITINERARY is a complete assignment of the TRIP's choices. An ITINERARY is derived by the COMPILER; it is never stored in the FILE.
+One complete way the TRIP could go: which OPTIONs happen, the exact start of each, the value chosen or assumed for each duration and the end that follows from it, which PERSONs and OBJECTs take part in each, which WAYs each PERSON takes and when, and, for each OPTION that needs a right, the BOOKING or OFFER that covers it, which price is paid and from which BUDGET. Where a duration is unknown, no value is assumed and the end is unknown too. In constraint-solving terms, an ITINERARY is a complete assignment of the TRIP's choices. An ITINERARY is derived by the COMPILER; it is never stored in the FILE.
 
 *Uses:* TRIP, OPTION, WAY, PERSON, OBJECT, BOOKING, OFFER, BUDGET, COMPILER, FILE.
 

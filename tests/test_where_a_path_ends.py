@@ -1,4 +1,4 @@
-"""Where a PERSON starts from, and ending the TRIP at home."""
+"""Where a PERSON starts from, and where they have to end the TRIP."""
 
 from collections.abc import Iterator, Sequence
 from itertools import combinations_with_replacement, permutations
@@ -6,9 +6,9 @@ from random import Random
 
 import pytest
 
-from agloe import answers, compiler, report
+from agloe import answers, compiler
 from agloe.answers import Answer, Missing, Report
-from agloe.file import File, FileError, ReturnsTo, StartsFrom, load
+from agloe.file import File, FileError, StartsFrom, load
 from agloe.reference import (
     Broken,
     Constraint,
@@ -25,7 +25,6 @@ from agloe.reference import (
     itineraries,
     needless,
     no_better_than,
-    staying,
     unknowns,
     with_these_at_best,
     worst_case,
@@ -35,13 +34,12 @@ from tests.stories import (
     at,
     complete,
     cutoff,
-    ends_at_home,
+    ends_at,
     lasts,
     lock,
     moves,
     must,
     named,
-    returns_to,
     satisfies,
     seconds,
     starts_at,
@@ -76,7 +74,7 @@ def day_out(
     wants: Sequence[Document] | None = None,
     persons: Sequence[str] = ("alex",),
 ) -> Document:
-    """Alex starts from the hotel and must end the TRIP at the cottage.
+    """Alex starts from the hotel and has to end the TRIP at the cottage.
 
     Alex is LOCKed for a visit to the museum at 2:00 pm that takes an hour. The walk between the
     hotel and the museum takes 15 minutes, and the train from the museum to the cottage takes an
@@ -84,7 +82,6 @@ def day_out(
     """
     facts = [
         starts_from("alex", "hotel"),
-        returns_to("alex", "cottage"),
         starts_at("visit", 14),
         lasts("visit", "PT1H"),
         cutoff("visit", "PT0S"),
@@ -96,7 +93,7 @@ def day_out(
         "places": named("hotel", "museum", "cottage"),
         "options": [stays("visit", "museum")],
         "ways": list(ways),
-        "wants": [ends_at_home("alex")] if wants is None else list(wants),
+        "wants": [ends_at("cottage", "alex")] if wants is None else list(wants),
         "facts": [*(fact for fact in facts if fact["id"] not in without), *more],
         "decisions": [lock("visit", *persons), *decisions],
     }
@@ -117,13 +114,9 @@ def train(person: str = "alex", end: int | None = seconds(16)) -> Step:
     return Step(None, "museum", "cottage", (person,), seconds(15), end, "train")
 
 
-def not_home(*persons: str) -> Broken:
-    return Broken(Constraint.MUST, None, persons, want="home")
-
-
-def returns(place: str | None, person: str = "alex") -> Missing:
-    """That a PERSON returns to this PLACE. None is a PLACE the FILE has yet to name."""
-    return Missing(Unknown("returns to", person=person, destination=place), None)
+def elsewhere(*persons: str, want: str = "ending") -> Broken:
+    """These PERSONs do not end the TRIP where this WANT asks."""
+    return Broken(Constraint.MUST, None, persons, want=want)
 
 
 def other_ways(origin: str, destination: str, at_most: int | None) -> Missing:
@@ -146,50 +139,55 @@ def problems(document: Document) -> str:
 # ------------------------------- What a FILE holds -------------------------------
 
 
-def test_a_file_can_say_where_a_person_starts_from_and_returns_to() -> None:
+def test_a_file_can_say_where_a_person_starts_from_and_has_to_end() -> None:
     file = load(day_out())
     assert file.starts_from("alex") == StartsFrom("alex-start", "alex", "hotel")
-    assert file.returns_to("alex") == ReturnsTo("alex-home", "alex", "cottage")
-    assert [want.ends_at_home for want in file.wants] == [True]
-    nothing_said = load(day_out(without=["alex-start", "alex-home"]))
-    assert nothing_said.starts_from("alex") is None
-    assert nothing_said.returns_to("alex") is None
+    assert [want.ends_at for want in file.wants] == ["cottage"]
+    assert load(day_out(without=["alex-start"])).starts_from("alex") is None
 
 
-def test_a_file_says_each_of_them_once_for_a_person() -> None:
+def test_a_file_says_once_where_a_person_starts_from() -> None:
     again = {"id": "alex-start-again", "person": "alex", "starts_from": "museum"}
-    assert problems(day_out(again)) == "/facts/7: another FACT already states this about alex"
-    again = {"id": "alex-home-again", "person": "alex", "returns_to": "cottage"}
-    assert problems(day_out(again)) == "/facts/7: another FACT already states this about alex"
+    assert problems(day_out(again)) == "/facts/6: another FACT already states this about alex"
 
 
-def test_they_name_a_person_and_a_place_of_the_file() -> None:
+def test_a_start_and_an_end_name_a_person_and_a_place_of_the_file() -> None:
     assert problems(day_out(starts_from("sam", "hotel"))) == (
-        "/facts/7: sam is not a PERSON in this FILE"
+        "/facts/6: sam is not a PERSON in this FILE"
     )
-    assert problems(day_out(returns_to("alex", "moon"), without=["alex-home"])) == (
-        "/facts/6: moon is not a PLACE in this FILE"
+    assert problems(day_out(starts_from("alex", "moon"), without=["alex-start"])) == (
+        "/facts/5: moon is not a PLACE in this FILE"
+    )
+    assert problems(day_out(wants=[ends_at("moon", "alex")])) == (
+        "/wants/0: moon is not a PLACE in this FILE"
     )
 
 
-def test_a_file_states_the_want_to_end_at_home_only_as_a_must() -> None:
-    never = ends_at_home("alex")
+def test_a_file_states_the_want_to_end_at_a_place_only_as_a_must() -> None:
+    never = ends_at("cottage", "alex")
     never["holders"][0]["degree"] = -10
     assert problems(day_out(wants=[never])) == "/wants/0/holders/0/degree: 10 was expected"
 
 
-def test_no_option_delivers_the_want_to_end_at_home() -> None:
-    assert problems(day_out(satisfies("visit", "home"))) == "/facts/7: no OPTION delivers home"
-    whole = {"id": "every-home", "complete": {"satisfies": "home"}}
-    assert problems(day_out(whole)) == "/facts/7: no OPTION delivers home"
+def test_no_option_delivers_the_want_to_end_at_a_place() -> None:
+    assert problems(day_out(satisfies("visit", "ending"))) == "/facts/6: no OPTION delivers ending"
+    whole = {"id": "every-ending", "complete": {"satisfies": "ending"}}
+    assert problems(day_out(whole)) == "/facts/6: no OPTION delivers ending"
     file = load(day_out())
     for world in (best_case(file), worst_case(file), no_better_than(file, [])):
-        assert "home" not in {want for _, want in world.satisfies | world.might_satisfy}
+        assert "ending" not in {want for _, want in world.satisfies | world.might_satisfy}
+    assert {unknown.what for unknown in unknowns(load(day_out(without=["train-length"])))} == {
+        "duration",
+        "other ways",
+    }
 
 
-def test_a_want_about_the_whole_itinerary_names_a_property_the_format_knows() -> None:
-    other = ends_at_home("alex") | {"itinerary": "ends_anywhere"}
-    assert "'ends_anywhere' is not one of ['ends_at_home']" in problems(day_out(wants=[other]))
+def test_a_want_about_the_whole_itinerary_says_where_it_ends() -> None:
+    nowhere = ends_at("cottage", "alex")
+    del nowhere["itinerary"]["ends_at"]
+    assert problems(day_out(wants=[nowhere])) == (
+        "/wants/0/itinerary: 'ends_at' is a required property"
+    )
 
 
 # ------------------------------- The CONSTRAINTs -------------------------------
@@ -204,105 +202,85 @@ def test_a_path_begins_where_the_fact_says() -> None:
     assert broken(anywhere, worst_case(anywhere), (visit(), train())) == []
 
 
-def test_a_must_to_end_at_home_is_met_where_the_path_ends() -> None:
+def test_a_must_to_end_at_a_place_is_met_where_the_path_ends() -> None:
     file = load(day_out())
-    assert broken(file, worst_case(file), (walk(), visit())) == [not_home("alex")]
+    assert broken(file, worst_case(file), (walk(), visit())) == [elsewhere("alex")]
 
 
-def test_a_person_who_comes_home_and_leaves_again_is_not_home() -> None:
+def test_a_person_who_gets_there_and_leaves_again_does_not_end_there() -> None:
     back = way("back", "cottage", "museum")
     file = load(day_out(takes("back", "PT1H"), ways=[WALK, TRAIN, back]))
     again = Step(None, "cottage", "museum", ("alex",), seconds(16), seconds(17), "back")
-    assert broken(file, worst_case(file), (walk(), visit(), train(), again)) == [not_home("alex")]
+    assert broken(file, worst_case(file), (walk(), visit(), train(), again)) == [elsewhere("alex")]
 
 
-def stays_put(*facts: Document) -> File:
-    """Alex takes part in nothing and must end the TRIP at home."""
-    return trip(["alex"], ["hotel", "cottage"], [], list(facts), [], wants=[ends_at_home("alex")])
+def stays_put(*facts: Document, wants: Sequence[Document] | None = None) -> File:
+    """Alex takes part in nothing and has to end the TRIP at the cottage."""
+    asked = [ends_at("cottage", "alex")] if wants is None else wants
+    return trip(["alex"], ["hotel", "cottage"], [], list(facts), [], wants=asked)
 
 
 def test_a_person_who_does_nothing_ends_where_they_start() -> None:
-    at_home = stays_put(starts_from("alex", "cottage"), returns_to("alex", "cottage"))
-    assert broken(at_home, worst_case(at_home), ()) == []
-    found = checked(at_home)
+    there = stays_put(starts_from("alex", "cottage"))
+    assert broken(there, worst_case(there), ()) == []
+    found = checked(there)
     assert (found.answer, found.itinerary) == (Answer.FEASIBLE, ())
-    assert found.relies_on == ("alex-start", "alex-home", "home")
+    assert found.relies_on == ("alex-start", "ending")
 
-    elsewhere = stays_put(starts_from("alex", "hotel"), returns_to("alex", "cottage"))
-    assert broken(elsewhere, worst_case(elsewhere), ()) == [not_home("alex")]
-    found = checked(elsewhere)
+    away = stays_put(starts_from("alex", "hotel"))
+    assert broken(away, worst_case(away), ()) == [elsewhere("alex")]
+    found = checked(away)
     assert found.answer is Answer.UNDETERMINED
     assert found.missing == ((other_ways("hotel", "cottage", None),),)
 
 
-def test_a_path_with_no_stated_start_can_begin_at_home() -> None:
-    """With no FACT about where Alex starts from, the ITINERARY chooses where the path begins."""
-    file = stays_put(returns_to("alex", "cottage"))
-    worst = worst_case(file)
-    assert broken(file, worst, (), {"alex": "cottage"}) == []
-    assert broken(file, worst, (), {"alex": "hotel"}) == [not_home("alex")]
-    assert broken(file, worst, (), {}) == [not_home("alex")]
+def test_a_person_who_does_nothing_and_has_no_stated_start_is_where_they_have_to_end() -> None:
+    """Nobody has said where Alex is, and a path can begin wherever it suits."""
+    file = stays_put()
+    assert broken(file, worst_case(file), ()) == []
     found = checked(file)
     assert (found.answer, found.itinerary) == (Answer.FEASIBLE, ())
-    assert found.stays == (("alex", "cottage"),)
-    assert found.relies_on == ("alex-home", "home")
-    assert report.as_json(file, found)["stays"] == [{"person": "alex", "place": "cottage"}]
-    assert report.as_text(file, found).splitlines()[:5] == [
-        "FEASIBLE: this trip works.",
-        "",
-        "Nobody has to do anything.",
-        "",
-        "alex stays at cottage.",
-    ]
+    assert found.relies_on == ("ending",)
 
 
-def test_a_plan_says_where_only_those_stay_who_must_end_at_home() -> None:
-    """Alex has a FACT about the start, and Sam holds no WANT: the plan chooses for neither."""
-    found = checked(load(day_out()))
-    assert found.stays == ()
-    assert "stays" not in report.as_json(load(day_out()), found)
-    facts = [starts_from("alex", "cottage"), returns_to("alex", "cottage")]
-    facts += [returns_to("sam", "hotel")]
-    wants = [ends_at_home("alex")]
-    file = trip(["alex", "sam"], ["hotel", "cottage"], [], facts, [], wants=wants)
-    assert checked(file).stays == ()
+def test_nobody_ends_the_trip_at_two_places() -> None:
+    first, second = ends_at("hotel", "alex", id="first"), ends_at("cottage", "alex", id="second")
+    file = stays_put(wants=[first, second])
+    assert broken(file, worst_case(file), ()) == [elsewhere("alex", want="second")]
+    found = checked(file)
+    assert found.answer is Answer.INFEASIBLE
+    assert found.conflict == ("first", "second")
+
+    same = stays_put(wants=[first, ends_at("hotel", "alex", id="second")])
+    assert checked(same).answer is Answer.FEASIBLE
 
 
-def test_a_stay_is_one_choice_that_does_not_follow_the_world() -> None:
-    """Nobody knows where home is. Staying at the hotel works only if home is the hotel."""
-    file = stays_put()
-    at_the_hotel = {"alex": "hotel"}
-    for home in ("hotel", "cottage", None):
-        world = with_these_at_best(file, [returns(home).unknown])
-        assert staying(file, world, ()) == {"alex": home}
-        assert broken(file, world, (), staying(file, world, ())) == []
-        expected = [] if home == "hotel" else [not_home("alex")]
-        assert broken(file, world, (), at_the_hotel) == expected
-    assert staying(file, worst_case(file), ()) == {}
-    assert broken(file, worst_case(file), (), at_the_hotel) == [not_home("alex")]
-    assert checked(file).answer is Answer.UNDETERMINED
-
-
-def test_each_holder_ends_at_their_own_home() -> None:
-    both = [ends_at_home("alex", "sam")]
-    more = [starts_from("sam", "hotel"), returns_to("sam", "hotel")]
-    file = load(day_out(*more, wants=both, persons=["alex", "sam"]))
+def test_each_holder_ends_at_the_place_their_own_want_names() -> None:
+    wants = [ends_at("cottage", "alex", id="for-alex"), ends_at("hotel", "sam", id="for-sam")]
+    file = load(day_out(starts_from("sam", "hotel"), wants=wants, persons=["alex", "sam"]))
     worst = worst_case(file)
     together = (walk(), walk("sam"), visit("alex", "sam"))
     assert broken(file, worst, (*together, train(), walk("sam", back=True))) == []
-    assert broken(file, worst, (*together, train(), train("sam"))) == [not_home("sam")]
-    assert broken(file, worst, together) == [not_home("alex", "sam")]
-
+    assert broken(file, worst, (*together, train(), train("sam"))) == [
+        elsewhere("sam", want="for-sam")
+    ]
+    assert broken(file, worst, together) == [
+        elsewhere("alex", want="for-alex"),
+        elsewhere("sam", want="for-sam"),
+    ]
     found = checked(file)
     assert found.answer is Answer.FEASIBLE
     assert set(found.itinerary) == {*together, train(), walk("sam", back=True)}
 
+    both = [ends_at("cottage", "alex", "sam")]
+    file = load(day_out(starts_from("sam", "hotel"), wants=both, persons=["alex", "sam"]))
+    assert broken(file, worst_case(file), together) == [elsewhere("alex", "sam")]
 
-def test_a_path_of_ways_alone_can_end_at_home() -> None:
-    facts = [starts_from("alex", "hotel"), returns_to("alex", "cottage")]
-    facts += [takes("walk", "PT15M"), takes("train", "PT1H")]
+
+def test_a_path_of_ways_alone_can_end_where_it_has_to() -> None:
+    facts = [starts_from("alex", "hotel"), takes("walk", "PT15M"), takes("train", "PT1H")]
     places = ["hotel", "museum", "cottage"]
-    wants = [ends_at_home("alex")]
+    wants = [ends_at("cottage", "alex")]
     file = trip(["alex"], places, [], facts, [trip_starts(12)], ways=[WALK, TRAIN], wants=wants)
     found = checked(file)
     assert found.answer is Answer.FEASIBLE
@@ -310,129 +288,38 @@ def test_a_path_of_ways_alone_can_end_at_home() -> None:
         Step(None, "hotel", "museum", ("alex",), seconds(12), seconds(12, 15), "walk"),
         Step(None, "museum", "cottage", ("alex",), seconds(12, 15), seconds(13, 15), "train"),
     )
-    assert found.relies_on == (
-        "alex-start",
-        "alex-home",
-        "walk-length",
-        "train-length",
-        "home",
-        "trip-start",
-    )
+    assert found.relies_on == ("alex-start", "walk-length", "train-length", "ending", "trip-start")
 
 
-def test_a_movement_that_takes_no_time_can_end_at_home_as_the_trip_ends() -> None:
+def test_a_movement_that_takes_no_time_can_end_the_path_as_the_trip_ends() -> None:
     document = day_out(takes("train", "PT0S"), without=["train-length"], decisions=[trip_ends(15)])
     found = checked(load(document))
     assert found.answer is Answer.FEASIBLE
     assert found.itinerary == (walk(), visit(), train(end=seconds(15)))
 
 
-# ------------------------------- Where home is -------------------------------
-
-
-def test_nobody_is_home_where_nobody_knows_where_home_is() -> None:
-    file = load(day_out(without=["alex-home"]))
-    assert broken(file, worst_case(file), (walk(), visit(), train())) == [not_home("alex")]
-    assert broken(file, best_case(file), (walk(), visit(), train())) == []
-    assert broken(file, best_case(file), (walk(), visit())) == []
-
-
-def test_a_report_names_each_place_that_home_could_be() -> None:
-    """Each PLACE needs its own plan: back to the hotel, stay at the museum, or take the train."""
-    file = load(day_out(without=["alex-home"]))
-    found = checked(file)
-    assert found.answer is Answer.UNDETERMINED
-    assert found.missing == ((returns("hotel"),), (returns("museum"),), (returns("cottage"),))
-    for place, plan in [
-        ("hotel", (walk(), visit(), walk(back=True))),
-        ("museum", (walk(), visit())),
-        ("cottage", (walk(), visit(), train())),
-    ]:
-        there = with_these_at_best(file, [returns(place).unknown])
-        assert itineraries(file, there)[0] == plan
-
-
-def test_a_report_names_only_the_places_a_plan_can_end_at() -> None:
-    """No OPTION or WAY goes to a PLACE the FILE has yet to name, and Alex cannot stay there."""
-    file = load(day_out(without=["alex-home", "train-length"], ways=[WALK]))
-    assert checked(file).missing == ((returns("hotel"),), (returns("museum"),))
-    from_the_hotel = stays_put(starts_from("alex", "hotel"))
-    assert checked(from_the_hotel).missing == ((returns("hotel"),),)
-
-
-def test_a_home_comes_before_another_option_in_a_set() -> None:
-    """The unknown FACTs have one order, in a set and between sets: ``unknowns`` gives it."""
-    wants = [must("lunch", "sam"), ends_at_home("sam")]
-    file = trip(["sam"], ["hotel"], [], [], [], wants=wants)
-    found = checked(file)
-    another = Missing(Unknown("another option", want="lunch", person="sam"), None)
-    assert found.missing == ((returns("hotel", "sam"), another), (returns(None, "sam"), another))
-    assert [needed.unknown for enough in found.missing for needed in enough[:1]] == [
-        unknown for unknown in unknowns(file) if unknown.what == "returns to"
-    ]
-    assert report.as_text(file, found).splitlines()[3] == (
-        "  1. Sam returns to hotel and another OPTION that SATISFIES lunch is found for sam."
-    )
-
-
-def test_no_possible_world_has_two_homes_for_one_person() -> None:
-    file = load(day_out(without=["alex-home"]))
-    with pytest.raises(ValueError, match="two different things"):
-        with_these_at_best(file, [returns("hotel").unknown, returns("museum").unknown])
-
-
-def test_home_can_be_a_place_the_file_has_yet_to_name() -> None:
-    """Alex has nothing to do and no stated start, so Alex can stay wherever home is."""
-    found = checked(stays_put())
-    assert found.answer is Answer.UNDETERMINED
-    assert found.missing == ((returns("hotel"),), (returns("cottage"),), (returns(None),))
-
-    file = trip(["alex"], [], [], [], [], wants=[ends_at_home("alex")])
-    found = checked(file)
-    assert found.answer is Answer.UNDETERMINED
-    assert found.missing == ((returns(None),),)
-    assert report.as_json(file, found)["missing"] == [
-        [{"what": "returns to", "person": "alex", "to": None, "at_most": None}]
-    ]
-    assert report.as_text(file, found).splitlines()[-1] == (
-        "The trip works if alex returns to a PLACE that the FILE has yet to name."
-    )
-
-    wants = [ends_at_home("alex")]
-    named_now = trip(["alex"], ["cottage"], [], [returns_to("alex", "cottage")], [], wants=wants)
-    assert checked(named_now).answer is Answer.FEASIBLE
-
-
-def test_a_missing_home_does_not_hide_a_conflict() -> None:
-    file = load(day_out(without=["alex-home"], decisions=[trip_starts(15)]))
-    found = checked(file)
-    assert found.answer is Answer.INFEASIBLE
-    assert found.conflict == ("visit-time", "lock-visit", "trip-start")
-
-
 # ------------------------------- The three answers -------------------------------
 
 
-def test_a_person_travels_from_where_they_start_and_home_again() -> None:
-    """The walk is as late as the visit allows, and the train home is as early as it can be."""
+def test_a_person_travels_from_where_they_start_to_where_they_have_to_end() -> None:
+    """The walk is as late as the visit allows, and the train is as early as it can be."""
     found = checked(load(day_out()))
     assert found.answer is Answer.FEASIBLE
     assert found.itinerary == (walk(), visit(), train())
     assert found.relies_on == (
         "alex-start",
-        "alex-home",
         "visit-time",
         "visit-length",
         "visit-cutoff",
         "walk-length",
         "train-length",
-        "home",
+        "ending",
         "lock-visit",
     )
     assert found.robust is True
 
 
-def test_a_plan_relies_on_a_home_only_where_someone_must_end_there() -> None:
+def test_a_person_with_no_place_to_end_at_stops_after_their_last_option() -> None:
     found = checked(load(day_out(wants=[])))
     assert found.itinerary == (walk(), visit())
     assert found.relies_on == (
@@ -447,12 +334,12 @@ def test_a_plan_relies_on_a_home_only_where_someone_must_end_there() -> None:
 
 def test_a_plan_relies_on_a_start_only_for_a_person_it_is_about() -> None:
     """Sam is in no OPTION and holds no WANT, so nothing in the plan is about Sam."""
-    document = day_out(starts_from("sam", "cottage"), returns_to("sam", "hotel"))
+    document = day_out(starts_from("sam", "cottage"))
     document["persons"] = named("alex", "sam")
     found = checked(load(document))
     assert found.itinerary == (walk(), visit(), train())
+    assert "alex-start" in found.relies_on
     assert "sam-start" not in found.relies_on
-    assert "sam-home" not in found.relies_on
 
 
 def test_a_person_who_travels_to_their_first_option_has_to_be_in_time() -> None:
@@ -491,7 +378,7 @@ def too_late(*spans: Document) -> File:
     return load(day_out(*spans, decisions=[trip_ends(15, 30)]))
 
 
-def test_other_ways_home_might_be_in_time() -> None:
+def test_other_ways_might_get_a_person_there_in_time() -> None:
     found = checked(too_late())
     assert found.answer is Answer.UNDETERMINED
     assert found.missing == (
@@ -514,36 +401,35 @@ def has_no_record_to_spare(file: File, conflict: Sequence[str]) -> bool:
     return ruled_out(left) and not any(ruled_out(left.without(record)) for record in conflict)
 
 
-def test_a_must_to_end_at_home_can_make_a_trip_infeasible() -> None:
+def test_a_must_to_end_at_a_place_can_make_a_trip_infeasible() -> None:
     file = too_late(complete(None, "cottage"))
     found = checked(file)
     assert found.answer is Answer.INFEASIBLE
     assert found.conflict == (
-        "alex-home",
         "visit-time",
         "visit-length",
         "train-length",
         "ways-to-cottage",
-        "home",
+        "ending",
         "lock-visit",
         "trip-end",
     )
     assert has_no_record_to_spare(file, found.conflict)
 
 
-def span(id: str, earliest: str, latest: str, to: str = "cottage") -> Document:
-    """A FACT that the FILE lists every way straight to a PLACE that leaves in this span."""
+def span(id: str, earliest: str, latest: str) -> Document:
+    """A FACT that the FILE lists every way straight to the cottage that leaves in this span."""
     leaving = {"earliest": earliest, "latest": latest}
-    return {"id": id, "complete": {"to": to, "leaving": leaving}}
+    return {"id": id, "complete": {"to": "cottage", "leaving": leaving}}
 
 
 def test_every_time_a_person_could_still_leave_has_to_be_ruled_out() -> None:
-    """Two spans that meet at 3:10 pm rule out every way home. Either one alone does not."""
+    """Two spans that meet at 3:10 pm rule out every way to the cottage. Either alone does not."""
     early = span("early", at(0), at(15, 10))
     late = span("late", at(15, 10), at(15, 30))
     found = checked(too_late(early, late))
     assert found.answer is Answer.INFEASIBLE
-    assert {"early", "late", "home", "trip-end"} <= set(found.conflict)
+    assert {"early", "late", "ending", "trip-end"} <= set(found.conflict)
 
     found = checked(too_late(early))
     assert found.missing == (
@@ -564,11 +450,23 @@ def test_without_an_end_of_the_trip_a_person_can_wait_for_a_span_to_pass() -> No
     )
 
 
+def test_another_option_never_meets_the_must_to_end_at_a_place() -> None:
+    """Alex cannot leave the hotel. Another OPTION might give Alex a view, but not a way out."""
+    facts = [starts_from("alex", "hotel"), complete("hotel", None)]
+    wants = [ends_at("cottage", "alex"), must("a-view", "alex")]
+    places = ["hotel", "cottage"]
+    file = trip(["alex"], places, [], facts, [trip_starts(0), trip_ends(23)], wants=wants)
+    assert best_case(file).another_option == {("a-view", "alex")}
+    found = checked(file)
+    assert found.answer is Answer.INFEASIBLE
+    assert found.conflict == ("alex-start", "ways-from-hotel", "ending", "trip-start", "trip-end")
+
+
 # ------------------------------- A last step with no known end -------------------------------
 
 
-def test_a_last_ride_of_unknown_length_gets_a_person_home_where_the_trip_has_no_end() -> None:
-    """Whatever the train takes, it ends, and then Alex is home. Nothing has to follow it."""
+def test_a_last_ride_of_unknown_length_gets_a_person_there_where_the_trip_has_no_end() -> None:
+    """Whatever the train takes, it ends, and then Alex is at the cottage. Nothing follows it."""
     file = load(day_out(without=["train-length"]))
     found = checked(file)
     assert found.answer is Answer.FEASIBLE
@@ -617,81 +515,56 @@ def test_a_ride_of_known_length_is_found_where_the_trip_has_an_end() -> None:
     assert found.itinerary == (walk(), visit(), cab)
 
 
-def test_a_locked_ride_home_of_unknown_length_gets_a_person_home() -> None:
+def test_a_locked_ride_of_unknown_length_gets_a_person_there() -> None:
     places = ["museum", "cottage"]
-    facts = [returns_to("alex", "cottage"), starts_at("ride", 17)]
-    wants = [ends_at_home("alex")]
+    wants = [ends_at("cottage", "alex")]
     ride = [moves("ride", "museum", "cottage")]
-    file = trip(["alex"], places, ride, facts, [lock("ride", "alex")], wants=wants)
+    leaves_at_five = [starts_at("ride", 17)]
+    file = trip(["alex"], places, ride, leaves_at_five, [lock("ride", "alex")], wants=wants)
     found = checked(file)
     assert found.answer is Answer.FEASIBLE
     assert found.itinerary == (Step("ride", "museum", "cottage", ("alex",), seconds(17), None),)
 
     ends = [lock("ride", "alex"), trip_ends(18)]
-    found = checked(trip(["alex"], places, ride, facts, ends, wants=wants))
+    found = checked(trip(["alex"], places, ride, leaves_at_five, ends, wants=wants))
     assert found.missing == ((Missing(Unknown("duration", "ride"), 3600),),)
 
 
-def test_a_stay_at_home_of_unknown_length_keeps_a_person_home() -> None:
-    facts = [returns_to("alex", "cottage"), starts_at("supper", 19)]
-    wants = [ends_at_home("alex")]
+def test_a_stay_of_unknown_length_keeps_a_person_where_they_have_to_end() -> None:
+    wants = [ends_at("cottage", "alex")]
     supper = [stays("supper", "cottage")]
-    file = trip(["alex"], ["cottage"], supper, facts, [lock("supper", "alex")], wants=wants)
+    at_seven = [starts_at("supper", 19)]
+    file = trip(["alex"], ["cottage"], supper, at_seven, [lock("supper", "alex")], wants=wants)
     found = checked(file)
     assert found.answer is Answer.FEASIBLE
     assert found.itinerary == (Step("supper", "cottage", "cottage", ("alex",), seconds(19), None),)
 
 
-# ------------------------------- With the other WANTs -------------------------------
-
-
-def test_another_option_never_meets_the_must_to_end_at_home() -> None:
-    """Alex cannot leave the hotel. Another OPTION might give Alex a view, but not a way home."""
-    facts = [starts_from("alex", "hotel"), returns_to("alex", "cottage"), complete("hotel", None)]
-    wants = [ends_at_home("alex"), must("a-view", "alex")]
-    places = ["hotel", "cottage"]
-    file = trip(["alex"], places, [], facts, [trip_starts(0), trip_ends(23)], wants=wants)
-    assert best_case(file).another_option == {("a-view", "alex")}
-    found = checked(file)
-    assert found.answer is Answer.INFEASIBLE
-    assert found.conflict == (
-        "alex-start",
-        "alex-home",
-        "ways-from-hotel",
-        "home",
-        "trip-start",
-        "trip-end",
-    )
-
-
 # ------------------------------- Large trips -------------------------------
 
 
-def test_very_many_persons_can_take_one_way_home() -> None:
+def test_very_many_persons_can_take_one_way() -> None:
     """One step for each PERSON, and more PERSONs than Python allows calls inside calls."""
 
-    def bus_home(count: int) -> File:
+    def by_bus(count: int) -> File:
         people = [f"p{number}" for number in range(count)]
-        facts = [takes("bus", "PT1S")]
-        for person in people:
-            facts += [starts_from(person, "hotel"), returns_to(person, "cottage")]
+        facts = [takes("bus", "PT1S"), *(starts_from(person, "hotel") for person in people)]
         bus = [way("bus", "hotel", "cottage")]
-        wants = [ends_at_home(*people)]
+        wants = [ends_at("cottage", *people)]
         return trip(people, ["hotel", "cottage"], [], facts, [], ways=bus, wants=wants)
 
-    found = answers.check(bus_home(1100))
+    found = answers.check(by_bus(1100))
     assert found.answer is Answer.FEASIBLE
     assert len(found.itinerary) == 1100
-    assert len(checked(bus_home(150)).itinerary) == 150
+    assert len(checked(by_bus(150)).itinerary) == 150
 
 
-def test_a_way_home_can_go_through_very_many_places() -> None:
+def test_a_path_can_go_through_very_many_places() -> None:
     """A route of 1,099 WAYs, one after another."""
     places = [f"p{number}" for number in range(1100)]
     ways = [way(f"w{number}", f"p{number}", f"p{number + 1}") for number in range(1099)]
-    facts = [starts_from("sam", "p0"), returns_to("sam", "p1099")]
-    facts += [takes(each["id"], "PT1S") for each in ways]
-    file = trip(["sam"], places, [], facts, [], ways=ways, wants=[ends_at_home("sam")])
+    facts = [starts_from("sam", "p0"), *(takes(each["id"], "PT1S") for each in ways)]
+    file = trip(["sam"], places, [], facts, [], ways=ways, wants=[ends_at("p1099", "sam")])
     found = answers.check(file)
     assert found.answer is Answer.FEASIBLE
     assert [step.way for step in found.itinerary] == [each["id"] for each in ways]
@@ -700,15 +573,14 @@ def test_a_way_home_can_go_through_very_many_places() -> None:
 # ------------------------------- Random trips -------------------------------
 
 
-def a_way_home(rng: Random) -> File:
+def a_way_there(rng: Random) -> File:
     """Alex, three PLACES, at most one OPTION, and one or two WAYs, all on a quarter-hour grid.
 
-    The OPTION starts at 9:00 am or at 9:15 am. Alex usually starts from a stated PLACE,
-    returns to a stated PLACE and must end the TRIP there. The TRIP usually ends between
-    9:15 am and 10:00 am. A COMPLETE FACT often rules out unlisted WAYs to one PLACE, or to
-    every PLACE, from some quarter hour until after the latest time the TRIP can end. Its span
-    starts one second after a grid time and ends one second before another, so the times just
-    outside it are on the grid.
+    The OPTION starts at 9:00 am or at 9:15 am. Alex usually starts from a stated PLACE and
+    has to end the TRIP at one. The TRIP usually ends between 9:15 am and 10:00 am. A COMPLETE
+    FACT often rules out unlisted WAYs to one PLACE, or to every PLACE, from some quarter hour
+    until after the latest time the TRIP can end. Its span starts one second after a grid time
+    and ends one second before another, so the times just outside it are on the grid.
     """
     options: list[Document] = []
     facts: list[Document] = []
@@ -735,8 +607,6 @@ def a_way_home(rng: Random) -> File:
             facts.append(takes(id, f"PT{15 * rng.randrange(2)}M"))
     if rng.random() < 0.7:
         facts.append(starts_from("alex", rng.choice(PLACES)))
-    if rng.random() < 0.85:
-        facts.append(returns_to("alex", rng.choice(PLACES)))
     if rng.random() < 0.8:
         earliest = seconds(8, 30) + QUARTER * rng.randrange(4) + 1
         leaving = {"earliest": at_second(earliest), "latest": at_second(seconds(10, 15) - 1)}
@@ -744,7 +614,7 @@ def a_way_home(rng: Random) -> File:
         if rng.random() < 0.3:
             whole["to"] = rng.choice(PLACES)
         facts.append({"id": "ways", "complete": whole})
-    wants = [ends_at_home("alex")] if rng.random() < 0.9 else []
+    wants = [ends_at(rng.choice(PLACES), "alex")] if rng.random() < 0.9 else []
     if rng.random() < 0.5:
         decisions.append(trip_starts(8, 30 + 15 * rng.randrange(2)))
     if rng.random() < 0.8:
@@ -788,11 +658,11 @@ def any_path_works(file: File, world: World) -> bool:
                         yield (first, second)
 
     def works(before: tuple[Leg, ...], option: Step | None, after: tuple[Leg, ...]) -> bool:
-        legs = (*before, *after)
-        for times in combinations_with_replacement(grid, len(legs)):
+        taken = (*before, *after)
+        for times in combinations_with_replacement(grid, len(taken)):
             steps = [
                 Step(None, origin, destination, ("alex",), moment, None, id)
-                for (id, origin, destination), moment in zip(legs, times, strict=True)
+                for (id, origin, destination), moment in zip(taken, times, strict=True)
             ]
             if option is not None:
                 steps.insert(len(before), option)
@@ -816,12 +686,12 @@ def any_path_works(file: File, world: World) -> bool:
     return False
 
 
-def test_the_search_finds_a_way_home_whenever_trying_every_path_does() -> None:
+def test_the_search_finds_a_path_whenever_trying_every_path_does() -> None:
     """Both ends of the answer: something works in the worst case, and in the best case."""
     rng = Random(1919)
     seen: set[Answer] = set()
     for _ in range(40):
-        file = a_way_home(rng)
+        file = a_way_there(rng)
         found = checked(file)
         seen.add(found.answer)
         assert (found.answer is Answer.FEASIBLE) == any_path_works(file, worst_case(file))
@@ -829,9 +699,9 @@ def test_the_search_finds_a_way_home_whenever_trying_every_path_does() -> None:
     assert seen == set(Answer)
 
 
-def test_the_two_checkers_agree_on_random_trips_with_starts_and_homes() -> None:
+def test_the_two_checkers_agree_on_random_trips_with_starts_and_ends() -> None:
     rng = Random(2020)
-    trips = [a_way_home(rng) for _ in range(150)]
+    trips = [a_way_there(rng) for _ in range(150)]
     trips += [
         random_trip(rng, 0.2, contingent=0.3, with_complete=0.4, with_ways=0.9, with_ends=0.6)
         for _ in range(100)
@@ -841,56 +711,49 @@ def test_the_two_checkers_agree_on_random_trips_with_starts_and_homes() -> None:
         for _ in range(60)
     ]
     seen: set[Answer] = set()
-    names_the_want = at_an_end = unknown_home = no_end = 0
+    names_a_want = at_an_end = 0
     for file in trips:
         found = checked(file)
         seen.add(found.answer)
-        names_the_want += "home" in found.conflict
-        unknown_home += any(
-            needed.unknown.what == "returns to" for enough in found.missing for needed in enough
-        )
-        place = {unknown: number for number, unknown in enumerate(unknowns(file))}
-        sets = [[place[needed.unknown] for needed in enough] for enough in found.missing]
-        assert sets == sorted(sorted(each) for each in sets)
+        asking = {want.id for want in file.wants if want.ends_at is not None}
+        names_a_want += bool(asking & set(found.conflict))
         if found.answer is Answer.FEASIBLE:
             worst = worst_case(file)
-            assert broken(file, worst, found.itinerary, dict(found.stays)) == []
+            assert broken(file, worst, found.itinerary) == []
             assert needless(file, worst, found.itinerary) == []
         if found.itinerary:
             last = found.itinerary[-1]
             at_an_end += found.itinerary[0].option is None or last.option is None
-            no_end += last.option is None and last.end is None
     assert seen == set(Answer)
-    assert names_the_want >= 10
-    assert at_an_end >= 25
-    assert unknown_home >= 50
-    assert no_end >= 2
+    assert names_a_want >= 25
+    assert at_an_end >= 20
 
 
-def test_a_conflict_about_getting_home_has_no_record_to_spare() -> None:
+def test_a_conflict_about_where_a_path_ends_has_no_record_to_spare() -> None:
     rng = Random(2121)
-    checked_conflicts = 0
-    while checked_conflicts < 25:
-        file = a_way_home(rng)
+    conflicts = 0
+    while conflicts < 25:
+        file = a_way_there(rng)
         found = answers.check(file)
-        if "home" not in found.conflict:
+        if "ending" not in found.conflict:
             continue
-        checked_conflicts += 1
+        conflicts += 1
         assert has_no_record_to_spare(file, found.conflict)
 
 
-def test_the_best_and_worst_cases_settle_the_answer_with_starts_and_homes() -> None:
+def test_the_best_and_worst_cases_settle_the_answer_with_starts_and_ends() -> None:
     """What works in the worst case works in every possible world, and so on, as before.
 
-    A possible world gives each PERSON one home. Each set of unknown FACTs a report names is
-    enough, and no part of it is.
+    Where a PERSON starts from and where they have to end are the same in every possible world:
+    nothing about them is unknown. Each set of unknown FACTs a report names is enough, and no
+    part of it is.
     """
     rng = Random(2222)
     seen: set[Answer] = set()
-    by_chance_at_home = 0
+    by_chance_with_an_end = 0
     for number in range(160):
         if number % 2:
-            file = a_way_home(rng)
+            file = a_way_there(rng)
         else:
             file = random_trip(rng, 0.3, with_complete=0.3, with_ways=0.8, with_ends=0.7)
         found = answers.check(file)
@@ -907,13 +770,13 @@ def test_the_best_and_worst_cases_settle_the_answer_with_starts_and_homes() -> N
         for _ in range(6):
             world = possible_world(rng, file)
             for choice in always:
-                stays = staying(file, worst, choice)
-                assert broken(file, world, in_world(world, choice), stays) == []
+                assert broken(file, world, in_world(world, choice)) == []
             by_chance = [any_choice(rng, file, world) for _ in range(12)]
             by_chance = [
                 each for each in by_chance if not broken(file, world, in_world(world, each))
             ]
-            by_chance_at_home += bool(by_chance) and any(want.ends_at_home for want in file.wants)
+            asks = any(want.ends_at is not None for want in file.wants)
+            by_chance_with_an_end += bool(by_chance) and asks
             if by_chance:
                 assert itineraries(file, world)
             for choice in (*itineraries(file, world), *by_chance):
@@ -922,4 +785,4 @@ def test_the_best_and_worst_cases_settle_the_answer_with_starts_and_homes() -> N
                 assert not by_chance
                 assert not itineraries(file, world)
     assert seen == set(Answer)
-    assert by_chance_at_home > 40
+    assert by_chance_with_an_end > 40

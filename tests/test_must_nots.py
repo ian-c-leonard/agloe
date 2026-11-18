@@ -228,7 +228,7 @@ def test_no_possible_world_has_an_option_both_ways_and_only_the_upper_bound_does
     bound = no_better_than(file, [])
     assert broken(file, bound, together) == []
     assert ("rooftop", "view") in bound.satisfies - bound.might_satisfy
-    with pytest.raises(ValueError, match="two different things"):
+    with pytest.raises(ValueError, match="cannot both SATISFY"):
         with_these_at_best(file, [Unknown("satisfies", "rooftop", want="view"), is_not("rooftop")])
     # The bound shows only that something is not enough: here it cannot rule anything out,
     # and the report still asks for another OPTION, which the bound alone would not.

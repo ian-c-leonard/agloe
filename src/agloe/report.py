@@ -26,7 +26,6 @@ from agloe.file import (
     Option,
     Person,
     Place,
-    ReturnsTo,
     Satisfies,
     Start,
     StartsFrom,
@@ -70,8 +69,6 @@ def as_json(file: File, report: Report) -> dict[str, object]:
             }
             for step in report.itinerary
         ]
-        if report.stays:
-            out["stays"] = [{"person": person, "place": place} for person, place in report.stays]
         out["relies_on"] = list(report.relies_on)
         out["robust"] = report.robust
     if report.at_worst:
@@ -113,8 +110,6 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
         out["want"] = unknown.want
     if unknown.person is not None:
         out["person"] = unknown.person
-    if unknown.what == "returns to":
-        out["to"] = unknown.destination
     out["at_most"] = None if needed.at_most is None else length_written(needed.at_most)
     return out
 
@@ -260,11 +255,6 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
         lines += [f"    ! {mark}" for mark in marks.get(number, [])]
     if not report.itinerary:
         lines += ["", "Nobody has to do anything."]
-    places = _names(file.places)
-    stays = [
-        f"{_people(file, (person,))} stays at {places[place]}." for person, place in report.stays
-    ]
-    lines += ["", *stays] if stays else []
     relied_on = [fact for fact in file.facts if fact.id in report.relies_on]
     if not report.robust:
         lines += [
@@ -379,11 +369,6 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
         return f"{_name(file, unknown.option)} can start at any time"
     if unknown.what == "satisfies":
         return f"{_name(file, unknown.option)} SATISFIES {_want(file, unknown.want)}"
-    if unknown.what == "returns to":
-        person = _people(file, (unknown.person or "",))
-        if unknown.destination is None:
-            return f"{person} returns to a PLACE that the FILE has yet to name"
-        return f"{person} returns to {_names(file.places)[unknown.destination]}"
     if unknown.what == "does not satisfy":
         return f"{_name(file, unknown.option)} does not SATISFY {_want(file, unknown.want)}"
     if unknown.what == "other ways":
@@ -432,10 +417,6 @@ def _record(file: File, clock: _Clock, record: str) -> str:
         else:
             ways = f"every way straight from {places[found.origin]} to {places[found.destination]}"
         return f"{ways} that leaves between {span} is listed"
-    if isinstance(found, (StartsFrom, ReturnsTo)):
-        verb = "starts from" if isinstance(found, StartsFrom) else "returns to"
-        place = _names(file.places)[found.place]
-        return f"{_people(file, (found.person,))} {verb} {place}"
     if isinstance(found, TripStart):
         return f"the TRIP starts at {clock.moment(found.at)}"
     if isinstance(found, TripEnd):
@@ -448,6 +429,9 @@ def _record(file: File, clock: _Clock, record: str) -> str:
         ]
         said = _listed(which) if which else "there is none"
         return f"the FILE states every OPTION that SATISFIES {_want(file, found.want)}: {said}"
+    if isinstance(found, StartsFrom):
+        place = _names(file.places)[found.place]
+        return f"{_people(file, (found.person,))} starts from {place}"
     name = _name(file, found.option)
     if isinstance(found, Lock):
         verb = "takes" if len(found.persons) == 1 else "take"

@@ -18,13 +18,11 @@
     { "id": "walk", "name": "the walk between the hotel and the Art Institute", "between": ["hotel", "art-institute"] }
   ],
   "wants": [
-    { "id": "getting-home", "name": "getting home", "itinerary": "ends_at_home", "holders": [{ "person": "alex", "degree": 10 }, { "person": "sam", "degree": 10 }] }
+    { "id": "ending-in-denver", "name": "ending the trip in Denver", "itinerary": { "ends_at": "denver" }, "holders": [{ "person": "alex", "degree": 10 }, { "person": "sam", "degree": 10 }] }
   ],
   "facts": [
     { "id": "alex-start", "person": "alex", "starts_from": "hotel" },
     { "id": "sam-start", "person": "sam", "starts_from": "hotel" },
-    { "id": "alex-home", "person": "alex", "returns_to": "denver" },
-    { "id": "sam-home", "person": "sam", "returns_to": "denver" },
     { "id": "visit-time", "option": "museum-visit", "starts_at": "2027-05-15T14:00:00-05:00[America/Chicago]" },
     { "id": "visit-length", "option": "museum-visit", "duration": "PT1H" },
     { "id": "visit-arrival", "option": "museum-visit", "arrive_before_start": "PT0S" },
@@ -35,7 +33,7 @@
     { "id": "flight-length", "option": "flight", "duration": "PT2H30M" },
     { "id": "bag-drop", "option": "flight", "arrive_before_start": "PT45M" },
     { "id": "walk-length", "way": "walk", "duration": "PT15M" },
-    { "id": "every-way-home", "complete": { "to": "denver", "leaving": { "earliest": "2027-05-15T12:00:00-05:00[America/Chicago]", "latest": "2027-05-15T19:30:00-05:00[America/Chicago]" } } }
+    { "id": "every-way-to-denver", "complete": { "to": "denver", "leaving": { "earliest": "2027-05-15T12:00:00-05:00[America/Chicago]", "latest": "2027-05-15T19:30:00-05:00[America/Chicago]" } } }
   ],
   "decisions": [
     { "id": "trip-start", "trip_starts_at": "2027-05-15T12:00:00-05:00[America/Chicago]" },

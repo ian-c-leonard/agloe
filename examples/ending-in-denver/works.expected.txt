@@ -9,8 +9,6 @@ Saturday 15 May 2027 (times in America/Chicago)
 The plan relies on these FACTs, WANTs and DECISIONs:
   alex-start: Alex starts from the hotel
   sam-start: Sam starts from the hotel
-  alex-home: Alex returns to Denver
-  sam-home: Sam returns to Denver
   visit-time: Museum visit starts at 2:00 pm on Saturday 15 May 2027
   visit-length: Museum visit takes 1 h
   visit-arrival: nobody has to be at the Art Institute before Museum visit starts
@@ -21,7 +19,7 @@ The plan relies on these FACTs, WANTs and DECISIONs:
   flight-length: Flight home takes 2 h 30 min
   bag-drop: people must be at O'Hare 45 min before Flight home starts
   walk-length: the walk between the hotel and the Art Institute takes 15 min
-  getting-home: getting home is a must for Alex and Sam
+  ending-in-denver: ending the trip in Denver is a must for Alex and Sam
   trip-start: the TRIP starts at 12:00 pm on Saturday 15 May 2027
   trip-end: the TRIP ends at 7:30 pm on Saturday 15 May 2027
   lock-visit: Alex and Sam take part in Museum visit

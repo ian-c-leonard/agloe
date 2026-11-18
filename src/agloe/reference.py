@@ -21,7 +21,7 @@ from enum import Enum
 from heapq import heapify, heappop, heappush
 from itertools import combinations, groupby, pairwise, permutations, product
 
-from agloe.file import Complete, File, Satisfies
+from agloe.file import Complete, File, Satisfies, StartsFrom, Want
 
 _MOST_TO_TAKE_OUT = 12  # ``needless`` tries every combination of things to take out
 
@@ -117,10 +117,6 @@ class World:
     OPTION is found: one outside the FILE that SATISFIES the WANT, and that the PERSON can take
     part in whatever else they do. It holds conditions, one for each WANT and PERSON. It does
     not say how many OPTIONs meet them: one OPTION can be found for several.
-
-    ``home`` gives the PLACE each PERSON returns to, and None stands for a PLACE that the FILE
-    does not name. A PERSON who is not in it has no home that anybody knows. ``wherever`` holds
-    the PERSONs for whom that turns out as well as it can: home is wherever their path ends.
     """
 
     terms: Mapping[str, Terms]
@@ -132,11 +128,6 @@ class World:
     satisfies: frozenset[tuple[str, str]] = frozenset()
     might_satisfy: frozenset[tuple[str, str]] = frozenset()
     another_option: frozenset[tuple[str, str]] = frozenset()
-    home: Mapping[str, str | None] = field(default_factory=dict[str, str | None])
-    wherever: frozenset[str] = frozenset()
-
-
-type Stays = Mapping[str, str | None]  # where a PERSON who does nothing stays; None as in ``home``
 
 
 @dataclass(frozen=True)
@@ -146,8 +137,6 @@ class Unknown:
     ``what`` is "start", "duration" or "cutoff" for an OPTION, "duration" for a WAY, or "other
     ways" from one PLACE to another: unlisted WAYs that go straight there. For an OPTION and a
     WANT it is "satisfies" or "does not satisfy": the two ways the one unknown can turn out. It
-    is "returns to" for a PERSON and a PLACE: one PLACE that home could be for them. With no
-    PLACE, home is one that the FILE has yet to name. It
     is "another option" for a WANT and a PERSON: an OPTION outside the FILE
     that SATISFIES the WANT, and that the PERSON can take part in. That is one condition for one
     WANT and one PERSON, whichever OPTION meets it.
@@ -172,7 +161,7 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
     and that it does not only where the WANT is a must-not for some PERSON. So only those are
     listed. Where a FACT says a WANT's set is COMPLETE, nothing about the WANT is unknown.
     """
-    delivered = [want for want in file.wants if not want.ends_at_home]
+    delivered = [want for want in file.wants if want.ends_at is None]
     musts = [want for want in delivered if want.musts and file.complete_for(want.id) is None]
     out: list[Unknown] = []
     for option in file.options:
@@ -195,20 +184,15 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
         for destination in file.places:
             if origin != destination:
                 out.append(Unknown("other ways", origin=origin.id, destination=destination.id))
-    for person in file.persons:
-        if must_end_at_home(file, person.id) and file.returns_to(person.id) is None:
-            # One for each PLACE that home could be, and one for a PLACE the FILE has yet to name.
-            for place in [*(each.id for each in file.places), None]:
-                out.append(Unknown("returns to", person=person.id, destination=place))
     for want in musts:
         for person in _in_file_order_of_persons(file, want.musts):
             out.append(Unknown("another option", want=want.id, person=person))
     return tuple(out)
 
 
-def must_end_at_home(file: File, person: str) -> bool:
-    """Whether ending the TRIP at home is a must for this PERSON."""
-    return any(want.ends_at_home and person in want.musts for want in file.wants)
+def has_to_end_at(file: File, person: str) -> list[Want]:
+    """The WANTs to end the TRIP at a PLACE that are a must for this PERSON."""
+    return [want for want in file.wants if want.ends_at is not None and person in want.musts]
 
 
 def best_case(file: File) -> World:
@@ -302,21 +286,15 @@ def with_these_at_best(file: File, unknown: Iterable[Unknown]) -> World:
     """
     kind = frozenset(unknown)
     if not one_way_each(kind):
-        raise ValueError("these unknown FACTs say two different things about one thing")
+        raise ValueError("an OPTION cannot both SATISFY a WANT and not SATISFY it")
     return _world(file, kind)
 
 
 def one_way_each(unknown: Iterable[Unknown]) -> bool:
-    """Whether no two of these say different things about one thing.
-
-    That is: opposite things about one OPTION and one WANT, or two PLACEs that one PERSON
-    returns to.
-    """
+    """Whether no two of these say opposite things about one OPTION and one WANT."""
     signed = ("satisfies", "does not satisfy")
-    some = list(unknown)
-    about = [(each.option, each.want) for each in some if each.what in signed]
-    homes = [each.person for each in some if each.what == "returns to"]
-    return len(about) == len(set(about)) and len(homes) == len(set(homes))
+    about = [(each.option, each.want) for each in unknown if each.what in signed]
+    return len(about) == len(set(about))
 
 
 def no_better_than(file: File, found: Iterable[Unknown]) -> World:
@@ -335,7 +313,7 @@ def no_better_than(file: File, found: Iterable[Unknown]) -> World:
         (option.id, want.id)
         for option in file.options
         for want in file.wants
-        if not want.ends_at_home and file.says(option.id, want.id) is None
+        if want.ends_at is None and file.says(option.id, want.id) is None
     }
     conditions = frozenset(
         (each.want, each.person)
@@ -416,7 +394,7 @@ def _world(
     might_satisfy: set[tuple[str, str]] = set()
     for option in file.options:
         for want in file.wants:
-            if want.ends_at_home:
+            if want.ends_at is not None:
                 continue  # no OPTION delivers it: it is about where a PERSON's path ends
             pair = (option.id, want.id)
             said = file.says(*pair)
@@ -435,27 +413,10 @@ def _world(
         (want.id, person)
         for want in file.wants
         for person in want.musts
-        if not want.ends_at_home
+        if want.ends_at is None
         and file.complete_for(want.id) is None
         and well(Unknown("another option", want=want.id, person=person))
     )
-    # Where each PERSON returns to. With no FACT, the best case is that home is wherever their
-    # path ends, and the worst case is that nobody knows. ``kind`` can name one PLACE for it.
-    home: dict[str, str | None] = {}
-    wherever: set[str] = set()
-    for person in file.persons:
-        stated = file.returns_to(person.id)
-        named = [
-            each.destination
-            for each in kind or ()
-            if (each.what, each.person) == ("returns to", person.id)
-        ]
-        if stated is not None:
-            home[person.id] = stated.place
-        elif kind is None:
-            wherever.add(person.id)
-        elif named:
-            home[person.id] = named[0]
     return World(
         terms,
         unlisted,
@@ -464,8 +425,6 @@ def _world(
         frozenset(satisfies),
         frozenset(might_satisfy),
         another_option,
-        home,
-        frozenset(wherever),
     )
 
 
@@ -490,23 +449,17 @@ def in_world(world: World, itinerary: Itinerary) -> Itinerary:
     return tuple(replace(step, end=end(step)) for step in itinerary)
 
 
-def broken(
-    file: File, world: World, itinerary: Itinerary, stays: Stays | None = None
-) -> list[Broken]:
+def broken(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
     """The CONSTRAINTs this ITINERARY does not meet in this world. An empty list means it works.
 
     Steps that take no time and share an instant can happen in any order. The order in which the
     ITINERARY lists them is tried first, then every other order. The result is that of the order
     that breaks the least.
-
-    ``stays`` says where each PERSON stays who does nothing and has no FACT about where they
-    start from. That is a choice of the ITINERARY, like a start time, and ``staying`` gives the
-    one a plan makes. With None, each such PERSON stays where it suits them in this world.
     """
     _well_formed(file, itinerary)
     fewest: list[Broken] | None = None
     for order in _in_each_order(itinerary):
-        found = _along_each_path(file, world, itinerary, order, stays)
+        found = _along_each_path(file, world, itinerary, order)
         if fewest is None or len(found) < len(fewest):
             fewest = found
         if not found:
@@ -514,36 +467,15 @@ def broken(
     return [*_each_alone(file, world, itinerary), *(fewest or [])]
 
 
-def broken_as_listed(
-    file: File, world: World, itinerary: Itinerary, stays: Stays | None = None
-) -> list[Broken]:
+def broken_as_listed(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
     """The CONSTRAINTs this ITINERARY does not meet with its steps in the order it lists them.
 
     This says what one particular plan breaks. ``broken`` may put steps that share an instant
-    in another order, and that would describe a different plan. ``stays`` is as in ``broken``.
+    in another order, and that would describe a different plan.
     """
     _well_formed(file, itinerary)
     placed = list(enumerate(itinerary))
-    along = _along_each_path(file, world, itinerary, placed, stays)
-    return [*_each_alone(file, world, itinerary), *along]
-
-
-def staying(file: File, world: World, itinerary: Itinerary) -> dict[str, str | None]:
-    """Where each PERSON who does nothing stays, in a plan made for this world.
-
-    The plan chooses it for a PERSON with no FACT about where they start from. Only one choice
-    is worth making: a PERSON who must end the TRIP at home stays at home, where this world
-    says where that is. Nothing asks where anybody else stays.
-    """
-    busy = {person for step in itinerary for person in step.persons}
-    return {
-        person.id: world.home[person.id]
-        for person in file.persons
-        if person.id not in busy
-        and person.id in world.home
-        and file.starts_from(person.id) is None
-        and must_end_at_home(file, person.id)
-    }
+    return [*_each_alone(file, world, itinerary), *_along_each_path(file, world, itinerary, placed)]
 
 
 def works_as_listed(file: File, world: World, itinerary: Itinerary) -> bool:
@@ -658,7 +590,7 @@ def _musts(file: File, world: World, taking_part: Mapping[str, tuple[str, ...]])
     """
     out: list[Broken] = []
     for want in file.wants:
-        if want.ends_at_home:
+        if want.ends_at is not None:
             continue  # checked along each PERSON's path
         met = {
             person
@@ -731,15 +663,15 @@ type _Found = list[tuple[Constraint, _Placed, int | None]]  # which, at which st
 
 
 def _along_each_path(
-    file: File, world: World, itinerary: Itinerary, order: list[_Placed], stays: Stays | None
+    file: File, world: World, itinerary: Itinerary, order: list[_Placed]
 ) -> list[Broken]:
     """The CONSTRAINTs about what each PERSON does, with the steps in one order.
 
     One Broken for each step and amount, naming every PERSON it affects in the FILE's order.
-    A must to end the TRIP at home that is not met has no step: one Broken for each such WANT.
+    A must to end the TRIP at a PLACE that is not met has no step: one Broken for each such WANT.
     """
     groups: dict[tuple[Constraint, int, int | None], list[str]] = {}
-    not_home: dict[str, list[str]] = {}
+    elsewhere: dict[str, list[str]] = {}
     for person in file.persons:
         path = [placed for placed in order if person.id in placed[1].persons]
         start = file.starts_from(person.id)
@@ -749,10 +681,10 @@ def _along_each_path(
             *_listed(file, world, path),
         ):
             groups.setdefault((constraint, position, late), []).append(person.id)
-        if not _ends_at_home(file, world, person.id, path, stays):
-            for want in file.wants:
-                if want.ends_at_home and person.id in want.musts:
-                    not_home.setdefault(want.id, []).append(person.id)
+        asked = has_to_end_at(file, person.id)
+        for want in asked:
+            if want.ends_at != _ends(path, start, asked[0]):
+                elsewhere.setdefault(want.id, []).append(person.id)
     kinds = [Constraint.PLACE, Constraint.ARRIVAL, Constraint.LISTED]
     return [
         *(
@@ -761,29 +693,21 @@ def _along_each_path(
             for (constraint, position, late), who in groups.items()
             if constraint is kind
         ),
-        *(Broken(Constraint.MUST, None, tuple(who), want=want) for want, who in not_home.items()),
+        *(Broken(Constraint.MUST, None, tuple(who), want=want) for want, who in elsewhere.items()),
     ]
 
 
-def _ends_at_home(
-    file: File, world: World, person: str, path: list[_Placed], stays: Stays | None
-) -> bool:
-    """Whether a PERSON's path ends at the PLACE they return to.
+def _ends(path: list[_Placed], start: StartsFrom | None, asked: Want) -> str | None:
+    """The PLACE where a PERSON's path ends, for a PERSON who has to end the TRIP somewhere.
 
-    A path with nothing in it ends where it begins. Where no FACT says where that is, the
-    ITINERARY chooses it, as it chooses where any path begins: ``stays`` holds the choice.
+    A path ends where its last step ends, and a path with nothing in it ends where it begins:
+    at the PLACE a FACT says the PERSON starts from. With no such FACT, nobody has said where
+    the PERSON is, and a path can begin wherever it suits. So a PERSON who does nothing is where
+    they have to end. ``asked`` is the first WANT that says where that is.
     """
-    if person in world.wherever:
-        return True  # the best case: home is wherever this path ends
-    if person not in world.home:
-        return False  # nobody knows where home is
-    home = world.home[person]
     if path:
-        return path[-1][1].destination == home
-    start = file.starts_from(person)
-    if start is not None:
-        return start.place == home
-    return stays is None or (person in stays and stays[person] == home)
+        return path[-1][1].destination
+    return asked.ends_at if start is None else start.place
 
 
 def _in_each_order(itinerary: Itinerary) -> Iterator[list[_Placed]]:
@@ -1168,22 +1092,19 @@ def _schedules(
     needed: list[tuple[int, int, list[Route]]] = []
     for number, order in enumerate(orders):
         person = file.persons[number].id
-        start, home = file.starts_from(person), None
-        if must_end_at_home(file, person) and person not in world.wherever:
-            if person not in world.home:
-                return  # nobody knows where home is, so no path is known to end there
-            home = world.home[person]  # None: outside the FILE, where no OPTION or WAY goes
+        start, asked = file.starts_from(person), has_to_end_at(file, person)
+        end = asked[0].ends_at if asked else None  # where this PERSON's path has to end
         stops = [(file.options[index].origin, file.options[index].destination) for index in order]
         # After which OPTION, from where, to where, and whether the PERSON does nothing after it.
         hops = [
             (spot, here, there, False)
             for spot, ((_, here), (there, _)) in enumerate(pairwise(stops))
         ]
-        first = stops[0][0] if stops else home
+        first = stops[0][0] if stops else end
         if start is not None and first is not None:
             hops.insert(0, (-1, start.place, first, not stops))
-        if stops and home is not None:
-            hops.append((len(stops) - 1, stops[-1][1], home, True))
+        if stops and end is not None:
+            hops.append((len(stops) - 1, stops[-1][1], end, True))
         for spot, here, there, last in hops:
             if here != there:
                 possible = known.between(here, there, last)

@@ -29,12 +29,11 @@ from tests.stories import (
     at,
     complete,
     cutoff,
-    ends_at_home,
+    ends_at,
     lasts,
     lasts_between,
     lock,
     moves,
-    returns_to,
     seconds,
     starts_at,
     starts_from,
@@ -82,9 +81,9 @@ def test_a_trip_too_big_for_the_solver_gets_the_reference_checkers_answer() -> N
     """
     places = [f"p{number}" for number in range(10)]
     ways = [way(f"w{n}-{k}", f"p{n}", f"p{n + 1}") for n in range(9) for k in range(3)]
-    facts = [starts_from("sam", "p0"), returns_to("sam", "p9"), takes("w0-0", "PT999999999H")]
+    facts = [starts_from("sam", "p0"), takes("w0-0", "PT999999999H")]
     now = [trip_starts(9), trip_ends(9)]
-    file = trip(["sam"], places, [], facts, now, ways=ways, wants=[ends_at_home("sam")])
+    file = trip(["sam"], places, [], facts, now, ways=ways, wants=[ends_at("p9", "sam")])
     with pytest.raises(compiler.DoesNotFit):
         compiler.stuck(Remaining(file))
     found = compiler.check(file)

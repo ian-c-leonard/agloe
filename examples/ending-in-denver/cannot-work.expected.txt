@@ -1,12 +1,11 @@
 INFEASIBLE: this trip cannot work.
 
 These FACTs, WANTs and DECISIONs rule out every plan by themselves. Take any one away and they no longer do. A FACT that is taken away leaves what it said unknown. Times are in America/Chicago.
-  sam-home: Sam returns to Denver
   visit-time: Museum visit starts at 2:00 pm on Saturday 15 May 2027
   visit-length: Museum visit takes 1 h
   flight-time: Flight home starts at 3:30 pm on Saturday 15 May 2027
   bag-drop: people must be at O'Hare 45 min before Flight home starts
-  every-way-home: every way straight to Denver that leaves between 12:00 pm on Saturday 15 May 2027 and 7:30 pm is listed
-  getting-home: getting home is a must for Alex and Sam
+  every-way-to-denver: every way straight to Denver that leaves between 12:00 pm on Saturday 15 May 2027 and 7:30 pm is listed
+  ending-in-denver: ending the trip in Denver is a must for Alex and Sam
   trip-end: the TRIP ends at 7:30 pm on Saturday 15 May 2027
   lock-visit: Alex and Sam take part in Museum visit

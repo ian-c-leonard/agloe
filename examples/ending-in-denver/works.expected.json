@@ -48,8 +48,6 @@
   "relies_on": [
     "alex-start",
     "sam-start",
-    "alex-home",
-    "sam-home",
     "visit-time",
     "visit-length",
     "visit-arrival",
@@ -60,7 +58,7 @@
     "flight-length",
     "bag-drop",
     "walk-length",
-    "getting-home",
+    "ending-in-denver",
     "trip-start",
     "trip-end",
     "lock-visit"

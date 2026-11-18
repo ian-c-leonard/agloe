@@ -90,9 +90,9 @@ class Want:
     name: str
     musts: tuple[str, ...]  # the PERSONs for whom it is a must: a DEGREE OF WANT of +10
     must_nots: tuple[str, ...] = ()  # those for whom it is a must-not: a DEGREE OF WANT of -10
-    # Whether it is about the whole ITINERARY and no OPTION delivers it: the holder ends the
-    # TRIP at the PLACE they return to.
-    ends_at_home: bool = False
+    # The PLACE where each holder ends the TRIP, for a WANT that asks that. Such a WANT is about
+    # the whole ITINERARY, and no OPTION delivers it.
+    ends_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -209,16 +209,7 @@ class StartsFrom:
     place: str
 
 
-@dataclass(frozen=True)
-class ReturnsTo:
-    """A FACT: where a PERSON returns to: the PLACE that ending the TRIP at home means for them."""
-
-    id: str
-    person: str
-    place: str
-
-
-type Fact = Start | Duration | Cutoff | Complete | Satisfies | CompleteFor | StartsFrom | ReturnsTo
+type Fact = Start | Duration | Cutoff | Complete | Satisfies | CompleteFor | StartsFrom
 type Decision = Lock | TripStart | TripEnd
 
 
@@ -273,11 +264,6 @@ class File:
     def starts_from(self, person: str) -> StartsFrom | None:
         """The FACT about where this PERSON starts from, if the FILE states one."""
         facts = (fact for fact in self.facts if isinstance(fact, StartsFrom))
-        return next((fact for fact in facts if fact.person == person), None)
-
-    def returns_to(self, person: str) -> ReturnsTo | None:
-        """The FACT about where this PERSON returns to, if the FILE states one."""
-        facts = (fact for fact in self.facts if isinstance(fact, ReturnsTo))
         return next((fact for fact in facts if fact.person == person), None)
 
     def complete_for(self, want: str) -> CompleteFor | None:
@@ -586,9 +572,12 @@ def load(document: object) -> File:
             problems.append(f"{where}: {person} is a holder more than once")
         musts = tuple(each["person"] for each in want["holders"] if each["degree"] == 10)
         must_nots = tuple(each["person"] for each in want["holders"] if each["degree"] == -10)
-        wants.append(Want(want["id"], want["name"], musts, must_nots, "itinerary" in want))
+        ends_at = want["itinerary"]["ends_at"] if "itinerary" in want else None
+        if ends_at is not None:
+            known(where, ends_at, "PLACE", place_ids)
+        wants.append(Want(want["id"], want["name"], musts, must_nots, ends_at))
     want_ids = {want.id for want in wants}
-    not_delivered = {want.id for want in wants if want.ends_at_home}
+    not_delivered = {want.id for want in wants if want.ends_at is not None}
 
     facts: list[Fact] = []
     stated: set[tuple[str, type]] = set()
@@ -628,13 +617,11 @@ def load(document: object) -> File:
             continue
         if "person" in fact:
             known(where, fact["person"], "PERSON", person_ids)
-            place = fact["starts_from"] if "starts_from" in fact else fact["returns_to"]
-            known(where, place, "PLACE", place_ids)
-            kind = StartsFrom if "starts_from" in fact else ReturnsTo
-            if (fact["person"], kind) in stated:
+            known(where, fact["starts_from"], "PLACE", place_ids)
+            if (fact["person"], StartsFrom) in stated:
                 problems.append(f"{where}: another FACT already states this about {fact['person']}")
-            stated.add((fact["person"], kind))
-            facts.append(kind(fact["id"], fact["person"], place))
+            stated.add((fact["person"], StartsFrom))
+            facts.append(StartsFrom(fact["id"], fact["person"], fact["starts_from"]))
             continue
         made: Fact
         if "way" in fact:

@@ -17,6 +17,7 @@ need more than that. The reference checker's own search then answers for the who
 
 from collections.abc import Sequence
 from dataclasses import replace
+from itertools import combinations
 from math import inf
 
 from ortools.sat.python import cp_model
@@ -352,7 +353,7 @@ class _Search:
 
     def _delivered(self) -> list[Want]:
         """The WANTs about something an OPTION can deliver. The path settles the others."""
-        return [want for want in self.file.wants if not want.ends_at_home]
+        return [want for want in self.file.wants if want.ends_at is None]
 
     def _hold_to_the_wants_with_switches(self) -> list[set[int]]:
         """The same where each FACT and WANT applies only if switched on, in the best case.
@@ -417,7 +418,7 @@ class _Search:
         arcs: list[tuple[int, int, cp_model.LiteralT]] = [(ends, ends, nothing)]
         follows: dict[tuple[int, int], cp_model.IntVar] = {}
         between: dict[tuple[int, int], _Taken] = {}
-        start, home = self._begins_at(person.id), self._has_to_end_at(person.id, nothing)
+        start, asked = self._begins_at(person.id), self._has_to_end_at(person.id)
         moved = [model.new_bool_var(f"{person.id} moved by {o.id}") for o in options]
         arrived = [
             model.new_int_var(self.earliest, self.latest + self.room, f"{person.id} at {o.id}")
@@ -437,12 +438,18 @@ class _Search:
                     _when(model.add(arrived[index] >= done), takes[index])
             between[ends, index] = self._sets_out(start, first, index, moved, arrived)
             # Nobody knows when an OPTION with no limit ends: the PERSON never leaves it.
-            between[index, ends] = self._goes_home(
-                last, home, option.destination, free=done, leaves=done is not None
-            )
+            between[index, ends] = [
+                taken
+                for there in asked
+                for taken in self._ends_there(
+                    last, there, option.destination, free=done, leaves=done is not None
+                )
+            ]
         if start is not None:
-            # A PERSON who takes part in nothing stays where they start from, or goes home.
-            between[ends, ends] = self._goes_home(nothing, home, *start)
+            # A PERSON who takes part in nothing stays where they start from, or travels on.
+            between[ends, ends] = [
+                taken for there in asked for taken in self._ends_there(nothing, there, *start)
+            ]
 
         for before, earlier in enumerate(options):
             for after, later in enumerate(options):
@@ -527,10 +534,10 @@ class _Search:
         reached = self._travels(first, given, here, origin, None)
         return self._arrives_for(index, reached, moved, arrived)
 
-    def _goes_home(
+    def _ends_there(
         self,
         taken: cp_model.IntVar,
-        home: _End | None,
+        end: _End,
         here: str,
         given: Sequence[cp_model.IntVar] = (),
         free: _Amount | None = None,
@@ -539,12 +546,12 @@ class _Search:
         """The routes from where a PERSON is to where their path has to end.
 
         They take one while ``taken`` holds, with everything in ``given`` and the records that
-        say where home is. The PERSON can leave after ``free``. Where they never ``leaves``,
-        they are home only if they are there already.
+        ask for that end. The PERSON can leave after ``free``. Where they never ``leaves``,
+        their path ends there only if they are there already.
         """
-        if home is None or here == home[0]:
+        there, asked = end
+        if here == there:
             return []
-        there, asked = home
         if not leaves:
             self._never(taken, asked)
             return []
@@ -640,35 +647,26 @@ class _Search:
         stated = self.file.starts_from(person)
         return None if stated is None else (stated.place, self._given(stated.id))
 
-    def _has_to_end_at(self, person: str, nothing: cp_model.IntVar) -> _End | None:
-        """Where a PERSON's path has to end. None: anywhere.
+    def _has_to_end_at(self, person: str) -> list[_End]:
+        """Each PLACE where a PERSON's path has to end, with the records that ask for it.
 
-        It has to end at the PLACE the PERSON returns to, where ending the TRIP at home is a
-        must for them. Where nobody knows where home is, no path will do. Where home is a PLACE
-        the FILE does not name, only a PERSON who stays there is home: they do ``nothing``, and
-        no FACT says they start from somewhere else. With switches the world is the best case:
-        home is wherever the path ends unless a FACT says where it is, and the must holds only
-        while that FACT and the WANT are given.
+        A WANT can ask its holders to end the TRIP at a PLACE. It asks while it is given, and a
+        PLACE is asked for while any WANT that names it is. No path ends at two PLACEs. A PERSON
+        who does nothing, with no FACT about where they start from, is where they have to end.
         """
-        file, world = self.file, self.world
-        wants = [want for want in file.wants if want.ends_at_home and person in want.musts]
-        if not wants or person in world.wherever:
-            return None
-        if not self.switch:
-            there = world.home.get(person)
-            if there is not None:
-                return there, []
-            if person in world.home and file.starts_from(person) is None:
-                self.model.add(nothing == 1)
-            else:
-                self.model.add_bool_or([])  # nothing works
-            return None
-        stated = file.returns_to(person)
-        if stated is None:
-            return None
-        asked = self.model.new_bool_var(f"{person} must end at home")
-        self.model.add_max_equality(asked, [self.switch[want.id] for want in wants])
-        return stated.place, [asked, self.switch[stated.id]]
+        model = self.model
+        naming: dict[str, list[cp_model.IntVar]] = {}
+        for want in reference.has_to_end_at(self.file, person):
+            naming.setdefault(want.ends_at or "", []).extend(self._given(want.id))
+        asked: list[_End] = []
+        for place, given in naming.items():
+            if len(given) > 1:
+                given = [model.new_bool_var(f"{person} has to end at {place}")]
+                model.add_max_equality(given[0], naming[place])
+            asked.append((place, given))
+        for (_, one), (_, other) in combinations(asked, 2):
+            model.add_bool_or([each.negated() for each in (*one, *other)])
+        return asked
 
     def _keep_within_the_trip(
         self, begins: _Amount, lasts: _Amount | None, happens: cp_model.IntVar
@@ -781,7 +779,7 @@ class _Search:
                 here = ahead[0]
             for chosen, route in self.routes[number].get((here, count), ()):
                 if solver.boolean_value(chosen):
-                    by[number, len(order) - 1] = route  # the route home, after the last OPTION
+                    by[number, len(order) - 1] = route  # the route after the last OPTION
             orders.append(tuple(order))
         return self._who(orders), tuple(orders), by
 
