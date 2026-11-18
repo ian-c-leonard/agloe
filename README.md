@@ -6,7 +6,24 @@ AI agents are starting to plan trips. They need three things: a lasting place to
 
 ## Status
 
-Agloe is being built in public, and nothing is published to install yet. From a copy of this repository, `uv run agloe check examples/flight-home/works.json` checks one of the example trips.
+Agloe is being built in public, and nothing is published to install yet. The first release, the COMPILER, is being built in steps.
+
+Today the COMPILER reads a trip file and gives one of three answers, each with its evidence:
+
+- **FEASIBLE:** the trip works. The report shows a plan, and warns when the plan holds only if uncertain durations stay short.
+- **INFEASIBLE:** the trip cannot work. The report names the FACTs, WANTs and DECISIONs that clash.
+- **UNDETERMINED:** the file does not say enough to tell. The report names what it would have to say for the trip to work.
+
+It checks times and places for one traveler or a group, over one day or several. It also checks what each person must have and must not have. The [rules](spec/rules.md) say exactly what it checks, and every trip under [`examples/`](examples/) is one of its tests.
+
+From a copy of this repository:
+
+```
+uv run agloe check examples/flight-home/works.json
+uv run agloe check examples/a-must/cannot-work.json
+```
+
+The releases:
 
 - **0.1, the COMPILER:** says whether a trip is FEASIBLE, INFEASIBLE or UNDETERMINED, and explains every finding with its evidence.
 - **0.2, the OPTIMIZER:** finds the best version of a trip for the priorities people set.
@@ -24,7 +41,7 @@ See the [roadmap](docs/ROADMAP.md) for what each release contains.
 
 ## How it is built
 
-Ian Leonard designs Agloe and makes its product decisions. AI agents do much of the building: Claude Code writes the code, and Codex reviews each release. The principles and decisions are public, so anyone can see why Agloe works the way it does.
+Ian Leonard designs Agloe and makes its product decisions. AI agents do much of the building: Claude Code writes the code, and Codex reviews each step and each release. The principles and decisions are public, so anyone can see why Agloe works the way it does.
 
 ## The name
 
