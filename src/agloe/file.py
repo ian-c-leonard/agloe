@@ -274,12 +274,14 @@ class File:
         """Whether this OPTION SATISFIES this WANT, as far as the FILE says. None: nobody knows.
 
         A FACT about the two settles it. Without one, a FACT that the WANT's set is COMPLETE
-        settles it too: the OPTION does not.
+        settles it too: the OPTION does not. No OPTION delivers a WANT to end the TRIP at a
+        PLACE, so that is settled as well.
         """
         stated = self.satisfies(option, want)
         if stated is not None:
             return stated.degree > 0
-        return None if self.complete_for(want) is None else False
+        about_the_end = any(each.id == want and each.ends_at is not None for each in self.wants)
+        return None if self.complete_for(want) is None and not about_the_end else False
 
     def without(self, record: str) -> File:
         """The same FILE with one FACT, WANT or DECISION left out.

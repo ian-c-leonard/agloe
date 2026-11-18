@@ -19,7 +19,7 @@ The plan relies on these FACTs, WANTs and DECISIONs:
   flight-length: Flight home takes 2 h 30 min
   bag-drop: people must be at O'Hare 45 min before Flight home starts
   walk-length: the walk between the hotel and the Art Institute takes 15 min
-  ending-in-denver: ending the trip in Denver is a must for Alex and Sam
+  ending-in-denver: ending the trip in Denver is a must for Alex and Sam: to end the TRIP at Denver
   trip-start: the TRIP starts at 12:00 pm on Saturday 15 May 2027
   trip-end: the TRIP ends at 7:30 pm on Saturday 15 May 2027
   lock-visit: Alex and Sam take part in Museum visit

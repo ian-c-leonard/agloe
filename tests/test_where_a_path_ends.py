@@ -6,7 +6,7 @@ from random import Random
 
 import pytest
 
-from agloe import answers, compiler
+from agloe import answers, compiler, report
 from agloe.answers import Answer, Missing, Report
 from agloe.file import File, FileError, StartsFrom, load
 from agloe.reference import (
@@ -27,10 +27,12 @@ from agloe.reference import (
     no_better_than,
     unknowns,
     with_these_at_best,
+    works_as_listed,
     worst_case,
 )
 from tests.stories import (
     Document,
+    any_time,
     at,
     complete,
     cutoff,
@@ -174,6 +176,7 @@ def test_no_option_delivers_the_want_to_end_at_a_place() -> None:
     whole = {"id": "every-ending", "complete": {"satisfies": "ending"}}
     assert problems(day_out(whole)) == "/facts/6: no OPTION delivers ending"
     file = load(day_out())
+    assert file.says("visit", "ending") is False
     for world in (best_case(file), worst_case(file), no_better_than(file, [])):
         assert "ending" not in {want for _, want in world.satisfies | world.might_satisfy}
     assert {unknown.what for unknown in unknowns(load(day_out(without=["train-length"])))} == {
@@ -250,6 +253,10 @@ def test_nobody_ends_the_trip_at_two_places() -> None:
     found = checked(file)
     assert found.answer is Answer.INFEASIBLE
     assert found.conflict == ("first", "second")
+    assert report.as_text(file, found).splitlines()[-2:] == [
+        "  first: first is a must for alex: to end the TRIP at hotel",
+        "  second: second is a must for alex: to end the TRIP at cottage",
+    ]
 
     same = stays_put(wants=[first, ends_at("hotel", "alex", id="second")])
     assert checked(same).answer is Answer.FEASIBLE
@@ -462,6 +469,34 @@ def test_another_option_never_meets_the_must_to_end_at_a_place() -> None:
     assert found.conflict == ("alex-start", "ways-from-hotel", "ending", "trip-start", "trip-end")
 
 
+def test_the_way_listed_first_decides_though_its_route_takes_more_ways() -> None:
+    """Alex goes from a to c and on to e, and has two hours for both stretches.
+
+    Each stretch has a slow direct WAY and a quick route of two WAYs. Both slow WAYs together
+    take too long, so one stretch goes by two WAYs. The plan shown takes the WAY listed first:
+    by b on the first stretch.
+    """
+    ways = [
+        way("a-b", "a", "b"),
+        way("b-c", "b", "c"),
+        way("c-d", "c", "d"),
+        way("d-e", "d", "e"),
+        way("a-c", "a", "c"),
+        way("c-e", "c", "e"),
+    ]
+    facts = [starts_from("alex", "a"), any_time("stop"), lasts("stop", "PT0S")]
+    facts += [cutoff("stop", "PT0S")]
+    facts += [takes(each["id"], "PT20M") for each in ways[:4]]
+    facts += [takes("a-c", "PT70M"), takes("c-e", "PT70M")]
+    limits = [trip_starts(9), trip_ends(11), lock("stop", "alex")]
+    places = ["a", "b", "c", "d", "e"]
+    wants = [ends_at("e", "alex")]
+    file = trip(["alex"], places, [stays("stop", "c")], facts, limits, ways=ways, wants=wants)
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [step.option or step.way for step in found.itinerary] == ["a-b", "b-c", "stop", "c-e"]
+
+
 # ------------------------------- A last step with no known end -------------------------------
 
 
@@ -557,6 +592,22 @@ def test_very_many_persons_can_take_one_way() -> None:
     assert found.answer is Answer.FEASIBLE
     assert len(found.itinerary) == 1100
     assert len(checked(by_bus(150)).itinerary) == 150
+
+
+def test_a_large_group_with_two_ways_to_choose_from_is_planned_at_once() -> None:
+    """63 PERSONs and two WAYs give more choices of WAYs than a list can hold.
+
+    The first choice works, and the search makes no other one.
+    """
+    people = [f"p{number}" for number in range(63)]
+    facts = [takes("bus", "PT1S"), takes("tram", "PT1S")]
+    facts += [starts_from(person, "hotel") for person in people]
+    ways = [way("bus", "hotel", "cottage"), way("tram", "hotel", "cottage")]
+    wants = [ends_at("cottage", *people)]
+    file = trip(people, ["hotel", "cottage"], [], facts, [], ways=ways, wants=wants)
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [step.way for step in found.itinerary] == ["bus"] * 63
 
 
 def test_a_path_can_go_through_very_many_places() -> None:
@@ -770,7 +821,7 @@ def test_the_best_and_worst_cases_settle_the_answer_with_starts_and_ends() -> No
         for _ in range(6):
             world = possible_world(rng, file)
             for choice in always:
-                assert broken(file, world, in_world(world, choice)) == []
+                assert works_as_listed(file, world, in_world(world, choice))
             by_chance = [any_choice(rng, file, world) for _ in range(12)]
             by_chance = [
                 each for each in by_chance if not broken(file, world, in_world(world, each))

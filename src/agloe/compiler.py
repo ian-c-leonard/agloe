@@ -29,6 +29,8 @@ from agloe.reference import Itinerary, Remaining, World
 
 _MOST_AT_ONCE = 60  # yes-or-no choices ranked in one solve: their weights must fit in 64 bits
 _FURTHEST = 2**62  # a time further than this from the first fixed time does not fit in 64 bits
+# How CP-SAT starts when it refuses a model because its variables can take too many values.
+_TOO_MANY_VALUES = "The sum of all variable domains do not fit on an int64_t"
 
 type _Who = tuple[tuple[str, ...], ...]  # the PERSONs in each OPTION
 type _Orders = tuple[tuple[int, ...], ...]  # the OPTIONs each PERSON does, in order
@@ -437,18 +439,19 @@ class _Search:
                 if done is not None:
                     _when(model.add(arrived[index] >= done), takes[index])
             between[ends, index] = self._sets_out(start, first, index, moved, arrived)
-            # Nobody knows when an OPTION with no limit ends: the PERSON never leaves it.
-            between[index, ends] = [
-                taken
-                for there in asked
-                for taken in self._ends_there(
-                    last, there, option.destination, free=done, leaves=done is not None
-                )
-            ]
+            between[index, ends] = []
+            for there in asked:
+                if done is not None:
+                    between[index, ends] += self._ends_there(last, there, option.destination, done)
+                elif option.destination != there[0]:
+                    # Nobody knows when the OPTION ends, so the PERSON never leaves it.
+                    self._never(last, there[1])
         if start is not None:
             # A PERSON who takes part in nothing stays where they start from, or travels on.
             between[ends, ends] = [
-                taken for there in asked for taken in self._ends_there(nothing, there, *start)
+                taken
+                for there in asked
+                for taken in self._ends_there(nothing, there, start[0], given=start[1])
             ]
 
         for before, earlier in enumerate(options):
@@ -539,21 +542,16 @@ class _Search:
         taken: cp_model.IntVar,
         end: _End,
         here: str,
-        given: Sequence[cp_model.IntVar] = (),
         free: _Amount | None = None,
-        leaves: bool = True,
+        given: Sequence[cp_model.IntVar] = (),
     ) -> _Taken:
         """The routes from where a PERSON is to where their path has to end.
 
         They take one while ``taken`` holds, with everything in ``given`` and the records that
-        ask for that end. The PERSON can leave after ``free``. Where they never ``leaves``,
-        their path ends there only if they are there already.
+        ask for that end. The PERSON can leave after ``free``, or at any time where it is None.
         """
         there, asked = end
         if here == there:
-            return []
-        if not leaves:
-            self._never(taken, asked)
             return []
         reached = self._travels(taken, [*given, *asked], here, there, free, last=True)
         return [(chosen, route) for chosen, route, _ in reached]
@@ -749,7 +747,7 @@ class _Search:
         status = solver.solve(self.model)
         if status == cp_model.MODEL_INVALID:
             why = self.model.validate()
-            if "int64" not in why and "overflow" not in why:
+            if not why.startswith(_TOO_MANY_VALUES):
                 raise AssertionError(f"the solver refused the model: {why}")
             raise DoesNotFit(why)
         return solver, status

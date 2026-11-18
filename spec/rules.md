@@ -48,8 +48,8 @@ A FACT that the FILE does not state is unknown, unless a COMPLETE set settles it
 - With no stated duration, an OPTION or a WAY might take any length of time.
 - With no stated access cutoff, an OPTION might need any margin.
 - Travel that the FILE does not list might exist between any two PLACEs, and take any length of time. The rules call it an unlisted WAY. It stands for a WAY, or for an OPTION that leaves at some time, so it can be there at one time and not at another. Where it stands for an OPTION, nobody knows which WANTs it SATISFIES, except that it SATISFIES no WANT whose set is COMPLETE. A COMPLETE set of travel says that none goes straight from its first PLACE to its second within its span.
-- With no FACT about an OPTION and a WANT, nobody knows whether the OPTION SATISFIES the WANT, unless a FACT says that the WANT's set is COMPLETE.
-- An OPTION that the FILE does not list might SATISFY any WANT whose set is not COMPLETE. The rules call it another OPTION for the WANT. Nobody knows where it happens, when it starts or how long it takes. So nobody knows which PERSONs can take part in it.
+- With no FACT about an OPTION and a WANT that an OPTION can deliver, nobody knows whether the OPTION SATISFIES the WANT, unless a FACT says that the WANT's set is COMPLETE.
+- An OPTION that the FILE does not list might SATISFY any such WANT whose set is not COMPLETE. The rules call it another OPTION for the WANT. Nobody knows where it happens, when it starts or how long it takes. So nobody knows which PERSONs can take part in it.
 
 A possible world is one way that all the unknown FACTs could turn out. Its travel joins only PLACEs that the FILE names: travel through anywhere else is part of one WAY between two PLACEs of the FILE. Another OPTION for a WANT can happen anywhere.
 
@@ -86,7 +86,7 @@ Two cases settle the answer. For the same OPTIONs, PERSONs, WAYs and start times
 
 So a must on a WANT that an OPTION can deliver can make a TRIP INFEASIBLE only where a FACT says that the WANT's set is COMPLETE. Otherwise another OPTION might be found, and the must makes the TRIP UNDETERMINED when no OPTION that a FACT says SATISFIES the WANT fits. A must-not can make a TRIP INFEASIBLE: a LOCK names a PERSON in an OPTION that a FACT says SATISFIES what they must not have.
 
-A must to end the TRIP at a PLACE makes a TRIP UNDETERMINED where no listed OPTION or WAY gets the PERSON there in time: other WAYs might. It makes a TRIP INFEASIBLE only where COMPLETE sets of travel rule those out, on every route there and at every time the PERSON could still leave. Without a DECISION about when the TRIP ends, the PERSON could always wait until a span has passed. Two such musts that name different PLACEs for one PERSON make a TRIP INFEASIBLE by themselves.
+A must to end the TRIP at a PLACE makes a TRIP UNDETERMINED where the PERSON still has to travel there and no listed OPTION or WAY gets them there in time: other WAYs might. It makes a TRIP INFEASIBLE only where COMPLETE sets of travel rule those out, on every route there and at every time the PERSON could still leave. Without a DECISION about when the TRIP ends, the PERSON could always wait until a span has passed. Two such musts that name different PLACEs for one PERSON make a TRIP INFEASIBLE by themselves.
 
 ## ROBUST
 

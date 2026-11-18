@@ -15,7 +15,7 @@ section "Which ITINERARY is shown". The sections "The three answers", "ROBUST" a
 are in ``answers``, which works them out from this module's search or from a faster one.
 """
 
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence, Sized
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from heapq import heapify, heappop, heappush
@@ -161,8 +161,11 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
     and that it does not only where the WANT is a must-not for some PERSON. So only those are
     listed. Where a FACT says a WANT's set is COMPLETE, nothing about the WANT is unknown.
     """
-    delivered = [want for want in file.wants if want.ends_at is None]
-    musts = [want for want in delivered if want.musts and file.complete_for(want.id) is None]
+    musts = [
+        want
+        for want in file.wants
+        if want.musts and want.ends_at is None and file.complete_for(want.id) is None
+    ]
     out: list[Unknown] = []
     for option in file.options:
         if file.start(option.id) is None:
@@ -171,7 +174,7 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
             out.append(Unknown("duration", option.id))
         if file.cutoff(option.id) is None:
             out.append(Unknown("cutoff", option.id))
-        for want in delivered:
+        for want in file.wants:
             if file.says(option.id, want.id) is None:
                 if want.musts:
                     out.append(Unknown("satisfies", option.id, want=want.id))
@@ -313,7 +316,7 @@ def no_better_than(file: File, found: Iterable[Unknown]) -> World:
         (option.id, want.id)
         for option in file.options
         for want in file.wants
-        if want.ends_at is None and file.says(option.id, want.id) is None
+        if file.says(option.id, want.id) is None
     }
     conditions = frozenset(
         (each.want, each.person)
@@ -394,8 +397,6 @@ def _world(
     might_satisfy: set[tuple[str, str]] = set()
     for option in file.options:
         for want in file.wants:
-            if want.ends_at is not None:
-                continue  # no OPTION delivers it: it is about where a PERSON's path ends
             pair = (option.id, want.id)
             said = file.says(*pair)
             if said is not None:
@@ -874,7 +875,9 @@ def itineraries(file: File, world: World) -> list[Itinerary]:
 
     Nothing can be taken out of an ITINERARY in which PERSONs take part the fewest times, so
     ``needless`` finds nothing in any ITINERARY returned. They come in the order of "Which
-    ITINERARY is shown".
+    ITINERARY is shown". That rule covers the plans a report shows, which take no unlisted WAY.
+    In a world with unlisted WAYs the order and the times are still the same every time, and no
+    more is promised.
     """
     best: list[tuple[_Shown, Itinerary]] = []
     fewest: int | None = None
@@ -933,7 +936,7 @@ def scheduled(
     return next(_schedules(file, world, who, orders, known or Routes(file, world)), None)
 
 
-def _who_takes_part(file: File, world: World) -> list[tuple[tuple[str, ...], ...]]:
+def _who_takes_part(file: File, world: World) -> Iterator[tuple[tuple[str, ...], ...]]:
     """Every choice of PERSONs for every OPTION that honors the LOCKs, fewest PERSONs first."""
     people = [person.id for person in file.persons]
     choices: list[list[tuple[str, ...]]] = []
@@ -947,7 +950,7 @@ def _who_takes_part(file: File, world: World) -> list[tuple[tuple[str, ...], ...
         choices.append(
             [group for group in groups if must.issubset(group) and (can_happen or not group)]
         )
-    return sorted(product(*choices), key=lambda who: sum(len(persons) for persons in who))
+    return _fewest_first(choices)
 
 
 def _orders(
@@ -1112,57 +1115,62 @@ def _schedules(
                     return
                 needed.append((number, spot, possible))
 
-    def taken(chosen: tuple[Route, ...]) -> list[list[tuple[int, int, int]]]:
-        """For each PERSON in turn, every WAY they take, in the order they take them."""
-        each: list[list[tuple[int, int, int]]] = [[] for _ in orders]
-        for (number, _, _), route in zip(needed, chosen, strict=True):
-            each[number] += _legs_in_file_order(file, route)
-        return each
+    # The routes at each point in the order of the WAYs they take. No route is the beginning of
+    # another one between the same two PLACEs. So going through the points in turn puts the
+    # choices in the order of "Which ITINERARY is shown": PERSON by PERSON, WAY by WAY.
+    possible = [
+        sorted(routes, key=lambda route: _legs_in_file_order(file, route))
+        for _, _, routes in needed
+    ]
+    for chosen in _fewest_first(possible):
+        hops = {
+            (number, position): route
+            for (number, position, _), route in zip(needed, chosen, strict=True)
+        }
+        yield from _timings(file, world, who, orders, hops)
 
-    # The fewest and the most WAYs that the routes from each point on can take in all.
-    least = [0] * (len(needed) + 1)
-    greatest = [0] * (len(needed) + 1)
-    for rest in reversed(range(len(needed))):
-        lengths = [len(route) for route in needed[rest][2]]
-        least[rest] = least[rest + 1] + min(lengths)
-        greatest[rest] = greatest[rest + 1] + max(lengths)
 
-    def with_this_many(total: int) -> Iterator[tuple[Route, ...]]:
-        """Every choice of routes that takes this many WAYs in all.
+def _fewest_first[T: Sized](choices: Sequence[Sequence[T]]) -> Iterator[tuple[T, ...]]:
+    """One thing from each list, in every combination, the smallest combinations first.
 
-        It keeps its own list of what is picked, with no call inside a call. So a TRIP in which
-        very many PERSONs travel needs no deep stack.
-        """
-        picked: list[int] = []  # which route is taken at each point so far
-        nth, left = 0, total  # the next route to try at the point after those; the WAYs left
+    The size of a combination is the lengths of its things added up. Among combinations of one
+    size the lists' own order decides, and the first list counts most.
+
+    Each combination is made when it is asked for. So a search that stops at the first one that
+    works never makes the rest, however many there are. It keeps its own list of what is picked,
+    with no call inside a call, so very many lists need no deep stack.
+    """
+    if not all(choices):
+        return
+    # The smallest and the largest size that the lists from each point on can add.
+    least = [0] * (len(choices) + 1)
+    greatest = [0] * (len(choices) + 1)
+    for rest in reversed(range(len(choices))):
+        sizes = [len(thing) for thing in choices[rest]]
+        least[rest] = least[rest + 1] + min(sizes)
+        greatest[rest] = greatest[rest + 1] + max(sizes)
+    for total in range(least[0], greatest[0] + 1):
+        picked: list[int] = []  # which thing is taken from each list so far
+        nth, left = 0, total  # the next thing to try in the list after those; the size left
         while True:
             point = len(picked)
-            possible = needed[point][2] if point < len(needed) else []
-            while nth < len(possible):
-                after = left - len(possible[nth])
+            here: Sequence[T] = choices[point] if point < len(choices) else ()
+            while nth < len(here):
+                after = left - len(here[nth])
                 if least[point + 1] <= after <= greatest[point + 1]:
                     break
                 nth += 1
-            if nth < len(possible):
+            if nth < len(here):
                 picked.append(nth)
-                nth, left = 0, left - len(possible[nth])
+                nth, left = 0, left - len(here[nth])
                 continue
-            if point == len(needed):
-                yield tuple(needed[at][2][which] for at, which in enumerate(picked))
+            if point == len(choices):
+                yield tuple(choices[at][which] for at, which in enumerate(picked))
             if not picked:
-                return
+                break
             nth = picked.pop()
-            left += len(needed[len(picked)][2][nth])
+            left += len(choices[len(picked)][nth])
             nth += 1
-
-    fewest, most = least[0], greatest[0]
-    for total in range(fewest, most + 1):
-        for chosen in sorted(with_this_many(total), key=taken):
-            hops = {
-                (number, position): route
-                for (number, position, _), route in zip(needed, chosen, strict=True)
-            }
-            yield from _timings(file, world, who, orders, hops)
 
 
 def _timings(

@@ -403,7 +403,10 @@ def _record(file: File, clock: _Clock, record: str) -> str:
             for kind, persons in (("must", found.musts), ("must-not", found.must_nots))
             if persons
         ]
-        return f"{_want(file, found.id)} is {' and '.join(said)}"
+        asked = f"{_want(file, found.id)} is {' and '.join(said)}"
+        if found.ends_at is None:
+            return asked
+        return f"{asked}: to end the TRIP at {_names(file.places)[found.ends_at]}"
     if isinstance(found, Complete):
         places = _names(file.places)
         first = clock.day(found.earliest)

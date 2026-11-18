@@ -20,7 +20,7 @@ The trip being planned, lived and recorded: the PERSONs it concerns, their WANTs
 
 ### SCOPE
 
-The TRIP's frame: its dates, the PLACE each traveling PERSON starts from and returns to, what the TRIP is for, and anything explicitly out of bounds. WANTs use the SCOPE to know which days and nights they cover. The dates are DECISIONs: one can say the time at which the TRIP starts, and one the time at which it ends. A TRIP can have either, both or neither. Nothing in an ITINERARY starts before the first or ends after the second. The PLACE a PERSON starts from is a FACT. The PLACE they return to is named by a WANT to end the TRIP there.
+The TRIP's frame: its dates, the PLACE each traveling PERSON starts from and the PLACE where they end the TRIP, what the TRIP is for, and anything explicitly out of bounds. WANTs use the SCOPE to know which days and nights they cover. The dates are DECISIONs: one can say the time at which the TRIP starts, and one the time at which it ends. A TRIP can have either, both or neither. Nothing in an ITINERARY starts before the first or ends after the second. The PLACE a PERSON starts from is a FACT. The PLACE where they end the TRIP is named by a WANT to end it there.
 
 *Uses:* TRIP, PLACE, PERSON, → WANT, → DECISION, → FACT, → ITINERARY.
 

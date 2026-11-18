@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 from random import Random
+from typing import Any
 
 import pytest
 
@@ -108,15 +109,37 @@ def test_times_too_far_apart_for_the_solver_get_the_reference_checkers_answer() 
     assert (found.answer, found.itinerary) == (Answer.FEASIBLE, ())
 
 
+def test_many_visits_nobody_has_to_make_do_not_stop_the_reference_checkers_search() -> None:
+    """The TRIP is too big for the solver, and 63 visits can each happen or not.
+
+    The reference checker's search tries the plans with the fewest PERSONs taking part first.
+    The plan with nothing in it works, so it never makes the others.
+    """
+    places = [f"p{number}" for number in range(200)]
+    visits = [stays(f"visit-{number}", "p0") for number in range(63)]
+    facts = [takes("far", "PT999999999H"), *(any_time(each["id"]) for each in visits)]
+    file = trip(["sam"], places, visits, facts, [], ways=[way("far", "p1", "p2")])
+    with pytest.raises(compiler.DoesNotFit):
+        compiler.works(file, worst_case(file))
+    found = compiler.check(file)
+    assert found == answers.check(file)
+    assert (found.answer, found.itinerary, found.robust) == (Answer.FEASIBLE, (), True)
+
+
 def test_a_fault_in_the_model_is_not_taken_for_a_trip_that_is_too_big() -> None:
-    """Only numbers that do not fit send a TRIP to the reference checker's search."""
-    file = trip(["sam"], ["a"], [stays("visit", "a")], [], [])
+    """Only numbers that do not fit send a TRIP to the reference checker's search.
+
+    The OPTION is named after the solver's own words for numbers that do not fit. Its name is
+    in what the solver says about the fault, and that must not count.
+    """
+    visit = stays("int64-overflow", "a")
+    file = trip(["sam"], ["a"], [visit], [any_time("int64-overflow")], [])
     search = compiler._Search(file, worst_case(file))  # pyright: ignore[reportPrivateUsage]
-    # A choice the model does not have, put where only the solver looks at it.
-    search.model.proto.constraints.add().bool_or.literals.append(  # pyright: ignore[reportUnknownMemberType]
-        99999
-    )
-    with pytest.raises(AssertionError, match="the solver refused the model"):
+    # The start of the visit loses every value it could take: a fault only the solver sees.
+    model: Any = search.model.proto  # pyright: ignore[reportUnknownMemberType]
+    start = next(each for each in model.variables if "start" in each.name)
+    start.domain.clear()
+    with pytest.raises(AssertionError, match="the solver refused the model: var #0 has no domain"):
         search.any()
 
 

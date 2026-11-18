@@ -93,7 +93,7 @@ This document states what a TRIP means and what the COMPILER and the OPTIMIZER a
 - rest, with no day overfull, as a preference;
 - staying together: a weak dislike of splitting up from the group, ranked lowest.
 
-Starter WANTs are never hidden rules; they sit in the FILE like any other WANT. They use the TRIP's SCOPE to know which nights and days to cover and where home is.
+Starter WANTs are never hidden rules; they sit in the FILE like any other WANT. They use the TRIP's SCOPE to know which nights and days to cover, and the WANT to get home names the PLACE where the PERSON ends the TRIP.
 *Serves:* compiler, multiplayer, intuitive. *Source:* Hägerstrand (1970, pages 19 to 20) sketched a list of basic needs, each with its own rhythm (to be verified).
 
 ## D. The world
