@@ -415,7 +415,8 @@
             "places": {
               "description": "How many PERSONs can still buy a right.",
               "type": "integer",
-              "minimum": 1
+              "minimum": 1,
+              "maximum": 999999999
             }
           }
         }

@@ -1,15 +1,17 @@
 """OFFERs: a right that can still be bought counts, and a plan that takes one gets a WARNING."""
 
+import json
 from collections.abc import Sequence
 from itertools import combinations
+from pathlib import Path
 from random import Random
 from typing import cast
 
 import pytest
 
 from agloe import answers, compiler, report
-from agloe.answers import Answer, Cover
-from agloe.file import CompleteRights, File, FileError, Offer
+from agloe.answers import Answer, Cover, Missing
+from agloe.file import CompleteRights, File, FileError, Offer, read
 from agloe.reference import (
     Broken,
     Constraint,
@@ -17,6 +19,7 @@ from agloe.reference import (
     Remaining,
     Step,
     Unknown,
+    World,
     best_case,
     broken,
     first_shown,
@@ -42,6 +45,7 @@ from tests.stories import (
     starts_at,
     stays,
     trip,
+    trip_ends,
 )
 from tests.test_cross_check import random_trip, works_on_the_grid
 from tests.test_rights import every_world_of_rights
@@ -101,6 +105,31 @@ def test_an_offer_is_checked_like_every_other_fact() -> None:
     half = offer("tour", 1)
     half["offer"]["places"] = 1.5
     assert problems(half).endswith("1.5 is not of type 'integer'")
+    only_offers = {"id": "all", "complete": {"offers": ["tour-offer"]}}
+    assert problems(offer("tour", 1), only_offers).endswith("'rights_to' is a required property")
+
+
+def test_the_places_of_an_offer_read_the_same_however_the_number_is_written(tmp_path: Path) -> None:
+    """A hundred million places can be written three ways. A thousand million is too many."""
+    document = json.dumps(
+        {
+            "persons": [],
+            "places": [{"id": "dock", "name": "dock"}],
+            "options": [{"id": "tour", "name": "tour", "place": "dock"}],
+            "ways": [],
+            "wants": [],
+            "facts": [{"id": "tour-offer", "offer": {"option": "tour", "places": 12345}}],
+            "decisions": [],
+        }
+    )
+    path = tmp_path / "trip.json"
+    for written in ("100000000", "1e8", "100000000.0"):
+        path.write_text(document.replace("12345", written))
+        assert read(path).places_on_offer("tour") == 100_000_000
+    for written in ("1000000000", "1e9", "1000000000.0"):
+        path.write_text(document.replace("12345", written))
+        with pytest.raises(FileError):
+            read(path)
 
 
 def test_a_complete_set_of_rights_names_the_offers_that_are_still_open() -> None:
@@ -193,7 +222,8 @@ def test_a_plan_that_takes_a_place_works_and_gets_a_warning() -> None:
     )
     assert "  tour-offer: an OFFER has 2 places for tour that can still be bought" in words
     as_json = report.as_json(file, found)
-    assert as_json["to_buy"] == [{"option": "tour", "offer": "tour-offer", "persons": ["sam"]}]
+    to_buy = {"option": "tour", "offer": "tour-offer", "persons": ["sam"], "only_if_needed": False}
+    assert as_json["to_buy"] == [to_buy]
     steps = cast("list[dict[str, object]]", as_json["itinerary"])
     assert steps[0]["rights"] == {"alex": "tour-booking", "sam": "tour-offer"}
 
@@ -237,6 +267,8 @@ def test_a_right_has_to_be_bought_only_if_the_option_needs_one() -> None:
     assert found.relies_on == (*TIMES, "tour-offer", "lock-tour")
     mark = "    ! alex and sam still have to buy a right to this if it needs one, from tour-offer."
     assert in_words(file)[4] == mark
+    to_buy = cast("list[dict[str, object]]", report.as_json(file, found)["to_buy"])
+    assert [each["only_if_needed"] for each in to_buy] == [True]
 
 
 def test_an_option_that_needs_no_right_takes_no_place() -> None:
@@ -321,7 +353,12 @@ def test_a_report_can_give_both_warnings() -> None:
         "    ! alex still has to buy a right to this, from tour-offer.",
         "    ! alex would still be busy for 1 h when this starts.",
     ]
-    assert sum(line.startswith("WARNING:") for line in words) == 2
+    assert [line for line in words if line.startswith("WARNING:")] == [
+        "WARNING: no plan is sure to hold if the uncertain parts take their longest. Each line"
+        ' marked "!" that names no OFFER says what would go wrong at the step above it.',
+        'WARNING: not everything is booked yet. A line marked "!" that names an OFFER says who'
+        " still has to buy a right. Only a BOOKING secures one.",
+    ]
 
 
 def test_too_few_places_make_a_trip_infeasible_where_the_rights_are_complete() -> None:
@@ -342,9 +379,85 @@ def test_too_few_places_make_a_trip_infeasible_where_the_rights_are_complete() -
     )
     assert found.conflict == conflict
     assert has_no_record_to_spare(file, conflict)
+    assert (
+        in_words(file)[-3] == "  tour-offer: an OFFER has 1 place for tour that can still be bought"
+    )
     whole = "nobody on the trip holds another or can get one, except from tour-offer"
     assert (
         in_words(file)[-2] == f"  every-right-to-tour: the FILE lists every right to tour: {whole}"
+    )
+
+
+def test_one_sentence_stands_only_for_every_way_to_pick_the_persons() -> None:
+    """Two sets about two OPTIONs, or some of the ways to pick, stay as separate cases."""
+
+    def one_family(*each: Sequence[Unknown]) -> bool:
+        sets = [[Missing(unknown, None) for unknown in some] for some in each]
+        return report._any_of_them(sets) is not None  # pyright: ignore[reportPrivateUsage]
+
+    assert one_family([right("tour", "alex")], [right("tour", "sam")])
+    assert not one_family([right("tour", "alex")], [right("cruise", "sam")])
+    pairs = (
+        [right("tour", "alex"), right("tour", "sam")],
+        [right("tour", "jo"), right("tour", "pat")],
+    )
+    assert not one_family(*pairs)
+    assert not one_family([right("tour", "alex")])
+
+
+def test_what_the_sets_share_is_said_as_in_each_of_them() -> None:
+    """Alex and Sam are LOCKed into a tour at 10:00 am, and the TRIP ends at 11:00 am.
+
+    Nobody knows how long the tour takes, and one place is on OFFER. Each set holds the length
+    of the tour and a right for one of the two. The length has to fit, so stating it is not
+    enough, and the words say so.
+    """
+    facts = [starts_at("tour", 10), cutoff("tour", "PT0S"), needs_right("tour"), offer("tour", 1)]
+    decisions = [lock("tour", "alex", "sam"), trip_ends(11)]
+    file = trip(EVERYONE, ["dock"], [stays("tour", "dock")], facts, decisions, tickets=True)
+    length = Unknown("duration", "tour")
+    assert asked(checked(file)) == [[length, right("tour", "alex")], [length, right("tour", "sam")]]
+    assert in_words(file)[-1] == (
+        "The trip works if tour is quick enough and a right to tour is found for one of alex and"
+        " sam, in addition to the 1 place on OFFER."
+    )
+
+
+def test_a_shortage_among_many_locked_persons_takes_few_searches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ten PERSONs are LOCKed in and one place is on OFFER. Nine of them need another right.
+
+    A set with fewer rights cannot be enough, so the search is not asked about one.
+    """
+    people = [f"person-{number}" for number in range(10)]
+    facts = [*at_ten("tour"), needs_right("tour"), offer("tour", 1)]
+    file = trip(
+        people, ["dock"], [stays("tour", "dock")], facts, [lock("tour", *people)], tickets=True
+    )
+    calls = 0
+    solver = compiler.works
+
+    def counted(file: File, world: World) -> bool:
+        nonlocal calls
+        calls += 1
+        return solver(file, world)
+
+    monkeypatch.setattr(compiler, "works", counted)
+    found = compiler.check(file)
+    assert len(found.missing) == 10
+    assert all(len(enough) == 9 for enough in found.missing)
+    assert calls < 20
+
+
+def test_a_booking_that_covers_more_persons_than_the_plan_needs_says_whom_it_is_used_for() -> None:
+    first = booking("tour", "alex", id="first")
+    second = booking("tour", "alex", "sam", "jo", id="second")
+    file = a_boat_tour(first, second)
+    words = in_words(file)
+    assert "  first: a BOOKING for tour covers alex" in words
+    assert (
+        "  second: a BOOKING for tour covers alex, sam and jo; this plan uses it for sam" in words
     )
 
 
@@ -382,7 +495,10 @@ def test_another_right_is_asked_for_as_far_as_the_places_run_out() -> None:
     file = a_boat_tour(booking("tour", "alex"), offer("tour", 1), locked=EVERYONE)
     found = checked(file)
     assert asked(found) == [[right("tour", "sam")], [right("tour", "jo")]]
-    assert in_words(file)[-1] == "The trip works if a right to tour is found for one of sam and jo."
+    assert in_words(file)[-1] == (
+        "The trip works if a right to tour is found for one of sam and jo, in addition to the 1"
+        " place on OFFER."
+    )
     assert len(cast("list[object]", report.as_json(file, found)["missing"])) == 2
 
 
@@ -396,7 +512,8 @@ def test_the_words_say_how_many_of_a_group_need_a_right() -> None:
     assert len(sets) == 10
     assert all(len(some) == 3 for some in sets)
     assert in_words(file)[-1] == (
-        "The trip works if a right to tour is found for 3 of alex, sam, jo, pat and kim."
+        "The trip works if a right to tour is found for 3 of alex, sam, jo, pat and kim, in"
+        " addition to the 2 places on OFFER."
     )
 
 
@@ -407,9 +524,9 @@ def test_a_lock_asks_that_its_option_needs_no_right_only_where_the_places_run_ou
         return trip(EVERYONE, ["dock"], [stays("tour", "dock")], facts, locks, tickets=True)
 
     free = Unknown("needs no right", "tour")
-    assert answers._asked_by_a_lock(tour_with(3)) == frozenset()  # pyright: ignore[reportPrivateUsage]
+    assert answers._asked_by_a_lock(tour_with(3)) == (frozenset(), [])  # pyright: ignore[reportPrivateUsage]
     assert checked(tour_with(3)).answer is Answer.FEASIBLE
-    assert answers._asked_by_a_lock(tour_with(2)) == {free}  # pyright: ignore[reportPrivateUsage]
+    assert answers._asked_by_a_lock(tour_with(2)) == ({free}, [])  # pyright: ignore[reportPrivateUsage]
     assert asked(checked(tour_with(2))) == [[free]]
 
 
@@ -517,5 +634,6 @@ def test_several_sets_that_differ_only_in_who_gets_a_right_are_every_way_to_pick
     expected = [[right("tour", person) for person in three] for three in combinations(people, 3)]
     assert asked(found) == expected
     assert in_words(file)[-1] == (
-        "The trip works if a right to tour is found for 3 of alex, sam, jo and pat."
+        "The trip works if a right to tour is found for 3 of alex, sam, jo and pat, in addition"
+        " to the 1 place on OFFER."
     )

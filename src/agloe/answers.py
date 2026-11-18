@@ -254,27 +254,29 @@ def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
     every FACT about it. So the sets returned ask for the fewest of those, and among them they
     have the fewest FACTs. The count is of WANTs and PERSONs, whichever OPTIONs are found.
 
-    Every set holds the FACTs that a LOCK cannot be honored without, so only sets that hold
-    them are tried. A FILE that says little about its LOCKed OPTIONs needs many FACTs at once,
-    and those are most of them.
+    Every set holds the FACTs that a LOCK cannot be honored without, and enough rights for
+    the PERSONs it names. So only sets that do are tried. A FILE that says little about its
+    LOCKed OPTIONs needs many FACTs at once, and those are most of them.
     """
     every = unknowns(file)
     facts = [unknown for unknown in every if unknown.what != "another option"]
     to_find = [unknown for unknown in every if unknown.what == "another option"]
     place = {unknown: number for number, unknown in enumerate(facts)}
-    in_every_set = _asked_by_a_lock(file)
+    in_every_set, at_least = _asked_by_a_lock(file)
     others = [unknown for unknown in facts if unknown not in in_every_set]
+    fewest = len(in_every_set) + sum(number for _, number in at_least)
     for count in range(len(to_find) + 1):
         # Asking for these can be enough only if it is in the upper bound, where every FACT
         # helps whoever needs it. The bound only saves work: nothing is reported from it.
         hopeful = [
             some for some in combinations(to_find, count) if works(file, no_better_than(file, some))
         ]
-        for size in range(len(in_every_set), len(facts) + 1 if hopeful else 0):
+        for size in range(fewest, len(facts) + 1 if hopeful else 0):
             # Adding the same FACTs to each set keeps the sets in the order of their FACTs.
             sets = (
                 sorted((*in_every_set, *more), key=place.__getitem__)
                 for more in combinations(others, size - len(in_every_set))
+                if all(len(rights.intersection(more)) >= number for rights, number in at_least)
             )
             enough = [
                 (*stated, *some)
@@ -291,16 +293,23 @@ def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
     raise AssertionError("the best case works, so some unknown FACTs make it work")
 
 
-def _asked_by_a_lock(file: File) -> frozenset[Unknown]:
-    """The unknown FACTs that a LOCK cannot be honored without. Every set that is enough has them.
+def _asked_by_a_lock(file: File) -> tuple[frozenset[Unknown], list[tuple[frozenset[Unknown], int]]]:
+    """What the LOCKs ask of every set of unknown FACTs that is enough. It takes no search.
 
-    A LOCK puts its PERSONs into its OPTION in every ITINERARY. An OPTION with no stated start
-    can be used only if its start turns out free. And where nobody knows whether the OPTION
-    needs a right, the PERSONs whom no BOOKING covers can take part only if it turns out to
-    need none, once they are more than the places on OFFER: no set asks for another right to
-    such an OPTION. Nothing else can stand in for either FACT, so this takes no search.
+    First, the FACTs that every such set holds. A LOCK puts its PERSONs into its OPTION in
+    every ITINERARY. An OPTION with no stated start can be used only if its start turns out
+    free. And where nobody knows whether the OPTION needs a right, the PERSONs whom no BOOKING
+    covers can take part only if it turns out to need none, once they are more than the places
+    on OFFER: no set asks for another right to such an OPTION. Nothing else can stand in for
+    either FACT.
+
+    Second, groups of FACTs with a number: every such set holds at least that many of the
+    group. Where a FACT says the OPTION needs a right, each of those PERSONs needs one. The
+    places on OFFER serve some of them, whoever they are, and each of the rest needs another
+    right. So a set asks for another right for at least that many of them.
     """
     asked: set[Unknown] = set()
+    at_least: list[tuple[frozenset[Unknown], int]] = []
     locked: dict[str, set[str]] = {}
     for lock in file.locks:
         if file.start(lock.option) is None:
@@ -308,9 +317,13 @@ def _asked_by_a_lock(file: File) -> frozenset[Unknown]:
         locked.setdefault(lock.option, set()).update(lock.persons)
     for option, persons in locked.items():
         without = [person for person in persons if file.booking(option, person) is None]
-        if file.needs_right(option) is None and len(without) > file.places_on_offer(option):
+        short = len(without) - file.places_on_offer(option)
+        if file.needs_right(option) is None and short > 0:
             asked.add(Unknown("needs no right", option))
-    return frozenset(asked)
+        if file.needs_right(option) and file.rights_complete(option) is None and short > 0:
+            rights = (Unknown("another right", option, person=person) for person in without)
+            at_least.append((frozenset(rights), short))
+    return frozenset(asked), at_least
 
 
 def _limit(file: File, unknown: Unknown, works: Works) -> int | None:

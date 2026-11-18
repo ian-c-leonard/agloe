@@ -43,7 +43,7 @@ from agloe.file import (
     local,
     written,
 )
-from agloe.reference import Broken, Constraint, Itinerary, Step
+from agloe.reference import Broken, Constraint, Itinerary, Step, Unknown
 
 _DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 _MONTHS = [
@@ -83,7 +83,12 @@ def as_json(file: File, report: Report) -> dict[str, object]:
         out["robust"] = report.robust
         if _to_buy(report):
             out["to_buy"] = [
-                {"option": option, "offer": offer, "persons": persons}
+                {
+                    "option": option,
+                    "offer": offer,
+                    "persons": persons,
+                    "only_if_needed": file.needs_right(option) is None,
+                }
                 for (option, offer), persons in _to_buy(report).items()
             ]
     if report.at_worst:
@@ -229,10 +234,11 @@ def as_text(file: File, report: Report) -> str:
         ]
     else:
         lines = ["UNDETERMINED: the FILE does not say enough to tell.", ""]
-        cases = [_case(file, enough) for enough in report.missing]
-        any_of_them = _any_of_them(file, report.missing)
-        if any_of_them is not None:
-            cases = [any_of_them]
+        any_of_them = _any_of_them(report.missing)
+        if any_of_them is None:
+            cases = [_case(file, enough) for enough in report.missing]
+        else:
+            cases = [_case(file, report.missing[0], any_of_them)]
         if len(cases) == 1:
             lines.append(f"The trip works if {cases[0]}.")
         else:
@@ -308,7 +314,8 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
         lines += [
             "",
             "WARNING: no plan is sure to hold if the uncertain parts take their longest."
-            ' Each line marked "!" says what would go wrong at the step above it.',
+            f' Each line marked "!"{" that names no OFFER" if to_buy else ""} says what would'
+            " go wrong at the step above it.",
         ]
     elif any(isinstance(fact, Duration) and fact.contingent for fact in relied_on):
         lines += [
@@ -325,7 +332,14 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
         ]
     if report.relies_on:
         lines += ["", f"The plan relies on these {_kinds(file, report.relies_on)}:"]
-        lines += [f"  {record}: {_record(file, clock, record)}" for record in report.relies_on]
+        for record in report.relies_on:
+            # A BOOKING can cover more PERSONs than the plan credits to it.
+            found = next((fact for fact in file.facts if fact.id == record), None)
+            credited = tuple(cover.person for cover in report.rights if cover.by == record)
+            used_for = ""
+            if isinstance(found, Booking) and set(credited) != set(found.covers):
+                used_for = f"; this plan uses it for {_people(file, credited)}"
+            lines.append(f"  {record}: {_record(file, clock, record)}{used_for}")
     return lines
 
 
@@ -404,13 +418,17 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
     return marks
 
 
-def _case(file: File, enough: Sequence[Missing]) -> str:
+def _case(file: File, enough: Sequence[Missing], any_of: _AnyOf | None = None) -> str:
     """One set of unknown FACTs that would be enough, in words.
 
     PERSONs who need another OPTION for the same WANT are named together, as "each of". The
     condition is one for each PERSON: whether one OPTION or several meet it is left open. The
     OPTIONs that have to need no right are named together where they follow one another in the
     set. So are the PERSONs who need a right to one OPTION. Nothing else changes the order.
+
+    With ``any_of``, the set stands for several that differ only in who gets a right to one
+    OPTION. Where this set names those PERSONs, the words say how many of the whole group need
+    one. Everything else is said as for this set alone.
     """
     parts: list[str] = []
     for_whom: dict[str | None, list[str]] = {}
@@ -423,9 +441,20 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
             names = [_name(file, needed.unknown.option) for needed in group]
             parts.append(f"nobody needs a right to take part in {_listed(names, 'or')}")
         elif unknown.what == "another right":
-            each = "each of " if len(group) > 1 else ""
-            who = _people(file, tuple(needed.unknown.person or "" for needed in group))
-            parts.append(f"a right to {_name(file, unknown.option)} is found for {each}{who}")
+            # A right that is found is one more than the places on OFFER, and the words say so.
+            places = file.places_on_offer(unknown.option or "")
+            more = "" if not places else f", in addition to the {_places(places)} on OFFER"
+            found = f"a right to {_name(file, unknown.option)} is found for"
+            picked = [needed.unknown for needed in group]
+            if any_of is not None:
+                picked = [each for each in picked if each not in any_of.varying]
+            if picked:
+                each = "each of " if len(picked) > 1 else ""
+                who = _people(file, tuple(each.person or "" for each in picked))
+                parts.append(f"{found} {each}{who}{more}")
+            if any_of is not None and len(picked) < len(group):
+                count = "one" if any_of.picked == 1 else str(any_of.picked)
+                parts.append(f"{found} {count} of {_people(file, any_of.group)}{more}")
         else:
             parts.append(_wanted(file, group[0], len(enough) == 1))
     for want, persons in for_whom.items():
@@ -435,17 +464,29 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
     return " and ".join(parts)
 
 
-def _any_of_them(file: File, missing: Sequence[Sequence[Missing]]) -> str | None:
-    """Sets that differ only in which PERSONs get a right to one OPTION, in one sentence.
+@dataclass(frozen=True)
+class _AnyOf:
+    """Several sets that differ only in which PERSONs get a right to one OPTION.
 
-    Where the places on OFFER cover some of the PERSONs who need a right, any of them can take
-    a place. The sets then name every way to pick the others. One sentence says the same: a
-    right is found for so many of them. None where the sets are not of that kind.
+    ``group`` holds the PERSONs the sets pick from, and each set picks ``picked`` of them.
+    ``varying`` holds every FACT that some set has and another has not.
+    """
+
+    varying: frozenset[Unknown]
+    group: tuple[str, ...]
+    picked: int
+
+
+def _any_of_them(missing: Sequence[Sequence[Missing]]) -> _AnyOf | None:
+    """What a report's sets have in common where they are one family, and None otherwise.
+
+    Where the places on OFFER cover some of the PERSONs who need a right to an OPTION, any of
+    them can take a place. The sets then name every way to pick the others, and they share
+    everything else. One sentence can say the same: a right is found for so many of them.
     """
     asked = [[needed.unknown for needed in enough] for enough in missing]
-    shared = [needed for needed in missing[0] if all(needed.unknown in each for each in asked)]
-    kept = {needed.unknown for needed in shared}
-    varying = [[unknown for unknown in each if unknown not in kept] for each in asked]
+    shared = {unknown for unknown in asked[0] if all(unknown in each for each in asked)}
+    varying = [[unknown for unknown in each if unknown not in shared] for each in asked]
     about = {(unknown.what, unknown.option) for each in varying for unknown in each}
     if len(missing) < 2 or len(about) != 1 or about != {("another right", varying[0][0].option)}:
         return None
@@ -453,10 +494,11 @@ def _any_of_them(file: File, missing: Sequence[Sequence[Missing]]) -> str | None
     picked = len(varying[0])
     if any(len(each) != picked for each in varying) or len(missing) != comb(len(group), picked):
         return None
-    count = "one" if picked == 1 else str(picked)
-    who = _people(file, tuple(group))
-    found = f"a right to {_name(file, varying[0][0].option)} is found for {count} of {who}"
-    return " and ".join([*([_case(file, shared)] if shared else []), found])
+    return _AnyOf(frozenset(unknown for each in varying for unknown in each), tuple(group), picked)
+
+
+def _places(count: int) -> str:
+    return "1 place" if count == 1 else f"{count} places"
 
 
 def _named_with(needed: Missing) -> object:
@@ -564,8 +606,7 @@ def _record(file: File, clock: _Clock, record: str) -> str:
     if isinstance(found, Booking):
         return f"a BOOKING for {name} covers {_people(file, found.covers)}"
     if isinstance(found, Offer):
-        places = "1 place" if found.places == 1 else f"{found.places} places"
-        return f"an OFFER has {places} for {name} that can still be bought"
+        return f"an OFFER has {_places(found.places)} for {name} that can still be bought"
     if isinstance(found, CompleteRights):
         closed = "nobody on the trip holds another or can get one"
         if found.offers:

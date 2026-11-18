@@ -937,7 +937,7 @@ def _describe(error: ValidationError, shapes: dict[str, dict[str, object]]) -> s
             kinds = {
                 "complete_set": bool(keys & {"from", "to", "leaving"}),
                 "complete_for_a_want": "satisfies" in keys,
-                "complete_rights": "rights_to" in keys,
+                "complete_rights": bool(keys & {"rights_to", "offers"}),
             }
             meant = [kind for kind, there in kinds.items() if there] or ["complete_set"]
             if len(meant) > 1:

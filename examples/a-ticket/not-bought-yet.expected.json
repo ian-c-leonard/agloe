@@ -83,7 +83,8 @@
       "offer": "skydeck-tickets",
       "persons": [
         "sam"
-      ]
+      ],
+      "only_if_needed": false
     }
   ]
 }
