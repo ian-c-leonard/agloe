@@ -1,6 +1,6 @@
 INFEASIBLE: this trip cannot work.
 
-These FACTs and DECISIONs clash. Take any one away and the trip might work. A FACT that is taken away leaves what it said unknown. Times are in America/Chicago.
+These FACTs and DECISIONs rule out every plan by themselves. Take any one away and they no longer do. A FACT that is taken away leaves what it said unknown. Times are in America/Chicago.
   visit-time: Museum visit starts at 2:30 pm on Saturday 15 May 2027
   visit-length: Museum visit takes 1 h
   train-length: Blue Line to O'Hare takes 1 h

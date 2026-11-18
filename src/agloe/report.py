@@ -195,9 +195,9 @@ def as_text(file: File, report: Report) -> str:
         lines = [
             "INFEASIBLE: this trip cannot work.",
             "",
-            f"These {_kinds(file, report.conflict)} clash. Take any one away and the trip might"
-            " work. A FACT that is taken away leaves what it said unknown."
-            f" Times are in {file.zone}.",
+            f"These {_kinds(file, report.conflict)} rule out every plan by themselves. Take"
+            " any one away and they no longer do. A FACT that is taken away leaves what it"
+            f" said unknown. Times are in {file.zone}.",
             *(f"  {record}: {_record(file, clock, record)}" for record in report.conflict),
         ]
     else:

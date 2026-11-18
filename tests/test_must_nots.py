@@ -325,8 +325,9 @@ def test_the_report_puts_a_must_not_in_words() -> None:
     file = both_on_the_rooftop(satisfies("rooftop", "view", 4))
     found = checked(file)
     assert report.as_text(file, found).splitlines()[2:] == [
-        "These FACTs, WANTs and DECISIONs clash. Take any one away and the trip might work."
-        " A FACT that is taken away leaves what it said unknown. Times are in America/Chicago.",
+        "These FACTs, WANTs and DECISIONs rule out every plan by themselves. Take any one away"
+        " and they no longer do. A FACT that is taken away leaves what it said unknown."
+        " Times are in America/Chicago.",
         "  rooftop-gives-view: rooftop SATISFIES view, 4 out of 10",
         "  view: view is a must for alex and a must-not for jo",
         "  lock-rooftop: alex and jo take part in rooftop",
