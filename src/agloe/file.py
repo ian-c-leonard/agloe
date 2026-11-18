@@ -228,15 +228,26 @@ class Booking:
 
 
 @dataclass(frozen=True)
+class Offer:
+    """A FACT: an OFFER. Rights to one OPTION can still be bought, one for each of its places."""
+
+    id: str
+    option: str
+    places: int
+
+
+@dataclass(frozen=True)
 class CompleteRights:
     """A FACT: the rights to an OPTION are COMPLETE.
 
-    The BOOKINGs in the FILE secure every right to it that anybody on the TRIP holds, and nobody
-    on the TRIP can get another.
+    The BOOKINGs in the FILE secure every right to it that anybody on the TRIP holds. Nobody
+    on the TRIP can get another, except by a place of an OFFER that the FACT names in
+    ``offers``. Those are all the OFFERs the FILE has for the OPTION.
     """
 
     id: str
     option: str
+    offers: tuple[str, ...] = ()
 
 
 type Fact = (
@@ -249,6 +260,7 @@ type Fact = (
     | StartsFrom
     | NeedsRight
     | Booking
+    | Offer
     | CompleteRights
 )
 type Decision = Lock | TripStart | TripEnd
@@ -333,6 +345,22 @@ class File:
     def booking(self, option: str, person: str) -> Booking | None:
         """The BOOKING that covers this PERSON for this OPTION: the first one the FILE lists."""
         return self._bookings.get((option, person))
+
+    def offers(self, option: str) -> tuple[Offer, ...]:
+        """The OFFERs for this OPTION, in the FILE's order."""
+        return self._offers.get(option, ())
+
+    def places_on_offer(self, option: str) -> int:
+        """How many PERSONs can still buy a right to this OPTION."""
+        return sum(offer.places for offer in self.offers(option))
+
+    @cached_property
+    def _offers(self) -> dict[str, tuple[Offer, ...]]:
+        found: dict[str, tuple[Offer, ...]] = {}
+        for fact in self.facts:
+            if isinstance(fact, Offer):
+                found[fact.option] = (*found.get(fact.option, ()), fact)
+        return found
 
     def rights_complete(self, option: str) -> CompleteRights | None:
         """The FACT that the rights to this OPTION are COMPLETE, if there is one."""
@@ -680,6 +708,8 @@ def load(document: object) -> File:
     stated: set[tuple[str, type]] = set()
     complete: set[tuple[str | None, str | None, int, int]] = set()
     satisfied: set[tuple[str, str]] = set()
+    offered: list[tuple[str, str, str]] = []  # where an OFFER is, its id and its OPTION
+    closures: list[tuple[str, str, tuple[str, ...]]] = []  # the same for a COMPLETE set of rights
     for index, fact in enumerate(raw["facts"]):
         where = f"/facts/{index}"
         claim(where, fact["id"])
@@ -701,7 +731,9 @@ def load(document: object) -> File:
                 if (about, CompleteRights) in stated:
                     problems.append(f"{where}: another FACT already states this about {about}")
                 stated.add((about, CompleteRights))
-                facts.append(CompleteRights(fact["id"], about))
+                open_offers = tuple(whole.get("offers", ()))
+                closures.append((where, about, open_offers))
+                facts.append(CompleteRights(fact["id"], about, open_offers))
                 continue
             origin, destination = whole.get("from"), whole.get("to")
             for place in (origin, destination):
@@ -729,6 +761,11 @@ def load(document: object) -> File:
             for person in sorted({person for person in covers if covers.count(person) > 1}):
                 problems.append(f"{where}: {person} is covered more than once")
             facts.append(Booking(fact["id"], agreed["option"], tuple(covers)))
+            continue
+        if "offer" in fact:
+            known(where, fact["offer"]["option"], "OPTION", option_ids)
+            offered.append((where, fact["id"], fact["offer"]["option"]))
+            facts.append(Offer(fact["id"], fact["offer"]["option"], int(fact["offer"]["places"])))
             continue
         if "person" in fact:
             known(where, fact["person"], "PERSON", person_ids)
@@ -788,6 +825,17 @@ def load(document: object) -> File:
             problems.append(f"{where}: another FACT already states this about {fact['option']}")
         stated.add((fact["option"], type(made)))
         facts.append(made)
+    # A COMPLETE set of rights and the OFFERs for its OPTION have to say the same thing.
+    for where, option, open_offers in closures:
+        for offer in open_offers:
+            if (offer, option) not in {(id, about) for _, id, about in offered}:
+                problems.append(f"{where}: {offer} is not an OFFER for {option}")
+        for at, offer, about in offered:
+            if about == option and offer not in open_offers:
+                said = (
+                    f"the rights to {option} are COMPLETE, and that FACT does not name this OFFER"
+                )
+                problems.append(f"{at}: {said}")
 
     decisions: list[Decision] = []
     for index, decision in enumerate(raw["decisions"]):

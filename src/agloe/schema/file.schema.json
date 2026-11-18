@@ -34,6 +34,7 @@
           { "$ref": "#/$defs/starts_from" },
           { "$ref": "#/$defs/needs_right" },
           { "$ref": "#/$defs/booking" },
+          { "$ref": "#/$defs/offer" },
           { "$ref": "#/$defs/complete_rights" }
         ]
       }
@@ -396,9 +397,33 @@
         }
       }
     },
+    "offer": {
+      "title": "OfferFact",
+      "description": "A FACT: an OFFER. Rights to one OPTION can still be bought. Each place is one right for one PERSON, and anybody on the TRIP can take it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "offer"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "offer": {
+          "title": "Offer",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["option", "places"],
+          "properties": {
+            "option": { "$ref": "#/$defs/id" },
+            "places": {
+              "description": "How many PERSONs can still buy a right.",
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
     "complete_rights": {
       "title": "CompleteRights",
-      "description": "A FACT: the rights to the OPTION are COMPLETE. The BOOKINGs in the FILE secure every right to it that anybody on the TRIP holds, and nobody on the TRIP can get another.",
+      "description": "A FACT: the rights to the OPTION are COMPLETE. The BOOKINGs in the FILE secure every right to it that anybody on the TRIP holds. Nobody on the TRIP can get another, except by a place of an OFFER that this FACT names.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "complete"],
@@ -410,7 +435,13 @@
           "additionalProperties": false,
           "required": ["rights_to"],
           "properties": {
-            "rights_to": { "$ref": "#/$defs/id" }
+            "rights_to": { "$ref": "#/$defs/id" },
+            "offers": {
+              "description": "The OFFERs for the OPTION that are still open. The FILE holds no other OFFER for it.",
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/id" }
+            }
           }
         }
       }

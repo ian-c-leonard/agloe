@@ -7,7 +7,10 @@
         "alex"
       ],
       "start": "2027-05-15T10:00:00-05:00[America/Chicago]",
-      "end": "2027-05-15T11:30:00-05:00[America/Chicago]"
+      "end": "2027-05-15T11:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "skydeck-ticket"
+      }
     },
     {
       "way": "walk-from-tower",

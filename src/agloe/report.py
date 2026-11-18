@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from itertools import groupby
+from math import comb
 
 from agloe.answers import Answer, Missing, Report
 from agloe.file import (
@@ -27,6 +28,7 @@ from agloe.file import (
     File,
     Lock,
     NeedsRight,
+    Offer,
     Option,
     Person,
     Place,
@@ -64,17 +66,26 @@ def as_json(file: File, report: Report) -> dict[str, object]:
     """The Report in the shape of the expected results beside the examples."""
     out: dict[str, object] = {"answer": report.answer.value}
     if report.answer is Answer.FEASIBLE:
+        rights: dict[str | None, dict[str, str]] = {}
+        for cover in report.rights:
+            rights.setdefault(cover.option, {})[cover.person] = cover.by
         out["itinerary"] = [
             {
                 ("way" if step.option is None else "option"): step.option or step.way,
                 "persons": list(step.persons),
                 "start": written(step.start, file.zone),
                 "end": None if step.end is None else written(step.end, file.zone),
+                **({"rights": rights[step.option]} if step.option in rights else {}),
             }
             for step in report.itinerary
         ]
         out["relies_on"] = list(report.relies_on)
         out["robust"] = report.robust
+        if _to_buy(report):
+            out["to_buy"] = [
+                {"option": option, "offer": offer, "persons": persons}
+                for (option, offer), persons in _to_buy(report).items()
+            ]
     if report.at_worst:
         out["at_worst"] = [_broken_as_json(file, report, found) for found in report.at_worst]
     if report.conflict:
@@ -84,6 +95,15 @@ def as_json(file: File, report: Report) -> dict[str, object]:
             [_missing_as_json(needed) for needed in enough] for enough in report.missing
         ]
     return out
+
+
+def _to_buy(report: Report) -> dict[tuple[str, str], list[str]]:
+    """The PERSONs who still have to buy a right, for each OPTION and each OFFER it is from."""
+    buyers: dict[tuple[str, str], list[str]] = {}
+    for cover in report.rights:
+        if cover.to_buy:
+            buyers.setdefault((cover.option, cover.by), []).append(cover.person)
+    return buyers
 
 
 def _broken_as_json(file: File, report: Report, found: Broken) -> dict[str, object]:
@@ -210,6 +230,9 @@ def as_text(file: File, report: Report) -> str:
     else:
         lines = ["UNDETERMINED: the FILE does not say enough to tell.", ""]
         cases = [_case(file, enough) for enough in report.missing]
+        any_of_them = _any_of_them(file, report.missing)
+        if any_of_them is not None:
+            cases = [any_of_them]
         if len(cases) == 1:
             lines.append(f"The trip works if {cases[0]}.")
         else:
@@ -260,11 +283,13 @@ def as_text(file: File, report: Report) -> str:
 
 
 def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
-    lines = [
-        "FEASIBLE: this trip works."
-        if report.robust
-        else "FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold."
-    ]
+    to_buy = _to_buy(report)
+    if not report.robust:
+        lines = ["FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold."]
+    elif to_buy:
+        lines = ["FEASIBLE, with a WARNING: this trip works, but not everything is booked yet."]
+    else:
+        lines = ["FEASIBLE: this trip works."]
     marks = _marks(file, report)
     day = None
     for number, (step, _) in enumerate(_lines(report.itinerary)):
@@ -290,6 +315,13 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
             "",
             "This plan holds however long the uncertain parts take, within the ranges the FILE"
             " states.",
+        ]
+    if to_buy:
+        lines += [
+            "",
+            "WARNING: not everything is booked yet."
+            ' A line marked "!" that names an OFFER says who still has to buy a right.'
+            " Only a BOOKING secures one.",
         ]
     if report.relies_on:
         lines += ["", f"The plan relies on these {_kinds(file, report.relies_on)}:"]
@@ -329,7 +361,10 @@ def _lines(itinerary: Itinerary) -> list[tuple[Step, list[int]]]:
 
 
 def _marks(file: File, report: Report) -> dict[int, list[str]]:
-    """What the plan would break at the longest durations, in words, for each line of the plan.
+    """The WARNINGs about a plan, in words, for each line of the plan.
+
+    First who still has to buy a right to an OPTION, and from which OFFER. Then what the plan
+    would break at the longest durations.
 
     A line is known by its number, counting from zero. PERSONs who share a line and are in the
     same trouble are named together. Longer durations break only CONSTRAINTs about time, and
@@ -348,6 +383,11 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
         number = line_of[found.step] if found.step is not None else line_of_option[found.option]
         together.setdefault((number, found.constraint, found.late), []).extend(found.persons)
     marks: dict[int, list[str]] = {}
+    for (option, offer), buyers in _to_buy(report).items():
+        have = "has" if len(buyers) == 1 else "have"
+        if_needed = "" if file.needs_right(option) else " if it needs one"
+        mark = f"{_people(file, tuple(buyers))} still {have} to buy a right to this{if_needed}"
+        marks.setdefault(line_of_option[option], []).append(f"{mark}, from {offer}.")
     for (number, constraint, late), persons in together.items():
         who = _people(file, tuple(persons))
         if constraint is Constraint.ARRIVAL and late is not None:
@@ -393,6 +433,30 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
         each = "each of " if len(persons) > 1 else ""
         parts.append(f"another OPTION that SATISFIES {_want(file, want)} is found for {each}{who}")
     return " and ".join(parts)
+
+
+def _any_of_them(file: File, missing: Sequence[Sequence[Missing]]) -> str | None:
+    """Sets that differ only in which PERSONs get a right to one OPTION, in one sentence.
+
+    Where the places on OFFER cover some of the PERSONs who need a right, any of them can take
+    a place. The sets then name every way to pick the others. One sentence says the same: a
+    right is found for so many of them. None where the sets are not of that kind.
+    """
+    asked = [[needed.unknown for needed in enough] for enough in missing]
+    shared = [needed for needed in missing[0] if all(needed.unknown in each for each in asked)]
+    kept = {needed.unknown for needed in shared}
+    varying = [[unknown for unknown in each if unknown not in kept] for each in asked]
+    about = {(unknown.what, unknown.option) for each in varying for unknown in each}
+    if len(missing) < 2 or len(about) != 1 or about != {("another right", varying[0][0].option)}:
+        return None
+    group = {unknown.person or "" for each in varying for unknown in each}
+    picked = len(varying[0])
+    if any(len(each) != picked for each in varying) or len(missing) != comb(len(group), picked):
+        return None
+    count = "one" if picked == 1 else str(picked)
+    who = _people(file, tuple(group))
+    found = f"a right to {_name(file, varying[0][0].option)} is found for {count} of {who}"
+    return " and ".join([*([_case(file, shared)] if shared else []), found])
 
 
 def _named_with(needed: Missing) -> object:
@@ -499,8 +563,13 @@ def _record(file: File, clock: _Clock, record: str) -> str:
         return f"{who} a right to take part in {name}"
     if isinstance(found, Booking):
         return f"a BOOKING for {name} covers {_people(file, found.covers)}"
+    if isinstance(found, Offer):
+        places = "1 place" if found.places == 1 else f"{found.places} places"
+        return f"an OFFER has {places} for {name} that can still be bought"
     if isinstance(found, CompleteRights):
         closed = "nobody on the trip holds another or can get one"
+        if found.offers:
+            closed += f", except from {_listed(found.offers)}"
         return f"the FILE lists every right to {name}: {closed}"
     return _cutoff(file, name, found)
 

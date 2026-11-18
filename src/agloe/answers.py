@@ -7,7 +7,7 @@ reference checker's, which tries everything. The COMPILER passes its solver sear
 the answers and the evidence are worked out here in either case.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Set
 from dataclasses import dataclass
 from enum import Enum
 from itertools import combinations
@@ -20,6 +20,7 @@ from agloe.file import (
     Fact,
     File,
     Lock,
+    Offer,
     Start,
     StartsFrom,
 )
@@ -39,6 +40,7 @@ from agloe.reference import (
     no_better_than,
     one_way_each,
     unknowns,
+    with_no_offer,
     with_these_at_best,
     with_this_long,
     worst_case,
@@ -60,12 +62,27 @@ class Missing:
 
 
 @dataclass(frozen=True)
+class Cover:
+    """What gives a PERSON their right to an OPTION in the plan shown.
+
+    ``by`` is the id of a BOOKING, or of an OFFER from which the PERSON takes a place. A place
+    is ``to_buy``: nothing secures it until a BOOKING does.
+    """
+
+    option: str
+    person: str
+    by: str
+    to_buy: bool
+
+
+@dataclass(frozen=True)
 class Report:
     """The answer and its evidence.
 
     FEASIBLE: the ITINERARY shown, the FACTs, WANTs and DECISIONs it relies on, whether it is
-    ROBUST, and what it breaks when every CONTINGENT duration runs longest. INFEASIBLE: FACTs and
-    DECISIONs that conflict. UNDETERMINED: each smallest set of unknown FACTs that would be enough.
+    ROBUST, what it breaks when every CONTINGENT duration runs longest, and what gives each
+    PERSON their right to each OPTION that needs one or might. INFEASIBLE: FACTs and DECISIONs
+    that conflict. UNDETERMINED: each smallest set of unknown FACTs that would be enough.
     """
 
     answer: Answer
@@ -73,6 +90,7 @@ class Report:
     relies_on: tuple[str, ...] = ()
     robust: bool | None = None
     at_worst: tuple[Broken, ...] = ()
+    rights: tuple[Cover, ...] = ()
     conflict: tuple[str, ...] = ()
     missing: tuple[tuple[Missing, ...], ...] = ()
 
@@ -103,45 +121,50 @@ def check(
             return frozenset(_records(given.file))
 
         stuck = every_record
-    plain = shown(file, worst_case(file))
+    worst = worst_case(file)
+    plain = shown(file, worst)
     if plain is not None:
         longest = longest_case(file)
-        robust = shown(file, longest)
-        chosen = plain if robust is None else robust
-        relies_on = [fact.id for fact in file.facts if _relied_on(file, chosen, fact)]
+        # A ROBUST plan comes first, and then a plan that takes no place of an OFFER. The
+        # OFFERs stay in the FILE for that: the plan only may not spend their places.
+        better = [(longest, True)]
+        if any(isinstance(fact, Offer) for fact in file.facts):
+            better = [(with_no_offer(longest), True), *better, (with_no_offer(worst), False)]
+        chosen, robust = plain, False
+        for world, holds in better:
+            found = shown(file, world)
+            if found is not None:
+                chosen, robust = found, holds
+                break
+        rights = _covers(file, chosen)
+        used = {cover.by for cover in rights}
+        relies_on = [fact.id for fact in file.facts if _relied_on(file, chosen, fact, used)]
         relies_on += [want.id for want in file.wants if want.musts or want.must_nots]
         relies_on += [each.id for each in file.decisions if isinstance(each, Lock) or chosen]
         at_worst: tuple[Broken, ...] = ()
-        if robust is None:
+        if not robust:
             # The steps keep the order the ITINERARY lists them in: that is the plan shown.
             at_worst = tuple(broken_as_listed(file, longest, in_world(longest, chosen)))
-        return Report(Answer.FEASIBLE, chosen, tuple(relies_on), robust is not None, at_worst)
+        return Report(Answer.FEASIBLE, chosen, tuple(relies_on), robust, at_worst, rights)
     enough = stuck(Remaining(file))
     if enough is not None:
         return Report(Answer.INFEASIBLE, conflict=_conflict(file, stuck, enough))
     return Report(Answer.UNDETERMINED, missing=_missing(file, works))
 
 
-def _relied_on(file: File, itinerary: Itinerary, fact: Fact) -> bool:
+def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> bool:
     """Whether a plan relies on this FACT.
 
     It relies on every FACT about an OPTION or a WAY it has in it. It relies on no COMPLETE set
     of travel: it takes no unlisted WAY. It relies on where a PERSON starts from where the
     PERSON is in it, or has to end the TRIP at a PLACE: their path begins there, or they stay
-    there. It relies on a BOOKING that covers a PERSON in one of its OPTIONs, unless a FACT
-    says that the OPTION needs no right: the first such BOOKING the FILE lists for each PERSON.
-    It relies on no FACT that the rights to an OPTION are COMPLETE.
+    there. It relies on the BOOKINGs and the OFFERs that give its PERSONs their rights:
+    ``used`` holds those. It relies on no FACT that the rights to an OPTION are COMPLETE.
     """
     if isinstance(fact, CompleteFor):
         return _settles(file, itinerary, fact)
-    if isinstance(fact, Booking):
-        taking_part = {
-            person for step in itinerary if step.option == fact.option for person in step.persons
-        }
-        may_be_needed = file.needs_right(fact.option) is not False
-        return may_be_needed and any(
-            file.booking(fact.option, person) == fact for person in taking_part
-        )
+    if isinstance(fact, Booking | Offer):
+        return fact.id in used
     if isinstance(fact, CompleteRights):
         return False
     if isinstance(fact, StartsFrom):
@@ -150,6 +173,27 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact) -> bool:
     if isinstance(fact, Complete):
         return False
     return fact.option in {step.option or step.way for step in itinerary}
+
+
+def _covers(file: File, itinerary: Itinerary) -> tuple[Cover, ...]:
+    """What gives each PERSON in a plan their right to each of its OPTIONs.
+
+    It leaves out an OPTION that a FACT says needs no right. A PERSON whom a BOOKING covers
+    has the first such BOOKING in the FILE. The other PERSONs who take part, in the FILE's
+    order, take the places of the OPTION's OFFERs in the FILE's order. The plan works in the
+    worst case, which has no other right, so there is a place for each of them.
+    """
+    order = {person.id: number for number, person in enumerate(file.persons)}
+    covers: list[Cover] = []
+    for step in itinerary:
+        if step.option is None or file.needs_right(step.option) is False:
+            continue
+        places = (offer.id for offer in file.offers(step.option) for _ in range(offer.places))
+        for person in sorted(step.persons, key=order.__getitem__):
+            booked = file.booking(step.option, person)
+            by = next(places) if booked is None else booked.id
+            covers.append(Cover(step.option, person, by, booked is None))
+    return tuple(covers)
 
 
 def _settles(file: File, itinerary: Itinerary, whole: CompleteFor) -> bool:
@@ -252,17 +296,20 @@ def _asked_by_a_lock(file: File) -> frozenset[Unknown]:
 
     A LOCK puts its PERSONs into its OPTION in every ITINERARY. An OPTION with no stated start
     can be used only if its start turns out free. And where nobody knows whether the OPTION
-    needs a right, a PERSON whom no BOOKING covers can take part only if it turns out to need
-    none: no set asks for another right to such an OPTION. Nothing else can stand in for
-    either FACT, so this takes no search.
+    needs a right, the PERSONs whom no BOOKING covers can take part only if it turns out to
+    need none, once they are more than the places on OFFER: no set asks for another right to
+    such an OPTION. Nothing else can stand in for either FACT, so this takes no search.
     """
     asked: set[Unknown] = set()
+    locked: dict[str, set[str]] = {}
     for lock in file.locks:
         if file.start(lock.option) is None:
             asked.add(Unknown("start", lock.option))
-        covered = all(file.booking(lock.option, person) is not None for person in lock.persons)
-        if file.needs_right(lock.option) is None and not covered:
-            asked.add(Unknown("needs no right", lock.option))
+        locked.setdefault(lock.option, set()).update(lock.persons)
+    for option, persons in locked.items():
+        without = [person for person in persons if file.booking(option, person) is None]
+        if file.needs_right(option) is None and len(without) > file.places_on_offer(option):
+            asked.add(Unknown("needs no right", option))
     return frozenset(asked)
 
 

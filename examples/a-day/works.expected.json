@@ -23,7 +23,10 @@
         "alex"
       ],
       "start": "2027-05-14T10:00:00-05:00[America/Chicago]",
-      "end": "2027-05-14T12:00:00-05:00[America/Chicago]"
+      "end": "2027-05-14T12:00:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "museum-ticket"
+      }
     },
     {
       "way": "walk-to-park",
@@ -55,7 +58,10 @@
         "alex"
       ],
       "start": "2027-05-14T15:00:00-05:00[America/Chicago]",
-      "end": "2027-05-14T16:30:00-05:00[America/Chicago]"
+      "end": "2027-05-14T16:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "tour-ticket"
+      }
     },
     {
       "way": "walk-to-dinner",

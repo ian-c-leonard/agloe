@@ -180,8 +180,19 @@ class BookingFact(TypedDict):
     booking: Booking
 
 
+class Offer(TypedDict):
+    option: Id
+    places: int
+
+
+class OfferFact(TypedDict):
+    id: Id
+    offer: Offer
+
+
 class Rights(TypedDict):
     rights_to: Id
+    offers: NotRequired[list[Id]]
 
 
 class CompleteRights(TypedDict):
@@ -231,6 +242,7 @@ class File(TypedDict):
         | StartsFrom
         | NeedsRight
         | BookingFact
+        | OfferFact
         | CompleteRights
     ]
     decisions: list[Lock | TripStart | TripEnd]
