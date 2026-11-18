@@ -924,8 +924,8 @@ def scheduled(
 
     ``who`` names the PERSONs in each OPTION, in the FILE's order of OPTIONs. ``orders`` gives,
     for each PERSON in the FILE's order, the OPTIONs they do, by position in the FILE, in the
-    order they do them. The start times are those of "Which ITINERARY is shown", and so are the
-    WAYs the PERSONs take.
+    order they do them. The start times are those of "Which ITINERARY is shown". So are the
+    WAYs the PERSONs take, unless ``by`` names them.
 
     With ``by``, only one choice of WAYs is tried: for a PERSON, by position in the FILE, and
     the position of an OPTION in their order, the route they take after that OPTION. Without it,

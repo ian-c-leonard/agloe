@@ -109,6 +109,35 @@ def test_times_too_far_apart_for_the_solver_get_the_reference_checkers_answer() 
     assert (found.answer, found.itinerary) == (Answer.FEASIBLE, ())
 
 
+def test_a_file_with_no_start_and_no_end_leaves_no_room_for_travel_at_the_ends() -> None:
+    """Sam is LOCKed for 21 visits at one PLACE, a minute apart, and one WAY elsewhere is very long.
+
+    Two more visits far away can start at any time, and nobody has to make them. The solver
+    leaves room for travel after each OPTION. Room for travel at two more ends would be too
+    much for its numbers, and no PERSON here has a stated start or end. With the solver's own
+    search for every part, the answer comes at once. The reference checker's search would try
+    every order of the 21 visits.
+    """
+    places = [f"p{number}" for number in range(30)]
+    locked = [stays(f"visit-{number}", "p0") for number in range(21)]
+    far = [stays("far-0", "p27"), stays("far-1", "p27")]
+    ways = [way_between(f"w{number}", f"p{number}", f"p{number + 1}") for number in range(27)]
+    facts = [takes(each["id"], "PT1M") for each in ways]
+    facts.append(takes("long", "PT770000000H"))
+    for minute, each in enumerate(locked):
+        facts.append(starts_at(each["id"], 9, minute))
+    for each in far:
+        facts.append(any_time(each["id"]))
+    for each in (*locked, *far):
+        facts += [lasts(each["id"], "PT0S"), cutoff(each["id"], "PT0S")]
+    locks = [lock(each["id"], "sam") for each in locked]
+    long = way("long", "p28", "p29")
+    file = trip(["sam"], places, [*locked, *far], facts, locks, ways=[*ways, long])
+    found = answers.check(file, compiler.shown, compiler.works, compiler.stuck)
+    assert found.answer is Answer.FEASIBLE
+    assert len(found.itinerary) == 21
+
+
 def test_many_visits_nobody_has_to_make_do_not_stop_the_reference_checkers_search() -> None:
     """The TRIP is too big for the solver, and 63 visits can each happen or not.
 

@@ -70,7 +70,7 @@ This document states what a TRIP means and what the COMPILER and the OPTIMIZER a
 **C2. Ranked, not scored.** PERSONs rank their own WANTs instead of inventing numbers, and a fixed rule turns each ranking into DEGREEs OF WANT. Adding a WANT shifts the others, and the report shows the shift: adding a second-ranked WANT drops the top weight from 0.61 to 0.52.
 *Serves:* optimizer, multiplayer, intuitive. *Source:* rank-order centroid weights (Barron, 1992; earlier, Solymosi and Dombi, 1986). A 2023 study found the rule performs poorly on some real-world data.
 
-**C3. Fit belongs to the pair.** How well an OPTION delivers a WANT is the DEGREE OF SATISFACTION on the SATISFIES link between them. No link means unknown, never zero, unless a FACT says that the FILE lists every OPTION that SATISFIES the WANT.
+**C3. Fit belongs to the pair.** How well an OPTION delivers a WANT is the DEGREE OF SATISFACTION on the SATISFIES link between them. No link means unknown, never zero, unless a FACT says that the FILE lists every OPTION that SATISFIES the WANT. A WANT about the whole ITINERARY has no such links: no OPTION delivers it.
 *Serves:* optimizer, self-explaining. *Source:* contribution links between tasks and goals (Mylopoulos, Chung and Nixon, 1992); numeric value scoring (Edwards, 1977); the open-world assumption (Reiter, 1978).
 
 **C4. Big WANTs are DECOMPOSED.** "Dinner each night" becomes one piece per night, and each piece is SATISFIED at most once.

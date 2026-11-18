@@ -12,7 +12,8 @@ For INFEASIBLE, the solver also names the FACTs and DECISIONs its proof used. Th
 checker then looks for the conflict among those alone.
 
 The solver counts in 64-bit numbers. A TRIP with very long durations and very many routes can
-need more than that. The reference checker's own search then answers for the whole TRIP.
+need more than that. The reference checker's own search then answers for the whole TRIP. That
+search tries everything, so it is meant for small TRIPs.
 """
 
 from collections.abc import Sequence
@@ -24,7 +25,7 @@ from ortools.sat.python import cp_model
 
 from agloe import answers, reference
 from agloe.answers import Report
-from agloe.file import Complete, Cutoff, Duration, File, Start, Want
+from agloe.file import Complete, Cutoff, Duration, File, Start, StartsFrom, Want
 from agloe.reference import Itinerary, Remaining, World
 
 _MOST_AT_ONCE = 60  # yes-or-no choices ranked in one solve: their weights must fit in 64 bits
@@ -269,7 +270,10 @@ class _Search:
         self.zero = min([*fixed, *spans], default=0)
         room = sum(each.shortest for each in terms) + sum(each.margin or 0 for each in terms) + 1
         slowest = max([world.unlisted_takes, *(shortest for shortest, _ in world.takes.values())])
-        room += (len(options) + 2) * max(len(self.file.places), 1) * slowest
+        # Travel after each OPTION, and at each end of a path that the FILE gives an end.
+        ends = any(isinstance(fact, StartsFrom) for fact in self.file.facts)
+        ends += any(want.ends_at is not None for want in self.file.wants)
+        room += (len(options) + ends) * max(len(self.file.places), 1) * slowest
         self.room = room
         self.earliest, self.latest = -room, max([*fixed, *spans], default=0) - self.zero + room
         if self.latest + room >= _FURTHEST:
@@ -299,6 +303,7 @@ class _Search:
             for person in file.persons
         ]
         self.used = [model.new_bool_var(f"used {option.id}") for option in file.options]
+        self.left_out: set[tuple[int, int]] = set()  # each PERSON and OPTION that is ruled out
         meets = self._hold_to_the_wants()
         for index, option in enumerate(file.options):
             model.add_max_equality(self.used[index], [0, *(row[index] for row in self.takes)])
@@ -321,6 +326,7 @@ class _Search:
                 wanted = index in meets[number]
                 if not self.usable[index] or (not self.moves[index] and not asking and not wanted):
                     model.add(takes == 0)
+                    self.left_out.add((number, index))
                 elif not self.moves[index] and not wanted:
                     switches = [each for each in asking if each is not None]
                     if len(switches) == len(asking):
@@ -438,6 +444,8 @@ class _Search:
                 _when(model.add(moved[index] == 1), takes[index])
                 if done is not None:
                     _when(model.add(arrived[index] >= done), takes[index])
+            if (number, index) in self.left_out:
+                continue  # the PERSON does not take part in it, so they travel neither to it nor on
             between[ends, index] = self._sets_out(start, first, index, moved, arrived)
             between[index, ends] = []
             for there in asked:

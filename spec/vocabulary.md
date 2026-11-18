@@ -193,7 +193,7 @@ The relation between a WANT and what delivers it. An OPTION SATISFIES a WANT whe
 
 Whether delivery is good or bad comes from the DEGREE OF WANT, not from SATISFIES. An overnight bus SATISFIES a WANT about overnight travel; for a holder at −7, that counts against the ITINERARY, and it always counts when the holder takes the bus for any reason.
 
-No stated relation means unknown, never "does not satisfy", unless a FACT says that the set of OPTIONs that SATISFY the WANT is COMPLETE. A relation may be stated directly, or derived from an OPTION's FACTs: a WANT about departures before 06:00 applies to every OPTION that departs earlier.
+For a WANT that an OPTION can deliver, no stated relation means unknown, never "does not satisfy", unless a FACT says that the set of OPTIONs that SATISFY the WANT is COMPLETE. No OPTION SATISFIES a WANT about the whole ITINERARY. A relation may be stated directly, or derived from an OPTION's FACTs: a WANT about departures before 06:00 applies to every OPTION that departs earlier.
 
 *Uses:* WANT, OPTION, DEGREE OF WANT, FACT, → ITINERARY, → DEGREE OF SATISFACTION.
 

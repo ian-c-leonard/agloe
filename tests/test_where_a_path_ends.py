@@ -3,6 +3,7 @@
 from collections.abc import Iterator, Sequence
 from itertools import combinations_with_replacement, permutations
 from random import Random
+from time import perf_counter
 
 import pytest
 
@@ -608,6 +609,30 @@ def test_a_large_group_with_two_ways_to_choose_from_is_planned_at_once() -> None
     found = checked(file)
     assert found.answer is Answer.FEASIBLE
     assert [step.way for step in found.itinerary] == ["bus"] * 63
+
+
+def test_no_routes_are_looked_for_from_an_option_that_cannot_happen() -> None:
+    """Sam has to end the TRIP on an island that no WAY reaches, and nobody says where Sam starts.
+
+    Eleven towns are joined to each other, and a visit in one of them has no stated start, so
+    it cannot happen. The plan with nothing in it works. Looking for a route from the visit to
+    the island would go through every row of towns for nothing.
+    """
+    towns = [f"t{number}" for number in range(11)]
+    ways = [
+        way_between(f"{one}-{other}", one, other)
+        for at, one in enumerate(towns)
+        for other in towns[at + 1 :]
+    ]
+    visit_in_town = [stays("visit", "t0")]
+    facts = [lasts("visit", "PT1S"), *(takes(each["id"], "PT1M") for each in ways)]
+    wants = [ends_at("island", "sam")]
+    places = ["island", *towns]
+    file = trip(["sam"], places, visit_in_town, facts, [], ways=ways, wants=wants)
+    begun = perf_counter()
+    found = checked(file)
+    assert (found.answer, found.itinerary, found.robust) == (Answer.FEASIBLE, (), True)
+    assert perf_counter() - begun < 20
 
 
 def test_a_path_can_go_through_very_many_places() -> None:
