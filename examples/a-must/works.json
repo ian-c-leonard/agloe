@@ -22,14 +22,18 @@
     { "id": "pizzeria-length", "option": "dinner-pizzeria", "duration": "PT1H30M" },
     { "id": "pizzeria-arrival", "option": "dinner-pizzeria", "arrive_before_start": "PT0S" },
     { "id": "pizzeria-serves-it", "option": "dinner-pizzeria", "satisfies": { "want": "deep-dish", "degree": 9 } },
+    { "id": "pizzeria-is-walk-up", "option": "dinner-pizzeria", "needs_right": false },
     { "id": "tavern-time", "option": "dinner-tavern", "starts_at": "2027-05-14T19:00:00-05:00[America/Chicago]" },
     { "id": "tavern-length", "option": "dinner-tavern", "duration": "PT1H" },
     { "id": "tavern-arrival", "option": "dinner-tavern", "arrive_before_start": "PT0S" },
     { "id": "tavern-does-not-serve-it", "option": "dinner-tavern", "satisfies": { "want": "deep-dish", "degree": 0 } },
+    { "id": "tavern-is-walk-up", "option": "dinner-tavern", "needs_right": false },
     { "id": "show-time", "option": "blues-show", "starts_at": "2027-05-14T21:00:00-05:00[America/Chicago]" },
     { "id": "show-length", "option": "blues-show", "duration": "PT2H" },
     { "id": "show-doors", "option": "blues-show", "arrive_before_start": "PT10M" },
     { "id": "show-does-not-serve-it", "option": "blues-show", "satisfies": { "want": "deep-dish", "degree": 0 } },
+    { "id": "show-needs-a-ticket", "option": "blues-show", "needs_right": true },
+    { "id": "show-ticket", "booking": { "option": "blues-show", "covers": ["alex"] } },
     { "id": "walk-to-club-length", "way": "walk-to-club", "duration": "PT15M" }
   ],
   "decisions": [

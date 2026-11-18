@@ -273,9 +273,9 @@ def test_a_way_is_checked_like_everything_else() -> None:
     assert "/ways/0: the-moon is not a PLACE in this FILE" in found
     assert "/ways/1: the id alex is used more than once" in found
     assert "/ways/2: a WAY needs two different PLACEs" in found
-    assert "/facts/8: another FACT already states this about cab" in found
-    assert "/facts/9: museum-visit is not a WAY in this FILE" in found
-    assert "/facts/10: the shortest duration is longer than the longest" in found
+    assert "/facts/13: another FACT already states this about cab" in found
+    assert "/facts/14: museum-visit is not a WAY in this FILE" in found
+    assert "/facts/15: the shortest duration is longer than the longest" in found
     document = flight_home()
     document["ways"] = [{"id": "loop", "name": "Loop", "between": ["home", "home"]}]
     assert problems(document).startswith("/ways/0: fits no known shape")
@@ -292,16 +292,16 @@ def test_each_fact_is_stated_once() -> None:
     document["facts"].append(
         {"id": "visit-length-again", "option": "museum-visit", "duration": "PT2H"}
     )
-    assert "/facts/7: another FACT already states this about museum-visit" in problems(document)
+    assert "/facts/12: another FACT already states this about museum-visit" in problems(document)
 
 
 def test_a_complete_fact_names_two_different_places_or_leaves_some_out() -> None:
     document = flight_home()
     document["facts"] += [complete("ohare", "ohare"), complete(None, "the-moon")]
     found = problems(document)
-    assert "/facts/7: a COMPLETE FACT needs two different PLACEs" in found
-    assert "/facts/8: the-moon is not a PLACE in this FILE" in found
-    document["facts"][7:] = [complete("art-institute", None), complete(None, None)]
+    assert "/facts/12: a COMPLETE FACT needs two different PLACEs" in found
+    assert "/facts/13: the-moon is not a PLACE in this FILE" in found
+    document["facts"][12:] = [complete("art-institute", None), complete(None, None)]
     stated = [fact for fact in load(document).facts if isinstance(fact, Complete)]
     assert [(fact.origin, fact.destination) for fact in stated] == [
         ("art-institute", None),
@@ -312,14 +312,14 @@ def test_a_complete_fact_names_two_different_places_or_leaves_some_out() -> None
 def test_a_complete_fact_is_stated_once() -> None:
     document = flight_home()
     document["facts"] += [complete("art-institute", "ohare"), complete("art-institute", "ohare")]
-    document["facts"][8]["id"] = "ways-again"
-    assert "/facts/8: another FACT already states this" in problems(document)
+    document["facts"][13]["id"] = "ways-again"
+    assert "/facts/13: another FACT already states this" in problems(document)
 
 
 def test_a_range_and_a_span_run_forward() -> None:
     document = flight_home()
     backwards = {"shortest": "PT2H", "longest": "PT1H"}
-    document["facts"][3] = {
+    document["facts"][5] = {
         "id": "train-length",
         "option": "blue-line",
         "contingent_duration": backwards,
@@ -331,8 +331,8 @@ def test_a_range_and_a_span_run_forward() -> None:
     }
     document["facts"].append({"id": "ways", "complete": ways})
     found = problems(document)
-    assert "/facts/3: the shortest duration is longer than the longest" in found
-    assert "/facts/7: the span ends before it starts" in found
+    assert "/facts/5: the shortest duration is longer than the longest" in found
+    assert "/facts/12: the span ends before it starts" in found
 
 
 def test_a_file_on_disk_must_be_json(tmp_path: Path) -> None:

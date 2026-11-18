@@ -22,11 +22,15 @@
   "facts": [
     { "id": "skydeck-time", "option": "skydeck", "starts_at": "2027-05-15T10:30:00-05:00[America/Chicago]" },
     { "id": "skydeck-length", "option": "skydeck", "duration": "PT1H30M" },
+    { "id": "skydeck-needs-a-ticket", "option": "skydeck", "needs_right": true },
+    { "id": "skydeck-tickets", "booking": { "option": "skydeck", "covers": ["alex", "sam"] } },
     { "id": "talk-time", "option": "gallery-talk", "starts_at": "2027-05-15T10:30:00-05:00[America/Chicago]" },
     { "id": "talk-length", "option": "gallery-talk", "duration": "PT1H" },
+    { "id": "talk-is-walk-up", "option": "gallery-talk", "needs_right": false },
     { "id": "lunch-time", "option": "lunch", "starts_at": "2027-05-15T12:15:00-05:00[America/Chicago]" },
     { "id": "lunch-length", "option": "lunch", "duration": "PT1H" },
     { "id": "lunch-table", "option": "lunch", "arrive_before_start": "PT0S" },
+    { "id": "lunch-is-walk-up", "option": "lunch", "needs_right": false },
     { "id": "walk-from-tower-length", "way": "walk-from-tower", "duration": "PT20M" },
     { "id": "walk-from-museum-length", "way": "walk-from-museum", "duration": "PT5M" },
     { "id": "all-ways", "complete": { "leaving": { "earliest": "2027-05-15T00:00:00-05:00[America/Chicago]", "latest": "2027-05-15T23:59:00-05:00[America/Chicago]" } } }

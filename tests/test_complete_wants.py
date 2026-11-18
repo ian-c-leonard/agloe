@@ -197,6 +197,7 @@ def test_a_complete_set_ends_the_questions_about_options_with_no_fact() -> None:
         "tavern-length",
         "tavern-cutoff",
         "every-deep-dish",
+        "tavern-open",
         "deep-dish",
         "lock-tavern",
     )
@@ -427,7 +428,7 @@ def test_only_a_fact_is_told_to_choose_a_kind_of_complete_set() -> None:
     document["options"][0]["complete"] = {"satisfies": "x", "from": "art-institute"}
     said = problems(document)
     assert said.startswith("/options/0: fits no known shape")
-    assert "never both" not in said
+    assert "of one kind" not in said
 
 
 def test_a_report_names_only_the_kinds_of_record_it_lists() -> None:
@@ -437,15 +438,17 @@ def test_a_report_names_only_the_kinds_of_record_it_lists() -> None:
     assert "DECISION" not in words
 
 
-def test_a_complete_set_about_travel_and_about_a_want_is_refused_as_both() -> None:
+def test_a_complete_set_of_two_kinds_is_refused_as_that() -> None:
     document = flight_home()
     document["wants"] = [must("window-seat", "alex")]
     both = every("window-seat")
     both["complete"]["from"] = "art-institute"
     document["facts"].append(both)
     last = len(document["facts"]) - 1
-    said = f"/facts/{last}: a COMPLETE set is about travel or about a WANT, never both"
-    assert problems(document) == said
+    one_kind = "travel, the OPTIONs that SATISFY a WANT, or the rights to an OPTION"
+    assert problems(document) == f"/facts/{last}: a COMPLETE set is of one kind: {one_kind}"
+    both["complete"] = {"satisfies": "window-seat", "rights_to": "flight"}
+    assert problems(document) == f"/facts/{last}: a COMPLETE set is of one kind: {one_kind}"
 
 
 def test_the_search_finds_a_plan_whenever_trying_everything_does() -> None:

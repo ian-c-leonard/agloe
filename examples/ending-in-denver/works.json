@@ -26,12 +26,17 @@
     { "id": "visit-time", "option": "museum-visit", "starts_at": "2027-05-15T14:00:00-05:00[America/Chicago]" },
     { "id": "visit-length", "option": "museum-visit", "duration": "PT1H" },
     { "id": "visit-arrival", "option": "museum-visit", "arrive_before_start": "PT0S" },
+    { "id": "visit-needs-a-ticket", "option": "museum-visit", "needs_right": true },
+    { "id": "museum-tickets", "booking": { "option": "museum-visit", "covers": ["alex", "sam"] } },
     { "id": "train-time", "option": "blue-line", "starts_any_time": true },
     { "id": "train-length", "option": "blue-line", "duration": "PT1H" },
     { "id": "train-boarding", "option": "blue-line", "arrive_before_start": "PT0S" },
+    { "id": "train-is-walk-up", "option": "blue-line", "needs_right": false },
     { "id": "flight-time", "option": "flight", "starts_at": "2027-05-15T17:00:00-05:00[America/Chicago]" },
     { "id": "flight-length", "option": "flight", "duration": "PT2H30M" },
     { "id": "bag-drop", "option": "flight", "arrive_before_start": "PT45M" },
+    { "id": "flight-needs-a-ticket", "option": "flight", "needs_right": true },
+    { "id": "flight-tickets", "booking": { "option": "flight", "covers": ["alex", "sam"] } },
     { "id": "walk-length", "way": "walk", "duration": "PT15M" }
   ],
   "decisions": [

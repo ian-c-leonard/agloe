@@ -21,6 +21,7 @@ from tests.stories import (
     lasts_between,
     lock,
     moves,
+    needs_no_right,
     starts_at,
     stays,
     takes,
@@ -90,7 +91,7 @@ def with_a_cab(*facts: dict[str, object], only_listed_ways: bool = False) -> str
     document = json.loads((EXAMPLES / "flight-home" / "depends-on-another-way.json").read_text())
     document["options"].append(moves("cab", "art-institute", "ohare"))
     document["options"][-1]["name"] = "Cab to O'Hare"
-    document["facts"] += facts
+    document["facts"] += [*facts, needs_no_right("cab")]
     if only_listed_ways:
         document["facts"].append(complete(None, "ohare"))
     file = load(document)
@@ -103,7 +104,8 @@ def test_several_ways_to_make_a_trip_work_are_numbered() -> None:
         "  1. Cab to O'Hare takes 45 min or less.",
         "  2. There are other WAYs from the Art Institute to O'Hare that take 45 min or less.",
         "",
-        "Other WAYs help only if they can be taken when the plan needs them.",
+        "Other WAYs help only if they can be taken when the plan needs them, with a right where"
+        " they need one.",
     ]
 
 
@@ -200,7 +202,8 @@ def test_a_way_nobody_timed_is_named_in_what_is_missing() -> None:
         "  1. Walk takes 30 min or less.",
         "  2. There are other WAYs from hotel to restaurant that take 30 min or less.",
         "",
-        "Other WAYs help only if they can be taken when the plan needs them.",
+        "Other WAYs help only if they can be taken when the plan needs them, with a right where"
+        " they need one.",
     ]
     assert report.as_json(file, found)["missing"] == [
         [{"what": "duration", "way": "walk", "at_most": "PT30M"}],
@@ -232,6 +235,7 @@ def test_a_report_with_a_time_past_the_year_9999_is_not_written(
                 "starts_at": "9999-12-31T23:59:59+00:00[UTC]",
             },
             lasts("fireworks", "PT1S"),
+            needs_no_right("fireworks"),
         ],
         "decisions": [lock("fireworks", "alex")],
     }
@@ -344,6 +348,7 @@ def test_times_show_their_offset_when_the_clocks_change() -> None:
                 "starts_at": "2027-11-07T01:45:00-05:00[America/Chicago]",
             },
             lasts("night-shift", "PT30M"),
+            needs_no_right("night-shift"),
         ],
         "decisions": [lock("night-shift", "alex")],
     }
@@ -424,7 +429,8 @@ def test_a_way_that_must_take_no_time_is_put_plainly() -> None:
         "  1. There are other WAYs from hotel to restaurant that take no time.",
         "  2. There are other WAYs from restaurant to hotel that take no time.",
         "",
-        "Other WAYs help only if they can be taken when the plan needs them.",
+        "Other WAYs help only if they can be taken when the plan needs them, with a right where"
+        " they need one.",
     ]
 
 
@@ -602,6 +608,8 @@ def test_records_with_the_same_name_show_their_ids() -> None:
             lasts_between("call", "PT30M", "PT1H"),
             starts_at("nap", 9, 30),
             lasts("nap", "PT1H"),
+            needs_no_right("call"),
+            needs_no_right("nap"),
         ],
         "decisions": [lock("call", "alex-a", "alex-b"), lock("nap", "alex-b")],
     }
@@ -669,6 +677,8 @@ def test_a_warning_follows_the_order_the_plan_shows() -> None:
             },
             lasts("last", "PT1H"),
             cutoff("last", "PT0S"),
+            needs_no_right("back"),
+            needs_no_right("last"),
             takes("ab", "PT0S"),
         ],
         "decisions": [lock("back", "sam"), lock("last", "sam")],
@@ -703,6 +713,8 @@ def test_an_offset_is_shown_to_the_second() -> None:
                 "starts_at": "1911-03-11T00:00:00+00:00[Europe/Paris]",
             },
             lasts("paper", "PT1M"),
+            needs_no_right("coffee"),
+            needs_no_right("paper"),
         ],
         "decisions": [lock("coffee", "alex"), lock("paper", "alex")],
     }
@@ -721,6 +733,7 @@ def test_an_end_in_another_year_shows_its_year() -> None:
         "facts": [
             {"id": "stay-time", "option": "stay", "starts_at": "2027-05-14T23:30:00+00:00[UTC]"},
             lasts("stay", "PT8784H"),
+            needs_no_right("stay"),
         ],
         "decisions": [lock("stay", "alex")],
     }
@@ -744,7 +757,7 @@ def test_no_two_records_are_shown_by_the_same_name() -> None:
         "options": [stays("call", "hotel")],
         "ways": [],
         "wants": [],
-        "facts": [starts_at("call", 9), lasts("call", "PT30M")],
+        "facts": [starts_at("call", 9), lasts("call", "PT30M"), needs_no_right("call")],
         "decisions": [lock("call", "a", "b", "c")],
     }
     file = load(document)
@@ -781,6 +794,7 @@ def test_a_warning_falls_under_the_day_it_is_about() -> None:
             {"id": "sail-time", "option": "sail", "starts_at": on(16, 9, 20)},
             lasts("sail", "PT1H"),
             cutoff("sail", "PT0S"),
+            *(needs_no_right(name) for name in ("coffee", "swim", "shuttle", "sail")),
             takes("walk", "PT20M"),
         ],
         "decisions": [lock(name, "alex") for name in ("coffee", "swim", "shuttle", "sail")],

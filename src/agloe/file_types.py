@@ -164,6 +164,31 @@ class CompleteForAWant(TypedDict):
     complete: Satisfying
 
 
+class NeedsRight(TypedDict):
+    id: Id
+    option: Id
+    needs_right: bool
+
+
+class Booking(TypedDict):
+    option: Id
+    covers: list[Id]
+
+
+class BookingFact(TypedDict):
+    id: Id
+    booking: Booking
+
+
+class Rights(TypedDict):
+    rights_to: Id
+
+
+class CompleteRights(TypedDict):
+    id: Id
+    complete: Rights
+
+
 class StartsFrom(TypedDict):
     id: Id
     person: Id
@@ -204,5 +229,8 @@ class File(TypedDict):
         | Satisfies
         | CompleteForAWant
         | StartsFrom
+        | NeedsRight
+        | BookingFact
+        | CompleteRights
     ]
     decisions: list[Lock | TripStart | TripEnd]

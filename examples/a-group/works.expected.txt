@@ -10,11 +10,15 @@ Saturday 15 May 2027 (times in America/Chicago)
 The plan relies on these FACTs and DECISIONs:
   skydeck-time: Skydeck visit starts at 10:00 am on Saturday 15 May 2027
   skydeck-length: Skydeck visit takes 1 h 30 min
+  skydeck-needs-a-ticket: people need a right to take part in Skydeck visit
+  skydeck-tickets: a BOOKING for Skydeck visit covers Alex and Sam
   talk-time: Gallery talk starts at 10:30 am on Saturday 15 May 2027
   talk-length: Gallery talk takes 1 h
+  talk-is-walk-up: nobody needs a right to take part in Gallery talk
   lunch-time: Lunch in the park starts at 12:15 pm on Saturday 15 May 2027
   lunch-length: Lunch in the park takes 1 h
   lunch-table: nobody has to be at Millennium Park before Lunch in the park starts
+  lunch-is-walk-up: nobody needs a right to take part in Lunch in the park
   walk-from-tower-length: the walk between Willis Tower and Millennium Park takes 20 min
   walk-from-museum-length: the walk between the Art Institute and Millennium Park takes 5 min
   lock-skydeck: Alex and Sam take part in Skydeck visit

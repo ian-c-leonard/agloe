@@ -13,15 +13,21 @@ Saturday 15 May 2027 (times in America/Chicago)
 The plan relies on these FACTs and DECISIONs:
   dinner-time: Dinner starts at 7:00 pm on Friday 14 May 2027
   dinner-length: Dinner takes 1 h 30 min
+  dinner-is-walk-up: nobody needs a right to take part in Dinner
   night-time: Night at the hotel starts at 11:30 pm on Friday 14 May 2027
   night-length: Night at the hotel takes 8 h
   night-arrival: nobody has to be at the hotel before Night at the hotel starts
+  night-needs-a-room: people need a right to take part in Night at the hotel
+  room: a BOOKING for Night at the hotel covers Alex
   breakfast-time: Breakfast starts at 8:00 am on Saturday 15 May 2027
   breakfast-length: Breakfast takes 45 min
   breakfast-arrival: nobody has to be at the hotel before Breakfast starts
+  breakfast-is-walk-up: nobody needs a right to take part in Breakfast
   skydeck-time: Skydeck visit starts at 10:00 am on Saturday 15 May 2027
   skydeck-length: Skydeck visit takes 1 h 30 min
   skydeck-arrival: nobody has to be at Willis Tower before Skydeck visit starts
+  skydeck-needs-a-ticket: people need a right to take part in Skydeck visit
+  skydeck-ticket: a BOOKING for Skydeck visit covers Alex
   walk-to-hotel-length: the walk between River North and the hotel takes 25 min
   walk-to-tower-length: the walk between the hotel and Willis Tower takes 15 min
   lock-dinner: Alex takes part in Dinner

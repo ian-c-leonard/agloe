@@ -372,8 +372,9 @@ def test_other_ways_must_not_break_a_must_not_either() -> None:
     assert report.as_text(file, found).splitlines()[2:] == [
         "The trip works if there are other WAYs from hotel to loop that take 3 h or less.",
         "",
-        "Other WAYs help only if they can be taken when the plan needs them, and only if they"
-        " SATISFY nothing that is a must-not for a PERSON who takes them.",
+        "Other WAYs help only if they can be taken when the plan needs them, with a right where"
+        " they need one, and only if they SATISFY nothing that is a must-not for a PERSON who"
+        " takes them.",
     ]
 
 

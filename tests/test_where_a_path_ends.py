@@ -44,6 +44,7 @@ from tests.stories import (
     must,
     must_not,
     named,
+    needs_no_right,
     satisfies,
     seconds,
     starts_at,
@@ -89,6 +90,7 @@ def day_out(
         starts_at("visit", 14),
         lasts("visit", "PT1H"),
         cutoff("visit", "PT0S"),
+        needs_no_right("visit"),
         takes("walk", "PT15M"),
         takes("train", "PT1H"),
     ]
@@ -152,15 +154,15 @@ def test_a_file_can_say_where_a_person_starts_from_and_has_to_end() -> None:
 
 def test_a_file_says_once_where_a_person_starts_from() -> None:
     again = {"id": "alex-start-again", "person": "alex", "starts_from": "museum"}
-    assert problems(day_out(again)) == "/facts/6: another FACT already states this about alex"
+    assert problems(day_out(again)) == "/facts/7: another FACT already states this about alex"
 
 
 def test_a_start_and_an_end_name_a_person_and_a_place_of_the_file() -> None:
     assert problems(day_out(starts_from("sam", "hotel"))) == (
-        "/facts/6: sam is not a PERSON in this FILE"
+        "/facts/7: sam is not a PERSON in this FILE"
     )
     assert problems(day_out(starts_from("alex", "moon"), without=["alex-start"])) == (
-        "/facts/5: moon is not a PLACE in this FILE"
+        "/facts/6: moon is not a PLACE in this FILE"
     )
     assert problems(day_out(wants=[ends_at("moon", "alex")])) == (
         "/wants/0: moon is not a PLACE in this FILE"
@@ -174,9 +176,9 @@ def test_a_file_states_the_want_to_end_at_a_place_only_as_a_must() -> None:
 
 
 def test_no_option_delivers_the_want_to_end_at_a_place() -> None:
-    assert problems(day_out(satisfies("visit", "ending"))) == "/facts/6: no OPTION delivers ending"
+    assert problems(day_out(satisfies("visit", "ending"))) == "/facts/7: no OPTION delivers ending"
     whole = {"id": "every-ending", "complete": {"satisfies": "ending"}}
-    assert problems(day_out(whole)) == "/facts/6: no OPTION delivers ending"
+    assert problems(day_out(whole)) == "/facts/7: no OPTION delivers ending"
     file = load(day_out())
     assert file.says("visit", "ending") is False
     for world in (best_case(file), worst_case(file), no_better_than(file, [])):
@@ -320,6 +322,7 @@ def test_a_person_travels_from_where_they_start_to_where_they_have_to_end() -> N
         "visit-time",
         "visit-length",
         "visit-cutoff",
+        "visit-open",
         "walk-length",
         "train-length",
         "ending",
@@ -336,6 +339,7 @@ def test_a_person_with_no_place_to_end_at_stops_after_their_last_option() -> Non
         "visit-time",
         "visit-length",
         "visit-cutoff",
+        "visit-open",
         "walk-length",
         "lock-visit",
     )

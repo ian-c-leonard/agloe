@@ -23,9 +23,12 @@
     { "id": "skydeck-length", "option": "skydeck", "duration": "PT1H30M" },
     { "id": "skydeck-arrival", "option": "skydeck", "arrive_before_start": "PT0S" },
     { "id": "skydeck-is-high-up", "option": "skydeck", "satisfies": { "want": "view", "degree": 9 } },
+    { "id": "skydeck-needs-a-ticket", "option": "skydeck", "needs_right": true },
+    { "id": "skydeck-ticket", "booking": { "option": "skydeck", "covers": ["alex"] } },
     { "id": "lunch-time", "option": "lunch", "starts_at": "2027-05-15T12:15:00-05:00[America/Chicago]" },
     { "id": "lunch-length", "option": "lunch", "duration": "PT1H" },
     { "id": "lunch-table", "option": "lunch", "arrive_before_start": "PT0S" },
+    { "id": "lunch-is-walk-up", "option": "lunch", "needs_right": false },
     { "id": "walk-from-tower-length", "way": "walk-from-tower", "duration": "PT20M" }
   ],
   "decisions": [

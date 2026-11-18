@@ -12,7 +12,17 @@ from dataclasses import dataclass
 from enum import Enum
 from itertools import combinations
 
-from agloe.file import Complete, CompleteFor, Fact, File, Lock, Start, StartsFrom
+from agloe.file import (
+    Booking,
+    Complete,
+    CompleteFor,
+    CompleteRights,
+    Fact,
+    File,
+    Lock,
+    Start,
+    StartsFrom,
+)
 from agloe.reference import (
     Broken,
     Itinerary,
@@ -118,10 +128,22 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact) -> bool:
     It relies on every FACT about an OPTION or a WAY it has in it. It relies on no COMPLETE set
     of travel: it takes no unlisted WAY. It relies on where a PERSON starts from where the
     PERSON is in it, or has to end the TRIP at a PLACE: their path begins there, or they stay
-    there.
+    there. It relies on a BOOKING that covers a PERSON in one of its OPTIONs, unless a FACT
+    says that the OPTION needs no right: the first such BOOKING the FILE lists for each PERSON.
+    It relies on no FACT that the rights to an OPTION are COMPLETE.
     """
     if isinstance(fact, CompleteFor):
         return _settles(file, itinerary, fact)
+    if isinstance(fact, Booking):
+        taking_part = {
+            person for step in itinerary if step.option == fact.option for person in step.persons
+        }
+        may_be_needed = file.needs_right(fact.option) is not False
+        return may_be_needed and any(
+            file.booking(fact.option, person) == fact for person in taking_part
+        )
+    if isinstance(fact, CompleteRights):
+        return False
     if isinstance(fact, StartsFrom):
         in_it = any(fact.person in step.persons for step in itinerary)
         return in_it or bool(has_to_end_at(file, fact.person))
@@ -187,20 +209,32 @@ def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
     this WANT and this PERSON" asks for something new, and stands in for a listed OPTION and
     every FACT about it. So the sets returned ask for the fewest of those, and among them they
     have the fewest FACTs. The count is of WANTs and PERSONs, whichever OPTIONs are found.
+
+    Every set holds the FACTs that a LOCK cannot be honored without, so only sets that hold
+    them are tried. A FILE that says little about its LOCKed OPTIONs needs many FACTs at once,
+    and those are most of them.
     """
     every = unknowns(file)
     facts = [unknown for unknown in every if unknown.what != "another option"]
     to_find = [unknown for unknown in every if unknown.what == "another option"]
+    place = {unknown: number for number, unknown in enumerate(facts)}
+    in_every_set = _asked_by_a_lock(file)
+    others = [unknown for unknown in facts if unknown not in in_every_set]
     for count in range(len(to_find) + 1):
         # Asking for these can be enough only if it is in the upper bound, where every FACT
         # helps whoever needs it. The bound only saves work: nothing is reported from it.
         hopeful = [
             some for some in combinations(to_find, count) if works(file, no_better_than(file, some))
         ]
-        for size in range(len(facts) + 1 if hopeful else 0):
+        for size in range(len(in_every_set), len(facts) + 1 if hopeful else 0):
+            # Adding the same FACTs to each set keeps the sets in the order of their FACTs.
+            sets = (
+                sorted((*in_every_set, *more), key=place.__getitem__)
+                for more in combinations(others, size - len(in_every_set))
+            )
             enough = [
                 (*stated, *some)
-                for stated in combinations(facts, size)
+                for stated in sets
                 for some in hopeful
                 if one_way_each(stated) and works(file, with_these_at_best(file, (*stated, *some)))
             ]
@@ -213,12 +247,32 @@ def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
     raise AssertionError("the best case works, so some unknown FACTs make it work")
 
 
+def _asked_by_a_lock(file: File) -> frozenset[Unknown]:
+    """The unknown FACTs that a LOCK cannot be honored without. Every set that is enough has them.
+
+    A LOCK puts its PERSONs into its OPTION in every ITINERARY. An OPTION with no stated start
+    can be used only if its start turns out free. And where nobody knows whether the OPTION
+    needs a right, a PERSON whom no BOOKING covers can take part only if it turns out to need
+    none: no set asks for another right to such an OPTION. Nothing else can stand in for
+    either FACT, so this takes no search.
+    """
+    asked: set[Unknown] = set()
+    for lock in file.locks:
+        if file.start(lock.option) is None:
+            asked.add(Unknown("start", lock.option))
+        covered = all(file.booking(lock.option, person) is not None for person in lock.persons)
+        if file.needs_right(lock.option) is None and not covered:
+            asked.add(Unknown("needs no right", lock.option))
+    return frozenset(asked)
+
+
 def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
     """The most seconds this one unknown can be for the TRIP to work.
 
     None for an unknown that is not a length of time, and None when any length would do.
     """
-    if unknown.what in ("start", "satisfies", "does not satisfy", "another option"):
+    no_length = ("start", "satisfies", "does not satisfy", "another option")
+    if unknown.what in (*no_length, "needs no right", "another right"):
         return None
 
     def enough(seconds: int) -> bool:

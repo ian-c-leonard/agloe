@@ -32,11 +32,16 @@
   "relies_on": [
     "visit-time",
     "visit-length",
+    "visit-needs-a-ticket",
+    "museum-tickets",
     "train-time",
+    "train-is-walk-up",
     "train-length",
     "flight-time",
     "flight-length",
     "bag-drop",
+    "flight-needs-a-ticket",
+    "flight-tickets",
     "lock-visit",
     "lock-flight"
   ],
