@@ -196,9 +196,6 @@ class File:
     facts: tuple[Fact, ...]
     locks: tuple[Lock, ...]
     zone: str = "UTC"  # the time zone of the first time in the FILE; reports show times in it
-    # Each OPTION and WANT about which a FACT has been taken out. What that FACT stated is then
-    # unknown, even where another FACT says the WANT's set is COMPLETE.
-    unsaid: frozenset[tuple[str, str]] = frozenset()
 
     def option(self, id: str) -> Option:
         return next(option for option in self.options if option.id == id)
@@ -230,34 +227,21 @@ class File:
         """Whether this OPTION SATISFIES this WANT, as far as the FILE says. None: nobody knows.
 
         A FACT about the two settles it. Without one, a FACT that the WANT's set is COMPLETE
-        settles it too: the OPTION does not. That does not hold for an OPTION and a WANT about
-        which a FACT has been taken out: there nobody knows.
+        settles it too: the OPTION does not.
         """
         stated = self.satisfies(option, want)
         if stated is not None:
             return stated.degree > 0
-        if self.complete_for(want) is not None and (option, want) not in self.unsaid:
-            return False
-        return None
+        return None if self.complete_for(want) is None else False
 
     def without(self, record: str) -> File:
-        """The same FILE with one FACT, WANT or DECISION taken out.
+        """The same FILE with one FACT, WANT or DECISION left out.
 
-        What a FACT stated is then unknown. That is more than leaving the FACT out. Where
-        another FACT says a WANT's set is COMPLETE, an OPTION with no FACT about the WANT does
-        not SATISFY it. An OPTION whose FACT about the WANT was taken out might.
-
-        A WANT that is taken out stays in the FILE with no holders, so it asks nothing of anyone
+        A WANT that is left out stays in the FILE with no holders, so it asks nothing of anyone
         and the FACTs about it still name a WANT.
         """
-        forgotten = {
-            (fact.option, fact.want)
-            for fact in self.facts
-            if isinstance(fact, Satisfies) and fact.id == record
-        }
         return replace(
             self,
-            unsaid=self.unsaid | forgotten,
             wants=tuple(
                 replace(want, musts=(), must_nots=()) if want.id == record else want
                 for want in self.wants
@@ -654,9 +638,27 @@ def _unwritable_characters(value: object, where: str) -> list[str]:
 
 
 def _describe(error: ValidationError) -> str:
-    """One schema problem as 'where: what'. A record that fits no shape gets its closest miss."""
+    """One schema problem as 'where: what'. A record that fits no shape gets its closest miss.
+
+    A FACT with ``complete`` is about travel or about a WANT. Its miss is the one for the kind
+    it was meant to be, so that a key of that kind is never named as the problem.
+    """
     where = "".join(_inside("", part) for part in error.absolute_path) or "the FILE"
-    if error.context:
-        closest = max(error.context, key=lambda miss: len(miss.absolute_path))
-        return f"{where}: fits no known shape; the closest miss: {closest.message}"
-    return f"{where}: {error.message}"
+    if not error.context:
+        return f"{where}: {error.message}"
+    misses = list(error.context)
+    whole = cast("dict[str, object]", error.instance).get("complete") if error.instance else None
+    if isinstance(whole, dict):
+        keys = set(cast("dict[str, object]", whole))
+        if "satisfies" in keys and keys & {"from", "to", "leaving"}:
+            return f"{where}: a COMPLETE set is about travel or about a WANT, never both"
+        meant = "complete_for_a_want" if "satisfies" in keys else "complete_set"
+        shapes = cast("dict[str, list[dict[str, str]]]", error.schema)["oneOf"]
+        of_that_kind = [
+            miss
+            for miss in misses
+            if shapes[cast("int", miss.relative_schema_path[0])]["$ref"].endswith(f"/{meant}")
+        ]
+        misses = of_that_kind or misses
+    closest = max(misses, key=lambda miss: len(miss.absolute_path))
+    return f"{where}: fits no known shape; the closest miss: {closest.message}"

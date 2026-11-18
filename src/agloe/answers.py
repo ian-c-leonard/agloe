@@ -16,6 +16,7 @@ from agloe.file import Complete, CompleteFor, File, Start
 from agloe.reference import (
     Broken,
     Itinerary,
+    Remaining,
     Unknown,
     World,
     any_works,
@@ -67,7 +68,7 @@ class Report:
 
 type Shown = Callable[[File, World], Itinerary | None]
 type Works = Callable[[File, World], bool]
-type Stuck = Callable[[File], frozenset[str] | None]
+type Stuck = Callable[[Remaining], frozenset[str] | None]
 
 
 def check(
@@ -85,10 +86,10 @@ def check(
     """
     if stuck is None:
 
-        def every_record(given: File) -> frozenset[str] | None:
-            if any(works(given, world) for world in best_cases(given)):
+        def every_record(given: Remaining) -> frozenset[str] | None:
+            if any(works(given.file, world) for world in best_cases(given)):
                 return None
-            return frozenset(_records(given))
+            return frozenset(_records(given.file))
 
         stuck = every_record
     plain = shown(file, worst_case(file))
@@ -100,8 +101,11 @@ def check(
         relies_on = [
             fact.id
             for fact in file.facts
-            if isinstance(fact, CompleteFor)
-            or (not isinstance(fact, Complete) and fact.option in used)
+            if (
+                _settles(file, chosen, fact)
+                if isinstance(fact, CompleteFor)
+                else not isinstance(fact, Complete) and fact.option in used
+            )
         ]
         relies_on += [want.id for want in file.wants if want.musts or want.must_nots]
         relies_on += [lock.id for lock in file.locks]
@@ -110,10 +114,25 @@ def check(
             # The steps keep the order the ITINERARY lists them in: that is the plan shown.
             at_worst = tuple(broken_as_listed(file, longest, in_world(longest, chosen)))
         return Report(Answer.FEASIBLE, chosen, tuple(relies_on), robust is not None, at_worst)
-    enough = stuck(file)
+    enough = stuck(Remaining(file))
     if enough is not None:
         return Report(Answer.INFEASIBLE, conflict=_conflict(file, stuck, enough))
     return Report(Answer.UNDETERMINED, missing=_missing(file, works))
+
+
+def _settles(file: File, itinerary: Itinerary, whole: CompleteFor) -> bool:
+    """Whether this ITINERARY relies on the FACT that a WANT's set is COMPLETE.
+
+    It does where a PERSON for whom the WANT is a must-not takes part in an OPTION with no FACT
+    about the WANT. Only the COMPLETE set says that such an OPTION does not SATISFY it.
+    """
+    held_back = next(set(want.must_nots) for want in file.wants if want.id == whole.want)
+    return any(
+        step.option is not None
+        and file.satisfies(step.option, whole.want) is None
+        and held_back.intersection(step.persons)
+        for step in itinerary
+    )
 
 
 def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[str, ...]:
@@ -126,7 +145,7 @@ def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[str, ..
     not work without it. A FACT that is taken out is unknown, and the best case gives every
     unknown its most helpful value.
     """
-    kept = file
+    kept = Remaining(file)
     skipped = False
     for record in _records(file):
         without = kept.without(record)
@@ -138,7 +157,7 @@ def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[str, ..
             kept, enough = without, smaller
     if skipped and stuck(kept) is None:
         raise AssertionError("records said to rule out every ITINERARY do not")
-    return tuple(_records(kept))
+    return tuple(_records(kept.file))
 
 
 def _records(file: File) -> list[str]:

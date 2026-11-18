@@ -13,13 +13,14 @@ checker then looks for the conflict among those alone.
 """
 
 from collections.abc import Sequence
+from dataclasses import replace
 
 from ortools.sat.python import cp_model
 
 from agloe import answers, reference
 from agloe.answers import Report
 from agloe.file import Complete, Cutoff, Duration, File, Start
-from agloe.reference import Itinerary, World
+from agloe.reference import Itinerary, Remaining, World
 
 _MOST_AT_ONCE = 60  # yes-or-no choices ranked in one solve: their weights must fit in 64 bits
 
@@ -50,25 +51,28 @@ def works(file: File, world: World) -> bool:
     return choice is not None
 
 
-def stuck(file: File) -> frozenset[str] | None:
+def stuck(remaining: Remaining) -> frozenset[str] | None:
     """FACTs, WANTs and DECISIONs that rule out every ITINERARY by themselves, or None.
 
-    The question is asked in the best case. The set returned is small: no record can be taken
-    out of it. It need not be the conflict the report names, which is found in the FILE's order.
-    This search goes the other way, from the last record to the first. That takes the DECISIONs
-    out before the FACTs, and with fewer LOCKs to honor each proof is quick.
+    The question is asked in the best case of what is left of a FILE. The set returned is small:
+    no record can be taken out of it. It need not be the conflict the report names, which is
+    found in the FILE's order. This search goes the other way, from the last record to the
+    first. That takes the DECISIONs out before the FACTs, and with fewer LOCKs to honor each
+    proof is quick.
 
-    A FILE from which FACTs were taken out can have several best cases. The solver picks one
-    with its choice, and the reference checker must agree that the choice works in one of them.
+    Where something works, the solver has chosen a plan and a possible world for it: which
+    OPTIONs SATISFY which WANTs, where nobody knows. The reference checker then checks that
+    plan in that world.
     """
+    file = remaining.file
     world = reference.best_case(file)
-    search = _Search(file, world, switched=True)
+    search = _Search(file, world, switched=True, unsaid=remaining.unsaid)
     records = [record.id for record in (*file.facts, *file.wants, *file.locks)]
     choice, needed = search.clash(records)
     if choice is not None:
-        best = reference.best_cases(file)
-        if all(reference.scheduled(file, each, *choice) is None for each in best):
-            raise AssertionError("the solver chose PERSONs and orders that the rules refuse")
+        does = search.turned_out
+        chosen = replace(world, satisfies=does, might_satisfy=does)
+        _checked(file, chosen, choice)
         return None
     while True:  # ask again with only the records the proof used, until it uses them all
         choice, fewer = search.clash([record for record in records if record in needed])
@@ -151,13 +155,25 @@ class _Search:
     reference checker.
     """
 
-    def __init__(self, file: File, world: World, switched: bool = False) -> None:
+    def __init__(
+        self,
+        file: File,
+        world: World,
+        switched: bool = False,
+        unsaid: frozenset[tuple[str, str]] = frozenset(),
+    ) -> None:
         """Build the model. With ``switched``, each FACT and DECISION applies only if switched on.
 
         A FACT that is switched off is unknown, and turns out as in the best case. So the world
-        must be the best case when ``switched`` is set.
+        must be the best case when ``switched`` is set. ``unsaid`` holds each OPTION and WANT
+        about which a FACT was taken out before: nobody knows about those either, even where
+        the WANT's set is COMPLETE.
         """
-        self.file, self.world = file, world
+        self.file, self.world, self.unsaid = file, world, unsaid
+        # Whether each OPTION SATISFIES each WANT, where the solver chooses the world too, and
+        # how that turned out in the last answer it gave.
+        self.does: dict[tuple[str, str], cp_model.IntVar] = {}
+        self.turned_out: frozenset[tuple[str, str]] = frozenset()
         self.model = cp_model.CpModel()
         self.switch: dict[str, cp_model.IntVar] = {}
         if switched:
@@ -326,11 +342,12 @@ class _Search:
             for option in file.options:
                 satisfies = model.new_bool_var(f"{option.id} satisfies {want.id}")
                 does.append(satisfies)
+                self.does[option.id, want.id] = satisfies
                 stated = file.satisfies(option.id, want.id)
                 if stated is not None:
                     turns_out = 1 if stated.degree > 0 else 0
                     _when(model.add(satisfies == turns_out), self.switch[stated.id])
-                elif closed is not None and (option.id, want.id) not in file.unsaid:
+                elif closed is not None and (option.id, want.id) not in self.unsaid:
                     _when(model.add(satisfies == 0), closed)
             for number, person in enumerate(file.persons):
                 takes = self.takes[number]
@@ -494,7 +511,11 @@ class _Search:
         status = solver.solve(self.model)
         self.model.clear_assumptions()
         if status != cp_model.INFEASIBLE:
-            return self._found(solver, status), frozenset()
+            choice = self._found(solver, status)
+            self.turned_out = frozenset(
+                pair for pair, satisfies in self.does.items() if solver.boolean_value(satisfies)
+            )
+            return choice, frozenset()
         needed = frozenset(
             names[index]
             for index in solver.sufficient_assumptions_for_infeasibility()

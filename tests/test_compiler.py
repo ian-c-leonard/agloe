@@ -12,6 +12,7 @@ from agloe import answers, compiler, reference
 from agloe.answers import Answer, Missing
 from agloe.file import File, load, read
 from agloe.reference import (
+    Remaining,
     Unknown,
     World,
     best_case,
@@ -548,7 +549,7 @@ def test_the_conflict_named_is_the_one_found_in_the_files_order() -> None:
     )
     of_sam = {"call-time", "call-length", "nap-time", "lock-call", "lock-nap"}
     assert report.conflict == of_alex
-    assert compiler.stuck(file) in (frozenset(of_alex), frozenset(of_sam))
+    assert compiler.stuck(Remaining(file)) in (frozenset(of_alex), frozenset(of_sam))
 
 
 def test_two_conflicts_at_once_give_the_reference_checkers_report() -> None:
@@ -568,7 +569,7 @@ def test_two_conflicts_at_once_give_the_reference_checkers_report() -> None:
     report = compiler.check(file)
     assert report == answers.check(file)
     assert report.conflict == ("swim-time", "swim-length", "lunch-time", "lock-swim", "lock-lunch")
-    assert compiler.stuck(file) == frozenset(
+    assert compiler.stuck(Remaining(file)) == frozenset(
         {"call-time", "call-length", "nap-time", "lock-call", "lock-nap"}
     )
 

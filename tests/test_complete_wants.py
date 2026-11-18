@@ -12,6 +12,7 @@ from agloe.reference import (
     Broken,
     Constraint,
     Itinerary,
+    Remaining,
     Step,
     Unknown,
     best_case,
@@ -70,9 +71,9 @@ def checked(file: File) -> Report:
     return found
 
 
-def cannot_work(file: File) -> bool:
-    """Whether nothing works in any best case of this FILE, by trying everything."""
-    return not any(itineraries(file, world) for world in best_cases(file))
+def cannot_work(left: Remaining) -> bool:
+    """Whether nothing works in any best case of what is left of a FILE, by trying everything."""
+    return not any(itineraries(left.file, world) for world in best_cases(left))
 
 
 def test_the_file_can_say_that_a_wants_set_is_complete() -> None:
@@ -120,15 +121,6 @@ def test_a_want_has_one_fact_that_its_set_is_complete() -> None:
     )
 
 
-def test_a_complete_set_is_about_ways_or_about_a_want() -> None:
-    document = flight_home()
-    document["wants"] = [must("window-seat", "alex")]
-    both = every("window-seat")
-    both["complete"]["from"] = "art-institute"
-    document["facts"].append(both)
-    assert problems(document).startswith(f"/facts/{len(document['facts']) - 1}:")
-
-
 def test_nothing_about_a_complete_want_is_unknown() -> None:
     wants = [must("deep-dish", "alex", never=["sam"])]
     open_set = an_evening(wants=wants, locks=[])
@@ -140,7 +132,7 @@ def test_nothing_about_a_complete_want_is_unknown() -> None:
     whole = an_evening(every("deep-dish"), wants=wants, locks=[])
     assert unknowns(whole) == ()
     assert best_case(whole).another_option == frozenset()
-    assert best_cases(whole) == [best_case(whole)]
+    assert list(best_cases(Remaining(whole))) == [best_case(whole)]
 
 
 def test_an_option_with_no_fact_about_a_complete_want_breaks_no_must_not() -> None:
@@ -212,19 +204,35 @@ def test_a_complete_set_ends_the_questions_about_options_with_no_fact() -> None:
 
 
 def test_a_fact_that_is_taken_out_is_unknown_even_where_the_set_is_complete() -> None:
+    """Leaving a FACT out of a FILE and taking it out to look for a conflict are different."""
     wants = [must("deep-dish", "alex")]
     file = an_evening(
         satisfies("tavern", "deep-dish", 0), every("deep-dish"), wants=wants, locks=[]
     )
     assert file.says("tavern", "deep-dish") is False
-    assert file.says("show", "deep-dish") is False
-    without = file.without("tavern-gives-deep-dish")
-    assert without.says("tavern", "deep-dish") is None
-    assert without.says("show", "deep-dish") is False
-    assert without.without("every-deep-dish").says("show", "deep-dish") is None
-    forgotten = file.without("pizzeria-gives-deep-dish")
-    assert forgotten.says("pizzeria", "deep-dish") is None
-    assert Unknown("satisfies", "pizzeria", want="deep-dish") in unknowns(forgotten)
+    assert file.without("tavern-gives-deep-dish").says("tavern", "deep-dish") is False
+    left = Remaining(file).without("tavern-gives-deep-dish")
+    assert left.unsaid == {("tavern", "deep-dish")}
+    assert left.reopened() == [("tavern", "deep-dish")]
+    (best,) = best_cases(left)
+    assert ("tavern", "deep-dish") in best.satisfies
+    assert ("show", "deep-dish") not in best.might_satisfy
+    assert left.without("every-deep-dish").reopened() == []
+    assert Remaining(file).without("pizzeria-time").reopened() == []
+
+
+def test_what_is_reopened_turns_out_the_way_that_helps() -> None:
+    """A must wants it to SATISFY the WANT, a must-not wants it not to, and both get both."""
+    more = [satisfies("tavern", "deep-dish", 0), every("deep-dish")]
+    tavern = ("tavern", "deep-dish")
+    for wants, expected in (
+        ([must("deep-dish", "alex")], [True]),
+        ([must_not("deep-dish", "alex")], [False]),
+        ([must("deep-dish", "alex", never=["sam"])], [False, True]),
+    ):
+        left = Remaining(an_evening(*more, wants=wants, locks=[])).without("tavern-gives-deep-dish")
+        assert [tavern in world.satisfies for world in best_cases(left)] == expected
+        assert all(world.satisfies == world.might_satisfy for world in best_cases(left))
 
 
 def test_a_conflict_keeps_a_fact_that_rules_an_option_out() -> None:
@@ -285,8 +293,8 @@ def test_a_conflict_is_exact_where_a_fact_about_a_want_held_both_ways_is_taken_o
         found = checked(file)
         assert found.answer is Answer.INFEASIBLE
         assert found.conflict == ("every-deep-dish", "deep-dish", "lock-show")
-        forgotten = file.without("show-gives-deep-dish")
-        assert len(best_cases(forgotten)) == 2
+        forgotten = Remaining(file).without("show-gives-deep-dish")
+        assert len(list(best_cases(forgotten))) == 2
         assert cannot_work(forgotten)
         assert compiler.stuck(forgotten) is not None
 
@@ -304,7 +312,7 @@ def test_every_conflict_is_enough_and_has_no_record_to_spare() -> None:
             continue
         records = [*(fact.id for fact in file.facts), *(want.id for want in file.wants)]
         records += [each.id for each in file.locks]
-        alone = file
+        alone = Remaining(file)
         for record in records:
             if record not in found.conflict:
                 alone = alone.without(record)
@@ -318,11 +326,89 @@ def test_every_conflict_is_enough_and_has_no_record_to_spare() -> None:
 def test_the_report_puts_a_complete_set_for_a_want_in_words() -> None:
     file = trip(["alex"], [], [], [every("deep-dish")], [], wants=[must("deep-dish", "alex")])
     assert report.as_text(file, checked(file)).splitlines()[2:] == [
-        "These FACTs, WANTs and DECISIONs clash. Each one is needed for the clash."
-        " Times are in UTC.",
-        "  every-deep-dish: every OPTION that SATISFIES deep-dish is listed",
+        "These FACTs, WANTs and DECISIONs clash. Take any one away and the trip might work."
+        " A FACT that is taken away leaves what it said unknown. Times are in UTC.",
+        "  every-deep-dish: the FILE states every OPTION that SATISFIES deep-dish: there is none",
         "  deep-dish: deep-dish is a must for alex",
     ]
+
+
+def test_a_complete_set_in_words_names_the_options_that_satisfy_the_want() -> None:
+    """Alex is LOCKed for the show while both dinners that SATISFY the WANT are served."""
+    wants = [must("deep-dish", "alex")]
+    more = [satisfies("tavern", "deep-dish", 3), satisfies("show", "deep-dish", 0)]
+    file = an_evening(*more, every("deep-dish"), wants=wants, locks=[lock("show", "alex")])
+    found = checked(file)
+    assert found.answer is Answer.INFEASIBLE
+    assert (
+        "  every-deep-dish: the FILE states every OPTION that SATISFIES deep-dish:"
+        " pizzeria and tavern\n"
+    ) in report.as_text(file, found)
+
+
+def test_a_plan_relies_on_a_complete_set_only_where_it_needs_it() -> None:
+    """Sam must not have deep-dish pizza. Nothing asks Sam to do anything.
+
+    The empty plan works with or without the COMPLETE set, so it does not rely on it. Once Sam
+    is LOCKed for the tavern, which has no FACT about the WANT, it does.
+    """
+    wants = [must_not("deep-dish", "sam")]
+    idle = an_evening(every("deep-dish"), wants=wants, locks=[])
+    assert checked(idle).relies_on == ("deep-dish",)
+    at_the_pizzeria = an_evening(every("deep-dish"), wants=wants, locks=[lock("pizzeria", "alex")])
+    assert "every-deep-dish" not in checked(at_the_pizzeria).relies_on
+    at_the_tavern = an_evening(every("deep-dish"), wants=wants, locks=[lock("tavern", "sam")])
+    assert "every-deep-dish" in checked(at_the_tavern).relies_on
+    stated = an_evening(
+        satisfies("tavern", "deep-dish", 0),
+        every("deep-dish"),
+        wants=wants,
+        locks=[lock("tavern", "sam")],
+    )
+    assert "every-deep-dish" not in checked(stated).relies_on
+
+
+def test_many_musts_with_complete_sets_do_not_slow_the_search_for_a_conflict() -> None:
+    """One OPTION SATISFIES twenty WANTs, and nothing SATISFIES one more. All sets are COMPLETE.
+
+    Only the last WANT and its COMPLETE set clash. Taking the other FACTs out reopens twenty
+    questions, and none of them has to be tried both ways.
+    """
+    wants = [must(f"want-{number}", "alex") for number in range(21)]
+    facts = [*at_seven("supper")]
+    facts += [satisfies("supper", f"want-{number}", 5) for number in range(20)]
+    facts += [every(f"want-{number}") for number in range(21)]
+    file = trip(["alex"], ["loop"], [stays("supper", "loop")], facts, [], wants=wants)
+    assert compiler.check(file).conflict == ("every-want-20", "want-20")
+    left = Remaining(file)
+    for number in range(20):
+        left = left.without(f"supper-gives-want-{number}")
+    assert len(left.reopened()) == 20
+    assert len(list(best_cases(left))) == 1
+
+
+def test_a_wrong_key_in_a_complete_set_is_named_alone() -> None:
+    document = flight_home()
+    document["wants"] = [must("window-seat", "alex")]
+    odd = every("window-seat")
+    odd["complete"]["note"] = 1
+    document["facts"].append(odd)
+    last = len(document["facts"]) - 1
+    assert problems(document) == (
+        f"/facts/{last}: fits no known shape; the closest miss:"
+        " Additional properties are not allowed ('note' was unexpected)"
+    )
+
+
+def test_a_complete_set_about_travel_and_about_a_want_is_refused_as_both() -> None:
+    document = flight_home()
+    document["wants"] = [must("window-seat", "alex")]
+    both = every("window-seat")
+    both["complete"]["from"] = "art-institute"
+    document["facts"].append(both)
+    last = len(document["facts"]) - 1
+    said = f"/facts/{last}: a COMPLETE set is about travel or about a WANT, never both"
+    assert problems(document) == said
 
 
 def test_the_search_finds_a_plan_whenever_trying_everything_does() -> None:

@@ -195,7 +195,8 @@ def as_text(file: File, report: Report) -> str:
         lines = [
             "INFEASIBLE: this trip cannot work.",
             "",
-            f"These {_kinds(file, report.conflict)} clash. Each one is needed for the clash."
+            f"These {_kinds(file, report.conflict)} clash. Take any one away and the trip might"
+            " work. A FACT that is taken away leaves what it said unknown."
             f" Times are in {file.zone}.",
             *(f"  {record}: {_record(file, clock, record)}" for record in report.conflict),
         ]
@@ -411,7 +412,13 @@ def _record(file: File, clock: _Clock, record: str) -> str:
             ways = f"every way straight from {places[found.origin]} to {places[found.destination]}"
         return f"{ways} that leaves between {span} is listed"
     if isinstance(found, CompleteFor):
-        return f"every OPTION that SATISFIES {_want(file, found.want)} is listed"
+        which = [
+            _name(file, fact.option)
+            for fact in file.facts
+            if isinstance(fact, Satisfies) and fact.want == found.want and fact.degree > 0
+        ]
+        said = _listed(which) if which else "there is none"
+        return f"the FILE states every OPTION that SATISFIES {_want(file, found.want)}: {said}"
     name = _name(file, found.option)
     if isinstance(found, Lock):
         verb = "takes" if len(found.persons) == 1 else "take"
@@ -473,7 +480,11 @@ def _want(file: File, id: str | None) -> str:
 def _people(file: File, persons: tuple[str, ...]) -> str:
     """Names joined as a sentence would: Alex, Sam and Jo."""
     shown = _names(file.persons)
-    names = [shown[person.id] for person in file.persons if person.id in persons]
+    return _listed([shown[person.id] for person in file.persons if person.id in persons])
+
+
+def _listed(names: Sequence[str]) -> str:
+    """Names joined as a sentence would: one, two and three."""
     if len(names) < 2:
         return "".join(names)
     return f"{', '.join(names[:-1])} and {names[-1]}"
