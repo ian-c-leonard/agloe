@@ -15,13 +15,13 @@ section "Which ITINERARY is shown". The sections "The three answers", "ROBUST" a
 are in ``answers``, which works them out from this module's search or from a faster one.
 """
 
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence, Sized
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from heapq import heapify, heappop, heappush
 from itertools import combinations, groupby, pairwise, permutations, product
 
-from agloe.file import Complete, File, Satisfies
+from agloe.file import Complete, File, Satisfies, StartsFrom, Want
 
 _MOST_TO_TAKE_OUT = 12  # ``needless`` tries every combination of things to take out
 
@@ -161,7 +161,11 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
     and that it does not only where the WANT is a must-not for some PERSON. So only those are
     listed. Where a FACT says a WANT's set is COMPLETE, nothing about the WANT is unknown.
     """
-    musts = [want for want in file.wants if want.musts and file.complete_for(want.id) is None]
+    musts = [
+        want
+        for want in file.wants
+        if want.musts and want.ends_at is None and file.complete_for(want.id) is None
+    ]
     out: list[Unknown] = []
     for option in file.options:
         if file.start(option.id) is None:
@@ -187,6 +191,11 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
         for person in _in_file_order_of_persons(file, want.musts):
             out.append(Unknown("another option", want=want.id, person=person))
     return tuple(out)
+
+
+def has_to_end_at(file: File, person: str) -> list[Want]:
+    """The WANTs to end the TRIP at a PLACE that are a must for this PERSON."""
+    return [want for want in file.wants if want.ends_at is not None and person in want.musts]
 
 
 def best_case(file: File) -> World:
@@ -405,7 +414,8 @@ def _world(
         (want.id, person)
         for want in file.wants
         for person in want.musts
-        if file.complete_for(want.id) is None
+        if want.ends_at is None
+        and file.complete_for(want.id) is None
         and well(Unknown("another option", want=want.id, person=person))
     )
     return World(
@@ -581,6 +591,8 @@ def _musts(file: File, world: World, taking_part: Mapping[str, tuple[str, ...]])
     """
     out: list[Broken] = []
     for want in file.wants:
+        if want.ends_at is not None:
+            continue  # checked along each PERSON's path
         met = {
             person
             for option, persons in taking_part.items()
@@ -654,26 +666,49 @@ type _Found = list[tuple[Constraint, _Placed, int | None]]  # which, at which st
 def _along_each_path(
     file: File, world: World, itinerary: Itinerary, order: list[_Placed]
 ) -> list[Broken]:
-    """The three CONSTRAINTs about what each PERSON does, with the steps in one order.
+    """The CONSTRAINTs about what each PERSON does, with the steps in one order.
 
     One Broken for each step and amount, naming every PERSON it affects in the FILE's order.
+    A must to end the TRIP at a PLACE that is not met has no step: one Broken for each such WANT.
     """
     groups: dict[tuple[Constraint, int, int | None], list[str]] = {}
+    elsewhere: dict[str, list[str]] = {}
     for person in file.persons:
         path = [placed for placed in order if person.id in placed[1].persons]
+        start = file.starts_from(person.id)
         for constraint, (position, _), late in (
-            *_places(path),
+            *_places(path, None if start is None else start.place),
             *_arrivals(world, path),
             *_listed(file, world, path),
         ):
             groups.setdefault((constraint, position, late), []).append(person.id)
+        asked = has_to_end_at(file, person.id)
+        for want in asked:
+            if want.ends_at != _ends(path, start, asked[0]):
+                elsewhere.setdefault(want.id, []).append(person.id)
     kinds = [Constraint.PLACE, Constraint.ARRIVAL, Constraint.LISTED]
     return [
-        _at(kind, (position, itinerary[position]), _in_file_order_of_persons(file, people), late)
-        for kind in kinds
-        for (constraint, position, late), people in groups.items()
-        if constraint is kind
+        *(
+            _at(kind, (position, itinerary[position]), _in_file_order_of_persons(file, who), late)
+            for kind in kinds
+            for (constraint, position, late), who in groups.items()
+            if constraint is kind
+        ),
+        *(Broken(Constraint.MUST, None, tuple(who), want=want) for want, who in elsewhere.items()),
     ]
+
+
+def _ends(path: list[_Placed], start: StartsFrom | None, asked: Want) -> str | None:
+    """The PLACE where a PERSON's path ends, for a PERSON who has to end the TRIP somewhere.
+
+    A path ends where its last step ends, and a path with nothing in it ends where it begins:
+    at the PLACE a FACT says the PERSON starts from. With no such FACT, nobody has said where
+    the PERSON is, and a path can begin wherever it suits. So a PERSON who does nothing is where
+    they have to end. ``asked`` is the first WANT that says where that is.
+    """
+    if path:
+        return path[-1][1].destination
+    return asked.ends_at if start is None else start.place
 
 
 def _in_each_order(itinerary: Itinerary) -> Iterator[list[_Placed]]:
@@ -736,13 +771,16 @@ def _sharing_persons(steps: list[_Placed]) -> list[list[_Placed]]:
     return groups
 
 
-def _places(path: list[_Placed]) -> _Found:
+def _places(path: list[_Placed], start: str | None = None) -> _Found:
     """Each PERSON is in one place at a time: no overlap, and each step starts where they are.
 
+    ``start`` is the PLACE a FACT says the PERSON starts from: their first step starts there.
     A PERSON is busy until the latest end of the steps they have started. So a step is found
     to overlap even when the step it overlaps is not the one just before it.
     """
     found: _Found = []
+    if start is not None and path and path[0][1].origin != start:
+        found.append((Constraint.PLACE, path[0], None))
     busy_until: int | None = None  # the latest end so far
     endless = False  # whether a step so far has no end that anybody knows
     for (_, before), after in pairwise(path):
@@ -837,7 +875,9 @@ def itineraries(file: File, world: World) -> list[Itinerary]:
 
     Nothing can be taken out of an ITINERARY in which PERSONs take part the fewest times, so
     ``needless`` finds nothing in any ITINERARY returned. They come in the order of "Which
-    ITINERARY is shown".
+    ITINERARY is shown". That rule covers the plans a report shows, which take no unlisted WAY.
+    In a world with unlisted WAYs the order and the times are still the same every time, and no
+    more is promised.
     """
     best: list[tuple[_Shown, Itinerary]] = []
     fewest: int | None = None
@@ -884,11 +924,13 @@ def scheduled(
 
     ``who`` names the PERSONs in each OPTION, in the FILE's order of OPTIONs. ``orders`` gives,
     for each PERSON in the FILE's order, the OPTIONs they do, by position in the FILE, in the
-    order they do them. The start times are those of "Which ITINERARY is shown", and so are the
-    WAYs the PERSONs take.
+    order they do them. The start times are those of "Which ITINERARY is shown". So are the
+    WAYs the PERSONs take, unless ``by`` names them.
 
     With ``by``, only one choice of WAYs is tried: for a PERSON, by position in the FILE, and
-    the position of an OPTION in their order, the route they take after that OPTION. Without it,
+    the position of an OPTION in their order, the route they take after that OPTION. The
+    position is -1 for the route before their first OPTION, and for the one route of a PERSON
+    who takes part in no OPTION. Without it,
     ``known`` can hold the routes of this world that are already worked out.
     """
     if by is not None:
@@ -896,7 +938,7 @@ def scheduled(
     return next(_schedules(file, world, who, orders, known or Routes(file, world)), None)
 
 
-def _who_takes_part(file: File, world: World) -> list[tuple[tuple[str, ...], ...]]:
+def _who_takes_part(file: File, world: World) -> Iterator[tuple[tuple[str, ...], ...]]:
     """Every choice of PERSONs for every OPTION that honors the LOCKs, fewest PERSONs first."""
     people = [person.id for person in file.persons]
     choices: list[list[tuple[str, ...]]] = []
@@ -910,7 +952,7 @@ def _who_takes_part(file: File, world: World) -> list[tuple[tuple[str, ...], ...
         choices.append(
             [group for group in groups if must.issubset(group) and (can_happen or not group)]
         )
-    return sorted(product(*choices), key=lambda who: sum(len(persons) for persons in who))
+    return _fewest_first(choices)
 
 
 def _orders(
@@ -935,15 +977,17 @@ def _orders(
 type Route = tuple[Leg, ...]
 
 
-def routes(file: File, world: World, here: str, there: str) -> list[Route]:
+def routes(file: File, world: World, here: str, there: str, last: bool = False) -> list[Route]:
     """Every route from one PLACE to another by WAYs alone that is worth trying, shortest first.
 
-    Three kinds of route are left out, because another route is never worse.
+    ``last`` says that the PERSON does nothing after the route. Three kinds of route are left
+    out, because another route is never worse.
 
     - A route that passes through a PLACE twice. A PERSON who came back to a PLACE could have
       waited there instead: every WAY they take after that starts at the same time either way,
       and no CONSTRAINT asks how they spent the wait.
-    - A route with a listed WAY that has no limit to how long it takes. Nothing could follow it.
+    - A route in which something follows a listed WAY that has no limit to how long it takes.
+      Nothing could follow it. Such a WAY can only be the last thing a PERSON does.
     - A route in which one unlisted WAY could stand in for a stretch of two or more WAYs that
       takes an unlisted WAY. The PERSON waits where the stretch began, takes the one WAY when
       they would have taken the other, and arrives no later. For this the one WAY must exist in
@@ -972,31 +1016,40 @@ def routes(file: File, world: World, here: str, there: str) -> list[Route]:
 
     def onward(place: str) -> Iterator[tuple[str | None, str]]:
         for way in file.ways:
-            if world.takes[way.id][1] is None:
-                continue
             if way.origin == place:
-                yield way.id, way.destination
+                ahead = way.destination
             elif way.both_ways and way.destination == place:
-                yield way.id, way.origin
+                ahead = way.origin
+            else:
+                continue
+            if world.takes[way.id][1] is not None or (last and ahead == there):
+                yield way.id, ahead
         for other in places:
             if other != place and joined(place, other):
                 yield None, other
 
     found: list[Route] = []
-
-    def extend(passed: tuple[str, ...], legs: Route) -> None:
-        for way, place in onward(passed[-1]):
-            if place in passed:
-                continue
-            longer = (*legs, (way, passed[-1], place))
-            if any(stands_in(passed[first], place, longer[first:]) for first in range(len(legs))):
-                continue
-            if place == there:
-                found.append(longer)
-            else:
-                extend((*passed, place), longer)
-
-    extend((here,), ())
+    # The PLACEs passed so far, the WAYs taken, and what is still to try from there. A list, and
+    # no call inside a call: a route through very many PLACEs needs no deep stack.
+    begun: list[tuple[tuple[str, ...], Route, Iterator[tuple[str | None, str]]]] = [
+        ((here,), (), onward(here))
+    ]
+    while begun:
+        passed, legs, ahead = begun[-1]
+        step = next(ahead, None)
+        if step is None:
+            begun.pop()
+            continue
+        way, place = step
+        if place in passed:
+            continue
+        longer = (*legs, (way, passed[-1], place))
+        if any(stands_in(passed[first], place, longer[first:]) for first in range(len(legs))):
+            continue
+        if place == there:
+            found.append(longer)
+        else:
+            begun.append(((*passed, place), longer, onward(place)))
     return sorted(found, key=lambda route: (len(route), _legs_in_file_order(file, route)))
 
 
@@ -1005,13 +1058,16 @@ class Routes:
 
     def __init__(self, file: File, world: World) -> None:
         self._file, self._world = file, world
-        self._found: dict[tuple[str, str], list[Route]] = {}
+        self._found: dict[tuple[str, str, bool], list[Route]] = {}
 
-    def between(self, here: str, there: str) -> list[Route]:
-        """Every route from one PLACE to another that is worth trying, shortest first."""
-        if (here, there) not in self._found:
-            self._found[here, there] = routes(self._file, self._world, here, there)
-        return self._found[here, there]
+    def between(self, here: str, there: str, last: bool = False) -> list[Route]:
+        """Every route from one PLACE to another that is worth trying, shortest first.
+
+        ``last`` says that the PERSON does nothing after the route.
+        """
+        if (here, there, last) not in self._found:
+            self._found[here, there, last] = routes(self._file, self._world, here, there, last)
+        return self._found[here, there, last]
 
 
 def _legs_in_file_order(file: File, route: Route) -> list[tuple[int, int, int]]:
@@ -1037,50 +1093,86 @@ def _schedules(
     are tried with the fewest WAYs first, then in the order of "Which ITINERARY is shown": PERSON
     by PERSON, the WAYs listed first. Then each way the timing can fall is tried.
     """
-    needed: list[tuple[int, int, list[Route]]] = []  # which PERSON, after which step, the routes
+    # Which PERSON, after which of their OPTIONs, the routes. Before their first OPTION is -1.
+    needed: list[tuple[int, int, list[Route]]] = []
     for number, order in enumerate(orders):
-        for position, (before, after) in enumerate(pairwise(order)):
-            here, there = file.options[before].destination, file.options[after].origin
+        person = file.persons[number].id
+        start, asked = file.starts_from(person), has_to_end_at(file, person)
+        end = asked[0].ends_at if asked else None  # where this PERSON's path has to end
+        stops = [(file.options[index].origin, file.options[index].destination) for index in order]
+        # After which OPTION, from where, to where, and whether the PERSON does nothing after it.
+        hops = [
+            (spot, here, there, False)
+            for spot, ((_, here), (there, _)) in enumerate(pairwise(stops))
+        ]
+        first = stops[0][0] if stops else end
+        if start is not None and first is not None:
+            hops.insert(0, (-1, start.place, first, not stops))
+        if stops and end is not None:
+            hops.append((len(stops) - 1, stops[-1][1], end, True))
+        for spot, here, there, last in hops:
             if here != there:
-                possible = known.between(here, there)
+                possible = known.between(here, there, last)
                 if not possible:
                     return
-                needed.append((number, position, possible))
+                needed.append((number, spot, possible))
 
-    def taken(chosen: tuple[Route, ...]) -> list[list[tuple[int, int, int]]]:
-        """For each PERSON in turn, every WAY they take, in the order they take them."""
-        each: list[list[tuple[int, int, int]]] = [[] for _ in orders]
-        for (number, _, _), route in zip(needed, chosen, strict=True):
-            each[number] += _legs_in_file_order(file, route)
-        return each
+    # The routes at each point in the order of the WAYs they take. No route is the beginning of
+    # another one between the same two PLACEs. So going through the points in turn puts the
+    # choices in the order of "Which ITINERARY is shown": PERSON by PERSON, WAY by WAY.
+    possible = [
+        sorted(routes, key=lambda route: _legs_in_file_order(file, route))
+        for _, _, routes in needed
+    ]
+    for chosen in _fewest_first(possible):
+        hops = {
+            (number, position): route
+            for (number, position, _), route in zip(needed, chosen, strict=True)
+        }
+        yield from _timings(file, world, who, orders, hops)
 
-    # The fewest and the most WAYs that the routes from each point on can take in all.
-    least = [0] * (len(needed) + 1)
-    greatest = [0] * (len(needed) + 1)
-    for rest in reversed(range(len(needed))):
-        lengths = [len(route) for route in needed[rest][2]]
-        least[rest] = least[rest + 1] + min(lengths)
-        greatest[rest] = greatest[rest + 1] + max(lengths)
 
-    def with_this_many(total: int, rest: int = 0) -> Iterator[tuple[Route, ...]]:
-        """Every choice of routes that takes this many WAYs in all."""
-        if rest == len(needed):
-            yield ()
-            return
-        for route in needed[rest][2]:
-            left = total - len(route)
-            if least[rest + 1] <= left <= greatest[rest + 1]:
-                for others in with_this_many(left, rest + 1):
-                    yield (route, *others)
+def _fewest_first[T: Sized](choices: Sequence[Sequence[T]]) -> Iterator[tuple[T, ...]]:
+    """One thing from each list, in every combination, the smallest combinations first.
 
-    fewest, most = least[0], greatest[0]
-    for total in range(fewest, most + 1):
-        for chosen in sorted(with_this_many(total), key=taken):
-            hops = {
-                (number, position): route
-                for (number, position, _), route in zip(needed, chosen, strict=True)
-            }
-            yield from _timings(file, world, who, orders, hops)
+    The size of a combination is the lengths of its things added up. Among combinations of one
+    size the lists' own order decides, and the first list counts most.
+
+    Each combination is made when it is asked for. So a search that stops at the first one that
+    works never makes the rest, however many there are. It keeps its own list of what is picked,
+    with no call inside a call, so very many lists need no deep stack.
+    """
+    if not all(choices):
+        return
+    # The smallest and the largest size that the lists from each point on can add.
+    least = [0] * (len(choices) + 1)
+    greatest = [0] * (len(choices) + 1)
+    for rest in reversed(range(len(choices))):
+        sizes = [len(thing) for thing in choices[rest]]
+        least[rest] = least[rest + 1] + min(sizes)
+        greatest[rest] = greatest[rest + 1] + max(sizes)
+    for total in range(least[0], greatest[0] + 1):
+        picked: list[int] = []  # which thing is taken from each list so far
+        nth, left = 0, total  # the next thing to try in the list after those; the size left
+        while True:
+            point = len(picked)
+            here: Sequence[T] = choices[point] if point < len(choices) else ()
+            while nth < len(here):
+                after = left - len(here[nth])
+                if least[point + 1] <= after <= greatest[point + 1]:
+                    break
+                nth += 1
+            if nth < len(here):
+                picked.append(nth)
+                nth, left = 0, left - len(here[nth])
+                continue
+            if point == len(choices):
+                yield tuple(choices[at][which] for at, which in enumerate(picked))
+            if not picked:
+                break
+            nth = picked.pop()
+            left += len(choices[len(picked)][nth])
+            nth += 1
 
 
 def _timings(
@@ -1101,8 +1193,9 @@ def _timings(
     lines: list[list[int]] = []  # what each PERSON does in order, the WAYs they take included
     for number, (person, order) in enumerate(zip(file.persons, orders, strict=True)):
         line: list[int] = []
-        for position, index in enumerate(order):
-            line.append(index)
+        for position in range(-1, len(order)):
+            if position >= 0:
+                line.append(order[position])
             for leg in hops.get((number, position), ()):
                 legs.append((person.id, leg))
                 line.append(listed + len(legs) - 1)
@@ -1113,7 +1206,10 @@ def _timings(
             terms = world.terms[file.options[node].id]
             return None if terms.longest is None else terms.shortest
         way = legs[node - listed][1][0]
-        return world.unlisted_takes if way is None else world.takes[way][0]
+        if way is None:
+            return world.unlisted_takes
+        shortest, longest = world.takes[way]
+        return None if longest is None else shortest
 
     def origin(node: int) -> str:
         return legs[node - listed][1][1] if node >= listed else file.options[node].origin

@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 from random import Random
+from typing import Any
 
 import pytest
 
@@ -29,15 +30,19 @@ from tests.stories import (
     at,
     complete,
     cutoff,
+    ends_at,
     lasts,
     lasts_between,
     lock,
     moves,
     seconds,
     starts_at,
+    starts_from,
     stays,
     takes,
     trip,
+    trip_ends,
+    trip_starts,
     way,
     way_between,
 )
@@ -63,8 +68,108 @@ FILES = sorted(
 
 @pytest.mark.parametrize("path", FILES, ids=lambda path: f"{path.parent.name}/{path.stem}")
 def test_the_compiler_gives_the_reference_checkers_report(path: Path) -> None:
+    """With the solver's own search for every part of it: no example is too big for the solver."""
     file = read(path)
-    assert compiler.check(file) == answers.check(file)
+    found = answers.check(file, compiler.shown, compiler.works, compiler.stuck)
+    assert found == answers.check(file)
+
+
+def test_a_trip_too_big_for_the_solver_gets_the_reference_checkers_answer() -> None:
+    """Sam goes through ten PLACES. Three WAYs join each to the next: 19,683 routes in all.
+
+    One WAY takes 999,999,999 hours. Where every FACT can be switched off, each route has its
+    own times in the model, and together they are more than the solver can count.
+    """
+    places = [f"p{number}" for number in range(10)]
+    ways = [way(f"w{n}-{k}", f"p{n}", f"p{n + 1}") for n in range(9) for k in range(3)]
+    facts = [starts_from("sam", "p0"), takes("w0-0", "PT999999999H")]
+    now = [trip_starts(9), trip_ends(9)]
+    file = trip(["sam"], places, [], facts, now, ways=ways, wants=[ends_at("p9", "sam")])
+    with pytest.raises(compiler.DoesNotFit):
+        compiler.stuck(Remaining(file))
+    found = compiler.check(file)
+    assert found == answers.check(file)
+    assert found.missing == ((Missing(Unknown("other ways", origin="p0", destination="p9"), 0),),)
+
+
+def test_times_too_far_apart_for_the_solver_get_the_reference_checkers_answer() -> None:
+    """One WAY takes over 100,000 years. Nobody takes it, but the solver has to leave room.
+
+    With 1,122 PLACES and as many visits that nobody has to make, a path could take longer than
+    a 64-bit number of seconds can say.
+    """
+    places = [f"p{number}" for number in range(1122)]
+    visits = [stays(f"visit-{number}", "p0") for number in range(1122)]
+    far = [takes("far", "PT999999999H999999999M999999999S")]
+    file = trip(["sam"], places, visits, far, [], ways=[way("far", "p0", "p1")])
+    with pytest.raises(compiler.DoesNotFit):
+        compiler.works(file, worst_case(file))
+    found = compiler.check(file)
+    assert found == answers.check(file)
+    assert (found.answer, found.itinerary) == (Answer.FEASIBLE, ())
+
+
+def test_a_file_with_no_start_and_no_end_leaves_no_room_for_travel_at_the_ends() -> None:
+    """Sam is LOCKed for 21 visits at one PLACE, a minute apart, and one WAY elsewhere is very long.
+
+    Two rides far away can start at any time, and nobody has to take them. The solver
+    leaves room for travel after each OPTION. Room for travel at two more ends would be too
+    much for its numbers, and no PERSON here has a stated start or end. With the solver's own
+    search for every part, the answer comes at once. The reference checker's search would try
+    every order of the 21 visits.
+    """
+    places = [f"p{number}" for number in range(30)]
+    locked = [stays(f"visit-{number}", "p0") for number in range(21)]
+    far = [moves("far-0", "p27", "p26"), moves("far-1", "p26", "p27")]
+    ways = [way_between(f"w{number}", f"p{number}", f"p{number + 1}") for number in range(27)]
+    facts = [takes(each["id"], "PT1M") for each in ways]
+    facts.append(takes("long", "PT770000000H"))
+    for minute, each in enumerate(locked):
+        facts.append(starts_at(each["id"], 9, minute))
+    for each in far:
+        facts.append(any_time(each["id"]))
+    for each in (*locked, *far):
+        facts += [lasts(each["id"], "PT0S"), cutoff(each["id"], "PT0S")]
+    locks = [lock(each["id"], "sam") for each in locked]
+    long = way("long", "p28", "p29")
+    file = trip(["sam"], places, [*locked, *far], facts, locks, ways=[*ways, long])
+    found = answers.check(file, compiler.shown, compiler.works, compiler.stuck)
+    assert found.answer is Answer.FEASIBLE
+    assert len(found.itinerary) == 21
+
+
+def test_many_visits_nobody_has_to_make_do_not_stop_the_reference_checkers_search() -> None:
+    """The TRIP is too big for the solver, and 63 visits can each happen or not.
+
+    The reference checker's search tries the plans with the fewest PERSONs taking part first.
+    The plan with nothing in it works, so it never makes the others.
+    """
+    places = [f"p{number}" for number in range(200)]
+    visits = [stays(f"visit-{number}", "p0") for number in range(63)]
+    facts = [takes("far", "PT999999999H"), *(any_time(each["id"]) for each in visits)]
+    file = trip(["sam"], places, visits, facts, [], ways=[way("far", "p1", "p2")])
+    with pytest.raises(compiler.DoesNotFit):
+        compiler.works(file, worst_case(file))
+    found = compiler.check(file)
+    assert found == answers.check(file)
+    assert (found.answer, found.itinerary, found.robust) == (Answer.FEASIBLE, (), True)
+
+
+def test_a_fault_in_the_model_is_not_taken_for_a_trip_that_is_too_big() -> None:
+    """Only numbers that do not fit send a TRIP to the reference checker's search.
+
+    The OPTION is named after the solver's own words for numbers that do not fit. Its name is
+    in what the solver says about the fault, and that must not count.
+    """
+    visit = stays("int64-overflow", "a")
+    file = trip(["sam"], ["a"], [visit], [any_time("int64-overflow")], [])
+    search = compiler._Search(file, worst_case(file))  # pyright: ignore[reportPrivateUsage]
+    # The start of the visit loses every value it could take: a fault only the solver sees.
+    model: Any = search.model.proto  # pyright: ignore[reportUnknownMemberType]
+    start = next(each for each in model.variables if "start" in each.name)
+    start.domain.clear()
+    with pytest.raises(AssertionError, match="the solver refused the model: var #0 has no domain"):
+        search.any()
 
 
 def test_the_compiler_and_the_reference_checker_agree_on_random_trips() -> None:

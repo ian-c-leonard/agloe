@@ -70,7 +70,7 @@ This document states what a TRIP means and what the COMPILER and the OPTIMIZER a
 **C2. Ranked, not scored.** PERSONs rank their own WANTs instead of inventing numbers, and a fixed rule turns each ranking into DEGREEs OF WANT. Adding a WANT shifts the others, and the report shows the shift: adding a second-ranked WANT drops the top weight from 0.61 to 0.52.
 *Serves:* optimizer, multiplayer, intuitive. *Source:* rank-order centroid weights (Barron, 1992; earlier, Solymosi and Dombi, 1986). A 2023 study found the rule performs poorly on some real-world data.
 
-**C3. Fit belongs to the pair.** How well an OPTION delivers a WANT is the DEGREE OF SATISFACTION on the SATISFIES link between them. No link means unknown, never zero, unless a FACT says that the FILE lists every OPTION that SATISFIES the WANT.
+**C3. Fit belongs to the pair.** How well an OPTION delivers a WANT is the DEGREE OF SATISFACTION on the SATISFIES link between them. No link means unknown, never zero, unless a FACT says that the FILE lists every OPTION that SATISFIES the WANT. A WANT about the whole ITINERARY has no such links: no OPTION delivers it.
 *Serves:* optimizer, self-explaining. *Source:* contribution links between tasks and goals (Mylopoulos, Chung and Nixon, 1992); numeric value scoring (Edwards, 1977); the open-world assumption (Reiter, 1978).
 
 **C4. Big WANTs are DECOMPOSED.** "Dinner each night" becomes one piece per night, and each piece is SATISFIED at most once.
@@ -93,7 +93,7 @@ This document states what a TRIP means and what the COMPILER and the OPTIMIZER a
 - rest, with no day overfull, as a preference;
 - staying together: a weak dislike of splitting up from the group, ranked lowest.
 
-Starter WANTs are never hidden rules; they sit in the FILE like any other WANT. They use the TRIP's SCOPE to know which nights and days to cover and where home is.
+Starter WANTs are never hidden rules; they sit in the FILE like any other WANT. They use the TRIP's SCOPE to know which nights and days to cover, and the WANT to get home names the PLACE where the PERSON ends the TRIP.
 *Serves:* compiler, multiplayer, intuitive. *Source:* Hägerstrand (1970, pages 19 to 20) sketched a list of basic needs, each with its own rhythm (to be verified).
 
 ## D. The world

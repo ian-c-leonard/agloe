@@ -1,0 +1,29 @@
+{
+  "answer": "UNDETERMINED",
+  "missing": [
+    [
+      {
+        "what": "other ways",
+        "from": "hotel",
+        "to": "denver",
+        "at_most": "PT4H15M"
+      }
+    ],
+    [
+      {
+        "what": "other ways",
+        "from": "art-institute",
+        "to": "denver",
+        "at_most": "PT4H30M"
+      }
+    ],
+    [
+      {
+        "what": "other ways",
+        "from": "ohare",
+        "to": "denver",
+        "at_most": "PT3H30M"
+      }
+    ]
+  ]
+}

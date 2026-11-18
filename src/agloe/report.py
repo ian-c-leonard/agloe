@@ -28,6 +28,7 @@ from agloe.file import (
     Place,
     Satisfies,
     Start,
+    StartsFrom,
     TripEnd,
     TripStart,
     Want,
@@ -402,7 +403,10 @@ def _record(file: File, clock: _Clock, record: str) -> str:
             for kind, persons in (("must", found.musts), ("must-not", found.must_nots))
             if persons
         ]
-        return f"{_want(file, found.id)} is {' and '.join(said)}"
+        asked = f"{_want(file, found.id)} is {' and '.join(said)}"
+        if found.ends_at is None:
+            return asked
+        return f"{asked}: to end the TRIP at {_names(file.places)[found.ends_at]}"
     if isinstance(found, Complete):
         places = _names(file.places)
         first = clock.day(found.earliest)
@@ -428,6 +432,9 @@ def _record(file: File, clock: _Clock, record: str) -> str:
         ]
         said = _listed(which) if which else "there is none"
         return f"the FILE states every OPTION that SATISFIES {_want(file, found.want)}: {said}"
+    if isinstance(found, StartsFrom):
+        place = _names(file.places)[found.place]
+        return f"{_people(file, (found.person,))} starts from {place}"
     name = _name(file, found.option)
     if isinstance(found, Lock):
         verb = "takes" if len(found.persons) == 1 else "take"

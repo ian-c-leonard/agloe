@@ -83,6 +83,17 @@ def must_not(id: str, *persons: str) -> Document:
     return must(id, never=persons)
 
 
+def starts_from(person: str, place: str) -> Document:
+    """A FACT about where a PERSON starts from."""
+    return {"id": f"{person}-start", "person": person, "starts_from": place}
+
+
+def ends_at(place: str, *persons: str, id: str = "ending") -> Document:
+    """The WANT to end the TRIP at a PLACE, as a must for these PERSONs."""
+    holders = [{"person": person, "degree": 10} for person in persons]
+    return {"id": id, "name": id, "itinerary": {"ends_at": place}, "holders": holders}
+
+
 def trip_starts(hour: int, minute: int = 0) -> Document:
     """A DECISION about when the TRIP starts."""
     return {"id": "trip-start", "trip_starts_at": at(hour, minute)}

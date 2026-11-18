@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 from itertools import combinations
 
-from agloe.file import Complete, CompleteFor, Fact, File, Lock, Start
+from agloe.file import Complete, CompleteFor, Fact, File, Lock, Start, StartsFrom
 from agloe.reference import (
     Broken,
     Itinerary,
@@ -23,6 +23,7 @@ from agloe.reference import (
     best_cases,
     broken_as_listed,
     first_shown,
+    has_to_end_at,
     in_world,
     longest_case,
     no_better_than,
@@ -115,10 +116,15 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact) -> bool:
     """Whether a plan relies on this FACT.
 
     It relies on every FACT about an OPTION or a WAY it has in it. It relies on no COMPLETE set
-    of travel: it takes no unlisted WAY.
+    of travel: it takes no unlisted WAY. It relies on where a PERSON starts from where the
+    PERSON is in it, or has to end the TRIP at a PLACE: their path begins there, or they stay
+    there.
     """
     if isinstance(fact, CompleteFor):
         return _settles(file, itinerary, fact)
+    if isinstance(fact, StartsFrom):
+        in_it = any(fact.person in step.persons for step in itinerary)
+        return in_it or bool(has_to_end_at(file, fact.person))
     if isinstance(fact, Complete):
         return False
     return fact.option in {step.option or step.way for step in itinerary}

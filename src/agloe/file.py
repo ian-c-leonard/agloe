@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from functools import cache
+from functools import cache, cached_property
 from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
@@ -84,12 +84,15 @@ class Way:
 
 @dataclass(frozen=True)
 class Want:
-    """Something PERSONs want, or want to avoid, from the TRIP that an OPTION can deliver."""
+    """Something PERSONs want, or want to avoid, from the TRIP."""
 
     id: str
     name: str
     musts: tuple[str, ...]  # the PERSONs for whom it is a must: a DEGREE OF WANT of +10
     must_nots: tuple[str, ...] = ()  # those for whom it is a must-not: a DEGREE OF WANT of -10
+    # The PLACE where each holder ends the TRIP, for a WANT that asks that. Such a WANT is about
+    # the whole ITINERARY, and no OPTION delivers it.
+    ends_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -197,7 +200,16 @@ class TripEnd:
     at: int
 
 
-type Fact = Start | Duration | Cutoff | Complete | Satisfies | CompleteFor
+@dataclass(frozen=True)
+class StartsFrom:
+    """A FACT: where a PERSON starts from. The PERSON's path begins at this PLACE."""
+
+    id: str
+    person: str
+    place: str
+
+
+type Fact = Start | Duration | Cutoff | Complete | Satisfies | CompleteFor | StartsFrom
 type Decision = Lock | TripStart | TripEnd
 
 
@@ -249,6 +261,20 @@ class File:
         """The DECISION about when the TRIP ends, if the FILE holds one."""
         return next((each for each in self.decisions if isinstance(each, TripEnd)), None)
 
+    def starts_from(self, person: str) -> StartsFrom | None:
+        """The FACT about where this PERSON starts from, if the FILE states one."""
+        return self._starts.get(person)
+
+    @cached_property
+    def _starts(self) -> dict[str, StartsFrom]:
+        """The FACT about where each PERSON starts from, looked up once."""
+        return {fact.person: fact for fact in self.facts if isinstance(fact, StartsFrom)}
+
+    @cached_property
+    def _about_the_end(self) -> frozenset[str]:
+        """Each WANT to end the TRIP at a PLACE, looked up once."""
+        return frozenset(want.id for want in self.wants if want.ends_at is not None)
+
     def complete_for(self, want: str) -> CompleteFor | None:
         """The FACT that the FILE states every OPTION that SATISFIES this WANT, if there is one."""
         return next((f for f in self.facts if isinstance(f, CompleteFor) and f.want == want), None)
@@ -257,11 +283,14 @@ class File:
         """Whether this OPTION SATISFIES this WANT, as far as the FILE says. None: nobody knows.
 
         A FACT about the two settles it. Without one, a FACT that the WANT's set is COMPLETE
-        settles it too: the OPTION does not.
+        settles it too: the OPTION does not. No OPTION delivers a WANT to end the TRIP at a
+        PLACE, so that is settled as well.
         """
         stated = self.satisfies(option, want)
         if stated is not None:
             return stated.degree > 0
+        if want in self._about_the_end:
+            return False
         return None if self.complete_for(want) is None else False
 
     def without(self, record: str) -> File:
@@ -495,15 +524,17 @@ def load(document: object) -> File:
 
     zones: list[str] = []
 
-    def when(where: str, text: str) -> int:
+    def when(where: str, text: str) -> int | None:
+        """The moment a time states. None, with the problem noted, where it is no real time."""
         try:
             moment = instant(text)
         except ValueError:
             problems.append(f"{where}: {text} is not a real date and time")
-            return 0
+            return None
         disagreement = _zone_problem(text)
         if disagreement is not None:
             problems.append(f"{where}: {disagreement}")
+            return None
         zones.append(text[text.index("[") + 1 : -1])
         return moment
 
@@ -553,8 +584,12 @@ def load(document: object) -> File:
             problems.append(f"{where}: {person} is a holder more than once")
         musts = tuple(each["person"] for each in want["holders"] if each["degree"] == 10)
         must_nots = tuple(each["person"] for each in want["holders"] if each["degree"] == -10)
-        wants.append(Want(want["id"], want["name"], musts, must_nots))
+        ends_at = want["itinerary"]["ends_at"] if "itinerary" in want else None
+        if ends_at is not None:
+            known(where, ends_at, "PLACE", place_ids)
+        wants.append(Want(want["id"], want["name"], musts, must_nots, ends_at))
     want_ids = {want.id for want in wants}
+    not_delivered = {want.id for want in wants if want.ends_at is not None}
 
     facts: list[Fact] = []
     stated: set[tuple[str, type]] = set()
@@ -567,6 +602,8 @@ def load(document: object) -> File:
             whole = fact["complete"]
             if "satisfies" in whole:
                 known(where, whole["satisfies"], "WANT", want_ids)
+                if whole["satisfies"] in not_delivered:
+                    problems.append(f"{where}: no OPTION delivers {whole['satisfies']}")
                 if (whole["satisfies"], CompleteFor) in stated:
                     about = whole["satisfies"]
                     problems.append(f"{where}: another FACT already states this about {about}")
@@ -581,12 +618,22 @@ def load(document: object) -> File:
                 problems.append(f"{where}: a COMPLETE FACT needs two different PLACEs")
             earliest = when(where, whole["leaving"]["earliest"])
             latest = when(where, whole["leaving"]["latest"])
+            if earliest is None or latest is None:
+                continue
             if earliest > latest:
                 problems.append(f"{where}: the span ends before it starts")
             if (origin, destination, earliest, latest) in complete:
                 problems.append(f"{where}: another FACT already states this")
             complete.add((origin, destination, earliest, latest))
             facts.append(Complete(fact["id"], origin, destination, earliest, latest))
+            continue
+        if "person" in fact:
+            known(where, fact["person"], "PERSON", person_ids)
+            known(where, fact["starts_from"], "PLACE", place_ids)
+            if (fact["person"], StartsFrom) in stated:
+                problems.append(f"{where}: another FACT already states this about {fact['person']}")
+            stated.add((fact["person"], StartsFrom))
+            facts.append(StartsFrom(fact["id"], fact["person"], fact["starts_from"]))
             continue
         made: Fact
         if "way" in fact:
@@ -609,6 +656,8 @@ def load(document: object) -> File:
         if "satisfies" in fact:
             about = fact["satisfies"]
             known(where, about["want"], "WANT", want_ids)
+            if about["want"] in not_delivered:
+                problems.append(f"{where}: no OPTION delivers {about['want']}")
             if (fact["option"], about["want"]) in satisfied:
                 both = f"{fact['option']} and {about['want']}"
                 problems.append(f"{where}: another FACT already states this about {both}")
@@ -645,19 +694,19 @@ def load(document: object) -> File:
                 known(where, person, "PERSON", person_ids)
             decisions.append(Lock(decision["id"], decision["lock"], tuple(decision["persons"])))
             continue
-        bound = (
-            TripStart(decision["id"], when(where, decision["trip_starts_at"]))
-            if "trip_starts_at" in decision
-            else TripEnd(decision["id"], when(where, decision["trip_ends_at"]))
-        )
-        if ("the TRIP", type(bound)) in stated:
+        if "trip_starts_at" in decision:
+            kind, at = TripStart, when(where, decision["trip_starts_at"])
+        else:
+            kind, at = TripEnd, when(where, decision["trip_ends_at"])
+        if ("the TRIP", kind) in stated:
             problems.append(f"{where}: another DECISION already states this about the TRIP")
-        stated.add(("the TRIP", type(bound)))
-        decisions.append(bound)
+        stated.add(("the TRIP", kind))
+        if at is not None:
+            decisions.append(kind(decision["id"], at))
 
     starts = next((each.at for each in decisions if isinstance(each, TripStart)), None)
     ends = next((each.at for each in decisions if isinstance(each, TripEnd)), None)
-    if not problems and starts is not None and ends is not None and ends < starts:
+    if starts is not None and ends is not None and ends < starts:
         problems.append("/decisions: the TRIP ends before it starts")
     if problems:
         raise FileError(problems)

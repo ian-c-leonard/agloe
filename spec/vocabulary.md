@@ -20,9 +20,9 @@ The trip being planned, lived and recorded: the PERSONs it concerns, their WANTs
 
 ### SCOPE
 
-The TRIP's frame: its dates, the PLACE each traveling PERSON starts from and returns to, what the TRIP is for, and anything explicitly out of bounds. WANTs use the SCOPE to know which days and nights they cover. The dates are DECISIONs: one can say the time at which the TRIP starts, and one the time at which it ends. A TRIP can have either, both or neither. Nothing in an ITINERARY starts before the first or ends after the second.
+The TRIP's frame: its dates, the PLACE each traveling PERSON starts from and the PLACE where they end the TRIP, what the TRIP is for, and anything explicitly out of bounds. WANTs use the SCOPE to know which days and nights they cover. The dates are DECISIONs: one can say the time at which the TRIP starts, and one the time at which it ends. A TRIP can have either, both or neither. Nothing in an ITINERARY starts before the first or ends after the second. The PLACE a PERSON starts from is a FACT. The PLACE where they end the TRIP is named by a WANT to end it there.
 
-*Uses:* TRIP, PLACE, PERSON, → WANT, → DECISION, → ITINERARY.
+*Uses:* TRIP, PLACE, PERSON, → WANT, → DECISION, → FACT, → ITINERARY.
 
 ### FILE
 
@@ -163,7 +163,7 @@ Something PERSONs want, or want to avoid, from the TRIP: a bed each night, seein
 A WANT is about one of two things:
 
 - something an OPTION can deliver, such as dinner, a bed or a visit; or
-- a property of the whole ITINERARY, such as "at most two hotel changes", written with a fixed set of operators (always, never, at most n times, at most a total amount per day or per TRIP, after, within).
+- a property of the whole ITINERARY, such as "at most two hotel changes", written with a fixed set of operators (always, never, at most n times, at most a total amount per day or per TRIP, after, within). Ending the TRIP at a named PLACE is such a property.
 
 Each PERSON's ranking of their WANTs is recorded as a full snapshot; the latest applies. A negative WANT never adds an OPTION to a TRIP. Every traveling PERSON starts with a published set of starter WANTs for basic needs (a bed each night, getting home, meals, rest, staying together); they are stored like any other WANT and can be re-ranked or dropped.
 
@@ -193,7 +193,7 @@ The relation between a WANT and what delivers it. An OPTION SATISFIES a WANT whe
 
 Whether delivery is good or bad comes from the DEGREE OF WANT, not from SATISFIES. An overnight bus SATISFIES a WANT about overnight travel; for a holder at −7, that counts against the ITINERARY, and it always counts when the holder takes the bus for any reason.
 
-No stated relation means unknown, never "does not satisfy", unless a FACT says that the set of OPTIONs that SATISFY the WANT is COMPLETE. A relation may be stated directly, or derived from an OPTION's FACTs: a WANT about departures before 06:00 applies to every OPTION that departs earlier.
+For a WANT that an OPTION can deliver, no stated relation means unknown, never "does not satisfy", unless a FACT says that the set of OPTIONs that SATISFY the WANT is COMPLETE. No OPTION SATISFIES a WANT about the whole ITINERARY. A relation may be stated directly, or derived from an OPTION's FACTs: a WANT about departures before 06:00 applies to every OPTION that departs earlier.
 
 *Uses:* WANT, OPTION, DEGREE OF WANT, FACT, → ITINERARY, → DEGREE OF SATISFACTION.
 
