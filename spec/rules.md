@@ -12,7 +12,7 @@ An OPTION happens at one PLACE, or moves from one PLACE to another. It happens a
 
 A WAY goes from one PLACE to another, or between two PLACEs in both directions. A PERSON can take a WAY at any time and as often as they need, alone or with others.
 
-A WANT is something PERSONs want, or want to avoid, from the TRIP. Most WANTs are about something an OPTION can deliver: deep-dish pizza, a view from high up. A WANT can also ask that its holders end the TRIP at a PLACE it names. That WANT is about the whole ITINERARY, and no OPTION delivers it. A WANT names its holders. Each holder is a PERSON with a DEGREE OF WANT. +10 makes the WANT a must for that PERSON, and −10 makes it a must-not. A WANT names each PERSON at most once. A FILE states a WANT to end the TRIP at a PLACE only as a must.
+A WANT is something PERSONs want, or want to avoid, from the TRIP. Most WANTs are about something an OPTION can deliver: deep-dish pizza, a view from high up. A WANT can also ask that its holders end the TRIP at a PLACE it names. That WANT is about the whole ITINERARY, and no OPTION delivers it. A WANT names its holders. Each holder is a PERSON with a DEGREE OF WANT. +10 makes the WANT a must for that PERSON, and −10 makes it a must-not. A WANT names each PERSON at most once. A FILE states a WANT to end the TRIP at a PLACE only as a must. A WANT that repeats, such as dinner each night, is written as one WANT for each night, and a FACT says which OPTION SATISFIES which of them.
 
 A FACT states one thing:
 
