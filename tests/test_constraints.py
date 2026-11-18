@@ -402,7 +402,8 @@ def test_a_way_must_be_over_before_the_next_thing_starts() -> None:
     museum = step(file, "museum", seconds(10), seconds(12), "alex")
     late = walk("hotel", "gallery", seconds(9, 50))
     assert broken(file, worst_case(file), (breakfast, late, museum)) == [
-        Broken(Constraint.PLACE, "museum", ("alex",), late=300)
+        Broken(Constraint.PLACE, "museum", ("alex",), late=300),
+        Broken(Constraint.ARRIVAL, "museum", ("alex",), late=300),
     ]
 
 

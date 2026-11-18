@@ -1,0 +1,7 @@
+INFEASIBLE: this trip cannot work.
+
+These FACTs and DECISIONs rule out every plan by themselves. Take any one away and they no longer do. A FACT that is taken away leaves what it said unknown. Times are in America/Chicago.
+  flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
+  flight-length: Flight home takes 2 h 30 min
+  trip-end: the TRIP ends at 7:00 pm on Saturday 15 May 2027
+  lock-flight: Alex and Sam take part in Flight home

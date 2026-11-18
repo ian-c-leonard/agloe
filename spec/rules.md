@@ -34,7 +34,10 @@ A time states its date and time to the second, its offset from UTC and the name 
 
 No text in a FILE holds a control character, a line break or half of a character pair. A name holds at least one character that is not a space.
 
-A LOCK names an OPTION and the PERSONs who take part in it.
+A DECISION is a LOCK, or it says when the TRIP starts, or when the TRIP ends.
+
+- A LOCK names an OPTION and the PERSONs who take part in it.
+- A FILE holds at most one DECISION about when the TRIP starts and one about when it ends, and the TRIP does not end before it starts.
 
 ## What is unknown
 
@@ -63,6 +66,7 @@ An ITINERARY works in a possible world when it meets every CONSTRAINT below.
 6. **A COMPLETE set is the whole set.** A PERSON takes an unlisted WAY only in a possible world that has it. Where a FACT says the ways from one PLACE to another are COMPLETE, no PERSON takes an unlisted WAY that goes straight from the first PLACE to the second and starts within the stated span.
 7. **Every must is met.** A PERSON for whom a WANT is a must takes part in an OPTION that SATISFIES it. Only the PERSON's own taking part counts: nobody else can meet the must for them. A possible world can also have another OPTION for the WANT that the PERSON can take part in. Then the must is met as well, and the ITINERARY does not show that OPTION.
 8. **Every must-not is kept.** A PERSON for whom a WANT is a must-not takes part in no OPTION that SATISFIES it, and takes no unlisted WAY that does. Only the PERSON's own taking part counts: a must-not stops nobody else.
+9. **Everything happens within the TRIP.** No OPTION and no WAY starts before the TRIP starts, and none ends after the TRIP ends. Where no DECISION says when the TRIP starts, or when it ends, there is no such limit.
 
 ## The three answers
 
@@ -75,7 +79,7 @@ A CONTINGENT duration has a stated range, so it is not unknown, and a possible w
 Two cases settle the answer. For the same OPTIONs, PERSONs, WAYs and start times, every CONSTRAINT is at least as easy to meet when an OPTION can start more freely or needs less margin, when an OPTION or a WAY takes less time, when more WAYs exist, and when more PERSONs can take part in another OPTION for a WANT. Whether an OPTION SATISFIES a WANT is different: it helps a must and hurts a must-not. So each case takes it the way that suits the case.
 
 - **The best case.** Every unknown start is free, and every unknown duration and access cutoff is zero. An unlisted WAY joins any two PLACEs, takes no time and SATISFIES no WANT, except where a COMPLETE set of travel says there is none. An OPTION with no FACT about a WANT does not SATISFY it, so it breaks no must-not. For every must on a WANT whose set is not COMPLETE, there is another OPTION that the PERSON can take part in whatever else they do. It SATISFIES nothing else, it takes no time, and it comes before everything else the PERSON does, at the PLACE where they start. A PERSON who does nothing else can take part in it anywhere. So every such must is met here, with no help from a listed OPTION. A choice that works in any possible world works here too, so the TRIP is INFEASIBLE when nothing works here.
-- **The worst case.** An OPTION with an unknown start cannot be used. An unknown duration has no limit, so no PERSON does anything after that OPTION or WAY. An unknown access cutoff has no limit, so only a PERSON who was at the PLACE all along is in time. No unlisted WAY exists. Where a WANT's set is not COMPLETE, nobody knows whether an OPTION with no FACT about the WANT SATISFIES it. So it meets no must, and no PERSON for whom the WANT is a must-not takes part in it. That is no single possible world, but a choice that relies on such an OPTION either way fails in one. There is no other OPTION for any WANT. A choice works here exactly when it works in every possible world, so the TRIP is FEASIBLE when something works here.
+- **The worst case.** An OPTION with an unknown start cannot be used. An unknown duration has no limit, so no PERSON does anything after that OPTION or WAY, and it is not over before the TRIP ends where the TRIP has an end. An unknown access cutoff has no limit, so only a PERSON who was at the PLACE all along is in time. No unlisted WAY exists. Where a WANT's set is not COMPLETE, nobody knows whether an OPTION with no FACT about the WANT SATISFIES it. So it meets no must, and no PERSON for whom the WANT is a must-not takes part in it. That is no single possible world, but a choice that relies on such an OPTION either way fails in one. There is no other OPTION for any WANT. A choice works here exactly when it works in every possible world, so the TRIP is FEASIBLE when something works here.
 
 So a must can make a TRIP INFEASIBLE only where a FACT says that the WANT's set is COMPLETE. Otherwise another OPTION might be found, and the must makes the TRIP UNDETERMINED when no OPTION that a FACT says SATISFIES the WANT fits. A must-not can make a TRIP INFEASIBLE: a LOCK names a PERSON in an OPTION that a FACT says SATISFIES what they must not have.
 
@@ -105,13 +109,15 @@ The start times follow a fixed rule too. It treats each time a PERSON takes a WA
 1. An OPTION that comes after one already timed starts as early as it can.
 2. Then an OPTION that comes before one already timed starts as late as it can.
 3. Steps 1 and 2 repeat until they time nothing more.
-4. The OPTIONs still without a time are tied to no fixed start. They are timed from the first second of 1970 in UTC, each as early as it can.
+4. The OPTIONs still without a time are tied to no fixed start. They are timed from the time the TRIP starts, each as early as it can. Where no DECISION says when the TRIP starts, they are timed from the first second of 1970 in UTC, or from earlier where the TRIP ends too soon for that.
+
+The times of the TRIP are limits, and a FILE can hold either, both or neither. They are no fixed starts: steps 1 to 3 time nothing from them. "As early as it can" and "as late as it can" keep to them, for the OPTION itself and for whatever comes before or after it: a start that leaves no room for the rest inside the TRIP is not one the OPTION can take. The opening in which an unlisted WAY leaves, before or after the span of a COMPLETE set of travel, is a limit of the same kind.
 
 A ROBUST ITINERARY shows each CONTINGENT duration at its longest value, and any other ITINERARY shows it at its shortest. An OPTION with an unknown duration shows no end.
 
 ## Evidence
 
-- **FEASIBLE:** the ITINERARY, and the FACTs, WANTs and DECISIONs it relies on. These are every FACT about an OPTION or a WAY in the ITINERARY, every WANT, and every LOCK. A FACT that a WANT's set is COMPLETE is one of them where a PERSON for whom the WANT is a must-not takes part in an OPTION with no FACT about the WANT: only the COMPLETE set says that such an OPTION does not SATISFY it.
+- **FEASIBLE:** the ITINERARY, and the FACTs, WANTs and DECISIONs it relies on. These are every FACT about an OPTION or a WAY in the ITINERARY, every WANT, and every LOCK. Where the ITINERARY has anything in it, they include the DECISIONs about when the TRIP starts and ends. A FACT that a WANT's set is COMPLETE is one of them where a PERSON for whom the WANT is a must-not takes part in an OPTION with no FACT about the WANT: only the COMPLETE set says that such an OPTION does not SATISFY it.
 - **INFEASIBLE:** a set of FACTs, WANTs and DECISIONs that make the TRIP INFEASIBLE by themselves, and from which none can be removed. Removing a FACT makes what it stated unknown. That is more than leaving the FACT out: where a WANT's set is COMPLETE, an OPTION whose FACT about the WANT is removed might SATISFY the WANT or not. So the set is the smallest by this test, and a FILE with only these records can be one that fewer records already rule out. The set is one conflict: a TRIP can have another, so taking a record away need not make the TRIP work. Removing a WANT removes its musts and must-nots. The COMPILER goes through the FACTs, then the WANTs, then the DECISIONs, each in the FILE's order, and removes each record that the TRIP stays INFEASIBLE without.
 - **UNDETERMINED:** the unknown FACTs that would make the TRIP FEASIBLE. A set of unknown FACTs is enough when the TRIP is FEASIBLE with those FACTs turned out well and every other unknown FACT as in the worst case. A start, a length of time, other WAYs and another OPTION turn out well as in the best case. Whether an OPTION SATISFIES a WANT can help either way, so it gives two unknown FACTs: that it does, and that it does not. A set states which of the two, and that is how it turns out. A set never holds both. The report lists the sets that are enough and have the fewest FACTs. This is a choice about what a report says first: what to find out about the OPTIONs and WAYs that the FILE already lists. "Another OPTION is found for this WANT and this PERSON" is a different kind of condition. It asks for something new, and it stands in for a listed OPTION and every FACT about it. So the report first keeps the sets with the fewest of these conditions, and lists those among them with the fewest FACTs. Other WAYs count as one FACT: they stand in for one listed WAY and its duration, and the report says how long they may take. When a set holds exactly one unknown FACT, and that FACT is a length of time, the report gives the most it can be: "works if the cab takes 45 minutes or less". When any length of time would do, the report gives no limit, and the FACT only has to be stated.
 
@@ -170,6 +176,16 @@ Friday evening has one more plan. Alex has a ticket for a blues show at 9:00 pm,
 | [cannot work](../examples/a-must/cannot-work.json) | The deep-dish place has no table until 7:45 pm, so Alex would miss the show. A FACT says that the FILE lists every OPTION that SATISFIES the WANT. | INFEASIBLE. Six records conflict: when dinner at the deep-dish place starts, how long it takes, when the show starts, the COMPLETE set, the WANT and the LOCK. |
 | [depends on the menu](../examples/a-must/depends-on-the-menu.json) | The deep-dish place has no table until 7:45 pm, so Alex would miss the show. Nobody has recorded whether the tavern serves deep-dish pizza. | UNDETERMINED. It works if dinner at the tavern SATISFIES deep-dish pizza. |
 | [depends on another place](../examples/a-must/depends-on-another-place.json) | The deep-dish place has no table until 7:45 pm, and a FACT says that dinner at the tavern does not SATISFY the WANT. | UNDETERMINED. It works if another OPTION that SATISFIES deep-dish pizza is found for Alex. |
+
+The trip home has a frame. The TRIP starts at noon on Saturday and ends at 7:30 pm, when the flight lands. The story is the first one, with those two DECISIONs.
+
+| FILE | What it says | Answer |
+|---|---|---|
+| [works](../examples/the-times-of-the-trip/works.json) | The flight takes two and a half hours and lands at 7:30 pm. | FEASIBLE. The last second of the TRIP is inside it. |
+| [ends too early](../examples/the-times-of-the-trip/ends-too-early.json) | The TRIP ends at 7:00 pm. | INFEASIBLE. Four records conflict: when the flight starts, how long it takes, when the TRIP ends, and the LOCK. |
+| [starts too late](../examples/the-times-of-the-trip/starts-too-late.json) | The TRIP starts at 2:30 pm, after the museum visit has begun. | INFEASIBLE. Three records conflict: when the visit starts, when the TRIP starts, and the LOCK. |
+| [depends on the flight](../examples/the-times-of-the-trip/depends-on-the-flight.json) | Nobody has recorded how long the flight takes. | UNDETERMINED. It works if the flight takes 2 hours 30 minutes or less. |
+| [works, but risky](../examples/the-times-of-the-trip/works-but-risky.json) | The flight can take up to three hours. | FEASIBLE, with a WARNING that no ITINERARY is ROBUST. At three hours the flight would end 30 minutes after the TRIP ends. |
 
 On Saturday morning a view from high up is a must for Alex and a must-not for Jo, who is afraid of heights. A FACT says that the Skydeck visit at 10:00 am SATISFIES it. All three are LOCKed for lunch at 12:15 pm.
 

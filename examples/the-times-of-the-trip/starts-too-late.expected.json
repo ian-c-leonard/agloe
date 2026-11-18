@@ -1,0 +1,8 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "visit-time",
+    "trip-start",
+    "lock-visit"
+  ]
+}

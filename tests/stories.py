@@ -83,6 +83,16 @@ def must_not(id: str, *persons: str) -> Document:
     return must(id, never=persons)
 
 
+def trip_starts(hour: int, minute: int = 0) -> Document:
+    """A DECISION about when the TRIP starts."""
+    return {"id": "trip-start", "trip_starts_at": at(hour, minute)}
+
+
+def trip_ends(hour: int, minute: int = 0) -> Document:
+    """A DECISION about when the TRIP ends."""
+    return {"id": "trip-end", "trip_ends_at": at(hour, minute)}
+
+
 def every(want: str) -> Document:
     """A FACT that the FILE states every OPTION that SATISFIES this WANT."""
     return {"id": f"every-{want}", "complete": {"satisfies": want}}

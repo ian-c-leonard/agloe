@@ -28,6 +28,8 @@ from agloe.file import (
     Place,
     Satisfies,
     Start,
+    TripEnd,
+    TripStart,
     Want,
     Way,
     length_written,
@@ -165,13 +167,13 @@ def _offset(ahead: timedelta) -> str:
 
 
 def _times_stated(file: File, records: tuple[str, ...]) -> list[int]:
-    """The times that these FACTs state."""
-    facts = {fact.id: fact for fact in file.facts}
+    """The times that these FACTs and DECISIONs state."""
+    stated = {each.id: each for each in (*file.facts, *file.decisions)}
     times: list[int] = []
     for record in records:
-        found = facts.get(record)
-        if isinstance(found, Start) and found.at is not None:
-            times.append(found.at)
+        found = stated.get(record)
+        if isinstance(found, (Start, TripStart, TripEnd)):
+            times += [] if found.at is None else [found.at]
         elif isinstance(found, Complete):
             times += [found.earliest, found.latest]
     return times
@@ -273,7 +275,7 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
 
 def _kinds(file: File, records: Sequence[str]) -> str:
     """The kinds of record in a list, and no kind that is not in it: FACTs, WANTs and DECISIONs."""
-    kinds = (("FACTs", file.facts), ("WANTs", file.wants), ("DECISIONs", file.locks))
+    kinds = (("FACTs", file.facts), ("WANTs", file.wants), ("DECISIONs", file.decisions))
     return _listed([kind for kind, held in kinds if any(each.id in records for each in held)])
 
 
@@ -330,6 +332,8 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
             mark = f"{who} would still be busy for {_span(late)} when this starts."
         elif constraint is Constraint.PLACE:
             mark = f"{who} would not be free when this starts."
+        elif constraint is Constraint.WITHIN and late is not None:
+            mark = f"This would end {_span(late)} after the trip ends."
         else:
             mark = f'This would break the rule "{constraint.value}" for {who}.'
         marks.setdefault(number, []).append(mark)
@@ -390,7 +394,8 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
 
 def _record(file: File, clock: _Clock, record: str) -> str:
     """One FACT, WANT or DECISION in words."""
-    found = next(each for each in (*file.facts, *file.wants, *file.locks) if each.id == record)
+    records = (*file.facts, *file.wants, *file.decisions)
+    found = next(each for each in records if each.id == record)
     if isinstance(found, Want):
         said = [
             f"a {kind} for {_people(file, persons)}"
@@ -411,6 +416,10 @@ def _record(file: File, clock: _Clock, record: str) -> str:
         else:
             ways = f"every way straight from {places[found.origin]} to {places[found.destination]}"
         return f"{ways} that leaves between {span} is listed"
+    if isinstance(found, TripStart):
+        return f"the TRIP starts at {clock.moment(found.at)}"
+    if isinstance(found, TripEnd):
+        return f"the TRIP ends at {clock.moment(found.at)}"
     if isinstance(found, CompleteFor):
         which = [
             _name(file, fact.option)

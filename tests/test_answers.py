@@ -634,7 +634,10 @@ def test_a_warning_names_only_what_the_longest_durations_break() -> None:
     report = check(file)
     assert report.answer is Answer.FEASIBLE
     assert report.robust is False
-    assert report.at_worst == (Broken(Constraint.PLACE, "event", ("alex",), late=3600),)
+    assert report.at_worst == (
+        Broken(Constraint.PLACE, "event", ("alex",), late=3600),
+        Broken(Constraint.ARRIVAL, "event", ("alex",), late=3600),
+    )
 
 
 def test_unlisted_ways_join_up_one_after_another() -> None:
@@ -1018,7 +1021,10 @@ def test_a_way_that_can_run_long_is_checked_at_its_longest_every_time() -> None:
     report = check(file)
     assert report.answer is Answer.FEASIBLE
     assert report.robust is False
-    assert report.at_worst == (Broken(Constraint.PLACE, "lunch", BOTH, late=600),)
+    assert report.at_worst == (
+        Broken(Constraint.PLACE, "lunch", BOTH, late=600),
+        Broken(Constraint.ARRIVAL, "lunch", BOTH, late=600),
+    )
     safe = takes_between("walk-to-cafe", "PT10M", "PT50M")
     file = a_morning(*WALKS, more=[takes("walk-to-gallery", "PT15M"), safe])
     assert check(file).robust is True
