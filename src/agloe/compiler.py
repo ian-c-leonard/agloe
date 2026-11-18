@@ -25,7 +25,17 @@ from ortools.sat.python import cp_model
 
 from agloe import answers, reference
 from agloe.answers import Report
-from agloe.file import Complete, Cutoff, Duration, File, Start, StartsFrom, Want
+from agloe.file import (
+    Booking,
+    Complete,
+    Cutoff,
+    Duration,
+    File,
+    NeedsRight,
+    Start,
+    StartsFrom,
+    Want,
+)
 from agloe.reference import Itinerary, Remaining, World
 
 _MOST_AT_ONCE = 60  # yes-or-no choices ranked in one solve: their weights must fit in 64 bits
@@ -86,12 +96,13 @@ def stuck(remaining: Remaining) -> frozenset[str] | None:
     """
     file = remaining.file
     world = reference.best_case(file)
-    search = _Search(file, world, switched=True, unsaid=remaining.unsaid)
+    search = _Search(file, world, remaining)
     records = [record.id for record in (*file.facts, *file.wants, *file.decisions)]
     choice, needed = search.clash(records)
     if choice is not None:
         does = search.turned_out
-        chosen = replace(world, satisfies=does, might_satisfy=does)
+        rights = world.rights | remaining.might_cover()
+        chosen = replace(world, satisfies=does, might_satisfy=does, rights=rights)
         _checked(file, chosen, choice)
         return None
     while True:  # ask again with only the records the proof used, until it uses them all
@@ -180,28 +191,24 @@ class _Search:
     reference checker.
     """
 
-    def __init__(
-        self,
-        file: File,
-        world: World,
-        switched: bool = False,
-        unsaid: frozenset[tuple[str, str]] = frozenset(),
-    ) -> None:
-        """Build the model. With ``switched``, each FACT and DECISION applies only if switched on.
+    def __init__(self, file: File, world: World, remaining: Remaining | None = None) -> None:
+        """Build the model. With ``remaining``, each record applies only if switched on.
 
-        A FACT that is switched off is unknown, and turns out as in the best case. So the world
-        must be the best case when ``switched`` is set. ``unsaid`` holds each OPTION and WANT
-        about which a FACT was taken out before: nobody knows about those either, even where
-        the WANT's set is COMPLETE.
+        That is for the search for a conflict. ``remaining`` is what is left of the FILE, and
+        the world must be its best case. A FACT that is switched off is unknown, and turns out
+        as in the best case. So does what a FACT stated that was taken out before: whether an
+        OPTION SATISFIES a WANT, and whom a BOOKING covers.
         """
-        self.file, self.world, self.unsaid = file, world, unsaid
+        self.file, self.world = file, world
+        self.unsaid = frozenset[tuple[str, str]]() if remaining is None else remaining.unsaid
+        self.open_to_all = frozenset[str]() if remaining is None else remaining.open_to_all
         # Whether each OPTION SATISFIES each WANT, where the solver chooses the world too, and
         # how that turned out in the last answer it gave.
         self.does: dict[tuple[str, str], cp_model.IntVar] = {}
         self.turned_out: frozenset[tuple[str, str]] = frozenset()
         self.model = cp_model.CpModel()
         self.switch: dict[str, cp_model.IntVar] = {}
-        if switched:
+        if remaining is not None:
             for record in (*file.facts, *file.wants, *file.decisions):
                 self.switch[record.id] = self.model.new_bool_var(f"given {record.id}")
         self._read_the_world()
@@ -305,6 +312,7 @@ class _Search:
         self.used = [model.new_bool_var(f"used {option.id}") for option in file.options]
         self.left_out: set[tuple[int, int]] = set()  # each PERSON and OPTION that is ruled out
         meets = self._hold_to_the_wants()
+        self._hold_to_the_rights()
         for index, option in enumerate(file.options):
             model.add_max_equality(self.used[index], [0, *(row[index] for row in self.takes)])
             for number, person in enumerate(file.persons):
@@ -339,6 +347,41 @@ class _Search:
         """
         self.model.add(self.takes[number][index] == 0)
         self.left_out.add((number, index))
+
+    def _hold_to_the_rights(self) -> None:
+        """Nobody takes part without a right in an OPTION that needs one.
+
+        Where records can be switched off, the best case decides, and it has a right for a
+        PERSON unless the FILE rules that out. That takes three kinds of FACT, all switched on:
+        that the OPTION needs a right, that the FILE holds every right to it, and every BOOKING
+        for it. A BOOKING that is off, or was taken out before, might cover anybody. So a
+        PERSON whom some BOOKING for the OPTION covers is never kept out.
+        """
+        model, file, world = self.model, self.file, self.world
+        if not self.switch:
+            for index, option in enumerate(file.options):
+                for number, person in enumerate(file.persons):
+                    covered = (option.id, person.id) in world.rights
+                    if option.id in world.needs_right and not covered:
+                        self._rule_out(number, index)
+            return
+        needs = {fact.option: fact for fact in file.facts if isinstance(fact, NeedsRight)}
+        for index, option in enumerate(file.options):
+            needed, whole = needs.get(option.id), file.rights_complete(option.id)
+            if needed is None or not needed.needed or whole is None:
+                continue
+            if option.id in self.open_to_all:
+                continue
+            bookings = [
+                self.switch[fact.id]
+                for fact in file.facts
+                if isinstance(fact, Booking) and fact.option == option.id
+            ]
+            closed = [self.switch[needed.id], self.switch[whole.id], *bookings]
+            for number, person in enumerate(file.persons):
+                if file.booking(option.id, person.id) is None:
+                    takes = self.takes[number][index]
+                    model.add_bool_or([takes.negated(), *(each.negated() for each in closed)])
 
     def _hold_to_the_wants(self) -> list[set[int]]:
         """Every must is met and every must-not is kept. Returns what could meet a must.

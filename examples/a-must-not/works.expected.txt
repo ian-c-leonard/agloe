@@ -10,10 +10,13 @@ The plan relies on these FACTs, WANTs and DECISIONs:
   skydeck-length: Skydeck visit takes 1 h 30 min
   skydeck-arrival: nobody has to be at Willis Tower before Skydeck visit starts
   skydeck-is-high-up: Skydeck visit SATISFIES a view from high up, 9 out of 10
+  skydeck-needs-a-ticket: people need a right to take part in Skydeck visit
+  skydeck-ticket: a BOOKING for Skydeck visit covers Alex
   lunch-time: Lunch in the park starts at 12:15 pm on Saturday 15 May 2027
   lunch-length: Lunch in the park takes 1 h
   lunch-table: nobody has to be at Millennium Park before Lunch in the park starts
   lunch-is-on-the-ground: Lunch in the park does not SATISFY a view from high up
+  lunch-is-walk-up: nobody needs a right to take part in Lunch in the park
   walk-from-tower-length: the walk between Willis Tower and Millennium Park takes 20 min
   view: a view from high up is a must for Alex and a must-not for Jo
   lock-lunch: Alex, Sam and Jo take part in Lunch in the park

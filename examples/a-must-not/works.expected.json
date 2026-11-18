@@ -33,10 +33,13 @@
     "skydeck-length",
     "skydeck-arrival",
     "skydeck-is-high-up",
+    "skydeck-needs-a-ticket",
+    "skydeck-ticket",
     "lunch-time",
     "lunch-length",
     "lunch-table",
     "lunch-is-on-the-ground",
+    "lunch-is-walk-up",
     "walk-from-tower-length",
     "view",
     "lock-lunch"

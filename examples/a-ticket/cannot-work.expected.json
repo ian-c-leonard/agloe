@@ -1,0 +1,9 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "skydeck-needs-a-ticket",
+    "alex-skydeck-ticket",
+    "skydeck-sold-out",
+    "lock-skydeck"
+  ]
+}

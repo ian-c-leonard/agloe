@@ -14,18 +14,25 @@ Friday 14 May 2027 (times in America/Chicago)
 The plan relies on these FACTs and DECISIONs:
   breakfast-time: Breakfast starts at 8:00 am on Friday 14 May 2027
   breakfast-length: Breakfast takes 45 min
+  breakfast-is-walk-up: nobody needs a right to take part in Breakfast
   museum-time: Museum visit starts at 10:00 am on Friday 14 May 2027
   museum-length: Museum visit takes 2 h
   museum-entry: nobody has to be at the Art Institute before Museum visit starts
+  museum-needs-a-ticket: people need a right to take part in Museum visit
+  museum-ticket: a BOOKING for Museum visit covers Alex
   lunch-time: Lunch in the park starts at 12:30 pm on Friday 14 May 2027
   lunch-length: Lunch in the park takes 1 h
   lunch-table: nobody has to be at Millennium Park before Lunch in the park starts
+  lunch-is-walk-up: nobody needs a right to take part in Lunch in the park
   boat-time: Architecture boat tour starts at 3:00 pm on Friday 14 May 2027
   boat-length: Architecture boat tour takes 1 h 30 min
   boat-boarding: people must be at the Riverwalk dock 15 min before Architecture boat tour starts
+  tour-needs-a-ticket: people need a right to take part in Architecture boat tour
+  tour-ticket: a BOOKING for Architecture boat tour covers Alex
   dinner-time: Dinner starts at 7:00 pm on Friday 14 May 2027
   dinner-length: Dinner takes 1 h 30 min
   dinner-table: nobody has to be at River North before Dinner starts
+  dinner-is-walk-up: nobody needs a right to take part in Dinner
   walk-to-museum-length: the walk between the hotel and the Art Institute takes 10 min
   walk-to-park-length: the walk between the Art Institute and Millennium Park takes 5 min
   walk-to-dock-length: the walk between Millennium Park and the Riverwalk dock takes 20 min

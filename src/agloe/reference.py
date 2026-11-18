@@ -9,8 +9,8 @@ OPTION already meets every must on a WANT whose set is not COMPLETE, no unlisted
 WANT whose set is COMPLETE, and none has to break a must-not. The worst case has no unlisted WAY
 at all.
 
-``broken`` is the section "The CONSTRAINTs": it checks a finished ITINERARY against all nine,
-and nothing here or in the solver counts as working unless it passes. ``itineraries`` is the
+``broken`` is the section "The CONSTRAINTs": it checks a finished ITINERARY against all of
+them, and nothing here or in the solver counts as working unless it passes. ``itineraries`` is the
 section "Which ITINERARY is shown". The sections "The three answers", "ROBUST" and "Evidence"
 are in ``answers``, which works them out from this module's search or from a faster one.
 """
@@ -21,7 +21,7 @@ from enum import Enum
 from heapq import heapify, heappop, heappush
 from itertools import combinations, groupby, pairwise, permutations, product
 
-from agloe.file import Complete, File, Satisfies, StartsFrom, Want
+from agloe.file import Booking, Complete, File, Satisfies, StartsFrom, Want
 
 _MOST_TO_TAKE_OUT = 12  # ``needless`` tries every combination of things to take out
 
@@ -38,6 +38,7 @@ class Constraint(Enum):
     MUST = "Every must is met"
     MUST_NOT = "Every must-not is kept"
     WITHIN = "Everything happens within the TRIP"
+    RIGHT = "Every PERSON has a right to what they take part in"
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,10 @@ class World:
     OPTION is found: one outside the FILE that SATISFIES the WANT, and that the PERSON can take
     part in whatever else they do. It holds conditions, one for each WANT and PERSON. It does
     not say how many OPTIONs meet them: one OPTION can be found for several.
+
+    ``needs_right`` holds each OPTION that a PERSON can take part in only with a right.
+    ``rights`` holds each OPTION and PERSON where the PERSON has one: a BOOKING covers them, or
+    another right is found for them.
     """
 
     terms: Mapping[str, Terms]
@@ -128,6 +133,8 @@ class World:
     satisfies: frozenset[tuple[str, str]] = frozenset()
     might_satisfy: frozenset[tuple[str, str]] = frozenset()
     another_option: frozenset[tuple[str, str]] = frozenset()
+    needs_right: frozenset[str] = frozenset()
+    rights: frozenset[tuple[str, str]] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -136,7 +143,9 @@ class Unknown:
 
     ``what`` is "start", "duration" or "cutoff" for an OPTION, "duration" for a WAY, or "other
     ways" from one PLACE to another: unlisted WAYs that go straight there. For an OPTION and a
-    WANT it is "satisfies" or "does not satisfy": the two ways the one unknown can turn out. It
+    WANT it is "satisfies" or "does not satisfy": the two ways the one unknown can turn out.
+    For an OPTION it is also "needs no right", and for an OPTION and a PERSON "another right":
+    a right to the OPTION for that PERSON that no BOOKING in the FILE secures. It
     is "another option" for a WANT and a PERSON: an OPTION outside the FILE
     that SATISFIES the WANT, and that the PERSON can take part in. That is one condition for one
     WANT and one PERSON, whichever OPTION meets it.
@@ -174,6 +183,12 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
             out.append(Unknown("duration", option.id))
         if file.cutoff(option.id) is None:
             out.append(Unknown("cutoff", option.id))
+        if file.needs_right(option.id) is None:
+            out.append(Unknown("needs no right", option.id))
+        if file.needs_right(option.id) is True and file.rights_complete(option.id) is None:
+            for person in file.persons:
+                if file.booking(option.id, person.id) is None:
+                    out.append(Unknown("another right", option.id, person=person.id))
         for want in file.wants:
             if file.says(option.id, want.id) is None:
                 if want.musts:
@@ -210,21 +225,27 @@ class Remaining:
     Taking a FACT out makes what it stated unknown. That is more than leaving the FACT out.
     Where a FACT says a WANT's set is COMPLETE, an OPTION with no FACT about the WANT does not
     SATISFY it. An OPTION whose FACT about the WANT was taken out might. ``unsaid`` holds each
-    such OPTION and WANT. It belongs to the search for a conflict: no FILE that is read has it,
-    and no answer is ever given for what is left.
+    such OPTION and WANT. A BOOKING that is taken out is the same: nobody knows whom it covers,
+    so it might cover anybody. ``open_to_all`` holds the OPTION of each such BOOKING. Both
+    belong to the search for a conflict: no FILE that is read has them, and no answer is ever
+    given for what is left.
     """
 
     file: File
     unsaid: frozenset[tuple[str, str]] = frozenset()
+    open_to_all: frozenset[str] = frozenset()
 
     def without(self, record: str) -> Remaining:
         """What is left with one more FACT, WANT or DECISION taken out."""
-        taken = {
-            (fact.option, fact.want)
-            for fact in self.file.facts
-            if isinstance(fact, Satisfies) and fact.id == record
-        }
-        return Remaining(self.file.without(record), self.unsaid | taken)
+        found = [fact for fact in self.file.facts if fact.id == record]
+        taken = {(fact.option, fact.want) for fact in found if isinstance(fact, Satisfies)}
+        opened = {fact.option for fact in found if isinstance(fact, Booking)}
+        return Remaining(self.file.without(record), self.unsaid | taken, self.open_to_all | opened)
+
+    def might_cover(self) -> frozenset[tuple[str, str]]:
+        """Each OPTION and PERSON that a BOOKING taken out might cover: anybody, for its OPTION."""
+        people = self.file.persons
+        return frozenset((option, person.id) for option in self.open_to_all for person in people)
 
     def reopened(self) -> list[tuple[str, str]]:
         """Each OPTION and WANT that nobody knows about though the WANT's set is COMPLETE.
@@ -257,6 +278,7 @@ def best_cases(remaining: Remaining) -> Iterator[World]:
     """
     file = remaining.file
     best = best_case(file)
+    best = replace(best, rights=best.rights | remaining.might_cover())
     wants = {want.id: want for want in file.wants}
     helps = {pair for pair in remaining.reopened() if not wants[pair[1]].must_nots}
     helps = {pair for pair in helps if wants[pair[1]].musts}
@@ -300,30 +322,19 @@ def one_way_each(unknown: Iterable[Unknown]) -> bool:
     return len(about) == len(set(about))
 
 
-def no_better_than(file: File, found: Iterable[Unknown]) -> World:
-    """An upper bound that is no possible world: every unknown FACT helps whoever needs it.
+def no_better_than(file: File, unknown: Iterable[Unknown]) -> World:
+    """An upper bound that need be no possible world: these unknown FACTs all help.
 
-    Everything is as in the best case, with two differences. Another OPTION is found only for
-    the WANTs and PERSONs in ``found``. And an OPTION with no FACT about a WANT counts for a
-    must while it breaks no must-not, which no possible world allows.
+    Each of them helps whoever needs it, and every other unknown FACT is as in the worst case.
+    The FACTs can say both that an OPTION SATISFIES a WANT and that it does not. The OPTION
+    then counts for a must while it breaks no must-not, which no possible world allows.
 
-    Whatever works in a possible world with those other OPTIONs works here too. So this can
-    show that those other OPTIONs are not enough, whatever else turns out well. It can show
-    nothing else, and no answer and no evidence is ever read from it.
+    A choice that works with some of these FACTs turned out well works here too: one more
+    unknown FACT that turns out well never makes a CONSTRAINT harder to meet. So this can show
+    that these FACTs are not enough, however they are picked. It can show nothing else, and no
+    answer and no evidence is ever read from it.
     """
-    best = best_case(file)
-    unknown = {
-        (option.id, want.id)
-        for option in file.options
-        for want in file.wants
-        if file.says(option.id, want.id) is None
-    }
-    conditions = frozenset(
-        (each.want, each.person)
-        for each in found
-        if each.want is not None and each.person is not None
-    )
-    return replace(best, satisfies=best.satisfies | unknown, another_option=conditions)
+    return _world(file, frozenset(unknown))
 
 
 def with_this_long(file: File, unknown: Unknown, seconds: int) -> World:
@@ -410,6 +421,25 @@ def _world(
                 satisfies.add(pair)
             if not does_not:
                 might_satisfy.add(pair)
+    # Whether an OPTION needs a right, and who has one. A FACT settles the first in every
+    # world. A BOOKING covers the PERSONs it names. Another right can be found only where no
+    # FACT says that the FILE holds every right to the OPTION.
+    needs_right = {
+        option.id
+        for option in file.options
+        if file.needs_right(option.id) is True
+        or (file.needs_right(option.id) is None and not well(Unknown("needs no right", option.id)))
+    }
+    rights = {
+        (option.id, person.id)
+        for option in file.options
+        for person in file.persons
+        if file.booking(option.id, person.id) is not None
+        or (
+            file.rights_complete(option.id) is None
+            and well(Unknown("another right", option.id, person=person.id))
+        )
+    }
     another_option = frozenset(
         (want.id, person)
         for want in file.wants
@@ -426,6 +456,8 @@ def _world(
         frozenset(satisfies),
         frozenset(might_satisfy),
         another_option,
+        frozenset(needs_right),
+        frozenset(rights),
     )
 
 
@@ -489,7 +521,7 @@ def works_as_listed(file: File, world: World, itinerary: Itinerary) -> bool:
 
 
 def _each_alone(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
-    """The six CONSTRAINTs that hold or not whatever order the steps happen in."""
+    """The seven CONSTRAINTs that hold or not whatever order the steps happen in."""
     taking_part = {step.option: step.persons for step in itinerary if step.option is not None}
     return [
         *_locks(file, itinerary),
@@ -498,7 +530,19 @@ def _each_alone(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
         *_musts(file, world, taking_part),
         *_must_nots(file, world, taking_part),
         *_within(file, itinerary),
+        *_rights(file, world, taking_part),
     ]
+
+
+def _rights(file: File, world: World, taking_part: Mapping[str, tuple[str, ...]]) -> list[Broken]:
+    """Every PERSON has a right to what they take part in, where the OPTION needs one."""
+    out: list[Broken] = []
+    for option, persons in taking_part.items():
+        without = [person for person in persons if (option, person) not in world.rights]
+        if option in world.needs_right and without:
+            who = _in_file_order_of_persons(file, without)
+            out.append(Broken(Constraint.RIGHT, option, who))
+    return out
 
 
 def _within(file: File, itinerary: Itinerary) -> list[Broken]:
@@ -888,7 +932,8 @@ def itineraries(file: File, world: World) -> list[Itinerary]:
         happening = {
             option.id: persons for option, persons in zip(file.options, who, strict=True) if persons
         }
-        if _musts(file, world, happening) or _must_nots(file, world, happening):
+        wanted = _musts(file, world, happening) or _must_nots(file, world, happening)
+        if wanted or _rights(file, world, happening):
             continue  # no order and no timing changes these: only who takes part counts
         mine = [
             [i for i, persons in enumerate(who) if person.id in persons] for person in file.persons

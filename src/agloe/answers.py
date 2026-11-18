@@ -7,12 +7,22 @@ reference checker's, which tries everything. The COMPILER passes its solver sear
 the answers and the evidence are worked out here in either case.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum
 from itertools import combinations
 
-from agloe.file import Complete, CompleteFor, Fact, File, Lock, Start, StartsFrom
+from agloe.file import (
+    Booking,
+    Complete,
+    CompleteFor,
+    CompleteRights,
+    Fact,
+    File,
+    Lock,
+    Start,
+    StartsFrom,
+)
 from agloe.reference import (
     Broken,
     Itinerary,
@@ -118,10 +128,22 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact) -> bool:
     It relies on every FACT about an OPTION or a WAY it has in it. It relies on no COMPLETE set
     of travel: it takes no unlisted WAY. It relies on where a PERSON starts from where the
     PERSON is in it, or has to end the TRIP at a PLACE: their path begins there, or they stay
-    there.
+    there. It relies on a BOOKING that covers a PERSON in one of its OPTIONs, unless a FACT
+    says that the OPTION needs no right: the first such BOOKING the FILE lists for each PERSON.
+    It relies on no FACT that the FILE holds every right to an OPTION.
     """
     if isinstance(fact, CompleteFor):
         return _settles(file, itinerary, fact)
+    if isinstance(fact, Booking):
+        taking_part = {
+            person for step in itinerary if step.option == fact.option for person in step.persons
+        }
+        may_be_needed = file.needs_right(fact.option) is not False
+        return may_be_needed and any(
+            file.booking(fact.option, person) == fact for person in taking_part
+        )
+    if isinstance(fact, CompleteRights):
+        return False
     if isinstance(fact, StartsFrom):
         in_it = any(fact.person in step.persons for step in itinerary)
         return in_it or bool(has_to_end_at(file, fact.person))
@@ -187,28 +209,51 @@ def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
     this WANT and this PERSON" asks for something new, and stands in for a listed OPTION and
     every FACT about it. So the sets returned ask for the fewest of those, and among them they
     have the fewest FACTs. The count is of WANTs and PERSONs, whichever OPTIONs are found.
+
+    Two shortcuts save work, and nothing is reported from either. Both use the upper bound of
+    ``no_better_than``, where a set of unknown FACTs all help. Asking for some other OPTIONs
+    can be enough only if it is enough there with every unknown FACT about the FILE's own
+    OPTIONs and WAYs. And a set that is enough holds each of those FACTs that the TRIP cannot
+    work without there, with all the others helping. A FILE that says little needs many FACTs
+    at once, and most of them are of that kind. So once no set of one FACT is enough, the
+    search finds them, with one check each, and tries only the sets that hold them all.
     """
     every = unknowns(file)
     facts = [unknown for unknown in every if unknown.what != "another option"]
     to_find = [unknown for unknown in every if unknown.what == "another option"]
+    place = {unknown: number for number, unknown in enumerate(facts)}
+
+    def at_most(stated: Iterable[Unknown], some: tuple[Unknown, ...]) -> bool:
+        return works(file, no_better_than(file, (*stated, *some)))
+
     for count in range(len(to_find) + 1):
-        # Asking for these can be enough only if it is in the upper bound, where every FACT
-        # helps whoever needs it. The bound only saves work: nothing is reported from it.
-        hopeful = [
-            some for some in combinations(to_find, count) if works(file, no_better_than(file, some))
-        ]
+        hopeful = [some for some in combinations(to_find, count) if at_most(facts, some)]
+        needed: dict[tuple[Unknown, ...], list[Unknown]] = {}
         for size in range(len(facts) + 1 if hopeful else 0):
-            enough = [
-                (*stated, *some)
-                for stated in combinations(facts, size)
-                for some in hopeful
-                if one_way_each(stated) and works(file, with_these_at_best(file, (*stated, *some)))
-            ]
+            enough: list[tuple[list[int], int, tuple[Unknown, ...]]] = []
+            for number, some in enumerate(hopeful):
+                if size > 1 and some not in needed:
+                    needed[some] = [
+                        fact for fact in facts if not at_most((f for f in facts if f != fact), some)
+                    ]
+                in_every_set = needed.get(some, [])
+                if size < len(in_every_set):
+                    continue
+                others = [fact for fact in facts if fact not in in_every_set]
+                for more in combinations(others, size - len(in_every_set)):
+                    stated = sorted((*in_every_set, *more), key=place.__getitem__)
+                    turned_out_well = (*stated, *some)
+                    if one_way_each(stated) and works(
+                        file, with_these_at_best(file, turned_out_well)
+                    ):
+                        order = [place[fact] for fact in stated]
+                        enough.append((order, number, turned_out_well))
             if enough:
                 alone = count + size == 1
+                # The sets come in the order of their FACTs, as if every set had been tried.
                 return tuple(
                     tuple(Missing(u, _limit(file, u, works) if alone else None) for u in some)
-                    for some in enough
+                    for _, _, some in sorted(enough, key=lambda found: found[:2])
                 )
     raise AssertionError("the best case works, so some unknown FACTs make it work")
 
@@ -218,7 +263,8 @@ def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
 
     None for an unknown that is not a length of time, and None when any length would do.
     """
-    if unknown.what in ("start", "satisfies", "does not satisfy", "another option"):
+    no_length = ("start", "satisfies", "does not satisfy", "another option")
+    if unknown.what in (*no_length, "needs no right", "another right"):
         return None
 
     def enough(seconds: int) -> bool:

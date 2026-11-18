@@ -30,6 +30,7 @@ from tests.stories import (
     lasts_between,
     lock,
     moves,
+    open_to_all,
     seconds,
     starts_at,
     stays,
@@ -295,7 +296,7 @@ def test_only_those_who_need_an_option_take_part() -> None:
 def with_a_cab_listed_first(length: dict[str, object]) -> dict[str, object]:
     document = flight_home()
     document["options"].insert(0, moves("cab", "art-institute", "ohare"))
-    document["facts"] += [any_time("cab"), length]
+    document["facts"] += [any_time("cab"), length, open_to_all("cab")]
     return document
 
 
@@ -399,8 +400,8 @@ def test_a_robust_itinerary_is_shown_before_any_other() -> None:
 
 def test_a_robust_itinerary_allows_for_the_longest_durations() -> None:
     document = flight_home()
-    document["facts"][3] = lasts_between("blue-line", "PT50M", "PT1H10M")
-    document["facts"][3]["id"] = "train-length"
+    document["facts"][5] = lasts_between("blue-line", "PT50M", "PT1H10M")
+    document["facts"][5]["id"] = "train-length"
     report = check(load(document))
     assert report.robust is True
     train = report.itinerary[1]
@@ -447,8 +448,8 @@ def test_an_option_before_a_fixed_time_starts_as_late_as_it_can() -> None:
 def test_a_complete_set_says_nothing_after_its_span() -> None:
     """The listed train is far too slow. An unlisted way that leaves after the span might exist."""
     document = flight_home()
-    document["facts"][3] = lasts("blue-line", "PT5H")
-    document["facts"][4] = starts_at("flight", 19)
+    document["facts"][5] = lasts("blue-line", "PT5H")
+    document["facts"][7] = starts_at("flight", 19)
     ways = {
         "from": "art-institute",
         "to": "ohare",
@@ -907,9 +908,12 @@ def test_persons_take_ways_between_their_options() -> None:
         ("walk-to-gallery", BOTH, seconds(9), seconds(9, 15)),
         ("walk-to-cafe", BOTH, seconds(12), seconds(12, 10)),
     ]
-    assert report.relies_on[-5:] == (
+    assert report.relies_on[-8:] == (
         "walk-to-gallery-length",
         "walk-to-cafe-length",
+        "breakfast-open",
+        "museum-open",
+        "lunch-open",
         "lock-breakfast",
         "lock-museum",
         "lock-lunch",

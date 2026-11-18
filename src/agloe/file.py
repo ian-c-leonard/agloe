@@ -209,7 +209,47 @@ class StartsFrom:
     place: str
 
 
-type Fact = Start | Duration | Cutoff | Complete | Satisfies | CompleteFor | StartsFrom
+@dataclass(frozen=True)
+class NeedsRight:
+    """A FACT: whether a PERSON needs a right to take part in an OPTION."""
+
+    id: str
+    option: str
+    needed: bool
+
+
+@dataclass(frozen=True)
+class Booking:
+    """A FACT: a BOOKING. It secures a right to one OPTION for each PERSON it covers."""
+
+    id: str
+    option: str
+    covers: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CompleteRights:
+    """A FACT: the FILE holds every right to an OPTION.
+
+    Nobody on the TRIP holds another right to it, and no more can be had.
+    """
+
+    id: str
+    option: str
+
+
+type Fact = (
+    Start
+    | Duration
+    | Cutoff
+    | Complete
+    | Satisfies
+    | CompleteFor
+    | StartsFrom
+    | NeedsRight
+    | Booking
+    | CompleteRights
+)
 type Decision = Lock | TripStart | TripEnd
 
 
@@ -269,6 +309,35 @@ class File:
     def _starts(self) -> dict[str, StartsFrom]:
         """The FACT about where each PERSON starts from, looked up once."""
         return {fact.person: fact for fact in self.facts if isinstance(fact, StartsFrom)}
+
+    def needs_right(self, option: str) -> bool | None:
+        """Whether a PERSON needs a right to take part in this OPTION. None: nobody knows."""
+        return self._needs_right.get(option)
+
+    def booking(self, option: str, person: str) -> Booking | None:
+        """The BOOKING that covers this PERSON for this OPTION: the first one the FILE lists."""
+        return self._bookings.get((option, person))
+
+    def rights_complete(self, option: str) -> CompleteRights | None:
+        """The FACT that the FILE holds every right to this OPTION, if there is one."""
+        return self._rights_complete.get(option)
+
+    @cached_property
+    def _needs_right(self) -> dict[str, bool]:
+        return {fact.option: fact.needed for fact in self.facts if isinstance(fact, NeedsRight)}
+
+    @cached_property
+    def _bookings(self) -> dict[tuple[str, str], Booking]:
+        first: dict[tuple[str, str], Booking] = {}
+        for fact in self.facts:
+            if isinstance(fact, Booking):
+                for person in fact.covers:
+                    first.setdefault((fact.option, person), fact)
+        return first
+
+    @cached_property
+    def _rights_complete(self) -> dict[str, CompleteRights]:
+        return {fact.option: fact for fact in self.facts if isinstance(fact, CompleteRights)}
 
     @cached_property
     def _about_the_end(self) -> frozenset[str]:
@@ -610,6 +679,14 @@ def load(document: object) -> File:
                 stated.add((whole["satisfies"], CompleteFor))
                 facts.append(CompleteFor(fact["id"], whole["satisfies"]))
                 continue
+            if "rights_to" in whole:
+                about = whole["rights_to"]
+                known(where, about, "OPTION", option_ids)
+                if (about, CompleteRights) in stated:
+                    problems.append(f"{where}: another FACT already states this about {about}")
+                stated.add((about, CompleteRights))
+                facts.append(CompleteRights(fact["id"], about))
+                continue
             origin, destination = whole.get("from"), whole.get("to")
             for place in (origin, destination):
                 if place is not None:
@@ -626,6 +703,16 @@ def load(document: object) -> File:
                 problems.append(f"{where}: another FACT already states this")
             complete.add((origin, destination, earliest, latest))
             facts.append(Complete(fact["id"], origin, destination, earliest, latest))
+            continue
+        if "booking" in fact:
+            agreed = fact["booking"]
+            known(where, agreed["option"], "OPTION", option_ids)
+            covers = list(agreed["covers"])
+            for person in covers:
+                known(where, person, "PERSON", person_ids)
+            for person in sorted({person for person in covers if covers.count(person) > 1}):
+                problems.append(f"{where}: {person} is covered more than once")
+            facts.append(Booking(fact["id"], agreed["option"], tuple(covers)))
             continue
         if "person" in fact:
             known(where, fact["person"], "PERSON", person_ids)
@@ -677,6 +764,8 @@ def load(document: object) -> File:
             if shortest > longest:
                 problems.append(f"{where}: the shortest duration is longer than the longest")
             made = Duration(fact["id"], fact["option"], shortest, longest, contingent=True)
+        elif "needs_right" in fact:
+            made = NeedsRight(fact["id"], fact["option"], fact["needs_right"])
         else:
             made = Cutoff(fact["id"], fact["option"], length(fact["arrive_before_start"]))
         if (fact["option"], type(made)) in stated:
@@ -754,7 +843,8 @@ def _describe(error: ValidationError, shapes: dict[str, dict[str, object]]) -> s
     The closest miss is the one for the shape the record was meant to have: the shape whose
     required keys the record has most of. So a key that belongs to that shape is never named as
     the problem. ``shapes`` holds each shape of the schema by its name. A FACT with ``complete``
-    is about travel or about a WANT, and what is inside ``complete`` says which.
+    is about travel, about a WANT or about the rights to an OPTION, and what is inside
+    ``complete`` says which.
     """
     where = "".join(_inside("", part) for part in error.absolute_path) or "the FILE"
     if not error.context:
@@ -780,9 +870,17 @@ def _describe(error: ValidationError, shapes: dict[str, dict[str, object]]) -> s
         whole = record.get("complete")
         if isinstance(whole, dict) and list(error.absolute_path)[:1] == ["facts"]:
             keys = set(cast("dict[str, object]", whole))
-            if "satisfies" in keys and keys & {"from", "to", "leaving"}:
-                return f"{where}: a COMPLETE set is about travel or about a WANT, never both"
-            meant = "complete_for_a_want" if "satisfies" in keys else "complete_set"
-            misses = [miss for miss in misses if name(miss) == meant] or misses
+            kinds = {
+                "complete_set": bool(keys & {"from", "to", "leaving"}),
+                "complete_for_a_want": "satisfies" in keys,
+                "complete_rights": "rights_to" in keys,
+            }
+            meant = [kind for kind, there in kinds.items() if there] or ["complete_set"]
+            if len(meant) > 1:
+                return (
+                    f"{where}: a COMPLETE set is of one kind: travel, the OPTIONs that SATISFY"
+                    " a WANT, or the rights to an OPTION"
+                )
+            misses = [miss for miss in misses if name(miss) == meant[0]] or misses
     closest = max(misses, key=lambda miss: len(miss.absolute_path))
     return f"{where}: fits no known shape; the closest miss: {closest.message}"

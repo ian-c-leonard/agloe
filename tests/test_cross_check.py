@@ -30,15 +30,19 @@ from agloe.reference import (
 from tests.stories import (
     Document,
     any_time,
+    booking,
     complete,
     cutoff,
     ends_at,
     every,
+    every_right,
     lasts,
     lasts_between,
     lock,
     moves,
     must,
+    needs_right,
+    open_to_all,
     satisfies,
     seconds,
     starts_at,
@@ -68,6 +72,7 @@ def random_trip(
     whole_sets: float = 0,
     with_times: float = 0,
     with_ends: float = 0,
+    with_rights: float = 0,
 ) -> File:
     """Two or three OPTIONs on a quarter-hour grid.
 
@@ -81,7 +86,10 @@ def random_trip(
     often a FACT says that a WANT's set is COMPLETE. ``with_times`` is how often a DECISION says
     when the TRIP starts, and how often one says when it ends, both on the grid. ``with_ends``
     is how often a FACT says where a PERSON starts from, and how often a PERSON has to end the
-    TRIP at some PLACE.
+    TRIP at some PLACE. ``with_rights`` is how often a FACT says that the FILE holds every right
+    to an OPTION. When it is set, a FACT says that an OPTION needs a right, or that it needs
+    none, or the FILE says nothing, and an OPTION has up to two BOOKINGs. When it is not, a
+    FACT says that each OPTION needs none.
     """
     count = count or rng.choice([2, 3])
     if persons is None:
@@ -164,7 +172,18 @@ def random_trip(
         decisions.append(at_the_start(rng))
     if with_times and rng.random() < with_times:
         decisions.append(at_the_end(rng))
-    return trip(persons, PLACES, options, facts, decisions, ways, wants)
+    if with_rights:
+        for option in options:
+            id = option["id"]
+            stated = rng.choice([needs_right(id), needs_right(id), open_to_all(id), None])
+            if stated is not None:
+                facts.append(stated)
+            for number in range(rng.choice([0, 1, 1, 2])):
+                covered = rng.sample(persons, rng.randrange(1, len(persons) + 1))
+                facts.append(booking(id, *covered, id=f"{id}-booking-{number}"))
+            if rng.random() < with_rights:
+                facts.append(every_right(id))
+    return trip(persons, PLACES, options, facts, decisions, ways, wants, tickets=bool(with_rights))
 
 
 def at_the_start(rng: Random) -> Document:
@@ -448,8 +467,30 @@ def possible_world(rng: Random, file: File) -> World:
         for person in want.musts
         if file.complete_for(want.id) is None and rng.random() < 0.3
     )
+    # Whether an OPTION needs a right is a guess where no FACT says. So is another right, for
+    # a PERSON whom no BOOKING covers, unless a FACT says that the FILE holds every right.
+    needs = frozenset(
+        option.id
+        for option in file.options
+        if (
+            rng.random() < 0.5
+            if file.needs_right(option.id) is None
+            else file.needs_right(option.id)
+        )
+    )
+    rights = frozenset(
+        (option.id, person.id)
+        for option in file.options
+        for person in file.persons
+        if file.needs_right(option.id) is not False
+        and (
+            file.booking(option.id, person.id) is not None
+            or (file.rights_complete(option.id) is None and rng.random() < 0.4)
+        )
+    )
     # One possible world: what SATISFIES a WANT is the same for a must and for a must-not.
-    return World(terms, unlisted, slow, takes, frozenset(delivers), frozenset(delivers), elsewhere)
+    delivered_by = frozenset(delivers)
+    return World(terms, unlisted, slow, takes, delivered_by, delivered_by, elsewhere, needs, rights)
 
 
 def any_choice(rng: Random, file: File, world: World) -> Itinerary:

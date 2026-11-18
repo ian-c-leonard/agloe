@@ -17,12 +17,15 @@ from datetime import date, timedelta
 
 from agloe.answers import Answer, Missing, Report
 from agloe.file import (
+    Booking,
     Complete,
     CompleteFor,
+    CompleteRights,
     Cutoff,
     Duration,
     File,
     Lock,
+    NeedsRight,
     Option,
     Person,
     Place,
@@ -345,14 +348,28 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
     """One set of unknown FACTs that would be enough, in words.
 
     PERSONs who need another OPTION for the same WANT are named together, as "each of". The
-    condition is one for each PERSON: whether one OPTION or several meet it is left open.
+    condition is one for each PERSON: whether one OPTION or several meet it is left open. The
+    OPTIONs that have to need no right are named together, at the first of them. So are the
+    PERSONs who need a right to one OPTION.
     """
     parts: list[str] = []
     for_whom: dict[str | None, list[str]] = {}
+    walk_up = [each.unknown for each in enough if each.unknown.what == "needs no right"]
+    rights = [each.unknown for each in enough if each.unknown.what == "another right"]
     for needed in enough:
         unknown = needed.unknown
         if unknown.what == "another option":
             for_whom.setdefault(unknown.want, []).append(unknown.person or "")
+        elif unknown.what == "needs no right":
+            if unknown == walk_up[0]:
+                names = [_name(file, each.option) for each in walk_up]
+                parts.append(f"nobody needs a right to take part in {_listed(names, 'or')}")
+        elif unknown.what == "another right":
+            persons = [each.person or "" for each in rights if each.option == unknown.option]
+            if unknown.person == persons[0]:
+                each = "each of " if len(persons) > 1 else ""
+                who = _people(file, tuple(persons))
+                parts.append(f"a right to {_name(file, unknown.option)} is found for {each}{who}")
         else:
             parts.append(_wanted(file, needed, len(enough) == 1))
     for want, persons in for_whom.items():
@@ -451,6 +468,13 @@ def _record(file: File, clock: _Clock, record: str) -> str:
         if not found.degree:
             return f"{name} does not SATISFY {_want(file, found.want)}"
         return f"{name} SATISFIES {_want(file, found.want)}, {found.degree} out of 10"
+    if isinstance(found, NeedsRight):
+        who = "people need" if found.needed else "nobody needs"
+        return f"{who} a right to take part in {name}"
+    if isinstance(found, Booking):
+        return f"a BOOKING for {name} covers {_people(file, found.covers)}"
+    if isinstance(found, CompleteRights):
+        return f"the FILE holds every right to {name}: nobody has another, and no more can be had"
     return _cutoff(file, name, found)
 
 
@@ -499,11 +523,11 @@ def _people(file: File, persons: tuple[str, ...]) -> str:
     return _listed([shown[person.id] for person in file.persons if person.id in persons])
 
 
-def _listed(names: Sequence[str]) -> str:
+def _listed(names: Sequence[str], last: str = "and") -> str:
     """Names joined as a sentence would: one, two and three."""
     if len(names) < 2:
         return "".join(names)
-    return f"{', '.join(names[:-1])} and {names[-1]}"
+    return f"{', '.join(names[:-1])} {last} {names[-1]}"
 
 
 def _at_most(seconds: int) -> str:

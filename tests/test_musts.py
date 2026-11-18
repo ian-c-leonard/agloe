@@ -150,6 +150,7 @@ def test_a_must_puts_an_option_in_the_plan_that_no_lock_names() -> None:
         "pizzeria-length",
         "pizzeria-cutoff",
         "pizzeria-gives-deep-dish",
+        "pizzeria-open",
         "deep-dish",
     )
     assert needless(file, worst_case(file), found.itinerary) == []
@@ -363,12 +364,13 @@ def test_a_plan_that_a_must_shapes_can_get_a_warning() -> None:
 def test_the_report_names_the_want_and_what_satisfies_it() -> None:
     file = an_evening()
     words = report.as_text(file, checked(file)).splitlines()
-    assert words[-6:] == [
+    assert words[-7:] == [
         "The plan relies on these FACTs and WANTs:",
         "  pizzeria-time: pizzeria starts at 7:00 pm on Saturday 15 May 2027",
         "  pizzeria-length: pizzeria takes 1 h",
         "  pizzeria-cutoff: nobody has to be at river-north before pizzeria starts",
         "  pizzeria-gives-deep-dish: pizzeria SATISFIES deep-dish, 8 out of 10",
+        "  pizzeria-open: nobody needs a right to take part in pizzeria",
         "  deep-dish: deep-dish is a must for alex",
     ]
 

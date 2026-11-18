@@ -56,14 +56,15 @@ A newer FACT that contradicts an older one about the same thing: the 15:55 saili
 
 ### COMPLETE
 
-Describes a set of OPTIONs and WAYs that a FACT states the FILE holds in full. There are two kinds of set.
+Describes a set that a FACT states the FILE holds in full: a set of OPTIONs and WAYs, or the rights to an OPTION. There are three kinds of set.
 
 - Everything that goes straight from one PLACE to another and starts within a stated time span. Nothing unlisted does. The FACT can name both PLACEs, one of them, or neither, and a PLACE it does not name stands for every PLACE.
 - Every OPTION that SATISFIES a stated WANT. Each one is in the FILE, with a FACT that it SATISFIES the WANT. Nothing else does.
+- Every right to a stated OPTION. Each one is a BOOKING in the FILE. Nobody on the TRIP holds another, and no more can be had.
 
 A COMPLETE set that is empty means "we looked, and there is nothing". A FACT that one set is COMPLETE says nothing about any other set. So a FACT about travel between two PLACEs says nothing about travel through a third PLACE as a whole: each leg of that travel is straight travel by itself, and only a FACT that covers the leg rules it out.
 
-*Uses:* FACT, FILE, → OPTION, → WAY, → PLACE, → WANT, → SATISFIES.
+*Uses:* FACT, FILE, → OPTION, → WAY, → PLACE, → WANT, → SATISFIES, → BOOKING.
 
 ### DECISION
 

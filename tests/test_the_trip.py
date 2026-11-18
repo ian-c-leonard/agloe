@@ -170,7 +170,14 @@ def test_a_plan_can_run_past_the_end_of_the_trip_if_something_takes_its_longest(
 def test_a_plan_relies_on_the_times_of_the_trip_where_it_has_anything_in_it() -> None:
     file = a_visit(trip_starts(9), trip_ends(12))
     found = checked(file)
-    assert found.relies_on == ("visit-time", "visit-length", "trip-start", "trip-end", "lock-visit")
+    assert found.relies_on == (
+        "visit-time",
+        "visit-length",
+        "visit-open",
+        "trip-start",
+        "trip-end",
+        "lock-visit",
+    )
     words = report.as_text(file, found)
     assert "  trip-start: the TRIP starts at 9:00 am on Saturday 15 May 2027\n" in words
     assert "  trip-end: the TRIP ends at 12:00 pm on Saturday 15 May 2027\n" in words

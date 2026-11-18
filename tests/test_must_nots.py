@@ -225,7 +225,7 @@ def test_no_possible_world_has_an_option_both_ways_and_only_the_upper_bound_does
     file = both_on_the_rooftop()
     together: Itinerary = (visit("rooftop", "alex", "jo"),)
     another = Unknown("another option", want="view", person="alex")
-    bound = no_better_than(file, [])
+    bound = no_better_than(file, [each for each in unknowns(file) if each != another])
     assert broken(file, bound, together) == []
     assert ("rooftop", "view") in bound.satisfies - bound.might_satisfy
     with pytest.raises(ValueError, match="cannot both SATISFY"):

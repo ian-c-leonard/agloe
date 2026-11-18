@@ -8,10 +8,15 @@ Saturday 15 May 2027 (times in America/Chicago)
 The plan relies on these FACTs and DECISIONs:
   visit-time: Museum visit starts at 2:00 pm on Saturday 15 May 2027
   visit-length: Museum visit takes 1 h
+  visit-needs-a-ticket: people need a right to take part in Museum visit
+  museum-tickets: a BOOKING for Museum visit covers Alex and Sam
   train-time: Blue Line to O'Hare can start at any time
   train-length: Blue Line to O'Hare takes 1 h
+  train-is-walk-up: nobody needs a right to take part in Blue Line to O'Hare
   flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
   flight-length: Flight home takes 2 h 30 min
   bag-drop: people must be at O'Hare 45 min before Flight home starts
+  flight-needs-a-ticket: people need a right to take part in Flight home
+  flight-tickets: a BOOKING for Flight home covers Alex and Sam
   lock-visit: Alex and Sam take part in Museum visit
   lock-flight: Alex and Sam take part in Flight home
