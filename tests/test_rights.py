@@ -694,6 +694,7 @@ def test_a_lock_says_which_unknown_facts_every_set_holds() -> None:
         tickets=True,
     )
     assert asked(checked(both_locked)) == [[Unknown("start", "tour"), free("tour")]]
+    assert answers._asked_by_a_lock(both_locked) == {Unknown("start", "tour"), free("tour")}  # pyright: ignore[reportPrivateUsage]
     assert answers._asked_by_a_lock(a_boat_tour(needs_right("tour"))) == frozenset()  # pyright: ignore[reportPrivateUsage]
     assert answers._asked_by_a_lock(a_boat_tour(locked=())) == frozenset()  # pyright: ignore[reportPrivateUsage]
 

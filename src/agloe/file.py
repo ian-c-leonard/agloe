@@ -279,13 +279,28 @@ class File:
         return next(way for way in self.ways if way.id == id)
 
     def start(self, option: str) -> Start | None:
-        return next((f for f in self.facts if isinstance(f, Start) and f.option == option), None)
+        return self._start_of.get(option)
 
     def duration(self, option: str) -> Duration | None:
-        return next((f for f in self.facts if isinstance(f, Duration) and f.option == option), None)
+        return self._duration_of.get(option)
 
     def cutoff(self, option: str) -> Cutoff | None:
-        return next((f for f in self.facts if isinstance(f, Cutoff) and f.option == option), None)
+        return self._cutoff_of.get(option)
+
+    @cached_property
+    def _start_of(self) -> dict[str, Start]:
+        """The start of each OPTION that has one stated, looked up once."""
+        return {fact.option: fact for fact in self.facts if isinstance(fact, Start)}
+
+    @cached_property
+    def _duration_of(self) -> dict[str, Duration]:
+        """How long each OPTION and WAY takes, where the FILE says, looked up once."""
+        return {fact.option: fact for fact in self.facts if isinstance(fact, Duration)}
+
+    @cached_property
+    def _cutoff_of(self) -> dict[str, Cutoff]:
+        """The access cutoff of each OPTION that has one stated, looked up once."""
+        return {fact.option: fact for fact in self.facts if isinstance(fact, Cutoff)}
 
     def satisfies(self, option: str, want: str) -> Satisfies | None:
         """The FACT about whether this OPTION SATISFIES this WANT, if the FILE states one."""
