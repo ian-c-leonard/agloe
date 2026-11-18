@@ -1,0 +1,69 @@
+{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "way": "walk",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T13:45:00-05:00[America/Chicago]",
+      "end": "2027-05-15T14:00:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "walk",
+      "persons": [
+        "sam"
+      ],
+      "start": "2027-05-15T13:45:00-05:00[America/Chicago]",
+      "end": "2027-05-15T14:00:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "museum-visit",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T14:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T15:00:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "blue-line",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T15:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T16:00:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "flight",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T17:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T19:30:00-05:00[America/Chicago]"
+    }
+  ],
+  "relies_on": [
+    "alex-start",
+    "sam-start",
+    "alex-home",
+    "sam-home",
+    "visit-time",
+    "visit-length",
+    "visit-arrival",
+    "train-time",
+    "train-length",
+    "train-boarding",
+    "flight-time",
+    "flight-length",
+    "bag-drop",
+    "walk-length",
+    "getting-home",
+    "trip-start",
+    "trip-end",
+    "lock-visit"
+  ],
+  "robust": true
+}

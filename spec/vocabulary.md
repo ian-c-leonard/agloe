@@ -20,9 +20,9 @@ The trip being planned, lived and recorded: the PERSONs it concerns, their WANTs
 
 ### SCOPE
 
-The TRIP's frame: its dates, the PLACE each traveling PERSON starts from and returns to, what the TRIP is for, and anything explicitly out of bounds. WANTs use the SCOPE to know which days and nights they cover. The dates are DECISIONs: one can say the time at which the TRIP starts, and one the time at which it ends. A TRIP can have either, both or neither. Nothing in an ITINERARY starts before the first or ends after the second.
+The TRIP's frame: its dates, the PLACE each traveling PERSON starts from and returns to, what the TRIP is for, and anything explicitly out of bounds. WANTs use the SCOPE to know which days and nights they cover. The dates are DECISIONs: one can say the time at which the TRIP starts, and one the time at which it ends. A TRIP can have either, both or neither. Nothing in an ITINERARY starts before the first or ends after the second. The two PLACEs are FACTs about a PERSON: one says where they start from, and one where they return to.
 
-*Uses:* TRIP, PLACE, PERSON, → WANT, → DECISION, → ITINERARY.
+*Uses:* TRIP, PLACE, PERSON, → WANT, → DECISION, → FACT, → ITINERARY.
 
 ### FILE
 
@@ -163,7 +163,7 @@ Something PERSONs want, or want to avoid, from the TRIP: a bed each night, seein
 A WANT is about one of two things:
 
 - something an OPTION can deliver, such as dinner, a bed or a visit; or
-- a property of the whole ITINERARY, such as "at most two hotel changes", written with a fixed set of operators (always, never, at most n times, at most a total amount per day or per TRIP, after, within).
+- a property of the whole ITINERARY, such as "at most two hotel changes", written with a fixed set of operators (always, never, at most n times, at most a total amount per day or per TRIP, after, within). Ending the TRIP at the PLACE the holder returns to is such a property.
 
 Each PERSON's ranking of their WANTs is recorded as a full snapshot; the latest applies. A negative WANT never adds an OPTION to a TRIP. Every traveling PERSON starts with a published set of starter WANTs for basic needs (a bed each night, getting home, meals, rest, staying together); they are stored like any other WANT and can be re-ranked or dropped.
 

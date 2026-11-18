@@ -26,8 +26,10 @@ from agloe.file import (
     Option,
     Person,
     Place,
+    ReturnsTo,
     Satisfies,
     Start,
+    StartsFrom,
     TripEnd,
     TripStart,
     Want,
@@ -109,6 +111,8 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
         out["want"] = unknown.want
     if unknown.person is not None:
         out["person"] = unknown.person
+    if unknown.what == "returns to":
+        out["to"] = unknown.destination
     out["at_most"] = None if needed.at_most is None else length_written(needed.at_most)
     return out
 
@@ -368,6 +372,11 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
         return f"{_name(file, unknown.option)} can start at any time"
     if unknown.what == "satisfies":
         return f"{_name(file, unknown.option)} SATISFIES {_want(file, unknown.want)}"
+    if unknown.what == "returns to":
+        person = _people(file, (unknown.person or "",))
+        if unknown.destination is None:
+            return f"the FILE names the PLACE that {person} returns to"
+        return f"{person} returns to {_names(file.places)[unknown.destination]}"
     if unknown.what == "does not satisfy":
         return f"{_name(file, unknown.option)} does not SATISFY {_want(file, unknown.want)}"
     if unknown.what == "other ways":
@@ -416,6 +425,10 @@ def _record(file: File, clock: _Clock, record: str) -> str:
         else:
             ways = f"every way straight from {places[found.origin]} to {places[found.destination]}"
         return f"{ways} that leaves between {span} is listed"
+    if isinstance(found, (StartsFrom, ReturnsTo)):
+        verb = "starts from" if isinstance(found, StartsFrom) else "returns to"
+        place = _names(file.places)[found.place]
+        return f"{_people(file, (found.person,))} {verb} {place}"
     if isinstance(found, TripStart):
         return f"the TRIP starts at {clock.moment(found.at)}"
     if isinstance(found, TripEnd):

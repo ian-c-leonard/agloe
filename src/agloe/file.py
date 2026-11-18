@@ -84,12 +84,15 @@ class Way:
 
 @dataclass(frozen=True)
 class Want:
-    """Something PERSONs want, or want to avoid, from the TRIP that an OPTION can deliver."""
+    """Something PERSONs want, or want to avoid, from the TRIP."""
 
     id: str
     name: str
     musts: tuple[str, ...]  # the PERSONs for whom it is a must: a DEGREE OF WANT of +10
     must_nots: tuple[str, ...] = ()  # those for whom it is a must-not: a DEGREE OF WANT of -10
+    # Whether it is about the whole ITINERARY and no OPTION delivers it: the holder ends the
+    # TRIP at the PLACE they return to.
+    ends_at_home: bool = False
 
 
 @dataclass(frozen=True)
@@ -197,7 +200,25 @@ class TripEnd:
     at: int
 
 
-type Fact = Start | Duration | Cutoff | Complete | Satisfies | CompleteFor
+@dataclass(frozen=True)
+class StartsFrom:
+    """A FACT: where a PERSON starts from. The PERSON's path begins at this PLACE."""
+
+    id: str
+    person: str
+    place: str
+
+
+@dataclass(frozen=True)
+class ReturnsTo:
+    """A FACT: where a PERSON returns to: the PLACE that ending the TRIP at home means for them."""
+
+    id: str
+    person: str
+    place: str
+
+
+type Fact = Start | Duration | Cutoff | Complete | Satisfies | CompleteFor | StartsFrom | ReturnsTo
 type Decision = Lock | TripStart | TripEnd
 
 
@@ -248,6 +269,16 @@ class File:
     def trip_end(self) -> TripEnd | None:
         """The DECISION about when the TRIP ends, if the FILE holds one."""
         return next((each for each in self.decisions if isinstance(each, TripEnd)), None)
+
+    def starts_from(self, person: str) -> StartsFrom | None:
+        """The FACT about where this PERSON starts from, if the FILE states one."""
+        facts = (fact for fact in self.facts if isinstance(fact, StartsFrom))
+        return next((fact for fact in facts if fact.person == person), None)
+
+    def returns_to(self, person: str) -> ReturnsTo | None:
+        """The FACT about where this PERSON returns to, if the FILE states one."""
+        facts = (fact for fact in self.facts if isinstance(fact, ReturnsTo))
+        return next((fact for fact in facts if fact.person == person), None)
 
     def complete_for(self, want: str) -> CompleteFor | None:
         """The FACT that the FILE states every OPTION that SATISFIES this WANT, if there is one."""
@@ -553,8 +584,12 @@ def load(document: object) -> File:
             problems.append(f"{where}: {person} is a holder more than once")
         musts = tuple(each["person"] for each in want["holders"] if each["degree"] == 10)
         must_nots = tuple(each["person"] for each in want["holders"] if each["degree"] == -10)
-        wants.append(Want(want["id"], want["name"], musts, must_nots))
+        about_the_end = "itinerary" in want
+        if about_the_end and must_nots:
+            problems.append(f"{where}: a FILE can state the WANT to end at home only as a must")
+        wants.append(Want(want["id"], want["name"], musts, must_nots, about_the_end))
     want_ids = {want.id for want in wants}
+    not_delivered = {want.id for want in wants if want.ends_at_home}
 
     facts: list[Fact] = []
     stated: set[tuple[str, type]] = set()
@@ -567,6 +602,8 @@ def load(document: object) -> File:
             whole = fact["complete"]
             if "satisfies" in whole:
                 known(where, whole["satisfies"], "WANT", want_ids)
+                if whole["satisfies"] in not_delivered:
+                    problems.append(f"{where}: no OPTION delivers {whole['satisfies']}")
                 if (whole["satisfies"], CompleteFor) in stated:
                     about = whole["satisfies"]
                     problems.append(f"{where}: another FACT already states this about {about}")
@@ -587,6 +624,16 @@ def load(document: object) -> File:
                 problems.append(f"{where}: another FACT already states this")
             complete.add((origin, destination, earliest, latest))
             facts.append(Complete(fact["id"], origin, destination, earliest, latest))
+            continue
+        if "person" in fact:
+            known(where, fact["person"], "PERSON", person_ids)
+            place = fact["starts_from"] if "starts_from" in fact else fact["returns_to"]
+            known(where, place, "PLACE", place_ids)
+            kind = StartsFrom if "starts_from" in fact else ReturnsTo
+            if (fact["person"], kind) in stated:
+                problems.append(f"{where}: another FACT already states this about {fact['person']}")
+            stated.add((fact["person"], kind))
+            facts.append(kind(fact["id"], fact["person"], place))
             continue
         made: Fact
         if "way" in fact:
@@ -609,6 +656,8 @@ def load(document: object) -> File:
         if "satisfies" in fact:
             about = fact["satisfies"]
             known(where, about["want"], "WANT", want_ids)
+            if about["want"] in not_delivered:
+                problems.append(f"{where}: no OPTION delivers {about['want']}")
             if (fact["option"], about["want"]) in satisfied:
                 both = f"{fact['option']} and {about['want']}"
                 problems.append(f"{where}: another FACT already states this about {both}")

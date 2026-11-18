@@ -14,7 +14,7 @@ Today the COMPILER reads a trip file and gives one of three answers, each with i
 - **INFEASIBLE:** the trip cannot work. The report names the FACTs, WANTs and DECISIONs that clash.
 - **UNDETERMINED:** the file does not say enough to tell. The report names what it would have to say for the trip to work.
 
-It checks times and places for one traveler or a group, over one day or several. It also checks what each person must have and must not have. The [rules](spec/rules.md) say exactly what it checks, and every trip under [`examples/`](examples/) is one of its tests.
+It checks times and places for one traveler or a group, over one day or several. It checks what each person must have and must not have. It also checks that the trip fits between its start and its end, and that each person can get home. The [rules](spec/rules.md) say exactly what it checks, and every trip under [`examples/`](examples/) is one of its tests.
 
 From a copy of this repository:
 

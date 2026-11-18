@@ -31,15 +31,18 @@ from tests.stories import (
     any_time,
     complete,
     cutoff,
+    ends_at_home,
     every,
     lasts,
     lasts_between,
     lock,
     moves,
     must,
+    returns_to,
     satisfies,
     seconds,
     starts_at,
+    starts_from,
     stays,
     takes,
     takes_between,
@@ -64,6 +67,7 @@ def random_trip(
     must_nots: float = 0,
     whole_sets: float = 0,
     with_times: float = 0,
+    with_ends: float = 0,
 ) -> File:
     """Two or three OPTIONs on a quarter-hour grid.
 
@@ -75,7 +79,9 @@ def random_trip(
     has the WANT as a must-not instead. For each OPTION and WANT, a FACT says that the OPTION
     SATISFIES the WANT, or that it does not, or the FILE says nothing. ``whole_sets`` is how
     often a FACT says that a WANT's set is COMPLETE. ``with_times`` is how often a DECISION says
-    when the TRIP starts, and how often one says when it ends, both on the grid.
+    when the TRIP starts, and how often one says when it ends, both on the grid. ``with_ends``
+    is how often a FACT says where a PERSON starts from, how often one says where they return
+    to, and how often ending the TRIP at home is a must for them.
     """
     count = count or rng.choice([2, 3])
     if persons is None:
@@ -145,6 +151,15 @@ def random_trip(
                     facts.append(satisfies(option["id"], id, degree))
             if whole_sets and rng.random() < whole_sets:
                 facts.append(every(id))
+    if with_ends:
+        for person in persons:
+            if rng.random() < with_ends:
+                facts.append(starts_from(person, rng.choice(PLACES)))
+            if rng.random() < with_ends:
+                facts.append(returns_to(person, rng.choice(PLACES)))
+        going_home = [person for person in persons if rng.random() < with_ends]
+        if going_home:
+            wants.append(ends_at_home(*going_home))
     if with_times and rng.random() < with_times:
         decisions.append(at_the_start(rng))
     if with_times and rng.random() < with_times:
@@ -432,8 +447,15 @@ def possible_world(rng: Random, file: File) -> World:
         for person in want.musts
         if file.complete_for(want.id) is None and rng.random() < 0.3
     )
-    # One possible world: what SATISFIES a WANT is the same for a must and for a must-not.
-    return World(terms, unlisted, slow, takes, frozenset(delivers), frozenset(delivers), elsewhere)
+    # One possible world: what SATISFIES a WANT is the same for a must and for a must-not, and
+    # everybody has one home.
+    homes: dict[str, str | None] = {}
+    for person in file.persons:
+        stated = file.returns_to(person.id)
+        homes[person.id] = rng.choice(PLACES) if stated is None else stated.place
+    return World(
+        terms, unlisted, slow, takes, frozenset(delivers), frozenset(delivers), elsewhere, homes
+    )
 
 
 def any_choice(rng: Random, file: File, world: World) -> Itinerary:
@@ -471,6 +493,21 @@ def any_choice(rng: Random, file: File, world: World) -> Itinerary:
                 quarters = max((after.start - before.start) // QUARTER, 0)
                 start = before.start + QUARTER * rng.randrange(quarters + 1)
                 steps.append(Step(None, origin, destination, (person,), start, None, name))
+        # A WAY from where the PERSON starts from, and a WAY home, where one goes straight there.
+        begins, home = file.starts_from(person), world.home.get(person)
+        first = mine[0].origin if mine else home
+        if begins is not None and first is not None and begins.place != first:
+            direct = [leg for leg in legs if leg[1:] == (begins.place, first)]
+            if direct and rng.random() < 0.8:
+                name, origin, destination = rng.choice(direct)
+                early = (mine[0].start if mine else seconds(9)) - QUARTER * rng.randrange(3)
+                steps.append(Step(None, origin, destination, (person,), early, None, name))
+        if mine and home is not None and mine[-1].destination != home:
+            direct = [leg for leg in legs if leg[1:] == (mine[-1].destination, home)]
+            if direct and rng.random() < 0.8:
+                name, origin, destination = rng.choice(direct)
+                late = mine[-1].start + QUARTER * rng.randrange(4)
+                steps.append(Step(None, origin, destination, (person,), late, None, name))
     if legs:
         for _ in range(rng.choice([0, 0, 0, 1])):
             name, origin, destination = rng.choice(legs)

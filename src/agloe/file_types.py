@@ -69,6 +69,7 @@ class Holder(TypedDict):
 class Want(TypedDict):
     id: Id
     name: Name
+    itinerary: NotRequired[Literal["ends_at_home"]]
     holders: list[Holder]
 
 
@@ -159,6 +160,18 @@ class CompleteForAWant(TypedDict):
     complete: Satisfying
 
 
+class StartsFrom(TypedDict):
+    id: Id
+    person: Id
+    starts_from: Id
+
+
+class ReturnsTo(TypedDict):
+    id: Id
+    person: Id
+    returns_to: Id
+
+
 class TripStart(TypedDict):
     id: Id
     trip_starts_at: Time
@@ -192,5 +205,7 @@ class File(TypedDict):
         | CompleteSet
         | Satisfies
         | CompleteForAWant
+        | StartsFrom
+        | ReturnsTo
     ]
     decisions: list[Lock | TripStart | TripEnd]

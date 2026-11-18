@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 from itertools import combinations
 
-from agloe.file import Complete, CompleteFor, Fact, File, Lock, Start
+from agloe.file import Complete, CompleteFor, Fact, File, Lock, ReturnsTo, Start, StartsFrom
 from agloe.reference import (
     Broken,
     Itinerary,
@@ -25,6 +25,7 @@ from agloe.reference import (
     first_shown,
     in_world,
     longest_case,
+    must_end_at_home,
     no_better_than,
     one_way_each,
     unknowns,
@@ -115,10 +116,17 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact) -> bool:
     """Whether a plan relies on this FACT.
 
     It relies on every FACT about an OPTION or a WAY it has in it. It relies on no COMPLETE set
-    of travel: it takes no unlisted WAY.
+    of travel: it takes no unlisted WAY. It relies on where a PERSON starts from where the
+    PERSON is in it, or must end the TRIP at home: the start is then where their path begins,
+    or where they stay. It relies on where a PERSON returns to where they must end at home.
     """
     if isinstance(fact, CompleteFor):
         return _settles(file, itinerary, fact)
+    if isinstance(fact, ReturnsTo):
+        return must_end_at_home(file, fact.person)
+    if isinstance(fact, StartsFrom):
+        in_it = any(fact.person in step.persons for step in itinerary)
+        return in_it or must_end_at_home(file, fact.person)
     if isinstance(fact, Complete):
         return False
     return fact.option in {step.option or step.way for step in itinerary}
@@ -212,7 +220,7 @@ def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
 
     None for an unknown that is not a length of time, and None when any length would do.
     """
-    if unknown.what in ("start", "satisfies", "does not satisfy", "another option"):
+    if unknown.what in ("start", "satisfies", "does not satisfy", "another option", "returns to"):
         return None
 
     def enough(seconds: int) -> bool:

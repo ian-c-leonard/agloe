@@ -1,0 +1,7 @@
+UNDETERMINED: the FILE does not say enough to tell.
+
+The trip works in any of these cases:
+  1. Sam returns to the hotel.
+  2. Sam returns to the Art Institute.
+  3. Sam returns to O'Hare.
+  4. Sam returns to home.

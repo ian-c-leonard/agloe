@@ -1,0 +1,27 @@
+FEASIBLE: this trip works.
+
+Saturday 15 May 2027 (times in America/Chicago)
+  1:45 pm to 2:00 pm: the walk between the hotel and the Art Institute, Alex and Sam
+  2:00 pm to 3:00 pm: Museum visit, Alex and Sam
+  3:00 pm to 4:00 pm: Blue Line to O'Hare, Alex and Sam
+  5:00 pm to 7:30 pm: Flight home, Alex and Sam
+
+The plan relies on these FACTs, WANTs and DECISIONs:
+  alex-start: Alex starts from the hotel
+  sam-start: Sam starts from the hotel
+  alex-home: Alex returns to home
+  sam-home: Sam returns to home
+  visit-time: Museum visit starts at 2:00 pm on Saturday 15 May 2027
+  visit-length: Museum visit takes 1 h
+  visit-arrival: nobody has to be at the Art Institute before Museum visit starts
+  train-time: Blue Line to O'Hare can start at any time
+  train-length: Blue Line to O'Hare takes 1 h
+  train-boarding: nobody has to be at the Art Institute before Blue Line to O'Hare starts
+  flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
+  flight-length: Flight home takes 2 h 30 min
+  bag-drop: people must be at O'Hare 45 min before Flight home starts
+  walk-length: the walk between the hotel and the Art Institute takes 15 min
+  getting-home: getting home is a must for Alex and Sam
+  trip-start: the TRIP starts at 12:00 pm on Saturday 15 May 2027
+  trip-end: the TRIP ends at 7:30 pm on Saturday 15 May 2027
+  lock-visit: Alex and Sam take part in Museum visit

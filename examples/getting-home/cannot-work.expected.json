@@ -1,0 +1,14 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "sam-home",
+    "visit-time",
+    "visit-length",
+    "flight-time",
+    "bag-drop",
+    "every-way-home",
+    "getting-home",
+    "trip-end",
+    "lock-visit"
+  ]
+}
