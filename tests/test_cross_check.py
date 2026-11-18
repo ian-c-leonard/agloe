@@ -63,6 +63,7 @@ def random_trip(
     with_wants: float = 0,
     must_nots: float = 0,
     whole_sets: float = 0,
+    with_times: float = 0,
 ) -> File:
     """Two or three OPTIONs on a quarter-hour grid.
 
@@ -73,7 +74,8 @@ def random_trip(
     has one or two WANTs, each a must for some PERSONs. ``must_nots`` is how often a holder
     has the WANT as a must-not instead. For each OPTION and WANT, a FACT says that the OPTION
     SATISFIES the WANT, or that it does not, or the FILE says nothing. ``whole_sets`` is how
-    often a FACT says that a WANT's set is COMPLETE.
+    often a FACT says that a WANT's set is COMPLETE. ``with_times`` is how often a DECISION says
+    when the TRIP starts, and how often one says when it ends, both on the grid.
     """
     count = count or rng.choice([2, 3])
     if persons is None:
@@ -143,7 +145,23 @@ def random_trip(
                     facts.append(satisfies(option["id"], id, degree))
             if whole_sets and rng.random() < whole_sets:
                 facts.append(every(id))
+    if with_times and rng.random() < with_times:
+        decisions.append(at_the_start(rng))
+    if with_times and rng.random() < with_times:
+        decisions.append(at_the_end(rng))
     return trip(persons, PLACES, options, facts, decisions, ways, wants)
+
+
+def at_the_start(rng: Random) -> Document:
+    """A DECISION that the TRIP starts at 8:30 am, 8:45 am, 9:00 am or 9:15 am."""
+    quarter = rng.randrange(-2, 2)
+    return {"id": "trip-start", "trip_starts_at": at_second(seconds(9) + QUARTER * quarter)}
+
+
+def at_the_end(rng: Random) -> Document:
+    """A DECISION that the TRIP ends at a quarter hour from 9:30 am to 10:30 am."""
+    quarter = rng.randrange(2, 7)
+    return {"id": "trip-end", "trip_ends_at": at_second(seconds(9) + QUARTER * quarter)}
 
 
 def at_second(moment: int) -> str:

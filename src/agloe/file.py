@@ -181,7 +181,24 @@ class CompleteFor:
     want: str
 
 
+@dataclass(frozen=True)
+class TripStart:
+    """A DECISION: when the TRIP starts. Nothing in an ITINERARY starts before this time."""
+
+    id: str
+    at: int
+
+
+@dataclass(frozen=True)
+class TripEnd:
+    """A DECISION: when the TRIP ends. Nothing in an ITINERARY ends after this time."""
+
+    id: str
+    at: int
+
+
 type Fact = Start | Duration | Cutoff | Complete | Satisfies | CompleteFor
+type Decision = Lock | TripStart | TripEnd
 
 
 @dataclass(frozen=True)
@@ -194,8 +211,13 @@ class File:
     ways: tuple[Way, ...]
     wants: tuple[Want, ...]
     facts: tuple[Fact, ...]
-    locks: tuple[Lock, ...]
+    decisions: tuple[Decision, ...]
     zone: str = "UTC"  # the time zone of the first time in the FILE; reports show times in it
+
+    @property
+    def locks(self) -> tuple[Lock, ...]:
+        """The LOCKs among the DECISIONs, in the FILE's order."""
+        return tuple(each for each in self.decisions if isinstance(each, Lock))
 
     def option(self, id: str) -> Option:
         return next(option for option in self.options if option.id == id)
@@ -218,6 +240,14 @@ class File:
             if isinstance(fact, Satisfies) and (fact.option, fact.want) == (option, want):
                 return fact
         return None
+
+    def trip_start(self) -> TripStart | None:
+        """The DECISION about when the TRIP starts, if the FILE holds one."""
+        return next((each for each in self.decisions if isinstance(each, TripStart)), None)
+
+    def trip_end(self) -> TripEnd | None:
+        """The DECISION about when the TRIP ends, if the FILE holds one."""
+        return next((each for each in self.decisions if isinstance(each, TripEnd)), None)
 
     def complete_for(self, want: str) -> CompleteFor | None:
         """The FACT that the FILE states every OPTION that SATISFIES this WANT, if there is one."""
@@ -247,7 +277,7 @@ class File:
                 for want in self.wants
             ),
             facts=tuple(fact for fact in self.facts if fact.id != record),
-            locks=tuple(lock for lock in self.locks if lock.id != record),
+            decisions=tuple(each for each in self.decisions if each.id != record),
         )
 
 
@@ -595,20 +625,42 @@ def load(document: object) -> File:
         stated.add((fact["option"], type(made)))
         facts.append(made)
 
-    locks: list[Lock] = []
+    decisions: list[Decision] = []
     for index, decision in enumerate(raw["decisions"]):
         where = f"/decisions/{index}"
         claim(where, decision["id"])
-        known(where, decision["lock"], "OPTION", option_ids)
-        for person in decision["persons"]:
-            known(where, person, "PERSON", person_ids)
-        locks.append(Lock(decision["id"], decision["lock"], tuple(decision["persons"])))
+        if "lock" in decision:
+            known(where, decision["lock"], "OPTION", option_ids)
+            for person in decision["persons"]:
+                known(where, person, "PERSON", person_ids)
+            decisions.append(Lock(decision["id"], decision["lock"], tuple(decision["persons"])))
+            continue
+        bound = (
+            TripStart(decision["id"], when(where, decision["trip_starts_at"]))
+            if "trip_starts_at" in decision
+            else TripEnd(decision["id"], when(where, decision["trip_ends_at"]))
+        )
+        if ("the TRIP", type(bound)) in stated:
+            problems.append(f"{where}: another DECISION already states this about the TRIP")
+        stated.add(("the TRIP", type(bound)))
+        decisions.append(bound)
 
+    starts = next((each.at for each in decisions if isinstance(each, TripStart)), None)
+    ends = next((each.at for each in decisions if isinstance(each, TripEnd)), None)
+    if starts is not None and ends is not None and ends < starts:
+        problems.append("/decisions: the TRIP ends before it starts")
     if problems:
         raise FileError(problems)
     zone = zones[0] if zones else "UTC"
     return File(
-        persons, places, tuple(options), tuple(ways), tuple(wants), tuple(facts), tuple(locks), zone
+        persons,
+        places,
+        tuple(options),
+        tuple(ways),
+        tuple(wants),
+        tuple(facts),
+        tuple(decisions),
+        zone,
     )
 
 

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 from itertools import combinations
 
-from agloe.file import Complete, CompleteFor, File, Start
+from agloe.file import Complete, CompleteFor, Fact, File, Lock, Start
 from agloe.reference import (
     Broken,
     Itinerary,
@@ -97,18 +97,9 @@ def check(
         longest = longest_case(file)
         robust = shown(file, longest)
         chosen = plain if robust is None else robust
-        used = {step.option or step.way for step in chosen}
-        relies_on = [
-            fact.id
-            for fact in file.facts
-            if (
-                _settles(file, chosen, fact)
-                if isinstance(fact, CompleteFor)
-                else not isinstance(fact, Complete) and fact.option in used
-            )
-        ]
+        relies_on = [fact.id for fact in file.facts if _relied_on(file, chosen, fact)]
         relies_on += [want.id for want in file.wants if want.musts or want.must_nots]
-        relies_on += [lock.id for lock in file.locks]
+        relies_on += [each.id for each in file.decisions if isinstance(each, Lock) or chosen]
         at_worst: tuple[Broken, ...] = ()
         if robust is None:
             # The steps keep the order the ITINERARY lists them in: that is the plan shown.
@@ -118,6 +109,19 @@ def check(
     if enough is not None:
         return Report(Answer.INFEASIBLE, conflict=_conflict(file, stuck, enough))
     return Report(Answer.UNDETERMINED, missing=_missing(file, works))
+
+
+def _relied_on(file: File, itinerary: Itinerary, fact: Fact) -> bool:
+    """Whether a plan relies on this FACT.
+
+    It relies on every FACT about an OPTION or a WAY it has in it. It relies on no COMPLETE set
+    of travel: it takes no unlisted WAY.
+    """
+    if isinstance(fact, CompleteFor):
+        return _settles(file, itinerary, fact)
+    if isinstance(fact, Complete):
+        return False
+    return fact.option in {step.option or step.way for step in itinerary}
 
 
 def _settles(file: File, itinerary: Itinerary, whole: CompleteFor) -> bool:
@@ -163,7 +167,7 @@ def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[str, ..
 def _records(file: File) -> list[str]:
     """The FACTs, then the WANTs that ask something of a PERSON, then the DECISIONs."""
     wants = [want.id for want in file.wants if want.musts or want.must_nots]
-    return [*(fact.id for fact in file.facts), *wants, *(lock.id for lock in file.locks)]
+    return [*(fact.id for fact in file.facts), *wants, *(each.id for each in file.decisions)]
 
 
 def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
@@ -215,8 +219,10 @@ def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
         return works(file, with_this_long(file, unknown, seconds))
 
     # Only two fixed times can limit a length of time: it must fit between them. So a length
-    # longer than the time between the earliest and the latest fixed time has no limit.
+    # longer than the time between the earliest and the latest fixed time has no limit. The
+    # times the TRIP starts and ends are fixed times too.
     fixed = [fact.at for fact in file.facts if isinstance(fact, Start) and fact.at is not None]
+    fixed += [bound.at for bound in (file.trip_start(), file.trip_end()) if bound is not None]
     for fact in file.facts:
         if isinstance(fact, Complete):
             fixed += [fact.earliest - 1, fact.latest + 1]

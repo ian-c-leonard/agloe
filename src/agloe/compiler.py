@@ -67,7 +67,7 @@ def stuck(remaining: Remaining) -> frozenset[str] | None:
     file = remaining.file
     world = reference.best_case(file)
     search = _Search(file, world, switched=True, unsaid=remaining.unsaid)
-    records = [record.id for record in (*file.facts, *file.wants, *file.locks)]
+    records = [record.id for record in (*file.facts, *file.wants, *file.decisions)]
     choice, needed = search.clash(records)
     if choice is not None:
         does = search.turned_out
@@ -177,11 +177,14 @@ class _Search:
         self.model = cp_model.CpModel()
         self.switch: dict[str, cp_model.IntVar] = {}
         if switched:
-            for record in (*file.facts, *file.wants, *file.locks):
+            for record in (*file.facts, *file.wants, *file.decisions):
                 self.switch[record.id] = self.model.new_bool_var(f"given {record.id}")
         self._read_the_world()
         self._count_time()
         self._choose_who_takes_part()
+        for index in range(len(file.options)):
+            lasts = None if self.endless[index] else self.lasts[index]
+            self._keep_within_the_trip(self.start[index], lasts, self.used[index])
         self.follows: list[dict[tuple[int, int], cp_model.IntVar]] = []
         self.nothing: list[cp_model.IntVar] = []
         # For each PERSON, the routes between two OPTIONs in different PLACEs, each with the
@@ -236,6 +239,7 @@ class _Search:
         model, options, terms, world = self.model, self.file.options, self.terms, self.world
         fixed = [each.fixed_start for each in terms if each.fixed_start is not None]
         spans = [moment for fact in self.facts for moment in (fact.earliest - 1, fact.latest + 1)]
+        spans += [bound.at for bound in (self.file.trip_start(), self.file.trip_end()) if bound]
         self.zero = min([*fixed, *spans], default=0)
         room = sum(each.shortest for each in terms) + sum(each.margin or 0 for each in terms) + 1
         slowest = max([world.unlisted_takes, *(shortest for shortest, _ in world.takes.values())])
@@ -473,12 +477,36 @@ class _Search:
                 _when(model.add(moment >= free), chosen)
                 if way is None:
                     self._outside_every_span(moment, origin, destination, chosen)
+                self._keep_within_the_trip(moment, self.way_lasts[way], chosen)
                 free = moment + self.way_lasts[way]
             _when(model.add(self.start[after] >= free + margin), chosen)
             if not self.moves[after]:
                 _when(model.add(arrived[after] >= free), chosen)
             self.legs.append((chosen, len(route)))
         return next_, list(zip(via, possible, strict=True))
+
+    def _keep_within_the_trip(
+        self, begins: _Amount, lasts: _Amount | None, happens: cp_model.IntVar
+    ) -> None:
+        """What happens starts no earlier than the TRIP starts and ends no later than it ends.
+
+        ``lasts`` is None for something with no limit to how long it takes. That is never over
+        in time, so it cannot happen where the TRIP has an end. Each limit applies only while
+        its DECISION is given.
+        """
+        model, file = self.model, self.file
+        opens, closes = file.trip_start(), file.trip_end()
+        if opens is not None:
+            given = self.switch.get(opens.id)
+            when = [happens] if given is None else [happens, given]
+            _when(model.add(begins >= opens.at - self.zero), *when)
+        if closes is not None:
+            given = self.switch.get(closes.id)
+            when = [happens] if given is None else [happens, given]
+            if lasts is None:
+                model.add_bool_or([each.negated() for each in when])
+            else:
+                _when(model.add(begins + lasts <= closes.at - self.zero), *when)
 
     def _routes(self, here: str, there: str) -> list[reference.Route]:
         """The routes from one PLACE to another worth choosing between, worked out once.

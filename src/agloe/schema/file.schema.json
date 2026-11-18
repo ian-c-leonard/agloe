@@ -34,7 +34,16 @@
         ]
       }
     },
-    "decisions": { "type": "array", "items": { "$ref": "#/$defs/lock" } }
+    "decisions": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/lock" },
+          { "$ref": "#/$defs/trip_start" },
+          { "$ref": "#/$defs/trip_end" }
+        ]
+      }
+    }
   },
   "$defs": {
     "id": {
@@ -328,6 +337,28 @@
             "satisfies": { "$ref": "#/$defs/id" }
           }
         }
+      }
+    },
+    "trip_start": {
+      "title": "TripStart",
+      "description": "A DECISION: when the TRIP starts. Nothing in an ITINERARY starts before this time.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "trip_starts_at"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "trip_starts_at": { "$ref": "#/$defs/time" }
+      }
+    },
+    "trip_end": {
+      "title": "TripEnd",
+      "description": "A DECISION: when the TRIP ends. Nothing in an ITINERARY ends after this time.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "trip_ends_at"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "trip_ends_at": { "$ref": "#/$defs/time" }
       }
     },
     "lock": {

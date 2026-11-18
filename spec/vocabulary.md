@@ -20,9 +20,9 @@ The trip being planned, lived and recorded: the PERSONs it concerns, their WANTs
 
 ### SCOPE
 
-The TRIP's frame: its dates, the PLACE each traveling PERSON starts from and returns to, what the TRIP is for, and anything explicitly out of bounds. WANTs use the SCOPE to know which days and nights they cover.
+The TRIP's frame: its dates, the PLACE each traveling PERSON starts from and returns to, what the TRIP is for, and anything explicitly out of bounds. WANTs use the SCOPE to know which days and nights they cover. The dates are two DECISIONs: the time at which the TRIP starts and the time at which it ends. Nothing in an ITINERARY starts before the first or ends after the second.
 
-*Uses:* TRIP, PLACE, PERSON, → WANT.
+*Uses:* TRIP, PLACE, PERSON, → WANT, → DECISION, → ITINERARY.
 
 ### FILE
 
@@ -67,7 +67,7 @@ A COMPLETE set that is empty means "we looked, and there is nothing". A FACT tha
 
 ### DECISION
 
-A dated choice by a PERSON: a LOCK, a PIN or a DISMISSAL, or the undoing of one. A DECISION is never edited; changing your mind is a new DECISION that names the one it undoes.
+A dated choice by a PERSON: a LOCK, a PIN, a DISMISSAL, or the time at which the TRIP starts or ends, or the undoing of one. A DECISION is never edited; changing your mind is a new DECISION that names the one it undoes.
 
 *Uses:* → PERSON, → LOCK, → PIN, → DISMISSAL.
 

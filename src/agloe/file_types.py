@@ -159,6 +159,16 @@ class CompleteForAWant(TypedDict):
     complete: Satisfying
 
 
+class TripStart(TypedDict):
+    id: Id
+    trip_starts_at: Time
+
+
+class TripEnd(TypedDict):
+    id: Id
+    trip_ends_at: Time
+
+
 class Lock(TypedDict):
     id: Id
     lock: Id
@@ -183,4 +193,4 @@ class File(TypedDict):
         | Satisfies
         | CompleteForAWant
     ]
-    decisions: list[Lock]
+    decisions: list[Lock | TripStart | TripEnd]
