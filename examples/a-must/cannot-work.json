@@ -1,0 +1,37 @@
+{
+  "persons": [
+    { "id": "alex", "name": "Alex" }
+  ],
+  "places": [
+    { "id": "river-north", "name": "River North" },
+    { "id": "blues-club", "name": "the blues club" }
+  ],
+  "options": [
+    { "id": "dinner-pizzeria", "name": "Dinner at the deep-dish place", "place": "river-north" },
+    { "id": "dinner-tavern", "name": "Dinner at the tavern", "place": "river-north" },
+    { "id": "blues-show", "name": "Blues show", "place": "blues-club" }
+  ],
+  "ways": [
+    { "id": "walk-to-club", "name": "the walk between River North and the blues club", "between": ["river-north", "blues-club"] }
+  ],
+  "wants": [
+    { "id": "deep-dish", "name": "deep-dish pizza", "holders": [{ "person": "alex", "degree": 10 }] }
+  ],
+  "facts": [
+    { "id": "pizzeria-time", "option": "dinner-pizzeria", "starts_at": "2027-05-14T19:45:00-05:00[America/Chicago]" },
+    { "id": "pizzeria-length", "option": "dinner-pizzeria", "duration": "PT1H30M" },
+    { "id": "pizzeria-arrival", "option": "dinner-pizzeria", "arrive_before_start": "PT0S" },
+    { "id": "pizzeria-serves-it", "option": "dinner-pizzeria", "satisfies": { "want": "deep-dish", "degree": 9 } },
+    { "id": "tavern-time", "option": "dinner-tavern", "starts_at": "2027-05-14T19:00:00-05:00[America/Chicago]" },
+    { "id": "tavern-length", "option": "dinner-tavern", "duration": "PT1H" },
+    { "id": "tavern-arrival", "option": "dinner-tavern", "arrive_before_start": "PT0S" },
+    { "id": "show-time", "option": "blues-show", "starts_at": "2027-05-14T21:00:00-05:00[America/Chicago]" },
+    { "id": "show-length", "option": "blues-show", "duration": "PT2H" },
+    { "id": "show-doors", "option": "blues-show", "arrive_before_start": "PT10M" },
+    { "id": "walk-to-club-length", "way": "walk-to-club", "duration": "PT15M" },
+    { "id": "every-deep-dish-place", "complete": { "satisfies": "deep-dish" } }
+  ],
+  "decisions": [
+    { "id": "lock-show", "lock": "blues-show", "persons": ["alex"] }
+  ]
+}

@@ -5,8 +5,9 @@ must agree with it. It refuses an ITINERARY too large for it to try everything.
 
 Read it beside spec/rules.md. The worlds are the section "What is unknown". No world here has
 an unlisted WAY that SATISFIES a WANT, and the answers do not need one. In the best case another
-OPTION already meets every must, and no unlisted WAY has to break a must-not. The worst case has
-no unlisted WAY at all.
+OPTION already meets every must on a WANT whose set is not COMPLETE, no unlisted WAY SATISFIES a
+WANT whose set is COMPLETE, and none has to break a must-not. The worst case has no unlisted WAY
+at all.
 
 ``broken`` is the section "The CONSTRAINTs": it checks a finished ITINERARY against all eight,
 and nothing here or in the solver counts as working unless it passes. ``itineraries`` is the
@@ -20,7 +21,7 @@ from enum import Enum
 from heapq import heapify, heappop, heappush
 from itertools import combinations, groupby, pairwise, permutations, product
 
-from agloe.file import Complete, File
+from agloe.file import Complete, File, Satisfies
 
 _MOST_TO_TAKE_OUT = 12  # ``needless`` tries every combination of things to take out
 
@@ -157,9 +158,9 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
 
     That an OPTION SATISFIES a WANT can help only where the WANT is a must for some PERSON,
     and that it does not only where the WANT is a must-not for some PERSON. So only those are
-    listed.
+    listed. Where a FACT says a WANT's set is COMPLETE, nothing about the WANT is unknown.
     """
-    musts = [want for want in file.wants if want.musts]
+    musts = [want for want in file.wants if want.musts and file.complete_for(want.id) is None]
     out: list[Unknown] = []
     for option in file.options:
         if file.start(option.id) is None:
@@ -169,7 +170,7 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
         if file.cutoff(option.id) is None:
             out.append(Unknown("cutoff", option.id))
         for want in file.wants:
-            if file.satisfies(option.id, want.id) is None:
+            if file.says(option.id, want.id) is None:
                 if want.musts:
                     out.append(Unknown("satisfies", option.id, want=want.id))
                 if want.must_nots:
@@ -190,6 +191,72 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
 def best_case(file: File) -> World:
     """The possible world in which every unknown FACT turns out as well as it can."""
     return _world(file, None)
+
+
+@dataclass(frozen=True)
+class Remaining:
+    """What is left of a FILE while a conflict is looked for: the FILE with records taken out.
+
+    Taking a FACT out makes what it stated unknown. That is more than leaving the FACT out.
+    Where a FACT says a WANT's set is COMPLETE, an OPTION with no FACT about the WANT does not
+    SATISFY it. An OPTION whose FACT about the WANT was taken out might. ``unsaid`` holds each
+    such OPTION and WANT. It belongs to the search for a conflict: no FILE that is read has it,
+    and no answer is ever given for what is left.
+    """
+
+    file: File
+    unsaid: frozenset[tuple[str, str]] = frozenset()
+
+    def without(self, record: str) -> Remaining:
+        """What is left with one more FACT, WANT or DECISION taken out."""
+        taken = {
+            (fact.option, fact.want)
+            for fact in self.file.facts
+            if isinstance(fact, Satisfies) and fact.id == record
+        }
+        return Remaining(self.file.without(record), self.unsaid | taken)
+
+    def reopened(self) -> list[tuple[str, str]]:
+        """Each OPTION and WANT that nobody knows about though the WANT's set is COMPLETE.
+
+        They come in the FILE's order of OPTIONs and then of WANTs.
+        """
+        file = self.file
+        return [
+            (option.id, want.id)
+            for option in file.options
+            for want in file.wants
+            if (option.id, want.id) in self.unsaid
+            and file.satisfies(option.id, want.id) is None
+            and file.complete_for(want.id) is not None
+        ]
+
+
+def best_cases(remaining: Remaining) -> Iterator[World]:
+    """Each best case of what is left of a FILE, one at a time. A FILE as it is read has one.
+
+    In that one, an OPTION with no FACT about a WANT does not SATISFY it. That is as good as it
+    gets where another OPTION meets every must, and where the WANT's set is COMPLETE.
+
+    An OPTION and a WANT that are reopened are different: nobody knows, and no other OPTION can
+    stand in. Where the WANT is a must for some PERSON and a must-not for nobody, the best case
+    is that the OPTION SATISFIES it. Where it is only a must-not, the best case is that it does
+    not. Where it is both, a must may need what a must-not fears, so each way it could turn out
+    is a best case of its own. Only those are tried both ways.
+    """
+    file = remaining.file
+    best = best_case(file)
+    wants = {want.id: want for want in file.wants}
+    helps = {pair for pair in remaining.reopened() if not wants[pair[1]].must_nots}
+    helps = {pair for pair in helps if wants[pair[1]].musts}
+    either = [
+        pair for pair in remaining.reopened() if wants[pair[1]].musts and wants[pair[1]].must_nots
+    ]
+    for chosen in product([False, True], repeat=len(either)):
+        does = helps | {pair for pair, yes in zip(either, chosen, strict=True) if yes}
+        yield replace(
+            best, satisfies=best.satisfies | does, might_satisfy=best.might_satisfy | does
+        )
 
 
 def worst_case(file: File) -> World:
@@ -238,7 +305,7 @@ def no_better_than(file: File, found: Iterable[Unknown]) -> World:
         (option.id, want.id)
         for option in file.options
         for want in file.wants
-        if file.satisfies(option.id, want.id) is None
+        if file.says(option.id, want.id) is None
     }
     conditions = frozenset(
         (each.want, each.person)
@@ -319,9 +386,9 @@ def _world(
     for option in file.options:
         for want in file.wants:
             pair = (option.id, want.id)
-            stated = file.satisfies(*pair)
-            if stated is not None:
-                if stated.degree > 0:
+            said = file.says(*pair)
+            if said is not None:
+                if said:
                     satisfies.add(pair)
                     might_satisfy.add(pair)
                 continue
@@ -335,7 +402,8 @@ def _world(
         (want.id, person)
         for want in file.wants
         for person in want.musts
-        if well(Unknown("another option", want=want.id, person=person))
+        if file.complete_for(want.id) is None
+        and well(Unknown("another option", want=want.id, person=person))
     )
     return World(
         terms,

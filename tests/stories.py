@@ -83,6 +83,11 @@ def must_not(id: str, *persons: str) -> Document:
     return must(id, never=persons)
 
 
+def every(want: str) -> Document:
+    """A FACT that the FILE states every OPTION that SATISFIES this WANT."""
+    return {"id": f"every-{want}", "complete": {"satisfies": want}}
+
+
 def satisfies(option: str, want: str, degree: int = 10) -> Document:
     """A FACT about how fully an OPTION delivers a WANT. A degree of zero says it does not."""
     about = {"want": want, "degree": degree}

@@ -169,7 +169,19 @@ class Lock:
     persons: tuple[str, ...]
 
 
-type Fact = Start | Duration | Cutoff | Complete | Satisfies
+@dataclass(frozen=True)
+class CompleteFor:
+    """A FACT: the FILE states every OPTION that SATISFIES this WANT.
+
+    Each one is listed, with a FACT that it SATISFIES the WANT. So an OPTION with no such FACT
+    does not SATISFY it, and no OPTION outside the FILE does.
+    """
+
+    id: str
+    want: str
+
+
+type Fact = Start | Duration | Cutoff | Complete | Satisfies | CompleteFor
 
 
 @dataclass(frozen=True)
@@ -207,11 +219,26 @@ class File:
                 return fact
         return None
 
-    def without(self, record: str) -> File:
-        """The same FILE with one FACT, WANT or DECISION taken out.
+    def complete_for(self, want: str) -> CompleteFor | None:
+        """The FACT that the FILE states every OPTION that SATISFIES this WANT, if there is one."""
+        return next((f for f in self.facts if isinstance(f, CompleteFor) and f.want == want), None)
 
-        What a FACT stated is then unknown. A WANT that is taken out stays in the FILE with no
-        holders, so it asks nothing of anyone and the FACTs about it still name a WANT.
+    def says(self, option: str, want: str) -> bool | None:
+        """Whether this OPTION SATISFIES this WANT, as far as the FILE says. None: nobody knows.
+
+        A FACT about the two settles it. Without one, a FACT that the WANT's set is COMPLETE
+        settles it too: the OPTION does not.
+        """
+        stated = self.satisfies(option, want)
+        if stated is not None:
+            return stated.degree > 0
+        return None if self.complete_for(want) is None else False
+
+    def without(self, record: str) -> File:
+        """The same FILE with one FACT, WANT or DECISION left out.
+
+        A WANT that is left out stays in the FILE with no holders, so it asks nothing of anyone
+        and the FACTs about it still name a WANT.
         """
         return replace(
             self,
@@ -498,6 +525,14 @@ def load(document: object) -> File:
         claim(where, fact["id"])
         if "complete" in fact:
             whole = fact["complete"]
+            if "satisfies" in whole:
+                known(where, whole["satisfies"], "WANT", want_ids)
+                if (whole["satisfies"], CompleteFor) in stated:
+                    about = whole["satisfies"]
+                    problems.append(f"{where}: another FACT already states this about {about}")
+                stated.add((whole["satisfies"], CompleteFor))
+                facts.append(CompleteFor(fact["id"], whole["satisfies"]))
+                continue
             origin, destination = whole.get("from"), whole.get("to")
             for place in (origin, destination):
                 if place is not None:
@@ -603,9 +638,27 @@ def _unwritable_characters(value: object, where: str) -> list[str]:
 
 
 def _describe(error: ValidationError) -> str:
-    """One schema problem as 'where: what'. A record that fits no shape gets its closest miss."""
+    """One schema problem as 'where: what'. A record that fits no shape gets its closest miss.
+
+    A FACT with ``complete`` is about travel or about a WANT. Its miss is the one for the kind
+    it was meant to be, so that a key of that kind is never named as the problem.
+    """
     where = "".join(_inside("", part) for part in error.absolute_path) or "the FILE"
-    if error.context:
-        closest = max(error.context, key=lambda miss: len(miss.absolute_path))
-        return f"{where}: fits no known shape; the closest miss: {closest.message}"
-    return f"{where}: {error.message}"
+    if not error.context:
+        return f"{where}: {error.message}"
+    misses = list(error.context)
+    whole = cast("dict[str, object]", error.instance).get("complete") if error.instance else None
+    if isinstance(whole, dict):
+        keys = set(cast("dict[str, object]", whole))
+        if "satisfies" in keys and keys & {"from", "to", "leaving"}:
+            return f"{where}: a COMPLETE set is about travel or about a WANT, never both"
+        meant = "complete_for_a_want" if "satisfies" in keys else "complete_set"
+        shapes = cast("dict[str, list[dict[str, str]]]", error.schema)["oneOf"]
+        of_that_kind = [
+            miss
+            for miss in misses
+            if shapes[cast("int", miss.relative_schema_path[0])]["$ref"].endswith(f"/{meant}")
+        ]
+        misses = of_that_kind or misses
+    closest = max(misses, key=lambda miss: len(miss.absolute_path))
+    return f"{where}: fits no known shape; the closest miss: {closest.message}"

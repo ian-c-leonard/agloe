@@ -150,6 +150,15 @@ class Satisfies(TypedDict):
     satisfies: Satisfaction
 
 
+class Satisfying(TypedDict):
+    satisfies: Id
+
+
+class CompleteForAWant(TypedDict):
+    id: Id
+    complete: Satisfying
+
+
 class Lock(TypedDict):
     id: Id
     lock: Id
@@ -172,5 +181,6 @@ class File(TypedDict):
         | WayContingentDuration
         | CompleteSet
         | Satisfies
+        | CompleteForAWant
     ]
     decisions: list[Lock]

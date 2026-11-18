@@ -31,6 +31,7 @@ from tests.stories import (
     any_time,
     complete,
     cutoff,
+    every,
     lasts,
     lasts_between,
     lock,
@@ -61,6 +62,7 @@ def random_trip(
     with_ways: float = 0,
     with_wants: float = 0,
     must_nots: float = 0,
+    whole_sets: float = 0,
 ) -> File:
     """Two or three OPTIONs on a quarter-hour grid.
 
@@ -70,7 +72,8 @@ def random_trip(
     ``with_ways`` is how often the FILE lists one or two WAYs. ``with_wants`` is how often it
     has one or two WANTs, each a must for some PERSONs. ``must_nots`` is how often a holder
     has the WANT as a must-not instead. For each OPTION and WANT, a FACT says that the OPTION
-    SATISFIES the WANT, or that it does not, or the FILE says nothing.
+    SATISFIES the WANT, or that it does not, or the FILE says nothing. ``whole_sets`` is how
+    often a FACT says that a WANT's set is COMPLETE.
     """
     count = count or rng.choice([2, 3])
     if persons is None:
@@ -138,6 +141,8 @@ def random_trip(
                 degree = rng.choice([None, None, 0, 0, 3, 10, 10])
                 if degree is not None:
                     facts.append(satisfies(option["id"], id, degree))
+            if whole_sets and rng.random() < whole_sets:
+                facts.append(every(id))
     return trip(persons, PLACES, options, facts, decisions, ways, wants)
 
 
@@ -399,12 +404,15 @@ def possible_world(rng: Random, file: File) -> World:
     delivers: set[tuple[str, str]] = set()
     for option in file.options:
         for want in file.wants:
-            stated = file.satisfies(option.id, want.id)
+            said = file.says(option.id, want.id)
             guessed = rng.random() < 0.5
-            if guessed if stated is None else stated.degree > 0:
+            if guessed if said is None else said:
                 delivers.add((option.id, want.id))
     elsewhere = frozenset(
-        (want.id, person) for want in file.wants for person in want.musts if rng.random() < 0.3
+        (want.id, person)
+        for want in file.wants
+        for person in want.musts
+        if file.complete_for(want.id) is None and rng.random() < 0.3
     )
     # One possible world: what SATISFIES a WANT is the same for a must and for a must-not.
     return World(terms, unlisted, slow, takes, frozenset(delivers), frozenset(delivers), elsewhere)

@@ -29,7 +29,8 @@
           { "$ref": "#/$defs/way_duration" },
           { "$ref": "#/$defs/way_contingent_duration" },
           { "$ref": "#/$defs/complete_set" },
-          { "$ref": "#/$defs/satisfies" }
+          { "$ref": "#/$defs/satisfies" },
+          { "$ref": "#/$defs/complete_for_a_want" }
         ]
       }
     },
@@ -306,6 +307,25 @@
               "minimum": 0,
               "maximum": 10
             }
+          }
+        }
+      }
+    },
+    "complete_for_a_want": {
+      "title": "CompleteForAWant",
+      "description": "A FACT: the FILE states every OPTION that SATISFIES the WANT. Each one is listed, with a FACT that it SATISFIES the WANT. So an OPTION with no such FACT does not SATISFY it, and no OPTION outside the FILE does.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "complete"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "complete": {
+          "title": "Satisfying",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["satisfies"],
+          "properties": {
+            "satisfies": { "$ref": "#/$defs/id" }
           }
         }
       }
