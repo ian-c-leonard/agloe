@@ -417,6 +417,24 @@ def test_a_time_that_is_not_real_is_the_only_problem_reported_for_it() -> None:
         f"/decisions/{last}: 2027-02-30T10:00:00-06:00[America/Chicago] is not a real date and time"
     )
 
+    document = flight_home()
+    not_a_day = "2027-06-31T10:00:00-05:00[America/Chicago]"
+    leaving = {"earliest": "2027-07-01T10:00:00-05:00[America/Chicago]", "latest": not_a_day}
+    document["facts"].append({"id": "every-way", "complete": {"leaving": leaving}})
+    last = len(document["facts"]) - 1
+    assert problems(document) == f"/facts/{last}: {not_a_day} is not a real date and time"
+
+
+def test_two_real_times_are_compared_whatever_else_is_wrong() -> None:
+    """The TRIP ends before it starts, and a LOCK names a PERSON the FILE does not have."""
+    document = flight_home()
+    document["decisions"] += [trip_starts(12), trip_ends(9), lock("museum-visit", "nobody")]
+    last = len(document["decisions"]) - 1
+    assert problems(document).splitlines() == [
+        f"/decisions/{last}: nobody is not a PERSON in this FILE",
+        "/decisions: the TRIP ends before it starts",
+    ]
+
 
 def test_the_search_finds_a_plan_within_the_trip_whenever_trying_everything_does() -> None:
     """Every choice of PERSONs and every start on the grid is tried, and each step is checked."""

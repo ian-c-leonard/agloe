@@ -29,15 +29,20 @@ from tests.stories import (
     at,
     complete,
     cutoff,
+    ends_at_home,
     lasts,
     lasts_between,
     lock,
     moves,
+    returns_to,
     seconds,
     starts_at,
+    starts_from,
     stays,
     takes,
     trip,
+    trip_ends,
+    trip_starts,
     way,
     way_between,
 )
@@ -63,8 +68,28 @@ FILES = sorted(
 
 @pytest.mark.parametrize("path", FILES, ids=lambda path: f"{path.parent.name}/{path.stem}")
 def test_the_compiler_gives_the_reference_checkers_report(path: Path) -> None:
+    """With the solver's own search for every part of it: no example is too big for the solver."""
     file = read(path)
-    assert compiler.check(file) == answers.check(file)
+    found = answers.check(file, compiler.shown, compiler.works, compiler.stuck)
+    assert found == answers.check(file)
+
+
+def test_a_trip_too_big_for_the_solver_gets_the_reference_checkers_answer() -> None:
+    """Sam goes through ten PLACES. Three WAYs join each to the next: 19,683 routes in all.
+
+    One WAY takes 999,999,999 hours. Where every FACT can be switched off, each route has its
+    own times in the model, and together they are more than the solver can count.
+    """
+    places = [f"p{number}" for number in range(10)]
+    ways = [way(f"w{n}-{k}", f"p{n}", f"p{n + 1}") for n in range(9) for k in range(3)]
+    facts = [starts_from("sam", "p0"), returns_to("sam", "p9"), takes("w0-0", "PT999999999H")]
+    now = [trip_starts(9), trip_ends(9)]
+    file = trip(["sam"], places, [], facts, now, ways=ways, wants=[ends_at_home("sam")])
+    with pytest.raises(compiler.DoesNotFit):
+        compiler.stuck(Remaining(file))
+    found = compiler.check(file)
+    assert found == answers.check(file)
+    assert found.missing == ((Missing(Unknown("other ways", origin="p0", destination="p9"), 0),),)
 
 
 def test_the_compiler_and_the_reference_checker_agree_on_random_trips() -> None:

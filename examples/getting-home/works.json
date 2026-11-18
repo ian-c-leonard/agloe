@@ -7,12 +7,12 @@
     { "id": "hotel", "name": "the hotel" },
     { "id": "art-institute", "name": "the Art Institute" },
     { "id": "ohare", "name": "O'Hare" },
-    { "id": "home", "name": "home" }
+    { "id": "denver", "name": "Denver" }
   ],
   "options": [
     { "id": "museum-visit", "name": "Museum visit", "place": "art-institute" },
     { "id": "blue-line", "name": "Blue Line to O'Hare", "from": "art-institute", "to": "ohare" },
-    { "id": "flight", "name": "Flight home", "from": "ohare", "to": "home" }
+    { "id": "flight", "name": "Flight home", "from": "ohare", "to": "denver" }
   ],
   "ways": [
     { "id": "walk", "name": "the walk between the hotel and the Art Institute", "between": ["hotel", "art-institute"] }
@@ -23,8 +23,8 @@
   "facts": [
     { "id": "alex-start", "person": "alex", "starts_from": "hotel" },
     { "id": "sam-start", "person": "sam", "starts_from": "hotel" },
-    { "id": "alex-home", "person": "alex", "returns_to": "home" },
-    { "id": "sam-home", "person": "sam", "returns_to": "home" },
+    { "id": "alex-home", "person": "alex", "returns_to": "denver" },
+    { "id": "sam-home", "person": "sam", "returns_to": "denver" },
     { "id": "visit-time", "option": "museum-visit", "starts_at": "2027-05-15T14:00:00-05:00[America/Chicago]" },
     { "id": "visit-length", "option": "museum-visit", "duration": "PT1H" },
     { "id": "visit-arrival", "option": "museum-visit", "arrive_before_start": "PT0S" },

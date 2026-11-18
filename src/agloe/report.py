@@ -70,6 +70,8 @@ def as_json(file: File, report: Report) -> dict[str, object]:
             }
             for step in report.itinerary
         ]
+        if report.stays:
+            out["stays"] = [{"person": person, "place": place} for person, place in report.stays]
         out["relies_on"] = list(report.relies_on)
         out["robust"] = report.robust
     if report.at_worst:
@@ -258,6 +260,11 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
         lines += [f"    ! {mark}" for mark in marks.get(number, [])]
     if not report.itinerary:
         lines += ["", "Nobody has to do anything."]
+    places = _names(file.places)
+    stays = [
+        f"{_people(file, (person,))} stays at {places[place]}." for person, place in report.stays
+    ]
+    lines += ["", *stays] if stays else []
     relied_on = [fact for fact in file.facts if fact.id in report.relies_on]
     if not report.robust:
         lines += [
@@ -375,7 +382,7 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
     if unknown.what == "returns to":
         person = _people(file, (unknown.person or "",))
         if unknown.destination is None:
-            return f"the FILE names the PLACE that {person} returns to"
+            return f"{person} returns to a PLACE that the FILE has yet to name"
         return f"{person} returns to {_names(file.places)[unknown.destination]}"
     if unknown.what == "does not satisfy":
         return f"{_name(file, unknown.option)} does not SATISFY {_want(file, unknown.want)}"

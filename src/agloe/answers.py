@@ -28,6 +28,7 @@ from agloe.reference import (
     must_end_at_home,
     no_better_than,
     one_way_each,
+    staying,
     unknowns,
     with_these_at_best,
     with_this_long,
@@ -54,8 +55,10 @@ class Report:
     """The answer and its evidence.
 
     FEASIBLE: the ITINERARY shown, the FACTs, WANTs and DECISIONs it relies on, whether it is
-    ROBUST, and what it breaks when every CONTINGENT duration runs longest. INFEASIBLE: FACTs and
-    DECISIONs that conflict. UNDETERMINED: each smallest set of unknown FACTs that would be enough.
+    ROBUST, and what it breaks when every CONTINGENT duration runs longest. ``stays`` holds each
+    PERSON who does nothing and the PLACE where the ITINERARY has them stay, where no FACT says
+    where they start from. INFEASIBLE: FACTs and DECISIONs that conflict. UNDETERMINED: each
+    smallest set of unknown FACTs that would be enough.
     """
 
     answer: Answer
@@ -65,6 +68,7 @@ class Report:
     at_worst: tuple[Broken, ...] = ()
     conflict: tuple[str, ...] = ()
     missing: tuple[tuple[Missing, ...], ...] = ()
+    stays: tuple[tuple[str, str], ...] = ()
 
 
 type Shown = Callable[[File, World], Itinerary | None]
@@ -93,7 +97,8 @@ def check(
             return frozenset(_records(given.file))
 
         stuck = every_record
-    plain = shown(file, worst_case(file))
+    worst = worst_case(file)
+    plain = shown(file, worst)
     if plain is not None:
         longest = longest_case(file)
         robust = shown(file, longest)
@@ -101,11 +106,16 @@ def check(
         relies_on = [fact.id for fact in file.facts if _relied_on(file, chosen, fact)]
         relies_on += [want.id for want in file.wants if want.musts or want.must_nots]
         relies_on += [each.id for each in file.decisions if isinstance(each, Lock) or chosen]
+        stays = staying(file, worst, chosen)
         at_worst: tuple[Broken, ...] = ()
         if robust is None:
             # The steps keep the order the ITINERARY lists them in: that is the plan shown.
-            at_worst = tuple(broken_as_listed(file, longest, in_world(longest, chosen)))
-        return Report(Answer.FEASIBLE, chosen, tuple(relies_on), robust is not None, at_worst)
+            at_worst = tuple(broken_as_listed(file, longest, in_world(longest, chosen), stays))
+        at_home = tuple((person, place) for person, place in stays.items() if place is not None)
+        robust_too = robust is not None
+        return Report(
+            Answer.FEASIBLE, chosen, tuple(relies_on), robust_too, at_worst, stays=at_home
+        )
     enough = stuck(Remaining(file))
     if enough is not None:
         return Report(Answer.INFEASIBLE, conflict=_conflict(file, stuck, enough))

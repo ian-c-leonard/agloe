@@ -5,7 +5,7 @@
       {
         "what": "other ways",
         "from": "hotel",
-        "to": "home",
+        "to": "denver",
         "at_most": "PT4H15M"
       }
     ],
@@ -13,7 +13,7 @@
       {
         "what": "other ways",
         "from": "art-institute",
-        "to": "home",
+        "to": "denver",
         "at_most": "PT4H30M"
       }
     ],
@@ -21,7 +21,7 @@
       {
         "what": "other ways",
         "from": "ohare",
-        "to": "home",
+        "to": "denver",
         "at_most": "PT3H30M"
       }
     ]

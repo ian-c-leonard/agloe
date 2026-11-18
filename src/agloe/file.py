@@ -526,12 +526,13 @@ def load(document: object) -> File:
 
     zones: list[str] = []
 
-    def when(where: str, text: str) -> int:
+    def when(where: str, text: str) -> int | None:
+        """The moment a time states. None, with the problem noted, where it is no real time."""
         try:
             moment = instant(text)
         except ValueError:
             problems.append(f"{where}: {text} is not a real date and time")
-            return 0
+            return None
         disagreement = _zone_problem(text)
         if disagreement is not None:
             problems.append(f"{where}: {disagreement}")
@@ -584,10 +585,7 @@ def load(document: object) -> File:
             problems.append(f"{where}: {person} is a holder more than once")
         musts = tuple(each["person"] for each in want["holders"] if each["degree"] == 10)
         must_nots = tuple(each["person"] for each in want["holders"] if each["degree"] == -10)
-        about_the_end = "itinerary" in want
-        if about_the_end and must_nots:
-            problems.append(f"{where}: a FILE can state the WANT to end at home only as a must")
-        wants.append(Want(want["id"], want["name"], musts, must_nots, about_the_end))
+        wants.append(Want(want["id"], want["name"], musts, must_nots, "itinerary" in want))
     want_ids = {want.id for want in wants}
     not_delivered = {want.id for want in wants if want.ends_at_home}
 
@@ -618,6 +616,8 @@ def load(document: object) -> File:
                 problems.append(f"{where}: a COMPLETE FACT needs two different PLACEs")
             earliest = when(where, whole["leaving"]["earliest"])
             latest = when(where, whole["leaving"]["latest"])
+            if earliest is None or latest is None:
+                continue
             if earliest > latest:
                 problems.append(f"{where}: the span ends before it starts")
             if (origin, destination, earliest, latest) in complete:
@@ -694,19 +694,19 @@ def load(document: object) -> File:
                 known(where, person, "PERSON", person_ids)
             decisions.append(Lock(decision["id"], decision["lock"], tuple(decision["persons"])))
             continue
-        bound = (
-            TripStart(decision["id"], when(where, decision["trip_starts_at"]))
-            if "trip_starts_at" in decision
-            else TripEnd(decision["id"], when(where, decision["trip_ends_at"]))
-        )
-        if ("the TRIP", type(bound)) in stated:
+        if "trip_starts_at" in decision:
+            kind, at = TripStart, when(where, decision["trip_starts_at"])
+        else:
+            kind, at = TripEnd, when(where, decision["trip_ends_at"])
+        if ("the TRIP", kind) in stated:
             problems.append(f"{where}: another DECISION already states this about the TRIP")
-        stated.add(("the TRIP", type(bound)))
-        decisions.append(bound)
+        stated.add(("the TRIP", kind))
+        if at is not None:
+            decisions.append(kind(decision["id"], at))
 
     starts = next((each.at for each in decisions if isinstance(each, TripStart)), None)
     ends = next((each.at for each in decisions if isinstance(each, TripEnd)), None)
-    if not problems and starts is not None and ends is not None and ends < starts:
+    if starts is not None and ends is not None and ends < starts:
         problems.append("/decisions: the TRIP ends before it starts")
     if problems:
         raise FileError(problems)

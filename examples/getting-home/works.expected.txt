@@ -9,8 +9,8 @@ Saturday 15 May 2027 (times in America/Chicago)
 The plan relies on these FACTs, WANTs and DECISIONs:
   alex-start: Alex starts from the hotel
   sam-start: Sam starts from the hotel
-  alex-home: Alex returns to home
-  sam-home: Sam returns to home
+  alex-home: Alex returns to Denver
+  sam-home: Sam returns to Denver
   visit-time: Museum visit starts at 2:00 pm on Saturday 15 May 2027
   visit-length: Museum visit takes 1 h
   visit-arrival: nobody has to be at the Art Institute before Museum visit starts

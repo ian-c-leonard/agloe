@@ -434,16 +434,17 @@ def possible_world(rng: Random, file: File) -> World:
             (guess, guess) if duration is None else (duration.shortest, duration.longest)
         )
     slow = QUARTER * rng.choice([0, 1, 2])
+    delivered = [want for want in file.wants if not want.ends_at_home]
     delivers: set[tuple[str, str]] = set()
     for option in file.options:
-        for want in file.wants:
+        for want in delivered:
             said = file.says(option.id, want.id)
             guessed = rng.random() < 0.5
             if guessed if said is None else said:
                 delivers.add((option.id, want.id))
     elsewhere = frozenset(
         (want.id, person)
-        for want in file.wants
+        for want in delivered
         for person in want.musts
         if file.complete_for(want.id) is None and rng.random() < 0.3
     )

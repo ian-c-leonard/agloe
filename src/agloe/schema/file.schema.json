@@ -146,10 +146,16 @@
     },
     "want": {
       "title": "Want",
-      "description": "A WANT: something PERSONs want, or want to avoid, from the TRIP. It is about something an OPTION can deliver, or, with `itinerary`, about a property of the whole ITINERARY. Each holder is a PERSON with their own DEGREE OF WANT, and a WANT names each PERSON at most once.",
+      "description": "A WANT: something PERSONs want, or want to avoid, from the TRIP. It is about something an OPTION can deliver, or, with `itinerary`, about a property of the whole ITINERARY. Each holder is a PERSON with their own DEGREE OF WANT, and a WANT names each PERSON at most once. A WANT about the whole ITINERARY is a must for each holder.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "name", "holders"],
+      "if": { "required": ["itinerary"] },
+      "then": {
+        "properties": {
+          "holders": { "items": { "properties": { "degree": { "const": 10 } } } }
+        }
+      },
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "name": { "$ref": "#/$defs/name" },

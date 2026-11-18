@@ -10,6 +10,9 @@ Only the search is different. The three answers, ROBUST and the evidence are wor
 
 For INFEASIBLE, the solver also names the FACTs and DECISIONs its proof used. The reference
 checker then looks for the conflict among those alone.
+
+The solver counts in 64-bit numbers. A TRIP with very long durations and very many routes can
+need more than that. The reference checker's own search then answers for the whole TRIP.
 """
 
 from collections.abc import Sequence
@@ -32,11 +35,20 @@ type _Choice = tuple[_Who, _Orders, _By | None]
 type _Amount = cp_model.LinearExpr | int  # seconds: a plain number, or one the solver works out
 type _End = tuple[str, list[cp_model.IntVar]]  # a PLACE, and the records that make it hold
 type _Taken = list[tuple[cp_model.IntVar, reference.Route]]  # routes, each with its choice
+# The same with the time each route arrives. None: nobody knows, and nothing follows it.
+type _Reached = list[tuple[cp_model.IntVar, reference.Route, _Amount | None]]
+
+
+class DoesNotFit(Exception):
+    """The solver refused a model: its numbers do not fit in the 64 bits it counts with."""
 
 
 def check(file: File) -> Report:
     """The answer for this TRIP, with its evidence. The same Report as the reference checker's."""
-    return answers.check(file, shown=shown, works=works, stuck=stuck)
+    try:
+        return answers.check(file, shown=shown, works=works, stuck=stuck)
+    except DoesNotFit:
+        return answers.check(file)
 
 
 def shown(file: File, world: World) -> Itinerary | None:
@@ -228,12 +240,13 @@ class _Search:
             margin = each.margin if given is None or not each.margin else each.margin * given
             self.margins.append(margin)
         self.when_fixed = [switch_of(file.start(option.id)) for option in file.options]
-        self.way_lasts: dict[str | None, _Amount] = {None: world.unlisted_takes}
-        self.way_endless = {way.id for way in file.ways if world.takes[way.id][1] is None}
+        # How long each WAY takes. None: there is no limit, and nobody knows when it ends.
+        self.way_lasts: dict[str | None, _Amount | None] = {None: world.unlisted_takes}
         for way in file.ways:
             given = switch_of(file.duration(way.id))
-            shortest = world.takes[way.id][0]
-            self.way_lasts[way.id] = shortest if given is None else shortest * given
+            shortest, longest = world.takes[way.id]
+            lasts = shortest if given is None else shortest * given
+            self.way_lasts[way.id] = None if longest is None else lasts
         unlisted = world.unlisted is None or bool(world.unlisted)
         self.facts = [fact for fact in file.facts if isinstance(fact, Complete)] if unlisted else []
         self.given = [self.switch.get(fact.id) for fact in self.facts]
@@ -401,7 +414,7 @@ class _Search:
         arcs: list[tuple[int, int, cp_model.LiteralT]] = [(ends, ends, nothing)]
         follows: dict[tuple[int, int], cp_model.IntVar] = {}
         between: dict[tuple[int, int], _Taken] = {}
-        start, home = self._begins_at(person.id), self._has_to_end_at(person.id)
+        start, home = self._begins_at(person.id), self._has_to_end_at(person.id, nothing)
         moved = [model.new_bool_var(f"{person.id} moved by {o.id}") for o in options]
         arrived = [
             model.new_int_var(self.earliest, self.latest + self.room, f"{person.id} at {o.id}")
@@ -414,14 +427,19 @@ class _Search:
             last = model.new_bool_var(f"{person.id} ends with {option.id}")
             follows[ends, index], follows[index, ends] = first, last
             arcs += [(ends, index, first), (index, ends, last)]
+            done = None if self.endless[index] else self.start[index] + self.lasts[index]
             if self.moves[index]:
                 _when(model.add(moved[index] == 1), takes[index])
-                if not self.endless[index]:
-                    done = self.start[index] + self.lasts[index]
+                if done is not None:
                     _when(model.add(arrived[index] >= done), takes[index])
             between[ends, index] = self._sets_out(start, first, index, moved, arrived)
-            between[index, ends] = self._gets_home(home, last, index)
-        between[ends, ends] = self._only_travels(start, home, nothing)
+            # Nobody knows when an OPTION with no limit ends: the PERSON never leaves it.
+            between[index, ends] = self._goes_home(
+                last, home, option.destination, free=done, leaves=done is not None
+            )
+        if start is not None:
+            # A PERSON who takes part in nothing stays where they start from, or goes home.
+            between[ends, ends] = self._goes_home(nothing, home, *start)
 
         for before, earlier in enumerate(options):
             for after, later in enumerate(options):
@@ -506,61 +524,57 @@ class _Search:
         reached = self._travels(first, given, here, origin, None)
         return self._arrives_for(index, reached, moved, arrived)
 
-    def _gets_home(self, home: _End | None, last: cp_model.IntVar, index: int) -> _Taken:
-        """The routes from the OPTION a PERSON does last to where their path has to end."""
-        option = self.file.options[index]
-        if home is None:
-            return []
-        there, given = home
-        if self.endless[index]:
-            # Nobody knows when the OPTION ends. So the PERSON does nothing after it.
-            if option.destination != there:
-                self._never(last, given)
-            return []
-        if option.destination == there:
-            return []
-        free = self.start[index] + self.lasts[index]
-        reached = self._travels(last, given, option.destination, there, free, last=True)
-        return [each[:2] for each in reached]
-
-    def _only_travels(
-        self, start: _End | None, home: _End | None, nothing: cp_model.IntVar
+    def _goes_home(
+        self,
+        taken: cp_model.IntVar,
+        home: _End | None,
+        here: str,
+        given: Sequence[cp_model.IntVar] = (),
+        free: _Amount | None = None,
+        leaves: bool = True,
     ) -> _Taken:
-        """The routes of a PERSON who takes part in nothing and still has to get home."""
-        if start is None or home is None or start[0] == home[0]:
+        """The routes from where a PERSON is to where their path has to end.
+
+        They take one while ``taken`` holds, with everything in ``given`` and the records that
+        say where home is. The PERSON can leave after ``free``. Where they never ``leaves``,
+        they are home only if they are there already.
+        """
+        if home is None or here == home[0]:
             return []
-        given = [*start[1], *home[1]]
-        reached = self._travels(nothing, given, start[0], home[0], None, last=True)
-        return [each[:2] for each in reached]
+        there, asked = home
+        if not leaves:
+            self._never(taken, asked)
+            return []
+        reached = self._travels(taken, [*given, *asked], here, there, free, last=True)
+        return [(chosen, route) for chosen, route, _ in reached]
 
     def _arrives_for(
         self,
         after: int,
-        reached: Sequence[tuple[cp_model.IntVar, reference.Route, _Amount]],
+        reached: _Reached,
         moved: Sequence[cp_model.IntVar],
         arrived: Sequence[cp_model.IntVar],
     ) -> _Taken:
         """A PERSON who travels to an OPTION gets there its access cutoff before it starts."""
         model, margin = self.model, self.margins[after]
-        if margin is None:
-            raise AssertionError("no PERSON who travels there could be in time")
         for chosen, _, arrival in reached:
+            if margin is None or arrival is None:
+                raise AssertionError("no PERSON who travels there is known to be in time")
             _when(model.add(self.start[after] >= arrival + margin), chosen)
             if not self.moves[after]:
                 _when(model.add(moved[after] == 1), chosen)
                 _when(model.add(arrived[after] >= arrival), chosen)
-        return [each[:2] for each in reached]
+        return [(chosen, route) for chosen, route, _ in reached]
 
     def _takes_the_ways(
         self, route: reference.Route, chosen: cp_model.IntVar, free: _Amount | None
-    ) -> _Amount:
+    ) -> _Amount | None:
         """The WAYs of one route, taken one after another while ``chosen`` holds.
 
         ``free`` is when the PERSON can leave, or None where nothing holds them back. Returns
-        when the last WAY ends, at the earliest.
+        when the last WAY ends, or None where it has no limit: then nobody knows.
         """
         model = self.model
-        arrival: _Amount = 0
         for place, (way, origin, destination) in enumerate(route):
             moment = model.new_int_var(self.earliest, self.latest, f"{chosen.name} leg {place}")
             if free is not None:
@@ -568,10 +582,10 @@ class _Search:
             if way is None:
                 self._outside_every_span(moment, origin, destination, chosen)
             lasts = self.way_lasts[way]
-            self._keep_within_the_trip(moment, None if way in self.way_endless else lasts, chosen)
-            free = arrival = moment + lasts
+            self._keep_within_the_trip(moment, lasts, chosen)
+            free = None if lasts is None else moment + lasts
         self.legs.append((chosen, len(route)))
-        return arrival
+        return free
 
     def _travels(
         self,
@@ -581,7 +595,7 @@ class _Search:
         there: str,
         free: _Amount | None,
         last: bool = False,
-    ) -> list[tuple[cp_model.IntVar, reference.Route, _Amount]]:
+    ) -> _Reached:
         """Travel by WAYs from one PLACE to another.
 
         While ``taken`` and everything in ``given`` hold, the PERSON takes exactly one route
@@ -623,24 +637,29 @@ class _Search:
         stated = self.file.starts_from(person)
         return None if stated is None else (stated.place, self._given(stated.id))
 
-    def _has_to_end_at(self, person: str) -> _End | None:
+    def _has_to_end_at(self, person: str, nothing: cp_model.IntVar) -> _End | None:
         """Where a PERSON's path has to end. None: anywhere.
 
         It has to end at the PLACE the PERSON returns to, where ending the TRIP at home is a
-        must for them. Where nobody knows where home is, no path will do. With switches the
-        world is the best case: home is wherever the path ends unless a FACT says where it is,
-        and the must holds only while that FACT and the WANT are given.
+        must for them. Where nobody knows where home is, no path will do. Where home is a PLACE
+        the FILE does not name, only a PERSON who stays there is home: they do ``nothing``, and
+        no FACT says they start from somewhere else. With switches the world is the best case:
+        home is wherever the path ends unless a FACT says where it is, and the must holds only
+        while that FACT and the WANT are given.
         """
         file, world = self.file, self.world
         wants = [want for want in file.wants if want.ends_at_home and person in want.musts]
-        if not wants:
+        if not wants or person in world.wherever:
             return None
         if not self.switch:
-            if person not in world.home:
+            there = world.home.get(person)
+            if there is not None:
+                return there, []
+            if person in world.home and file.starts_from(person) is None:
+                self.model.add(nothing == 1)
+            else:
                 self.model.add_bool_or([])  # nothing works
-                return None
-            there = world.home[person]
-            return None if there is None else (there, [])
+            return None
         stated = file.returns_to(person)
         if stated is None:
             return None
@@ -699,8 +718,7 @@ class _Search:
                 for record, switch in self.switch.items()
             ]
         )
-        solver = _solver()
-        status = solver.solve(self.model)
+        solver, status = self._solve()
         self.model.clear_assumptions()
         if status != cp_model.INFEASIBLE:
             choice = self._found(solver, status)
@@ -719,11 +737,18 @@ class _Search:
 
     def any(self) -> _Choice | None:
         """Some choice of PERSONs and orders that works, or None when none does."""
-        solver = _solver()
-        status = solver.solve(self.model)
+        solver, status = self._solve()
         if status == cp_model.INFEASIBLE:
             return None
         return self._found(solver, status)
+
+    def _solve(self) -> tuple[cp_model.CpSolver, object]:
+        """The solver's answer for the model as it stands."""
+        solver = _solver()
+        status = solver.solve(self.model)
+        if status == cp_model.MODEL_INVALID:
+            raise DoesNotFit(self.model.validate())
+        return solver, status
 
     def _found(self, solver: cp_model.CpSolver, status: object) -> _Choice:
         """The choice of PERSONs and orders in the answer the solver gave."""
@@ -834,8 +859,7 @@ class _Search:
     def _least(self, amount: cp_model.LinearExprT) -> int | None:
         """The least value this amount can take, or None when the model has no answer."""
         self.model.minimize(amount)
-        solver = _solver()
-        status = solver.solve(self.model)
+        solver, status = self._solve()
         self.model.clear_objective()
         if status == cp_model.INFEASIBLE:
             return None

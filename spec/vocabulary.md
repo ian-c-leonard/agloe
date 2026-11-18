@@ -260,7 +260,7 @@ The program that reads one FILE and reports, for the TRIP and for each VARIANT, 
 
 ### ITINERARY
 
-One complete way the TRIP could go: which OPTIONs happen, the exact start of each, the value chosen or assumed for each duration and the end that follows from it, which PERSONs and OBJECTs take part in each, which WAYs each PERSON takes and when, and, for each OPTION that needs a right, the BOOKING or OFFER that covers it, which price is paid and from which BUDGET. Where a duration is unknown, no value is assumed and the end is unknown too. In constraint-solving terms, an ITINERARY is a complete assignment of the TRIP's choices. An ITINERARY is derived by the COMPILER; it is never stored in the FILE.
+One complete way the TRIP could go: which OPTIONs happen, the exact start of each, the value chosen or assumed for each duration and the end that follows from it, which PERSONs and OBJECTs take part in each, which WAYs each PERSON takes and when, where a PERSON's path begins if no FACT says so, and, for each OPTION that needs a right, the BOOKING or OFFER that covers it, which price is paid and from which BUDGET. Where a duration is unknown, no value is assumed and the end is unknown too. In constraint-solving terms, an ITINERARY is a complete assignment of the TRIP's choices. An ITINERARY is derived by the COMPILER; it is never stored in the FILE.
 
 *Uses:* TRIP, OPTION, WAY, PERSON, OBJECT, BOOKING, OFFER, BUDGET, COMPILER, FILE.
 
