@@ -1,3 +1,5 @@
 UNDETERMINED: the FILE does not say enough to tell.
 
 The trip works if nobody needs a right to take part in Gallery talk.
+
+If a right is needed after all, a BOOKING for each PERSON who takes part is enough instead.

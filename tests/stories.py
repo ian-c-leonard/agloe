@@ -134,8 +134,8 @@ def takes_between(way: str, shortest: str, longest: str) -> Document:
     return {"id": f"{way}-length", "way": way, "contingent_duration": span}
 
 
-def open_to_all(option: str) -> Document:
-    """A FACT that anybody can take part in an OPTION: nobody needs a right to it."""
+def needs_no_right(option: str) -> Document:
+    """A FACT that nobody needs a right to take part in an OPTION."""
     return {"id": f"{option}-open", "option": option, "needs_right": False}
 
 
@@ -151,7 +151,7 @@ def booking(option: str, *persons: str, id: str | None = None) -> Document:
 
 
 def every_right(option: str) -> Document:
-    """A FACT that the FILE holds every right to an OPTION."""
+    """A FACT that the rights to an OPTION are COMPLETE."""
     return {"id": f"every-right-to-{option}", "complete": {"rights_to": option}}
 
 
@@ -165,12 +165,12 @@ def trip(
     wants: Sequence[Document] = (),
     tickets: bool = False,
 ) -> File:
-    """A FILE. Anybody can take part in each of its OPTIONs, unless the story is about tickets.
+    """A FILE. None of its OPTIONs needs a right, unless the story is about tickets.
 
     After the FACTs given, one more for each OPTION says that nobody needs a right to it. With
     ``tickets``, the FILE says about rights only what ``facts`` says.
     """
-    stated = facts if tickets else [*facts, *(open_to_all(option["id"]) for option in options)]
+    stated = facts if tickets else [*facts, *(needs_no_right(option["id"]) for option in options)]
     return load(
         {
             "persons": named(*persons),

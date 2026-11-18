@@ -44,7 +44,7 @@ from tests.stories import (
     must,
     must_not,
     named,
-    open_to_all,
+    needs_no_right,
     satisfies,
     seconds,
     starts_at,
@@ -90,7 +90,7 @@ def day_out(
         starts_at("visit", 14),
         lasts("visit", "PT1H"),
         cutoff("visit", "PT0S"),
-        open_to_all("visit"),
+        needs_no_right("visit"),
         takes("walk", "PT15M"),
         takes("train", "PT1H"),
     ]

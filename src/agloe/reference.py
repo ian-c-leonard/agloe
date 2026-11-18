@@ -38,7 +38,7 @@ class Constraint(Enum):
     MUST = "Every must is met"
     MUST_NOT = "Every must-not is kept"
     WITHIN = "Everything happens within the TRIP"
-    RIGHT = "Every PERSON has a right to what they take part in"
+    RIGHT = "Each PERSON has the rights they need"
 
 
 @dataclass(frozen=True)
@@ -337,6 +337,16 @@ def no_better_than(file: File, unknown: Iterable[Unknown]) -> World:
     return _world(file, frozenset(unknown))
 
 
+def with_others_found(world: World, found: Iterable[Unknown]) -> World:
+    """The same world, with another OPTION found for these WANTs and PERSONs and no others."""
+    conditions = frozenset(
+        (each.want, each.person)
+        for each in found
+        if each.want is not None and each.person is not None
+    )
+    return replace(world, another_option=conditions)
+
+
 def with_this_long(file: File, unknown: Unknown, seconds: int) -> World:
     """The worst case, except that one unknown length of time is exactly this many seconds.
 
@@ -423,7 +433,7 @@ def _world(
                 might_satisfy.add(pair)
     # Whether an OPTION needs a right, and who has one. A FACT settles the first in every
     # world. A BOOKING covers the PERSONs it names. Another right can be found only where no
-    # FACT says that the FILE holds every right to the OPTION.
+    # FACT says that the rights to the OPTION are COMPLETE.
     needs_right = {
         option.id
         for option in file.options
@@ -535,7 +545,7 @@ def _each_alone(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
 
 
 def _rights(file: File, world: World, taking_part: Mapping[str, tuple[str, ...]]) -> list[Broken]:
-    """Every PERSON has a right to what they take part in, where the OPTION needs one."""
+    """Each PERSON has the rights they need: one to each OPTION they take part in that needs one."""
     out: list[Broken] = []
     for option, persons in taking_part.items():
         without = [person for person in persons if (option, person) not in world.rights]

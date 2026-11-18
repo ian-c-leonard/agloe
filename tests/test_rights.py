@@ -1,6 +1,6 @@
 """Rights: a PERSON takes part in an OPTION that needs a right only with a right to it."""
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import replace
 from itertools import combinations, product
 from random import Random
@@ -39,8 +39,8 @@ from tests.stories import (
     lock,
     must,
     must_not,
+    needs_no_right,
     needs_right,
-    open_to_all,
     satisfies,
     seconds,
     starts_at,
@@ -114,7 +114,7 @@ def test_a_file_says_whether_an_option_needs_a_right() -> None:
     file = a_boat_tour(needs_right("tour"))
     assert file.facts[-1] == NeedsRight("tour-needs-right", "tour", True)
     assert file.needs_right("tour") is True
-    assert a_boat_tour(open_to_all("tour")).needs_right("tour") is False
+    assert a_boat_tour(needs_no_right("tour")).needs_right("tour") is False
     assert a_boat_tour().needs_right("tour") is None
 
 
@@ -142,7 +142,7 @@ def test_a_fact_can_say_that_the_file_holds_every_right_to_an_option() -> None:
 
 def test_facts_about_rights_are_checked_like_every_other_fact() -> None:
     twice = "/facts/4: another FACT already states this about tour"
-    assert problems(needs_right("tour"), open_to_all("tour")) == twice
+    assert problems(needs_right("tour"), needs_no_right("tour")) == twice
     again = every_right("tour")
     again["id"] = "again"
     assert problems(every_right("tour"), again) == twice
@@ -175,7 +175,7 @@ def test_each_person_needs_a_right_of_their_own() -> None:
 
 
 def test_an_option_that_needs_no_right_is_open_to_everybody() -> None:
-    file = a_boat_tour(open_to_all("tour"))
+    file = a_boat_tour(needs_no_right("tour"))
     assert broken(file, worst_case(file), on_the_tour(*EVERYONE)) == []
 
 
@@ -234,7 +234,12 @@ def test_with_no_fact_nobody_knows_whether_an_option_needs_a_right() -> None:
     file = a_boat_tour()
     assert [unknown.what for unknown in unknowns(file)] == ["needs no right"]
     assert asked(checked(file)) == [[free("tour")]]
-    assert in_words(file)[-1] == "The trip works if nobody needs a right to take part in tour."
+    assert in_words(file)[-3:] == [
+        "The trip works if nobody needs a right to take part in tour.",
+        "",
+        "If a right is needed after all, a BOOKING for each PERSON who takes part is enough"
+        " instead.",
+    ]
     covered = a_boat_tour(booking("tour", "alex"))
     assert asked(checked(covered)) == [[free("tour")]]
 
@@ -244,7 +249,7 @@ def test_a_right_is_unknown_only_where_one_might_be_had_and_would_help() -> None
     file = a_boat_tour(needs_right("tour"), booking("tour", "alex"))
     assert list(unknowns(file)) == [right("tour", "sam"), right("tour", "jo")]
     assert unknowns(a_boat_tour(needs_right("tour"), every_right("tour"))) == ()
-    assert unknowns(a_boat_tour(open_to_all("tour"))) == ()
+    assert unknowns(a_boat_tour(needs_no_right("tour"))) == ()
 
 
 def test_the_unknown_facts_about_rights_come_before_those_about_wants() -> None:
@@ -291,7 +296,20 @@ def test_the_options_that_have_to_need_no_right_are_named_together() -> None:
     file = trip(["alex"], ["dock"], options, facts, locks, tickets=True)
     assert asked(checked(file)) == [[free("tour"), free("cruise"), free("swim")]]
     words = "The trip works if nobody needs a right to take part in tour, cruise or swim."
-    assert in_words(file)[-1] == words
+    assert in_words(file)[2] == words
+
+
+def test_the_words_keep_the_order_of_the_unknown_facts() -> None:
+    """The cruise has no stated start, so the two OPTIONs are not named together."""
+    options = [stays("tour", "dock"), stays("cruise", "dock")]
+    facts = [*at_ten("tour"), *at_ten("cruise")[1:]]
+    locks = [lock("tour", "alex"), lock("cruise", "alex")]
+    file = trip(["alex"], ["dock"], options, facts, locks, tickets=True)
+    assert asked(checked(file)) == [[free("tour"), Unknown("start", "cruise"), free("cruise")]]
+    assert in_words(file)[2] == (
+        "The trip works if nobody needs a right to take part in tour and cruise can start at any"
+        " time and nobody needs a right to take part in cruise."
+    )
 
 
 def test_a_booking_for_everyone_settles_an_option_that_might_need_a_right() -> None:
@@ -303,7 +321,7 @@ def test_a_booking_for_everyone_settles_an_option_that_might_need_a_right() -> N
 
 
 def test_a_plan_relies_on_no_booking_for_an_option_that_needs_no_right() -> None:
-    file = a_boat_tour(open_to_all("tour"), booking("tour", "alex", "sam"))
+    file = a_boat_tour(needs_no_right("tour"), booking("tour", "alex", "sam"))
     found = checked(file)
     assert found.answer is Answer.FEASIBLE
     assert found.relies_on == (*TIMES, "tour-open", "lock-tour")
@@ -331,8 +349,10 @@ def test_a_missing_right_makes_a_trip_infeasible_where_the_rights_are_complete()
     conflict = ("tour-needs-right", "tour-booking", "every-right-to-tour", "lock-tour")
     assert found.conflict == conflict
     assert has_no_record_to_spare(file, conflict)
-    whole = "the FILE holds every right to tour: nobody has another, and no more can be had"
-    assert in_words(file)[-2] == f"  every-right-to-tour: {whole}"
+    whole = "nobody on the trip holds another, and nobody can get one"
+    assert (
+        in_words(file)[-2] == f"  every-right-to-tour: the FILE lists every right to tour: {whole}"
+    )
 
 
 def test_a_conflict_holds_every_booking_for_the_option() -> None:
@@ -377,6 +397,8 @@ def test_complete_rights_do_not_settle_an_option_that_might_need_none() -> None:
     found = checked(file)
     assert found.answer is Answer.UNDETERMINED
     assert asked(found) == [[free("tour")]]
+    # No BOOKING can stand in: the FILE says that nobody can get a right.
+    assert in_words(file)[-1] == "The trip works if nobody needs a right to take part in tour."
 
 
 def test_a_right_that_might_be_had_does_not_undo_a_must_not() -> None:
@@ -396,7 +418,7 @@ def a_view(*more: Document) -> File:
     """
     options = [stays("tower", "loop"), stays("rooftop", "loop")]
     facts = [*at_ten("tower"), *at_ten("rooftop"), satisfies("tower", "view")]
-    facts += [needs_right("tower"), every_right("tower"), open_to_all("rooftop"), *more]
+    facts += [needs_right("tower"), every_right("tower"), needs_no_right("rooftop"), *more]
     wants = [must("view", "alex")]
     return trip(["alex"], ["loop"], options, facts, [], wants=wants, tickets=True)
 
@@ -460,7 +482,9 @@ def two_tours(rng: Random) -> File:
     for option in ("tour", "cruise"):
         facts += [starts_at(option, 9, 15 * rng.randrange(3)), lasts(option, "PT15M")]
         facts.append(cutoff(option, "PT0S"))
-        stated = rng.choice([needs_right(option), needs_right(option), open_to_all(option), None])
+        stated = rng.choice(
+            [needs_right(option), needs_right(option), needs_no_right(option), None]
+        )
         if stated is not None:
             facts.append(stated)
         for number in range(rng.choice([0, 1, 1, 2])):
@@ -585,7 +609,7 @@ def test_the_search_for_missing_facts_skips_no_set() -> None:
         file = random_trip(
             rng, 0.15, persons, count=2, with_wants=0.5, must_nots=0.4, with_rights=0.3
         )
-        found = answers.check(file)
+        found = compiler.check(file)
         every = unknowns(file)
         if found.answer is not Answer.UNDETERMINED or len(every) > 13:
             continue
@@ -626,8 +650,13 @@ def test_one_more_unknown_fact_that_turns_out_well_never_hurts() -> None:
     assert held > 60
 
 
-def test_a_file_that_says_nothing_about_rights_gets_its_report_at_once() -> None:
-    """Six OPTIONs in a row, all LOCKed. The report asks one thing about each of them."""
+def test_a_file_that_says_nothing_about_rights_gets_its_report_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Six OPTIONs in a row, all LOCKed. The report asks one thing about each of them.
+
+    The COMPILER finds the six FACTs that no set can do without, and tries one set.
+    """
     names = [f"stop-{number}" for number in range(6)]
     facts = [
         fact
@@ -639,12 +668,62 @@ def test_a_file_that_says_nothing_about_rights_gets_its_report_at_once() -> None
         ["alex"], ["dock"], options, facts, [lock(name, "alex") for name in names], tickets=True
     )
     calls = 0
+    solver = compiler.works
 
     def counted(file: File, world: World) -> bool:
         nonlocal calls
         calls += 1
-        return answers.any_works(file, world)
+        return solver(file, world)
 
-    found = answers.check(file, works=counted)
+    monkeypatch.setattr(compiler, "works", counted)
+    found = compiler.check(file)
     assert asked(found) == [[free(name) for name in names]]
     assert calls < 20
+    assert answers.check(file) == found
+
+
+def test_the_search_that_tries_every_choice_is_asked_about_no_world_it_is_slow_in() -> None:
+    """Five optional stays with no stated start, and five PERSONs. Alex needs two of the stays.
+
+    A world where four of the stays can start has a million choices of who takes part, and the
+    search that tries every choice goes through them all to find that none works. So it is
+    asked only about the best case, the upper bound, and the sets it tries.
+    """
+    people = ["alex", "sam", "jo", "pat", "kim"]
+    names = [f"stay-{number}" for number in range(5)]
+    facts = [fact for name in names for fact in (lasts(name, "PT5M"), cutoff(name, "PT0S"))]
+    facts += [satisfies("stay-0", "first"), every("first")]
+    facts += [satisfies("stay-1", "second"), every("second")]
+    wants = [must("first", "alex"), must("second", "alex")]
+    file = trip(people, ["dock"], [stays(name, "dock") for name in names], facts, [], wants=wants)
+    asked_about: list[World] = []
+
+    def recorded(file: File, world: World) -> bool:
+        asked_about.append(world)
+        return answers.any_works(file, world)
+
+    found = answers.check(file, works=recorded)
+    assert asked(found) == [[Unknown("start", "stay-0"), Unknown("start", "stay-1")]]
+    can_start = [sum(terms.free_start for terms in world.terms.values()) for world in asked_about]
+    assert sorted(count for count in can_start if count > 2) == [5, 5]
+    assert compiler.check(file) == found
+
+
+def test_the_upper_bound_is_built_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Alex has eight musts that nothing listed meets. Every choice of other OPTIONs is tried."""
+    built = 0
+
+    def counted(file: File, unknown: Iterable[Unknown]) -> World:
+        nonlocal built
+        built += 1
+        return no_better_than(file, unknown)
+
+    monkeypatch.setattr(answers, "no_better_than", counted)
+    wanted = [f"want-{number}" for number in range(8)]
+    facts = [*at_ten("tour"), *(satisfies("tour", want, 0) for want in wanted)]
+    wants = [must(want, "alex") for want in wanted]
+    places = [f"place-{number}" for number in range(12)]
+    file = trip(["alex"], places, [stays("tour", "place-0")], facts, [], wants=wants)
+    found = compiler.check(file)
+    assert [len(enough) for enough in found.missing] == [8]
+    assert built == 1

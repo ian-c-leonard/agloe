@@ -41,8 +41,8 @@ from tests.stories import (
     lock,
     moves,
     must,
+    needs_no_right,
     needs_right,
-    open_to_all,
     satisfies,
     seconds,
     starts_at,
@@ -175,7 +175,7 @@ def random_trip(
     if with_rights:
         for option in options:
             id = option["id"]
-            stated = rng.choice([needs_right(id), needs_right(id), open_to_all(id), None])
+            stated = rng.choice([needs_right(id), needs_right(id), needs_no_right(id), None])
             if stated is not None:
                 facts.append(stated)
             for number in range(rng.choice([0, 1, 1, 2])):

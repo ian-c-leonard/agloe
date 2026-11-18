@@ -14,6 +14,7 @@ from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
+from itertools import groupby
 
 from agloe.answers import Answer, Missing, Report
 from agloe.file import (
@@ -216,13 +217,31 @@ def as_text(file: File, report: Report) -> str:
             lines += [
                 f"  {number}. {case[0].upper()}{case[1:]}." for number, case in enumerate(cases, 1)
             ]
-        kinds = {needed.unknown.what for enough in report.missing for needed in enough}
+        asked = [needed.unknown for enough in report.missing for needed in enough]
+        kinds = {unknown.what for unknown in asked}
+        # A BOOKING can stand in for the answer, unless the FILE says that none can be had.
+        might_be_booked = [
+            unknown
+            for unknown in asked
+            if unknown.what == "needs no right"
+            and file.rights_complete(unknown.option or "") is None
+        ]
+        if might_be_booked:
+            lines += [
+                "",
+                "If a right is needed after all, a BOOKING for each PERSON who takes part is"
+                " enough instead.",
+            ]
         if "other ways" in kinds:
-            lines += ["", "Other WAYs help only if they can be taken when the plan needs them."]
+            helps = (
+                "Other WAYs help only if they can be taken when the plan needs them, with a"
+                " right where they need one"
+            )
+            lines += ["", f"{helps}."]
             if any(want.must_nots for want in file.wants):
                 lines[-1] = (
-                    "Other WAYs help only if they can be taken when the plan needs them, and"
-                    " only if they SATISFY nothing that is a must-not for a PERSON who takes them."
+                    f"{helps}, and only if they SATISFY nothing that is a must-not for a PERSON"
+                    " who takes them."
                 )
         if "another option" in kinds:
             lines += [
@@ -349,34 +368,40 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
 
     PERSONs who need another OPTION for the same WANT are named together, as "each of". The
     condition is one for each PERSON: whether one OPTION or several meet it is left open. The
-    OPTIONs that have to need no right are named together, at the first of them. So are the
-    PERSONs who need a right to one OPTION.
+    OPTIONs that have to need no right are named together where they follow one another in the
+    set. So are the PERSONs who need a right to one OPTION. Nothing else changes the order.
     """
     parts: list[str] = []
     for_whom: dict[str | None, list[str]] = {}
-    walk_up = [each.unknown for each in enough if each.unknown.what == "needs no right"]
-    rights = [each.unknown for each in enough if each.unknown.what == "another right"]
-    for needed in enough:
-        unknown = needed.unknown
+    for _, run in groupby(enough, key=_named_with):
+        group = list(run)
+        unknown = group[0].unknown
         if unknown.what == "another option":
             for_whom.setdefault(unknown.want, []).append(unknown.person or "")
         elif unknown.what == "needs no right":
-            if unknown == walk_up[0]:
-                names = [_name(file, each.option) for each in walk_up]
-                parts.append(f"nobody needs a right to take part in {_listed(names, 'or')}")
+            names = [_name(file, needed.unknown.option) for needed in group]
+            parts.append(f"nobody needs a right to take part in {_listed(names, 'or')}")
         elif unknown.what == "another right":
-            persons = [each.person or "" for each in rights if each.option == unknown.option]
-            if unknown.person == persons[0]:
-                each = "each of " if len(persons) > 1 else ""
-                who = _people(file, tuple(persons))
-                parts.append(f"a right to {_name(file, unknown.option)} is found for {each}{who}")
+            each = "each of " if len(group) > 1 else ""
+            who = _people(file, tuple(needed.unknown.person or "" for needed in group))
+            parts.append(f"a right to {_name(file, unknown.option)} is found for {each}{who}")
         else:
-            parts.append(_wanted(file, needed, len(enough) == 1))
+            parts.append(_wanted(file, group[0], len(enough) == 1))
     for want, persons in for_whom.items():
         who = _people(file, tuple(persons))
         each = "each of " if len(persons) > 1 else ""
         parts.append(f"another OPTION that SATISFIES {_want(file, want)} is found for {each}{who}")
     return " and ".join(parts)
+
+
+def _named_with(needed: Missing) -> object:
+    """What an unknown FACT shares with those a report names it with. Otherwise it stands alone."""
+    unknown = needed.unknown
+    if unknown.what == "needs no right":
+        return unknown.what
+    if unknown.what == "another right":
+        return (unknown.what, unknown.option)
+    return needed
 
 
 def _wanted(file: File, needed: Missing, alone: bool) -> str:
@@ -474,7 +499,8 @@ def _record(file: File, clock: _Clock, record: str) -> str:
     if isinstance(found, Booking):
         return f"a BOOKING for {name} covers {_people(file, found.covers)}"
     if isinstance(found, CompleteRights):
-        return f"the FILE holds every right to {name}: nobody has another, and no more can be had"
+        closed = "nobody on the trip holds another, and nobody can get one"
+        return f"the FILE lists every right to {name}: {closed}"
     return _cutoff(file, name, found)
 
 

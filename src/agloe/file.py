@@ -229,9 +229,10 @@ class Booking:
 
 @dataclass(frozen=True)
 class CompleteRights:
-    """A FACT: the FILE holds every right to an OPTION.
+    """A FACT: the rights to an OPTION are COMPLETE.
 
-    Nobody on the TRIP holds another right to it, and no more can be had.
+    The BOOKINGs in the FILE secure every right to it that anybody on the TRIP holds, and nobody
+    on the TRIP can get another.
     """
 
     id: str
@@ -319,7 +320,7 @@ class File:
         return self._bookings.get((option, person))
 
     def rights_complete(self, option: str) -> CompleteRights | None:
-        """The FACT that the FILE holds every right to this OPTION, if there is one."""
+        """The FACT that the rights to this OPTION are COMPLETE, if there is one."""
         return self._rights_complete.get(option)
 
     @cached_property

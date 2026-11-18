@@ -30,7 +30,7 @@ from tests.stories import (
     lasts_between,
     lock,
     moves,
-    open_to_all,
+    needs_no_right,
     seconds,
     starts_at,
     stays,
@@ -296,7 +296,7 @@ def test_only_those_who_need_an_option_take_part() -> None:
 def with_a_cab_listed_first(length: dict[str, object]) -> dict[str, object]:
     document = flight_home()
     document["options"].insert(0, moves("cab", "art-institute", "ohare"))
-    document["facts"] += [any_time("cab"), length, open_to_all("cab")]
+    document["facts"] += [any_time("cab"), length, needs_no_right("cab")]
     return document
 
 

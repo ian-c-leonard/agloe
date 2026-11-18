@@ -25,7 +25,7 @@ from tests.stories import (
     lasts,
     lock,
     moves,
-    open_to_all,
+    needs_no_right,
     seconds,
     starts_at,
     stays,
@@ -431,7 +431,7 @@ def test_a_way_goes_only_where_the_file_says() -> None:
 def test_what_nobody_needs_can_be_taken_out() -> None:
     document = flight_home()
     document["options"].append(stays("coffee", "art-institute"))
-    document["facts"] += [any_time("coffee"), lasts("coffee", "PT10M"), open_to_all("coffee")]
+    document["facts"] += [any_time("coffee"), lasts("coffee", "PT10M"), needs_no_right("coffee")]
     file = load(document)
     world = worst_case(file)
     coffee = step(file, "coffee", seconds(13), seconds(13, 10), "alex")

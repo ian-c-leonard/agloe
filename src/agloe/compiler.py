@@ -61,7 +61,7 @@ class DoesNotFit(Exception):
 def check(file: File) -> Report:
     """The answer for this TRIP, with its evidence. The same Report as the reference checker's."""
     try:
-        return answers.check(file, shown=shown, works=works, stuck=stuck)
+        return answers.check(file, shown=shown, works=works, stuck=stuck, quick=True)
     except DoesNotFit:
         return answers.check(file)
 
@@ -353,7 +353,7 @@ class _Search:
 
         Where records can be switched off, the best case decides, and it has a right for a
         PERSON unless the FILE rules that out. That takes three kinds of FACT, all switched on:
-        that the OPTION needs a right, that the FILE holds every right to it, and every BOOKING
+        that the OPTION needs a right, that the rights to it are COMPLETE, and every BOOKING
         for it. A BOOKING that is off, or was taken out before, might cover anybody. So a
         PERSON whom some BOOKING for the OPTION covers is never kept out.
         """

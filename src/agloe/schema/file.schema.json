@@ -373,7 +373,7 @@
     },
     "booking": {
       "title": "BookingFact",
-      "description": "A FACT: a BOOKING. One agreement about one OPTION, for one unit that is used once. It secures a right to the OPTION for each PERSON it covers.",
+      "description": "A FACT: a BOOKING. One agreement about one OPTION, for one unit that can be used at most once. It secures a right to the OPTION for each PERSON it covers.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "booking"],
@@ -398,7 +398,7 @@
     },
     "complete_rights": {
       "title": "CompleteRights",
-      "description": "A FACT: the FILE holds every right to the OPTION. Nobody on the TRIP holds another, and no more can be had.",
+      "description": "A FACT: the rights to the OPTION are COMPLETE. The BOOKINGs in the FILE secure every right to it that anybody on the TRIP holds, and nobody on the TRIP can get another.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "complete"],
