@@ -181,7 +181,7 @@ def test_no_option_delivers_the_want_to_end_at_a_place() -> None:
     assert problems(day_out(whole)) == "/facts/7: no OPTION delivers ending"
     file = load(day_out())
     assert file.says("visit", "ending") is False
-    for world in (best_case(file), worst_case(file), no_better_than(file, unknowns(file))):
+    for world in (best_case(file), worst_case(file), no_better_than(file, [])):
         assert "ending" not in {want for _, want in world.satisfies | world.might_satisfy}
     assert {unknown.what for unknown in unknowns(load(day_out(without=["train-length"])))} == {
         "duration",

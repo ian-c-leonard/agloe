@@ -322,29 +322,30 @@ def one_way_each(unknown: Iterable[Unknown]) -> bool:
     return len(about) == len(set(about))
 
 
-def no_better_than(file: File, unknown: Iterable[Unknown]) -> World:
-    """An upper bound that need be no possible world: these unknown FACTs all help.
+def no_better_than(file: File, found: Iterable[Unknown]) -> World:
+    """An upper bound that is no possible world: every unknown FACT helps whoever needs it.
 
-    Each of them helps whoever needs it, and every other unknown FACT is as in the worst case.
-    The FACTs can say both that an OPTION SATISFIES a WANT and that it does not. The OPTION
-    then counts for a must while it breaks no must-not, which no possible world allows.
+    Everything is as in the best case, with two differences. Another OPTION is found only for
+    the WANTs and PERSONs in ``found``. And an OPTION with no FACT about a WANT counts for a
+    must while it breaks no must-not, which no possible world allows.
 
-    A choice that works with some of these FACTs turned out well works here too: one more
-    unknown FACT that turns out well never makes a CONSTRAINT harder to meet. So this can show
-    that these FACTs are not enough, however they are picked. It can show nothing else, and no
-    answer and no evidence is ever read from it.
+    Whatever works in a possible world with those other OPTIONs works here too. So this can
+    show that those other OPTIONs are not enough, whatever else turns out well. It can show
+    nothing else, and no answer and no evidence is ever read from it.
     """
-    return _world(file, frozenset(unknown))
-
-
-def with_others_found(world: World, found: Iterable[Unknown]) -> World:
-    """The same world, with another OPTION found for these WANTs and PERSONs and no others."""
+    best = best_case(file)
+    unknown = {
+        (option.id, want.id)
+        for option in file.options
+        for want in file.wants
+        if file.says(option.id, want.id) is None
+    }
     conditions = frozenset(
         (each.want, each.person)
         for each in found
         if each.want is not None and each.person is not None
     )
-    return replace(world, another_option=conditions)
+    return replace(best, satisfies=best.satisfies | unknown, another_option=conditions)
 
 
 def with_this_long(file: File, unknown: Unknown, seconds: int) -> World:

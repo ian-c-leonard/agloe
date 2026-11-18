@@ -1,6 +1,6 @@
 """Rights: a PERSON takes part in an OPTION that needs a right only with a right to it."""
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import replace
 from itertools import combinations, product
 from random import Random
@@ -22,7 +22,6 @@ from agloe.reference import (
     broken,
     in_world,
     itineraries,
-    no_better_than,
     one_way_each,
     unknowns,
     with_these_at_best,
@@ -237,7 +236,7 @@ def test_with_no_fact_nobody_knows_whether_an_option_needs_a_right() -> None:
     assert in_words(file)[-3:] == [
         "The trip works if nobody needs a right to take part in tour.",
         "",
-        "If a right is needed after all, a BOOKING for each PERSON who takes part is enough"
+        "If tour does need a right, a BOOKING for each PERSON who takes part in it is enough"
         " instead.",
     ]
     covered = a_boat_tour(booking("tour", "alex"))
@@ -349,7 +348,7 @@ def test_a_missing_right_makes_a_trip_infeasible_where_the_rights_are_complete()
     conflict = ("tour-needs-right", "tour-booking", "every-right-to-tour", "lock-tour")
     assert found.conflict == conflict
     assert has_no_record_to_spare(file, conflict)
-    whole = "nobody on the trip holds another, and nobody can get one"
+    whole = "nobody on the trip holds another or can get one"
     assert (
         in_words(file)[-2] == f"  every-right-to-tour: the FILE lists every right to tour: {whole}"
     )
@@ -603,7 +602,7 @@ def test_the_compiler_and_the_reference_checker_agree_on_trips_with_rights() -> 
 def test_the_search_for_missing_facts_skips_no_set() -> None:
     """The sets a report names are those a slow search of all sets finds, in the same order."""
     rng = Random(4040)
-    compared = several = 0
+    compared = several = held = 0
     for _ in range(140):
         persons = ["alex", "sam"] if rng.random() < 0.5 else ["alex"]
         file = random_trip(
@@ -626,28 +625,14 @@ def test_the_search_for_missing_facts_skips_no_set() -> None:
 
         least = min(cost(some) for some in enough)
         assert asked(found) == [list(some) for some in enough if cost(some) == least]
+        in_every_set = answers._asked_by_a_lock(file)  # pyright: ignore[reportPrivateUsage]
+        assert all(in_every_set.issubset(some) for some in enough)
+        held += bool(in_every_set)
         compared += 1
         several += len(found.missing[0]) > 2
     assert compared > 30
     assert several > 10
-
-
-def test_one_more_unknown_fact_that_turns_out_well_never_hurts() -> None:
-    """What works with some unknown FACTs turned out well works in the upper bound with more."""
-    rng = Random(5050)
-    held = 0
-    for _ in range(120):
-        file = random_trip(
-            rng, 0.3, with_ways=0.5, with_wants=0.6, must_nots=0.4, with_ends=0.3, with_rights=0.3
-        )
-        every = unknowns(file)
-        for _ in range(6):
-            some = [unknown for unknown in every if rng.random() < 0.5]
-            more = [unknown for unknown in every if unknown in some or rng.random() < 0.5]
-            if one_way_each(some) and itineraries(file, with_these_at_best(file, some)):
-                assert answers.any_works(file, no_better_than(file, more))
-                held += len(more) > len(some)
-    assert held > 60
+    assert held > 10
 
 
 def test_a_file_that_says_nothing_about_rights_gets_its_report_at_once(
@@ -655,7 +640,7 @@ def test_a_file_that_says_nothing_about_rights_gets_its_report_at_once(
 ) -> None:
     """Six OPTIONs in a row, all LOCKed. The report asks one thing about each of them.
 
-    The COMPILER finds the six FACTs that no set can do without, and tries one set.
+    Every set holds those six FACTs, so the search tries one set and no smaller one.
     """
     names = [f"stop-{number}" for number in range(6)]
     facts = [
@@ -673,21 +658,53 @@ def test_a_file_that_says_nothing_about_rights_gets_its_report_at_once(
     def counted(file: File, world: World) -> bool:
         nonlocal calls
         calls += 1
+        return answers.any_works(file, world)
+
+    def counted_solver(file: File, world: World) -> bool:
+        nonlocal calls
+        calls += 1
         return solver(file, world)
 
-    monkeypatch.setattr(compiler, "works", counted)
-    found = compiler.check(file)
+    found = answers.check(file, works=counted)
     assert asked(found) == [[free(name) for name in names]]
-    assert calls < 20
-    assert answers.check(file) == found
+    assert calls < 6
+    calls = 0
+    monkeypatch.setattr(compiler, "works", counted_solver)
+    assert compiler.check(file) == found
+    assert calls < 6
+
+
+def test_a_lock_says_which_unknown_facts_every_set_holds() -> None:
+    """The start of a LOCKed OPTION, and that it needs no right where somebody is not covered."""
+    nothing_said = trip(
+        EVERYONE, ["dock"], [stays("tour", "dock")], [], [lock("tour", "alex", "sam")], tickets=True
+    )
+    assert answers._asked_by_a_lock(nothing_said) == {Unknown("start", "tour"), free("tour")}  # pyright: ignore[reportPrivateUsage]
+    for_alex = [lasts("tour", "PT1H"), cutoff("tour", "PT0S"), booking("tour", "alex")]
+    one_covered = trip(
+        EVERYONE, ["dock"], [stays("tour", "dock")], for_alex, [lock("tour", "alex")], tickets=True
+    )
+    assert asked(checked(one_covered)) == [[Unknown("start", "tour")]]
+    both_locked = trip(
+        EVERYONE,
+        ["dock"],
+        [stays("tour", "dock")],
+        for_alex,
+        [lock("tour", "alex", "sam")],
+        tickets=True,
+    )
+    assert asked(checked(both_locked)) == [[Unknown("start", "tour"), free("tour")]]
+    assert answers._asked_by_a_lock(a_boat_tour(needs_right("tour"))) == frozenset()  # pyright: ignore[reportPrivateUsage]
+    assert answers._asked_by_a_lock(a_boat_tour(locked=())) == frozenset()  # pyright: ignore[reportPrivateUsage]
 
 
 def test_the_search_that_tries_every_choice_is_asked_about_no_world_it_is_slow_in() -> None:
     """Five optional stays with no stated start, and five PERSONs. Alex needs two of the stays.
 
     A world where four of the stays can start has a million choices of who takes part, and the
-    search that tries every choice goes through them all to find that none works. So it is
-    asked only about the best case, the upper bound, and the sets it tries.
+    search that tries every choice goes through them all to find that none works. So the
+    search for missing FACTs asks only about the best case, the upper bound, and the sets it
+    tries.
     """
     people = ["alex", "sam", "jo", "pat", "kim"]
     names = [f"stay-{number}" for number in range(5)]
@@ -707,23 +724,3 @@ def test_the_search_that_tries_every_choice_is_asked_about_no_world_it_is_slow_i
     can_start = [sum(terms.free_start for terms in world.terms.values()) for world in asked_about]
     assert sorted(count for count in can_start if count > 2) == [5, 5]
     assert compiler.check(file) == found
-
-
-def test_the_upper_bound_is_built_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Alex has eight musts that nothing listed meets. Every choice of other OPTIONs is tried."""
-    built = 0
-
-    def counted(file: File, unknown: Iterable[Unknown]) -> World:
-        nonlocal built
-        built += 1
-        return no_better_than(file, unknown)
-
-    monkeypatch.setattr(answers, "no_better_than", counted)
-    wanted = [f"want-{number}" for number in range(8)]
-    facts = [*at_ten("tour"), *(satisfies("tour", want, 0) for want in wanted)]
-    wants = [must(want, "alex") for want in wanted]
-    places = [f"place-{number}" for number in range(12)]
-    file = trip(["alex"], places, [stays("tour", "place-0")], facts, [], wants=wants)
-    found = compiler.check(file)
-    assert [len(enough) for enough in found.missing] == [8]
-    assert built == 1

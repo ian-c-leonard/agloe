@@ -219,18 +219,19 @@ def as_text(file: File, report: Report) -> str:
             ]
         asked = [needed.unknown for enough in report.missing for needed in enough]
         kinds = {unknown.what for unknown in asked}
-        # A BOOKING can stand in for the answer, unless the FILE says that none can be had.
-        might_be_booked = [
-            unknown
+        # A BOOKING can stand in for that answer, for an OPTION whose rights are not COMPLETE.
+        might_be_booked = {
+            unknown.option
             for unknown in asked
             if unknown.what == "needs no right"
             and file.rights_complete(unknown.option or "") is None
-        ]
+        }
         if might_be_booked:
+            names = [_name(file, each.id) for each in file.options if each.id in might_be_booked]
             lines += [
                 "",
-                "If a right is needed after all, a BOOKING for each PERSON who takes part is"
-                " enough instead.",
+                f"If {_listed(names, 'or')} does need a right, a BOOKING for each PERSON who"
+                " takes part in it is enough instead.",
             ]
         if "other ways" in kinds:
             helps = (
@@ -499,7 +500,7 @@ def _record(file: File, clock: _Clock, record: str) -> str:
     if isinstance(found, Booking):
         return f"a BOOKING for {name} covers {_people(file, found.covers)}"
     if isinstance(found, CompleteRights):
-        closed = "nobody on the trip holds another, and nobody can get one"
+        closed = "nobody on the trip holds another or can get one"
         return f"the FILE lists every right to {name}: {closed}"
     return _cutoff(file, name, found)
 

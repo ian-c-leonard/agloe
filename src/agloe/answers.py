@@ -39,7 +39,6 @@ from agloe.reference import (
     no_better_than,
     one_way_each,
     unknowns,
-    with_others_found,
     with_these_at_best,
     with_this_long,
     worst_case,
@@ -84,11 +83,7 @@ type Stuck = Callable[[Remaining], frozenset[str] | None]
 
 
 def check(
-    file: File,
-    shown: Shown = first_shown,
-    works: Works = any_works,
-    stuck: Stuck | None = None,
-    quick: bool = False,
+    file: File, shown: Shown = first_shown, works: Works = any_works, stuck: Stuck | None = None
 ) -> Report:
     """The answer for this TRIP, with its evidence.
 
@@ -99,10 +94,6 @@ def check(
     ``stuck`` names FACTs and DECISIONs that rule out every ITINERARY by themselves, or None when
     one works in the best case. The set need not be small. A search that can name a small one
     saves most of the work of finding the conflict. Without it, every record counts.
-
-    ``quick`` says that ``works`` soon finds that nothing works in a world, as a solver does.
-    The search that tries every choice does not. A quick search is asked more of those
-    questions, where the answers save work: see ``_missing``.
     """
     if stuck is None:
 
@@ -128,7 +119,7 @@ def check(
     enough = stuck(Remaining(file))
     if enough is not None:
         return Report(Answer.INFEASIBLE, conflict=_conflict(file, stuck, enough))
-    return Report(Answer.UNDETERMINED, missing=_missing(file, works, quick))
+    return Report(Answer.UNDETERMINED, missing=_missing(file, works))
 
 
 def _relied_on(file: File, itinerary: Itinerary, fact: Fact) -> bool:
@@ -207,7 +198,7 @@ def _records(file: File) -> list[str]:
     return [*(fact.id for fact in file.facts), *wants, *(each.id for each in file.decisions)]
 
 
-def _missing(file: File, works: Works, quick: bool) -> tuple[tuple[Missing, ...], ...]:
+def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
     """The sets of unknown FACTs that would be enough if they turned out well.
 
     Each set makes the TRIP FEASIBLE with every other unknown FACT at its worst. A set of one
@@ -219,62 +210,60 @@ def _missing(file: File, works: Works, quick: bool) -> tuple[tuple[Missing, ...]
     every FACT about it. So the sets returned ask for the fewest of those, and among them they
     have the fewest FACTs. The count is of WANTs and PERSONs, whichever OPTIONs are found.
 
-    Two shortcuts save work, and nothing is reported from either. Both use the upper bound of
-    ``no_better_than``, where a set of unknown FACTs all help. Asking for some other OPTIONs
-    can be enough only if it is enough there with every unknown FACT about the FILE's own
-    OPTIONs and WAYs. That bound is built once.
-
-    The second shortcut is for a ``quick`` search only. A set that is enough holds each FACT
-    that the TRIP cannot work without in the upper bound, with all the others helping. A FILE
-    that says little needs many FACTs at once, and most of them are of that kind. So once no
-    set of one FACT is enough, the search finds them, with one check each, and tries only the
-    sets that hold them all. Each check asks whether anything works in a world where nearly
-    everything is possible. A solver soon says no. The search that tries every choice would
-    take longer over one such question than over all the sets.
+    Every set holds the FACTs that a LOCK cannot be honored without, so only sets that hold
+    them are tried. A FILE that says little about its LOCKed OPTIONs needs many FACTs at once,
+    and those are most of them.
     """
     every = unknowns(file)
     facts = [unknown for unknown in every if unknown.what != "another option"]
     to_find = [unknown for unknown in every if unknown.what == "another option"]
     place = {unknown: number for number, unknown in enumerate(facts)}
-    at_most = no_better_than(file, facts)
-
-    def cannot_do_without(some: tuple[Unknown, ...]) -> list[Unknown]:
-        """Each FACT that every set holds which is enough with these other OPTIONs found."""
-        bounds = ((fact, no_better_than(file, (f for f in facts if f != fact))) for fact in facts)
-        return [fact for fact, bound in bounds if not works(file, with_others_found(bound, some))]
-
+    in_every_set = _asked_by_a_lock(file)
+    others = [unknown for unknown in facts if unknown not in in_every_set]
     for count in range(len(to_find) + 1):
+        # Asking for these can be enough only if it is in the upper bound, where every FACT
+        # helps whoever needs it. The bound only saves work: nothing is reported from it.
         hopeful = [
-            some
-            for some in combinations(to_find, count)
-            if works(file, with_others_found(at_most, some))
+            some for some in combinations(to_find, count) if works(file, no_better_than(file, some))
         ]
-        needed: dict[tuple[Unknown, ...], list[Unknown]] = {}
-        for size in range(len(facts) + 1 if hopeful else 0):
-            enough: list[tuple[list[int], int, tuple[Unknown, ...]]] = []
-            for number, some in enumerate(hopeful):
-                if quick and size > 1 and some not in needed:
-                    needed[some] = cannot_do_without(some)
-                in_every_set = needed.get(some, [])
-                if size < len(in_every_set):
-                    continue
-                others = [fact for fact in facts if fact not in in_every_set]
-                for more in combinations(others, size - len(in_every_set)):
-                    stated = sorted((*in_every_set, *more), key=place.__getitem__)
-                    turned_out_well = (*stated, *some)
-                    if one_way_each(stated) and works(
-                        file, with_these_at_best(file, turned_out_well)
-                    ):
-                        order = [place[fact] for fact in stated]
-                        enough.append((order, number, turned_out_well))
+        for size in range(len(in_every_set), len(facts) + 1 if hopeful else 0):
+            # Adding the same FACTs to each set keeps the sets in the order of their FACTs.
+            sets = (
+                sorted((*in_every_set, *more), key=place.__getitem__)
+                for more in combinations(others, size - len(in_every_set))
+            )
+            enough = [
+                (*stated, *some)
+                for stated in sets
+                for some in hopeful
+                if one_way_each(stated) and works(file, with_these_at_best(file, (*stated, *some)))
+            ]
             if enough:
                 alone = count + size == 1
-                # The sets come in the order of their FACTs, as if every set had been tried.
                 return tuple(
                     tuple(Missing(u, _limit(file, u, works) if alone else None) for u in some)
-                    for _, _, some in sorted(enough, key=lambda found: found[:2])
+                    for some in enough
                 )
     raise AssertionError("the best case works, so some unknown FACTs make it work")
+
+
+def _asked_by_a_lock(file: File) -> frozenset[Unknown]:
+    """The unknown FACTs that a LOCK cannot be honored without. Every set that is enough has them.
+
+    A LOCK puts its PERSONs into its OPTION in every ITINERARY. An OPTION with no stated start
+    can be used only if its start turns out free. And where nobody knows whether the OPTION
+    needs a right, a PERSON whom no BOOKING covers can take part only if it turns out to need
+    none: no set asks for another right to such an OPTION. Nothing else can stand in for
+    either FACT, so this takes no search.
+    """
+    asked: set[Unknown] = set()
+    for lock in file.locks:
+        if file.start(lock.option) is None:
+            asked.add(Unknown("start", lock.option))
+        covered = all(file.booking(lock.option, person) is not None for person in lock.persons)
+        if file.needs_right(lock.option) is None and not covered:
+            asked.add(Unknown("needs no right", lock.option))
+    return frozenset(asked)
 
 
 def _limit(file: File, unknown: Unknown, works: Works) -> int | None:

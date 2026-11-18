@@ -61,7 +61,7 @@ class DoesNotFit(Exception):
 def check(file: File) -> Report:
     """The answer for this TRIP, with its evidence. The same Report as the reference checker's."""
     try:
-        return answers.check(file, shown=shown, works=works, stuck=stuck, quick=True)
+        return answers.check(file, shown=shown, works=works, stuck=stuck)
     except DoesNotFit:
         return answers.check(file)
 

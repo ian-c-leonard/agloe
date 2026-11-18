@@ -3,5 +3,5 @@ INFEASIBLE: this trip cannot work.
 These FACTs and DECISIONs rule out every plan by themselves. Take any one away and they no longer do. A FACT that is taken away leaves what it said unknown. Times are in America/Chicago.
   skydeck-needs-a-ticket: people need a right to take part in Skydeck visit
   alex-skydeck-ticket: a BOOKING for Skydeck visit covers Alex
-  skydeck-sold-out: the FILE lists every right to Skydeck visit: nobody on the trip holds another, and nobody can get one
+  skydeck-sold-out: the FILE lists every right to Skydeck visit: nobody on the trip holds another or can get one
   lock-skydeck: Alex and Sam take part in Skydeck visit
