@@ -766,7 +766,7 @@ def _arrivals(world: World, path: list[_Placed]) -> _Found:
     for placed in path:
         step = placed[1]
         margin = 0 if step.option is None else world.terms[step.option].margin
-        if arrived is not None and margin != 0:
+        if arrived is not None and step.option is not None:
             if arrived.end is None or margin is None:
                 found.append((Constraint.ARRIVAL, placed, None))
             elif arrived.end + margin > step.start:
@@ -1148,23 +1148,23 @@ def _timings(
     count = listed + len(legs)
     if _goes_round(count, gaps):
         return  # two PERSONs would do the same OPTIONs at one instant in opposite orders
-    zero = count  # one more start, pinned at time zero, to measure the spans from
-    fixed: dict[int, int] = {zero: 0}
+    fixed: dict[int, int] = {}
     for index, option in enumerate(file.options):
         at = world.terms[option.id].fixed_start
         if who[index] and at is not None:
             fixed[index] = at
 
-    # The times of the TRIP. What is tied to no fixed start counts from when the TRIP starts,
-    # and each step with a known length has a latest start that leaves it over when the TRIP ends.
+    # The limits on each start that fix no start themselves. No step starts before the TRIP
+    # starts, and a step with a known length starts early enough to be over when the TRIP ends.
     trip_starts, trip_ends = file.trip_start(), file.trip_end()
-    not_before = None if trip_starts is None else trip_starts.at
+    not_before: dict[int, int] = {}
     no_later: dict[int, int] = {}
-    if trip_ends is not None:
-        for node in range(count):
-            lasts = takes(node)
-            if lasts is not None:
-                no_later[node] = trip_ends.at - lasts
+    for node in range(count):
+        lasts = takes(node)
+        if trip_starts is not None:
+            not_before[node] = trip_starts.at
+        if trip_ends is not None and lasts is not None:
+            no_later[node] = trip_ends.at - lasts
 
     ruled_out = [
         (node, spans)
@@ -1174,17 +1174,20 @@ def _timings(
         if spans
     ]
     # Each such WAY as it falls, then in each opening: before the first span, after each one.
+    # An opening is one more limit on when the WAY starts. It fixes no start either.
     openings = [[None, *range(len(spans) + 1)] for _, spans in ruled_out]
     for choice in product(*openings):
-        outside: list[tuple[int, int, int]] = []
+        earliest, latest = dict(not_before), dict(no_later)
         for (node, spans), opening in zip(ruled_out, choice, strict=True):
             if opening is None:
                 continue
             if opening > 0:
-                outside.append((zero, node, spans[opening - 1][1] + 1))
+                after = spans[opening - 1][1] + 1
+                earliest[node] = max(after, earliest.get(node, after))
             if opening < len(spans):
-                outside.append((node, zero, 1 - spans[opening][0]))
-        starts = _times(count + 1, [*gaps, *outside], fixed, not_before, no_later)
+                before = spans[opening][0] - 1
+                latest[node] = min(before, latest.get(node, before))
+        starts = _times(count, gaps, fixed, earliest, latest)
         if starts is None:
             continue
         steps: dict[int, Step] = {}
@@ -1280,34 +1283,38 @@ def _times(
     count: int,
     gaps: list[tuple[int, int, int]],
     fixed: Mapping[int, int],
-    not_before: int | None = None,
-    no_later: Mapping[int, int] | None = None,
+    not_before: Mapping[int, int],
+    no_later: Mapping[int, int],
 ) -> list[int] | None:
     """Start times that keep every gap and every fixed start, or None when there are none.
 
     A start that comes after one already timed is as early as the gaps allow. Then a start that
     comes before one already timed is as late as they allow. Those two steps repeat until they
-    time nothing more. What is left is tied to no fixed start, and counts from the time the TRIP
-    starts, or from zero.
+    time nothing more. What is left is tied to no fixed start, and counts from its own limit, or
+    from zero.
 
-    The times of the TRIP are limits on those choices. ``not_before`` is when the TRIP starts,
-    and no start that is not fixed is earlier. ``no_later`` gives the latest start that the end
-    of the TRIP allows a step. "As early as it can" and "as late as it can" keep to both limits,
-    for the step and for whatever comes before or after it.
+    ``not_before`` and ``no_later`` are limits on single starts: the times of the TRIP, and the
+    opening in which an unlisted WAY leaves. They fix no start, so they time nothing by
+    themselves. But "as early as it can" and "as late as it can" keep to them, for the step and
+    for whatever comes before or after it. So each limit is first carried along the gaps: a
+    start can be no earlier than what comes before it allows, and no later than what comes after
+    it allows.
+
+    This finds a timing whenever one exists. The gaps and limits say only that one start is at
+    least so long after another, or after or before a known time. With starts of that kind, any
+    start chosen inside its own limits leaves room for all the others.
     """
-    floor: dict[int, int] = {}
-    if not_before is not None:
-        floor = {node: not_before for node in range(count) if node not in fixed}
-    cap = dict(no_later or {})
-    for _ in range(
-        count + 1
-    ):  # carry each limit on to what comes after, and back to what comes before
+    floor = {node: moment for node, moment in not_before.items() if node not in fixed}
+    cap = {node: moment for node, moment in no_later.items() if node not in fixed}
+    for _ in range(count + 1):
         carried = False
         for before, after, gap in gaps:
-            if before in floor and after in floor and floor[before] + gap > floor[after]:
+            later = before in floor and after not in fixed
+            if later and (after not in floor or floor[before] + gap > floor[after]):
                 floor[after] = floor[before] + gap
                 carried = True
-            if after in cap and (before not in cap or cap[after] - gap < cap[before]):
+            sooner = after in cap and before not in fixed
+            if sooner and (before not in cap or cap[after] - gap < cap[before]):
                 cap[before] = cap[after] - gap
                 carried = True
         if not carried:
@@ -1344,7 +1351,9 @@ def _times(
             return None
         if len(still) == len(untimed) and all(times[node] is None for node in still):
             for node in still:
-                times[node] = floor.get(node, 0)
+                # From its earliest start. With none, from zero, or from its latest start
+                # where that is before zero: then zero would be too late.
+                times[node] = floor.get(node, min(0, cap.get(node, 0)))
             if not _settle(gaps, times, still, late=False, limit=floor):
                 return None
     return [moment for moment in times if moment is not None]

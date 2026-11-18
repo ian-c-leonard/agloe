@@ -288,8 +288,17 @@ def instant(text: str) -> int:
 
 
 def written(moment: int, zone: str) -> str:
-    """A time as a FILE writes it: date and time, offset from UTC, and time zone in brackets."""
-    return f"{local(moment, zone).isoformat(timespec='seconds')}[{zone}]"
+    """A time as a FILE writes it: date and time, offset from UTC, and time zone in brackets.
+
+    A FILE writes an offset in hours and minutes. Where the time zone's offset at that moment
+    has seconds too, as Paris had before 1911, the time is written in UTC. So whatever this
+    writes can be read back.
+    """
+    there = local(moment, zone)
+    offset = there.utcoffset() or timedelta()
+    if offset.total_seconds() % 60:
+        return written(moment, "UTC")
+    return f"{there.isoformat(timespec='seconds')}[{zone}]"
 
 
 def local(moment: int, zone: str) -> datetime:
@@ -464,7 +473,8 @@ def load(document: object) -> File:
         raise FileError(["the FILE: it is nested too deeply"])
     schema = json.loads(resources.files("agloe").joinpath("schema/file.schema.json").read_text())
     validator = cast("_Validator", Draft202012Validator(schema))
-    problems = sorted(_describe(error) for error in validator.iter_errors(document))
+    shapes = schema["$defs"]
+    problems = sorted(_describe(error, shapes) for error in validator.iter_errors(document))
     problems += _unwritable_characters(document, "")
     if problems:
         raise FileError(problems)
@@ -647,7 +657,7 @@ def load(document: object) -> File:
 
     starts = next((each.at for each in decisions if isinstance(each, TripStart)), None)
     ends = next((each.at for each in decisions if isinstance(each, TripEnd)), None)
-    if starts is not None and ends is not None and ends < starts:
+    if not problems and starts is not None and ends is not None and ends < starts:
         problems.append("/decisions: the TRIP ends before it starts")
     if problems:
         raise FileError(problems)
@@ -689,30 +699,41 @@ def _unwritable_characters(value: object, where: str) -> list[str]:
     return found
 
 
-def _describe(error: ValidationError) -> str:
+def _describe(error: ValidationError, shapes: dict[str, dict[str, object]]) -> str:
     """One schema problem as 'where: what'. A record that fits no shape gets its closest miss.
 
-    A FACT with ``complete`` is about travel or about a WANT. Its miss is the one for the kind
-    it was meant to be, so that a key of that kind is never named as the problem.
+    The closest miss is the one for the shape the record was meant to have: the shape whose
+    required keys the record has most of. So a key that belongs to that shape is never named as
+    the problem. ``shapes`` holds each shape of the schema by its name. A FACT with ``complete``
+    is about travel or about a WANT, and what is inside ``complete`` says which.
     """
     where = "".join(_inside("", part) for part in error.absolute_path) or "the FILE"
     if not error.context:
         return f"{where}: {error.message}"
     misses = list(error.context)
-    record: object = error.instance
-    a_fact = isinstance(record, dict) and list(error.absolute_path)[:1] == ["facts"]
-    whole = cast("dict[str, object]", record).get("complete") if a_fact else None
-    if isinstance(whole, dict):
-        keys = set(cast("dict[str, object]", whole))
-        if "satisfies" in keys and keys & {"from", "to", "leaving"}:
-            return f"{where}: a COMPLETE set is about travel or about a WANT, never both"
-        meant = "complete_for_a_want" if "satisfies" in keys else "complete_set"
-        shapes = cast("dict[str, list[dict[str, str]]]", error.schema)["oneOf"]
-        of_that_kind = [
-            miss
-            for miss in misses
-            if shapes[cast("int", miss.relative_schema_path[0])]["$ref"].endswith(f"/{meant}")
+    written: object = error.instance
+    if isinstance(written, dict):
+        record = cast("dict[str, object]", written)
+        names = [
+            each["$ref"].rsplit("/", 1)[-1]
+            for each in cast("dict[str, list[dict[str, str]]]", error.schema)["oneOf"]
         ]
-        misses = of_that_kind or misses
+
+        def name(miss: ValidationError) -> str:
+            return names[cast("int", miss.relative_schema_path[0])]
+
+        def fit(miss: ValidationError) -> int:
+            required = cast("list[str]", shapes[name(miss)].get("required", []))
+            return len(set(required) & set(record))
+
+        best = max(fit(miss) for miss in misses)
+        misses = [miss for miss in misses if fit(miss) == best]
+        whole = record.get("complete")
+        if isinstance(whole, dict) and list(error.absolute_path)[:1] == ["facts"]:
+            keys = set(cast("dict[str, object]", whole))
+            if "satisfies" in keys and keys & {"from", "to", "leaving"}:
+                return f"{where}: a COMPLETE set is about travel or about a WANT, never both"
+            meant = "complete_for_a_want" if "satisfies" in keys else "complete_set"
+            misses = [miss for miss in misses if name(miss) == meant] or misses
     closest = max(misses, key=lambda miss: len(miss.absolute_path))
     return f"{where}: fits no known shape; the closest miss: {closest.message}"

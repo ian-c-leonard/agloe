@@ -6,7 +6,7 @@ import pytest
 
 from agloe import answers, compiler, report
 from agloe.answers import Answer, Missing, Report
-from agloe.file import File, FileError, TripEnd, TripStart, load
+from agloe.file import File, FileError, TripEnd, TripStart, instant, load, written
 from agloe.reference import (
     Broken,
     Constraint,
@@ -14,6 +14,7 @@ from agloe.reference import (
     Unknown,
     best_case,
     broken,
+    first_shown,
     in_world,
     itineraries,
     needless,
@@ -265,6 +266,156 @@ def test_what_comes_after_a_fixed_start_waits_for_what_cannot_be_earlier() -> No
         "talk": seconds(10),
         "tour": seconds(10, 15),
     }
+
+
+EPOCH = "1970-01-01T00:00:00+00:00[UTC]"
+
+
+def before_1970(*facts: Document, starts_then_too: bool = False) -> File:
+    """Alex is LOCKed for a visit that can start at any time. The TRIP ends as 1970 begins."""
+    decisions = [{"id": "trip-end", "trip_ends_at": EPOCH}, lock("visit", "alex")]
+    if starts_then_too:
+        decisions.insert(0, {"id": "trip-start", "trip_starts_at": EPOCH})
+    options = [stays("visit", "museum")]
+    return trip(["alex"], ["museum"], options, [any_time("visit"), *facts], decisions)
+
+
+def test_a_trip_with_an_end_and_no_start_is_timed_back_from_its_end() -> None:
+    """What is tied to no fixed start counts from 1970. Here that is too late by one second."""
+    found = checked(before_1970(lasts("visit", "PT1S")))
+    assert found.answer is Answer.FEASIBLE
+    assert found.itinerary == (the_visit(-1, 0),)
+
+
+def test_the_start_of_the_trip_is_part_of_the_conflict_when_only_it_stops_an_earlier_start() -> (
+    None
+):
+    found = checked(before_1970(lasts("visit", "PT1S"), starts_then_too=True))
+    assert found.answer is Answer.INFEASIBLE
+    assert found.conflict == ("visit-length", "trip-start", "trip-end", "lock-visit")
+
+
+def test_any_stated_length_fits_before_an_end_when_nothing_holds_the_start() -> None:
+    found = checked(before_1970())
+    assert found.answer is Answer.UNDETERMINED
+    assert found.missing == ((Missing(Unknown("duration", "visit"), None),),)
+    assert checked(before_1970(lasts("visit", "PT1H"))).itinerary == (the_visit(-3600, 0),)
+
+
+def test_a_plan_that_can_start_earlier_is_robust() -> None:
+    found = checked(before_1970(lasts_between("visit", "PT0S", "PT1S")))
+    assert found.answer is Answer.FEASIBLE
+    assert found.robust is True
+    assert found.itinerary == (the_visit(-1, 0),)
+
+
+def test_a_warning_names_a_missed_arrival_where_nobody_has_to_be_early() -> None:
+    """A ride at 10:00 am takes 9 to 11 minutes. A visit starts at 10:10 am, when the TRIP ends.
+
+    At 11 minutes Alex is still on the ride when the visit starts, so Alex is also too late
+    for it, though nobody has to be there early. The ride also ends after the TRIP does.
+    """
+    options = [moves("ride", "hotel", "museum"), stays("visit", "museum")]
+    facts = [
+        starts_at("ride", 10),
+        lasts_between("ride", "PT9M", "PT11M"),
+        cutoff("ride", "PT0S"),
+        starts_at("visit", 10, 10),
+        lasts("visit", "PT0S"),
+        cutoff("visit", "PT0S"),
+    ]
+    decisions = [trip_ends(10, 10), lock("ride", "alex"), lock("visit", "alex")]
+    file = trip(["alex"], ["hotel", "museum"], options, facts, decisions)
+    found = checked(file)
+    assert found.robust is False
+    assert set(found.at_worst) == {
+        Broken(Constraint.WITHIN, "ride", ("alex",), 60),
+        Broken(Constraint.PLACE, "visit", ("alex",), 60),
+        Broken(Constraint.ARRIVAL, "visit", ("alex",), 60),
+    }
+    words = report.as_text(file, found)
+    assert "    ! alex would be 1 min too late for this.\n" in words
+    assert "    ! This would end 1 min after the trip ends.\n" in words
+
+
+def test_the_opening_of_a_complete_span_moves_only_the_way_that_must_wait() -> None:
+    """Alex visits A and then B. No unlisted WAY leaves A for B before 10:00 am.
+
+    The TRIP starts at 9:00 am. The visit at A is tied to no fixed start, so it is at 9:00 am.
+    Only the WAY waits for the span to pass.
+    """
+    options = [stays("first", "a"), stays("second", "b")]
+    facts = [
+        any_time("first"),
+        lasts("first", "PT0S"),
+        cutoff("first", "PT0S"),
+        any_time("second"),
+        lasts("second", "PT0S"),
+        cutoff("second", "PT0S"),
+        {
+            "id": "ways-a-b",
+            "complete": {
+                "from": "a",
+                "to": "b",
+                "leaving": {"earliest": at_minute(0, 0), "latest": at_second_before(10)},
+            },
+        },
+    ]
+    decisions = [trip_starts(9), trip_ends(11), lock("first", "alex"), lock("second", "alex")]
+    file = trip(["alex"], ["a", "b"], options, facts, decisions)
+    shown = first_shown(file, best_case(file))
+    assert shown is not None
+    assert compiler.shown(file, best_case(file)) == shown
+    assert [(step.option or "way", step.start) for step in shown] == [
+        ("first", seconds(9)),
+        ("way", seconds(10)),
+        ("second", seconds(10)),
+    ]
+    assert checked(file).answer is Answer.UNDETERMINED
+
+
+def at_minute(hour: int, minute: int) -> str:
+    return f"2027-05-15T{hour:02d}:{minute:02d}:00-05:00[America/Chicago]"
+
+
+def at_second_before(hour: int) -> str:
+    return f"2027-05-15T{hour - 1:02d}:59:59-05:00[America/Chicago]"
+
+
+def test_a_time_is_written_so_that_it_can_be_read_back() -> None:
+    """Until 11 March 1911, clocks in Paris ran 9 minutes and 21 seconds ahead of UTC.
+
+    A FILE writes an offset in hours and minutes, so such a time is written in UTC.
+    """
+    midnight = instant("1911-03-11T00:00:00+00:00[Europe/Paris]")
+    an_hour_before = written(midnight - 3600, "Europe/Paris")
+    assert an_hour_before == "1911-03-10T23:00:00+00:00[UTC]"
+    assert instant(an_hour_before) == midnight - 3600
+    assert written(midnight, "Europe/Paris") == "1911-03-11T00:00:00+00:00[Europe/Paris]"
+    document = flight_home()
+    document["decisions"].append({"id": "trip-start", "trip_starts_at": an_hour_before})
+    start = load(document).trip_start()
+    assert start is not None and start.at == midnight - 3600
+
+
+def test_a_wrong_key_in_a_decision_is_named_alone() -> None:
+    document = flight_home()
+    document["decisions"].append({**trip_ends(18), "extra": True})
+    last = len(document["decisions"]) - 1
+    assert problems(document) == (
+        f"/decisions/{last}: fits no known shape; the closest miss:"
+        " Additional properties are not allowed ('extra' was unexpected)"
+    )
+
+
+def test_a_time_that_is_not_real_is_the_only_problem_reported_for_it() -> None:
+    document = flight_home()
+    not_a_day = {"id": "trip-end", "trip_ends_at": "2027-02-30T10:00:00-06:00[America/Chicago]"}
+    document["decisions"] += [trip_starts(9), not_a_day]
+    last = len(document["decisions"]) - 1
+    assert problems(document) == (
+        f"/decisions/{last}: 2027-02-30T10:00:00-06:00[America/Chicago] is not a real date and time"
+    )
 
 
 def test_the_search_finds_a_plan_within_the_trip_whenever_trying_everything_does() -> None:

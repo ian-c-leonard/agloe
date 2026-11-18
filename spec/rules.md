@@ -109,9 +109,9 @@ The start times follow a fixed rule too. It treats each time a PERSON takes a WA
 1. An OPTION that comes after one already timed starts as early as it can.
 2. Then an OPTION that comes before one already timed starts as late as it can.
 3. Steps 1 and 2 repeat until they time nothing more.
-4. The OPTIONs still without a time are tied to no fixed start. They are timed from the time the TRIP starts, each as early as it can. Where no DECISION says when the TRIP starts, they are timed from the first second of 1970 in UTC.
+4. The OPTIONs still without a time are tied to no fixed start. They are timed from the time the TRIP starts, each as early as it can. Where no DECISION says when the TRIP starts, they are timed from the first second of 1970 in UTC, or from earlier where the TRIP ends too soon for that.
 
-The times of the TRIP are limits. They are no fixed starts, and they time nothing else. "As early as it can" and "as late as it can" keep to them, for the OPTION itself and for whatever comes before or after it: a start that leaves no room for the rest inside the TRIP is not one the OPTION can take.
+The times of the TRIP are limits, and a FILE can hold either, both or neither. They are no fixed starts: steps 1 to 3 time nothing from them. "As early as it can" and "as late as it can" keep to them, for the OPTION itself and for whatever comes before or after it: a start that leaves no room for the rest inside the TRIP is not one the OPTION can take. The opening in which an unlisted WAY leaves, before or after the span of a COMPLETE set of travel, is a limit of the same kind.
 
 A ROBUST ITINERARY shows each CONTINGENT duration at its longest value, and any other ITINERARY shows it at its shortest. An OPTION with an unknown duration shows no end.
 
@@ -176,6 +176,16 @@ Friday evening has one more plan. Alex has a ticket for a blues show at 9:00 pm,
 | [cannot work](../examples/a-must/cannot-work.json) | The deep-dish place has no table until 7:45 pm, so Alex would miss the show. A FACT says that the FILE lists every OPTION that SATISFIES the WANT. | INFEASIBLE. Six records conflict: when dinner at the deep-dish place starts, how long it takes, when the show starts, the COMPLETE set, the WANT and the LOCK. |
 | [depends on the menu](../examples/a-must/depends-on-the-menu.json) | The deep-dish place has no table until 7:45 pm, so Alex would miss the show. Nobody has recorded whether the tavern serves deep-dish pizza. | UNDETERMINED. It works if dinner at the tavern SATISFIES deep-dish pizza. |
 | [depends on another place](../examples/a-must/depends-on-another-place.json) | The deep-dish place has no table until 7:45 pm, and a FACT says that dinner at the tavern does not SATISFY the WANT. | UNDETERMINED. It works if another OPTION that SATISFIES deep-dish pizza is found for Alex. |
+
+The trip home has a frame. The TRIP starts at noon on Saturday and ends at 7:30 pm, when the flight lands. The story is the first one, with those two DECISIONs.
+
+| FILE | What it says | Answer |
+|---|---|---|
+| [works](../examples/the-times-of-the-trip/works.json) | The flight takes two and a half hours and lands at 7:30 pm. | FEASIBLE. The last second of the TRIP is inside it. |
+| [ends too early](../examples/the-times-of-the-trip/ends-too-early.json) | The TRIP ends at 7:00 pm. | INFEASIBLE. Four records conflict: when the flight starts, how long it takes, when the TRIP ends, and the LOCK. |
+| [starts too late](../examples/the-times-of-the-trip/starts-too-late.json) | The TRIP starts at 2:30 pm, after the museum visit has begun. | INFEASIBLE. Three records conflict: when the visit starts, when the TRIP starts, and the LOCK. |
+| [depends on the flight](../examples/the-times-of-the-trip/depends-on-the-flight.json) | Nobody has recorded how long the flight takes. | UNDETERMINED. It works if the flight takes 2 hours 30 minutes or less. |
+| [works, but risky](../examples/the-times-of-the-trip/works-but-risky.json) | The flight can take up to three hours. | FEASIBLE, with a WARNING that no ITINERARY is ROBUST. At three hours the flight would end 30 minutes after the TRIP ends. |
 
 On Saturday morning a view from high up is a must for Alex and a must-not for Jo, who is afraid of heights. A FACT says that the Skydeck visit at 10:00 am SATISFIES it. All three are LOCKed for lunch at 12:15 pm.
 

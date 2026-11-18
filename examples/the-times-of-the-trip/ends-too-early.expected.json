@@ -1,0 +1,9 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "flight-time",
+    "flight-length",
+    "trip-end",
+    "lock-flight"
+  ]
+}
