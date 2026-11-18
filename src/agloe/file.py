@@ -648,7 +648,8 @@ def _describe(error: ValidationError) -> str:
         return f"{where}: {error.message}"
     misses = list(error.context)
     record: object = error.instance
-    whole = cast("dict[str, object]", record).get("complete") if isinstance(record, dict) else None
+    a_fact = isinstance(record, dict) and list(error.absolute_path)[:1] == ["facts"]
+    whole = cast("dict[str, object]", record).get("complete") if a_fact else None
     if isinstance(whole, dict):
         keys = set(cast("dict[str, object]", whole))
         if "satisfies" in keys and keys & {"from", "to", "leaving"}:

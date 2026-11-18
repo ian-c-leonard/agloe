@@ -326,7 +326,7 @@ def test_every_conflict_is_enough_and_has_no_record_to_spare() -> None:
 def test_the_report_puts_a_complete_set_for_a_want_in_words() -> None:
     file = trip(["alex"], [], [], [every("deep-dish")], [], wants=[must("deep-dish", "alex")])
     assert report.as_text(file, checked(file)).splitlines()[2:] == [
-        "These FACTs, WANTs and DECISIONs rule out every plan by themselves. Take any one away"
+        "These FACTs and WANTs rule out every plan by themselves. Take any one away"
         " and they no longer do. A FACT that is taken away leaves what it said unknown."
         " Times are in UTC.",
         "  every-deep-dish: the FILE states every OPTION that SATISFIES deep-dish: there is none",
@@ -419,6 +419,22 @@ def test_a_wrong_key_in_a_complete_set_is_named_alone() -> None:
         f"/facts/{last}: fits no known shape; the closest miss:"
         " Additional properties are not allowed ('note' was unexpected)"
     )
+
+
+def test_only_a_fact_is_told_to_choose_a_kind_of_complete_set() -> None:
+    """An OPTION has no `complete` at all, so the reader says only that."""
+    document = flight_home()
+    document["options"][0]["complete"] = {"satisfies": "x", "from": "art-institute"}
+    said = problems(document)
+    assert said.startswith("/options/0: fits no known shape")
+    assert "never both" not in said
+
+
+def test_a_report_names_only_the_kinds_of_record_it_lists() -> None:
+    file = trip(["alex"], [], [], [every("deep-dish")], [], wants=[must("deep-dish", "alex")])
+    words = report.as_text(file, checked(file))
+    assert "These FACTs and WANTs rule out every plan by themselves." in words
+    assert "DECISION" not in words
 
 
 def test_a_complete_set_about_travel_and_about_a_want_is_refused_as_both() -> None:
