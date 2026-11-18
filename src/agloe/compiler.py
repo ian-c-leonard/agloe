@@ -27,6 +27,7 @@ from agloe.file import Complete, Cutoff, Duration, File, Start, Want
 from agloe.reference import Itinerary, Remaining, World
 
 _MOST_AT_ONCE = 60  # yes-or-no choices ranked in one solve: their weights must fit in 64 bits
+_FURTHEST = 2**62  # a time further than this from the first fixed time does not fit in 64 bits
 
 type _Who = tuple[tuple[str, ...], ...]  # the PERSONs in each OPTION
 type _Orders = tuple[tuple[int, ...], ...]  # the OPTIONs each PERSON does, in order
@@ -40,7 +41,7 @@ type _Reached = list[tuple[cp_model.IntVar, reference.Route, _Amount | None]]
 
 
 class DoesNotFit(Exception):
-    """The solver refused a model: its numbers do not fit in the 64 bits it counts with."""
+    """The numbers of a TRIP's model do not fit in the 64 bits the solver counts with."""
 
 
 def check(file: File) -> Report:
@@ -268,6 +269,8 @@ class _Search:
         room += (len(options) + 2) * max(len(self.file.places), 1) * slowest
         self.room = room
         self.earliest, self.latest = -room, max([*fixed, *spans], default=0) - self.zero + room
+        if self.latest + room >= _FURTHEST:
+            raise DoesNotFit("the times this TRIP can reach are too far apart")
 
         known = [
             each.fixed_start if given is None else None
@@ -747,7 +750,10 @@ class _Search:
         solver = _solver()
         status = solver.solve(self.model)
         if status == cp_model.MODEL_INVALID:
-            raise DoesNotFit(self.model.validate())
+            why = self.model.validate()
+            if "int64" not in why and "overflow" not in why:
+                raise AssertionError(f"the solver refused the model: {why}")
+            raise DoesNotFit(why)
         return solver, status
 
     def _found(self, solver: cp_model.CpSolver, status: object) -> _Choice:

@@ -425,6 +425,22 @@ def test_a_time_that_is_not_real_is_the_only_problem_reported_for_it() -> None:
     assert problems(document) == f"/facts/{last}: {not_a_day} is not a real date and time"
 
 
+def test_a_time_that_its_zone_does_not_have_is_compared_with_nothing() -> None:
+    """Chicago's clocks skipped 2:30 am on 8 March 2026."""
+    document = flight_home()
+    skipped = "2026-03-08T02:30:00-06:00[America/Chicago]"
+    later = "2026-03-08T03:15:00-05:00[America/Chicago]"
+    document["decisions"] += [
+        {"id": "trip-start", "trip_starts_at": skipped},
+        {"id": "trip-end", "trip_ends_at": later},
+    ]
+    last = len(document["decisions"]) - 2
+    assert problems(document) == (
+        f"/decisions/{last}: {skipped} does not agree with its time zone:"
+        " America/Chicago is at -05:00 then"
+    )
+
+
 def test_two_real_times_are_compared_whatever_else_is_wrong() -> None:
     """The TRIP ends before it starts, and a LOCK names a PERSON the FILE does not have."""
     document = flight_home()

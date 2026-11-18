@@ -1100,21 +1100,28 @@ def routes(file: File, world: World, here: str, there: str, last: bool = False) 
                 yield None, other
 
     found: list[Route] = []
-
-    def extend(passed: tuple[str, ...], legs: Route) -> None:
-        for way, place in onward(passed[-1]):
-            if place in passed:
-                continue
-            longer = (*legs, (way, passed[-1], place))
-            if any(stands_in(passed[first], place, longer[first:]) for first in range(len(legs))):
-                continue
-            if place == there:
-                found.append(longer)
-            else:
-                extend((*passed, place), longer)
-
-    extend((here,), ())
-    return sorted(found, key=lambda route: (len(route), *_in_file_order_of_ways(file, [route])))
+    # The PLACEs passed so far, the WAYs taken, and what is still to try from there. A list, and
+    # no call inside a call: a route through very many PLACEs needs no deep stack.
+    begun: list[tuple[tuple[str, ...], Route, Iterator[tuple[str | None, str]]]] = [
+        ((here,), (), onward(here))
+    ]
+    while begun:
+        passed, legs, ahead = begun[-1]
+        step = next(ahead, None)
+        if step is None:
+            begun.pop()
+            continue
+        way, place = step
+        if place in passed:
+            continue
+        longer = (*legs, (way, passed[-1], place))
+        if any(stands_in(passed[first], place, longer[first:]) for first in range(len(legs))):
+            continue
+        if place == there:
+            found.append(longer)
+        else:
+            begun.append(((*passed, place), longer, onward(place)))
+    return sorted(found, key=lambda route: (len(route), _legs_in_file_order(file, route)))
 
 
 class Routes:
@@ -1134,22 +1141,14 @@ class Routes:
         return self._found[here, there, last]
 
 
-def _in_file_order_of_ways(
-    file: File, routes: Iterable[Route]
-) -> tuple[list[int], list[tuple[int, int]]]:
-    """What puts the WAYs of some routes in the order of "Which ITINERARY is shown".
-
-    First every WAY in turn by where the FILE lists it, with an unlisted WAY after every listed
-    one. Only then the PLACEs they join, by where the FILE lists those: that tells two unlisted
-    WAYs apart.
-    """
+def _legs_in_file_order(file: File, route: Route) -> list[tuple[int, int, int]]:
+    """The WAYs listed first come first, then the PLACEs listed first. Unlisted WAYs come last."""
     ways = [way.id for way in file.ways]
     places = [place.id for place in file.places]
-    legs = [leg for route in routes for leg in route]
-    return (
-        [len(ways) if way is None else ways.index(way) for way, _, _ in legs],
-        [(places.index(origin), places.index(to)) for _, origin, to in legs],
-    )
+    return [
+        (len(ways) if way is None else ways.index(way), places.index(origin), places.index(to))
+        for way, origin, to in route
+    ]
 
 
 def _schedules(
@@ -1192,13 +1191,12 @@ def _schedules(
                     return
                 needed.append((number, spot, possible))
 
-    def taken(chosen: tuple[Route, ...]) -> tuple[list[list[int]], list[list[tuple[int, int]]]]:
+    def taken(chosen: tuple[Route, ...]) -> list[list[tuple[int, int, int]]]:
         """For each PERSON in turn, every WAY they take, in the order they take them."""
-        mine: list[list[Route]] = [[] for _ in orders]
+        each: list[list[tuple[int, int, int]]] = [[] for _ in orders]
         for (number, _, _), route in zip(needed, chosen, strict=True):
-            mine[number].append(route)
-        each = [_in_file_order_of_ways(file, routes) for routes in mine]
-        return [ways for ways, _ in each], [places for _, places in each]
+            each[number] += _legs_in_file_order(file, route)
+        return each
 
     # The fewest and the most WAYs that the routes from each point on can take in all.
     least = [0] * (len(needed) + 1)
@@ -1208,16 +1206,33 @@ def _schedules(
         least[rest] = least[rest + 1] + min(lengths)
         greatest[rest] = greatest[rest + 1] + max(lengths)
 
-    def with_this_many(total: int, rest: int = 0) -> Iterator[tuple[Route, ...]]:
-        """Every choice of routes that takes this many WAYs in all."""
-        if rest == len(needed):
-            yield ()
-            return
-        for route in needed[rest][2]:
-            left = total - len(route)
-            if least[rest + 1] <= left <= greatest[rest + 1]:
-                for others in with_this_many(left, rest + 1):
-                    yield (route, *others)
+    def with_this_many(total: int) -> Iterator[tuple[Route, ...]]:
+        """Every choice of routes that takes this many WAYs in all.
+
+        It keeps its own list of what is picked, with no call inside a call. So a TRIP in which
+        very many PERSONs travel needs no deep stack.
+        """
+        picked: list[int] = []  # which route is taken at each point so far
+        nth, left = 0, total  # the next route to try at the point after those; the WAYs left
+        while True:
+            point = len(picked)
+            possible = needed[point][2] if point < len(needed) else []
+            while nth < len(possible):
+                after = left - len(possible[nth])
+                if least[point + 1] <= after <= greatest[point + 1]:
+                    break
+                nth += 1
+            if nth < len(possible):
+                picked.append(nth)
+                nth, left = 0, left - len(possible[nth])
+                continue
+            if point == len(needed):
+                yield tuple(needed[at][2][which] for at, which in enumerate(picked))
+            if not picked:
+                return
+            nth = picked.pop()
+            left += len(needed[len(picked)][2][nth])
+            nth += 1
 
     fewest, most = least[0], greatest[0]
     for total in range(fewest, most + 1):
@@ -1325,13 +1340,7 @@ def _timings(
     ]
     # Each such WAY as it falls, then in each opening: before the first span, after each one.
     # An opening is one more limit on when the WAY starts. It fixes no start either.
-    # A WAY that starts as late as it can takes the last opening that works, and any other WAY
-    # takes the first.
-    late = _timed_late(count, gaps, fixed)
-    openings = [
-        [None, *(reversed(range(len(spans) + 1)) if node in late else range(len(spans) + 1))]
-        for node, spans in ruled_out
-    ]
+    openings = [[None, *range(len(spans) + 1)] for _, spans in ruled_out]
     for choice in product(*openings):
         earliest, latest = dict(not_before), dict(no_later)
         for (node, spans), opening in zip(ruled_out, choice, strict=True):
@@ -1513,36 +1522,6 @@ def _times(
             if not _settle(gaps, times, still, late=False, limit=floor):
                 return None
     return [moment for moment in times if moment is not None]
-
-
-def _timed_late(count: int, gaps: list[tuple[int, int, int]], fixed: Mapping[int, int]) -> set[int]:
-    """The starts that ``_times`` puts as late as they can be: those before one already timed.
-
-    It follows the same steps without the times. Starts after a timed one are timed first, then
-    starts before a timed one, and so on in turn until nothing more is timed.
-    """
-    timed = set(fixed)
-    late: set[int] = set()
-
-    def reached(onward: bool) -> set[int]:
-        """The starts not yet timed that come after a timed one, or before one."""
-        found: set[int] = set()
-        for _ in range(count):
-            for before, after, _ in gaps:
-                source, target = (before, after) if onward else (after, before)
-                if source in timed | found and target not in timed:
-                    found.add(target)
-        return found
-
-    timed |= reached(onward=True)
-    while True:
-        before = reached(onward=False)
-        timed |= before
-        after = reached(onward=True)
-        timed |= after
-        if not before and not after:
-            return late
-        late |= before
 
 
 def _settle(

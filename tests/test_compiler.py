@@ -92,6 +92,35 @@ def test_a_trip_too_big_for_the_solver_gets_the_reference_checkers_answer() -> N
     assert found.missing == ((Missing(Unknown("other ways", origin="p0", destination="p9"), 0),),)
 
 
+def test_times_too_far_apart_for_the_solver_get_the_reference_checkers_answer() -> None:
+    """One WAY takes over 100,000 years. Nobody takes it, but the solver has to leave room.
+
+    With 1,122 PLACES and as many visits that nobody has to make, a path could take longer than
+    a 64-bit number of seconds can say.
+    """
+    places = [f"p{number}" for number in range(1122)]
+    visits = [stays(f"visit-{number}", "p0") for number in range(1122)]
+    far = [takes("far", "PT999999999H999999999M999999999S")]
+    file = trip(["sam"], places, visits, far, [], ways=[way("far", "p0", "p1")])
+    with pytest.raises(compiler.DoesNotFit):
+        compiler.works(file, worst_case(file))
+    found = compiler.check(file)
+    assert found == answers.check(file)
+    assert (found.answer, found.itinerary) == (Answer.FEASIBLE, ())
+
+
+def test_a_fault_in_the_model_is_not_taken_for_a_trip_that_is_too_big() -> None:
+    """Only numbers that do not fit send a TRIP to the reference checker's search."""
+    file = trip(["sam"], ["a"], [stays("visit", "a")], [], [])
+    search = compiler._Search(file, worst_case(file))  # pyright: ignore[reportPrivateUsage]
+    # A choice the model does not have, put where only the solver looks at it.
+    search.model.proto.constraints.add().bool_or.literals.append(  # pyright: ignore[reportUnknownMemberType]
+        99999
+    )
+    with pytest.raises(AssertionError, match="the solver refused the model"):
+        search.any()
+
+
 def test_the_compiler_and_the_reference_checker_agree_on_random_trips() -> None:
     """The same Report for every TRIP: the answer, the ITINERARY shown and the evidence."""
     rng = Random(404)

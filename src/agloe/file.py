@@ -536,6 +536,7 @@ def load(document: object) -> File:
         disagreement = _zone_problem(text)
         if disagreement is not None:
             problems.append(f"{where}: {disagreement}")
+            return None
         zones.append(text[text.index("[") + 1 : -1])
         return moment
 

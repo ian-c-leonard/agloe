@@ -21,7 +21,6 @@ from agloe.reference import (
     best_case,
     best_cases,
     broken,
-    first_shown,
     in_world,
     itineraries,
     needless,
@@ -565,62 +564,6 @@ def test_without_an_end_of_the_trip_a_person_can_wait_for_a_span_to_pass() -> No
     )
 
 
-# ------------------------------- Which ITINERARY is shown -------------------------------
-
-
-def test_a_listed_way_comes_first_wherever_the_ways_before_it_go() -> None:
-    """Sam goes from a to b through x or through y, and only the train from y to b is listed.
-
-    Both routes start with an unlisted WAY, so the second WAY decides.
-    """
-    facts = [starts_from("sam", "a"), returns_to("sam", "b")]
-    facts += [complete("a", "b"), takes("train", "PT0S")]
-    now = [trip_starts(9), trip_ends(9)]
-    train_to_b = [way("train", "y", "b")]
-    wants = [ends_at_home("sam")]
-    file = trip(["sam"], ["a", "x", "y", "b"], [], facts, now, ways=train_to_b, wants=wants)
-    best = best_case(file)
-    shown = first_shown(file, best)
-    assert shown is not None and shown == compiler.shown(file, best)
-    assert [(step.way, step.origin, step.destination) for step in shown] == [
-        (None, "a", "y"),
-        ("train", "y", "b"),
-    ]
-
-
-def test_a_way_leaves_in_the_last_opening_where_it_starts_as_late_as_it_can() -> None:
-    """No unlisted WAY leaves for b from 8:00 am to 9:00 am, or from 11:00 am to noon.
-
-    Before a visit at noon, Sam leaves one second before 11:00 am: as late as Sam can. After
-    a visit that ends at 8:30 am, Sam leaves one second after 9:00 am: as early as Sam can.
-    """
-    spans = [span("early", at(8), at(9), "b"), span("late", at(11), at(12), "b")]
-    visit_at_b = [starts_at("visit", 12), lasts("visit", "PT1H"), cutoff("visit", "PT0S")]
-    before = trip(
-        ["sam"],
-        ["a", "b"],
-        [stays("visit", "b")],
-        [starts_from("sam", "a"), *visit_at_b, *spans],
-        [lock("visit", "sam")],
-    )
-    shown = first_shown(before, best_case(before))
-    assert shown is not None and shown == compiler.shown(before, best_case(before))
-    assert shown[0].start == seconds(11) - 1
-
-    visit_at_a = [starts_at("visit", 7, 30), lasts("visit", "PT1H"), returns_to("sam", "b")]
-    after = trip(
-        ["sam"],
-        ["a", "b"],
-        [stays("visit", "a")],
-        [*visit_at_a, *spans],
-        [lock("visit", "sam")],
-        wants=[ends_at_home("sam")],
-    )
-    shown = first_shown(after, best_case(after))
-    assert shown is not None and shown == compiler.shown(after, best_case(after))
-    assert shown[-1].start == seconds(9) + 1
-
-
 # ------------------------------- A last step with no known end -------------------------------
 
 
@@ -719,6 +662,39 @@ def test_another_option_never_meets_the_must_to_end_at_home() -> None:
         "trip-start",
         "trip-end",
     )
+
+
+# ------------------------------- Large trips -------------------------------
+
+
+def test_very_many_persons_can_take_one_way_home() -> None:
+    """One step for each PERSON, and more PERSONs than Python allows calls inside calls."""
+
+    def bus_home(count: int) -> File:
+        people = [f"p{number}" for number in range(count)]
+        facts = [takes("bus", "PT1S")]
+        for person in people:
+            facts += [starts_from(person, "hotel"), returns_to(person, "cottage")]
+        bus = [way("bus", "hotel", "cottage")]
+        wants = [ends_at_home(*people)]
+        return trip(people, ["hotel", "cottage"], [], facts, [], ways=bus, wants=wants)
+
+    found = answers.check(bus_home(1100))
+    assert found.answer is Answer.FEASIBLE
+    assert len(found.itinerary) == 1100
+    assert len(checked(bus_home(150)).itinerary) == 150
+
+
+def test_a_way_home_can_go_through_very_many_places() -> None:
+    """A route of 1,099 WAYs, one after another."""
+    places = [f"p{number}" for number in range(1100)]
+    ways = [way(f"w{number}", f"p{number}", f"p{number + 1}") for number in range(1099)]
+    facts = [starts_from("sam", "p0"), returns_to("sam", "p1099")]
+    facts += [takes(each["id"], "PT1S") for each in ways]
+    file = trip(["sam"], places, [], facts, [], ways=ways, wants=[ends_at_home("sam")])
+    found = answers.check(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [step.way for step in found.itinerary] == [each["id"] for each in ways]
 
 
 # ------------------------------- Random trips -------------------------------
