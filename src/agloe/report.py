@@ -893,7 +893,8 @@ def _cap_in_words(file: File, row: CapRow) -> str:
     if row.if_needed:
         more = _amount(row.if_needed, places)
         parts.append(f"up to {more} more to buy, depending on which OPTIONs need a right")
-    parts.append(f"{_amount(row.left, places)} left")
+    # A BOOKING that might have charged the cap is counted in full, so more may be left.
+    parts.append(f"{'at least ' if known else ''}{_amount(row.left, places)} left")
     pot = _names(file.budgets)[cap.budget]
     return f"{cap.id}: at most {cap.limit} from {pot}: {'; '.join(parts)}"
 
@@ -933,7 +934,8 @@ def _plan_in_words(file: File, plan: Plan) -> list[str]:
         counted = "; ".join(terms) or "nothing so far"
         left = f"{_amount(row.left, places)} {cap.limit.currency}"
         open_ended = [booking for booking, units in row.might if units and booking not in row.asked]
-        more = f", and more once the FILE says that {_listed(open_ended)} charged it less"
+        names = _listed(open_ended, "or")
+        more = f", and more once the FILE says that {names} charged it less"
         lines.append(
             f"{cap.id}, on {pots[cap.budget]}: {counted}, of at most {cap.limit}."
             f" That leaves {left} for whatever else is charged to it{more if open_ended else ''}."

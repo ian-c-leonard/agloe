@@ -260,7 +260,7 @@ def test_a_payment_from_an_unknown_budget_is_shown_as_one_that_might_count() -> 
     assert found.caps == (CapRow("trip-money-cap", 0, (("loose", 10000),), (), 0, 0, 40000),)
     assert in_words(file)[-1] == (
         "  trip-money-cap: at most 5 USD from trip-money: 0 paid; up to 1 more that loose might"
-        " have paid from it; 0 still to buy; 4 left"
+        " have paid from it; 0 still to buy; at least 4 left"
     )
     caps = report.as_json(file, found)["caps"]
     assert isinstance(caps, list)
