@@ -48,6 +48,7 @@ from tests.test_where_a_path_ends import checked, has_no_record_to_spare, ruled_
 
 EVERYONE = ["alex", "sam", "jo"]
 LEAVES = "for whatever else is charged to it."
+NOTHING = "nobody buys a place from an OFFER of this FILE"
 
 
 def at(option: str, hour: int) -> list[Document]:
@@ -154,6 +155,23 @@ def test_two_bookings_that_nobody_uses_can_pass_a_cap_together() -> None:
     ]
 
 
+def test_a_plan_says_which_of_two_bookings_gives_a_person_their_right() -> None:
+    """Two BOOKINGs cover Sam, and each paid nothing. The trip money may spend nothing."""
+    tickets = [
+        booking("tour", "sam", id="first", paid="0 USD"),
+        booking("tour", "sam", id="second", paid="0 USD"),
+    ]
+    file = a_tour(*tickets, caps=[cap("trip-money", "0 USD")])
+    found = checked(file)
+    assert [cover.by for cover in found.rights] == ["first"]
+    words = in_words(file)
+    assert "  first: a BOOKING for tour covers sam; its payment: nothing" in words
+    assert (
+        "  second: a BOOKING for tour covers sam; its payment: nothing; this plan counts what it"
+        " paid, and nobody uses its right"
+    ) in words
+
+
 def test_a_booking_counts_once_however_many_it_covers() -> None:
     for_three = booking("tour", *EVERYONE, paid="50 USD", budget="trip-money")
     file = a_tour(for_three, locked=EVERYONE, caps=[cap("trip-money", "50 USD")])
@@ -189,7 +207,13 @@ def test_a_charge_counts_only_against_the_cap_of_its_budget_and_currency(
         # Nobody does anything, and the plan still relies on the cap and on what Jo's
         # BOOKING says it charged.
         assert found.relies_on == ("tour-booking", "trip-money-cap")
-        assert not any("this plan uses it for" in line for line in in_words(file))
+        assert (
+            sum(
+                "; this plan counts what it paid, and nobody uses its right" in line
+                for line in in_words(file)
+            )
+            == 1
+        )
 
 
 def test_only_a_charge_that_a_cap_could_turn_on_is_an_unknown_fact() -> None:
@@ -473,7 +497,7 @@ def test_two_receipts_that_might_charge_one_cap_are_in_one_sum() -> None:
     assert in_words(file)[2:5] == [
         "The trip works if the FILE states what first paid and from which BUDGET and the FILE"
         " states what second paid and from which BUDGET.",
-        "  One plan that works then: nobody buys anything.",
+        f"  One plan that works then: {NOTHING}.",
         "  trip-money-cap, on trip-money: nothing so far, of at most 1 USD. That leaves 1 USD"
         f" {LEAVES}",
     ]
@@ -493,7 +517,8 @@ def test_a_receipt_that_no_set_asks_about_is_still_in_the_sum() -> None:
     assert found.plans == (Plan((), (row,)),)
     assert in_words(file)[4] == (
         "  trip-money-cap, on trip-money: up to 3 that loose might have charged it, of at most"
-        f" 10 USD. That leaves 7 USD {LEAVES}"
+        " 10 USD. That leaves 7 USD for whatever else is charged to it, and more once the FILE"
+        " says that loose charged it less."
     )
     plans = report.as_json(file, found)["plans"]
     assert plans == [
@@ -608,7 +633,7 @@ def test_what_the_writer_finds_has_to_fit_in_what_a_cap_has_left() -> None:
     file = a_tour(caps=low, persons=["sam"])
     assert in_words(file)[2:7] == [
         "The trip works if a right to tour is found for sam, at a cost that fits the caps.",
-        "  One plan that works then: nobody buys anything.",
+        f"  One plan that works then: {NOTHING}.",
         "  trip-money-cap, on trip-money: nothing so far, of at most 1 USD. That leaves 1 USD"
         f" {LEAVES}",
         "",

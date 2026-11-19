@@ -575,7 +575,10 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
             found = next((fact for fact in file.facts if fact.id == record), None)
             credited = tuple(cover.person for cover in report.rights if cover.by == record)
             used_for = ""
-            if isinstance(found, Booking) and credited and set(credited) != set(found.covers):
+            if isinstance(found, Booking) and not credited:
+                # In a FILE with a cap, a plan relies on a BOOKING whose right nobody uses.
+                used_for = "; this plan counts what it paid, and nobody uses its right"
+            elif isinstance(found, Booking) and set(credited) != set(found.covers):
                 used_for = f"; this plan uses it for {_people(file, credited)}"
             lines.append(f"  {record}: {_record(file, clock, record)}{used_for}")
     money = _money(file, report)
@@ -912,7 +915,8 @@ def _plan_in_words(file: File, plan: Plan) -> list[str]:
         if file.needs_right(cover.option) is None:
             place += ", if the OPTION needs a right"
         buys.append(place)
-    lines = [f"One plan that works then: {'; '.join(buys) or 'nobody buys anything'}."]
+    nothing = "nobody buys a place from an OFFER of this FILE"
+    lines = [f"One plan that works then: {'; '.join(buys) or nothing}."]
     for row in plan.caps:
         cap = next(each for each in file.caps.values() if each.id == row.cap)
         places = -int(cap.limit.amount.as_tuple().exponent)
@@ -928,9 +932,11 @@ def _plan_in_words(file: File, plan: Plan) -> list[str]:
             terms.append(f"up to {_amount(row.if_needed, places)} more if OPTIONs need a right")
         counted = "; ".join(terms) or "nothing so far"
         left = f"{_amount(row.left, places)} {cap.limit.currency}"
+        open_ended = [booking for booking, units in row.might if units and booking not in row.asked]
+        more = f", and more once the FILE says that {_listed(open_ended)} charged it less"
         lines.append(
             f"{cap.id}, on {pots[cap.budget]}: {counted}, of at most {cap.limit}."
-            f" That leaves {left} for whatever else is charged to it."
+            f" That leaves {left} for whatever else is charged to it{more if open_ended else ''}."
         )
     return lines
 
