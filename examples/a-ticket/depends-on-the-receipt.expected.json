@@ -38,12 +38,15 @@
               "amount": null
             }
           ],
-          "asked": [
-            "alex-skydeck-ticket"
-          ],
           "to_buy": "32.00",
           "to_buy_at_most_if_needed": "0.00",
-          "to_buy_at_a_price_not_stated": []
+          "depends_on": [
+            {
+              "what": "charged",
+              "booking": "alex-skydeck-ticket",
+              "amount": null
+            }
+          ]
         }
       ]
     }

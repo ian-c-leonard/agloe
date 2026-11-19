@@ -18,7 +18,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from itertools import groupby
 
-from agloe.answers import Answer, CapRow, Cover, Missing, Plan, Report
+from agloe.answers import Answer, CapRow, Cover, Missing, Open, Plan, Report
 from agloe.file import (
     Booking,
     Budget,
@@ -195,13 +195,25 @@ def _cap_as_json(file: File, row: CapRow) -> dict[str, object]:
             {"booking": booking, "amount": None if units is None else _amount(units, places)}
             for booking, units in row.might
         ],
-        "asked": list(row.asked),
         "to_buy": _amount(row.to_buy, places),
         "to_buy_at_most_if_needed": _amount(row.if_needed, places),
-        "to_buy_at_a_price_not_stated": [
-            {"offer": offer, "places": count} for offer, count in row.quoted
-        ],
+        "depends_on": [_open_as_json(each, places) for each in row.open],
     }
+
+
+def _open_as_json(each: Open, places: int) -> dict[str, object]:
+    """What one unknown FACT could add to a cap."""
+    out: dict[str, object] = {"what": each.what}
+    if each.what == "charged":
+        out["booking"] = each.about
+    elif each.what == "price":
+        out["offer"], out["persons"] = each.about, list(each.persons)
+    elif each.what == "funding":
+        out["person"] = each.persons[0]
+    else:
+        out["option"], out["person"] = each.about, each.persons[0]
+    out["amount"] = None if each.units is None else _amount(each.units, places)
+    return out
 
 
 def _amount(units: int, places: int) -> str:
@@ -911,21 +923,27 @@ def _plan_in_words(file: File, plan: Plan) -> list[str]:
         cap = next(each for each in file.caps.values() if each.id == row.cap)
         places = -int(cap.limit.amount.as_tuple().exponent)
         terms = [f"{_amount(row.paid, places)} paid"] if row.paid else []
-        if row.asked:
-            terms.append(f"what {_listed(list(row.asked))} charged it")
+        asked = [each.about or "" for each in row.open if each.what == "charged"]
+        if asked:
+            terms.append(f"what {_listed(asked)} charged it")
         terms += [
             f"up to {_amount(units, places)} that {booking} might have charged it"
             for booking, units in row.might
-            if units is not None and booking not in row.asked
+            if units is not None and booking not in asked
         ]
         if row.to_buy:
             terms.append(f"{_amount(row.to_buy, places)} still to buy")
         if row.if_needed:
             terms.append(f"up to {_amount(row.if_needed, places)} more if OPTIONs need a right")
-        terms += [
-            f"the price of {_places(count)} from {offer} if {pots[cap.budget]} pays it"
-            for offer, count in row.quoted
-        ]
+        for each in row.open:
+            who = _people(file, each.persons)
+            if each.what == "price":
+                terms.append(f"the price of each place from {each.about} that it pays for")
+            elif each.what == "funding":
+                amount = "what" if each.units is None else f"the {_amount(each.units, places)} that"
+                terms.append(f"{amount} {who} has to buy if it pays for them")
+            elif each.what == "another right":
+                terms.append(f"the cost of the right found for {who} if it pays for it")
         total = " plus ".join(terms) or "nothing"
         lines.append(f"{cap.id}, on {pots[cap.budget]}: {total} has to be at most {cap.limit}.")
     return lines

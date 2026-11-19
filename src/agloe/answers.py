@@ -89,28 +89,42 @@ class Missing:
 
 
 @dataclass(frozen=True)
+class Open:
+    """What a cap would count if an unknown FACT of a set turned out another way than its best.
+
+    The best way charges a cap nothing: a BOOKING charged nothing to it, a price is nothing,
+    money from outside the FILE pays for a PERSON whom no BUDGET lists, and another right is
+    free. What the writer finds can charge the cap, and the sum has to hold then too.
+
+    ``what`` is the kind of the unknown FACT. ``about`` is its BOOKING, its OFFER or its
+    OPTION, and ``persons`` the PERSONs whose places it is about. ``units`` is an amount the
+    FILE states, in ten-thousandths: what the places of a PERSON cost. None: nobody knows.
+    """
+
+    what: str
+    about: str | None
+    persons: tuple[str, ...]
+    units: int | None
+
+
+@dataclass(frozen=True)
 class CapRow:
     """What a report says about one cap, so that anybody can check its sum.
 
     ``paid`` is what the BOOKINGs charged to it for sure. ``might`` holds each BOOKING that
     might have charged it besides, with the amount where the FILE states one, and None where
-    the BOOKING states no payment. ``asked`` holds those among them whose charge a set of
-    unknown FACTs asks about. ``to_buy`` is what the plan buys from it, and ``if_needed`` the
-    most it buys besides, if OPTIONs turn out to need a right. The amounts are whole
-    ten-thousandths of the cap's currency.
-
-    ``quoted`` holds each OFFER with no stated price that the plan takes places of, with how
-    many of them go to PERSONs who may draw on the cap's BUDGET. If the price turns out
-    above nothing in the cap's currency and this BUDGET pays, it counts that many times.
+    the BOOKING states no payment. ``to_buy`` is what the plan buys from it, and
+    ``if_needed`` the most it buys besides, if OPTIONs turn out to need a right. ``open``
+    holds what each unknown FACT of the set could add. The amounts are whole ten-thousandths
+    of the cap's currency.
     """
 
     cap: str
     paid: int
     might: tuple[tuple[str, int | None], ...]
-    asked: tuple[str, ...]
     to_buy: int
     if_needed: int
-    quoted: tuple[tuple[str, int], ...] = ()
+    open: tuple[Open, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -439,27 +453,30 @@ def _purchases(
 def _plan(file: File, enough: Sequence[Missing], shown: Shown) -> Plan:
     """One plan that works where this set turns out well, with the sum for each cap.
 
-    A set of one length of time comes with the most it can be. The plan is one that works at
-    that length: a plan for no time at all could buy a place that the PERSON then misses.
+    A set of one length of time says the most that length can be, or that any length would
+    do. The plan is one that works at that length: a plan for no time at all could buy a
+    place that the PERSON then misses.
     """
     unknowns = [needed.unknown for needed in enough]
     world = None
-    if len(enough) == 1 and enough[0].at_most is not None:
-        world = with_this_long(file, unknowns[0], enough[0].at_most)
+    if len(enough) == 1 and unknowns[0].what in ("duration", "cutoff", "other ways"):
+        longest = enough[0].at_most
+        world = with_this_long(file, unknowns[0], _beyond(file) if longest is None else longest)
     buys = _purchases(file, unknowns, shown, world)
-    asked = [unknown.about or "" for unknown in unknowns if unknown.what == "charged"]
-    return Plan(tuple(buys), _cap_rows(file, buys, asked))
+    return Plan(tuple(buys), _cap_rows(file, buys, unknowns))
 
 
-def _cap_rows(file: File, covers: Sequence[Cover], asked: Sequence[str]) -> tuple[CapRow, ...]:
+def _cap_rows(file: File, covers: Sequence[Cover], enough: Sequence[Unknown]) -> tuple[CapRow, ...]:
     """A row for each cap of the FILE, in the FILE's order, for a plan with these purchases.
 
     A BOOKING that names the cap's BUDGET in its currency charged it for sure. One that states
     no payment might have charged any cap, and one that states a payment with no BUDGET might
-    have charged any cap in its currency.
+    have charged any cap in its currency. ``enough`` is the set of unknown FACTs the plan is
+    for, and each of them is in the row of each cap it could add to.
     """
     rows: list[CapRow] = []
     bookings = [fact for fact in file.facts if isinstance(fact, Booking)]
+    buys = [cover for cover in covers if cover.to_buy]
     for cap in file.caps.values():
         currency = cap.limit.currency
         paid = sum(
@@ -477,19 +494,37 @@ def _cap_rows(file: File, covers: Sequence[Cover], asked: Sequence[str]) -> tupl
         )
         mine = [
             cover
-            for cover in covers
-            if cover.to_buy
-            and cover.price is not None
+            for cover in buys
+            if cover.price is not None
             and cover.budget == cap.budget
             and cover.price.currency == currency
         ]
         sure = sum(c.price.units for c in mine if c.price and file.needs_right(c.option) is True)
         most = sum(c.price.units for c in mine if c.price and file.needs_right(c.option) is None)
-        named = tuple(booking for booking, _ in might if booking in asked)
         may_draw = next(each.persons for each in file.budgets if each.id == cap.budget)
-        unpriced = [c.by for c in covers if c.to_buy and c.price is None and c.person in may_draw]
-        quoted = tuple((offer, unpriced.count(offer)) for offer in dict.fromkeys(unpriced))
-        rows.append(CapRow(cap.id, paid, might, named, sure, most, quoted))
+        added: list[Open] = []
+        for unknown in enough:
+            person = unknown.person or ""
+            if unknown.what == "charged":
+                amounts = [units for booking, units in might if booking == unknown.about]
+                added += [Open("charged", unknown.about, (), units) for units in amounts]
+            elif unknown.what == "price":
+                buyers = [c.person for c in buys if c.by == unknown.about and c.person in may_draw]
+                if buyers:
+                    added.append(Open("price", unknown.about, tuple(buyers), None))
+            elif unknown.what == "funding":
+                # Whoever lists this PERSON on a BUDGET decides which one pays for them.
+                theirs = [c for c in buys if c.person == person and c.budget is None]
+                stated = [c.price.units for c in theirs if c.price and c.price.currency == currency]
+                if any(c.price is None for c in theirs):
+                    added.append(Open("funding", None, (person,), None))
+                elif sum(stated):
+                    added.append(Open("funding", None, (person,), sum(stated)))
+            elif unknown.what == "another right" and (
+                person in may_draw or not file.listed(person)
+            ):
+                added.append(Open("another right", unknown.option, (person,), None))
+        rows.append(CapRow(cap.id, paid, might, sure, most, tuple(added)))
     return tuple(rows)
 
 
@@ -559,6 +594,21 @@ def _asked_by_a_lock(file: File) -> tuple[frozenset[Unknown], list[tuple[frozens
     return frozenset(asked), at_least
 
 
+def _beyond(file: File) -> int:
+    """A length of time that no limit can be longer than, in seconds.
+
+    Only two fixed times can limit a length of time: it must fit between them. So a length
+    longer than the time between the earliest and the latest fixed time has no limit. The
+    times the TRIP starts and ends are fixed times too.
+    """
+    fixed = [fact.at for fact in file.facts if isinstance(fact, Start) and fact.at is not None]
+    fixed += [bound.at for bound in (file.trip_start(), file.trip_end()) if bound is not None]
+    for fact in file.facts:
+        if isinstance(fact, Complete):
+            fixed += [fact.earliest - 1, fact.latest + 1]
+    return max(fixed) - min(fixed) + 1 if fixed else 1
+
+
 def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
     """The most seconds this one unknown can be for the TRIP to work.
 
@@ -572,15 +622,7 @@ def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
     def enough(seconds: int) -> bool:
         return works(file, with_this_long(file, unknown, seconds))
 
-    # Only two fixed times can limit a length of time: it must fit between them. So a length
-    # longer than the time between the earliest and the latest fixed time has no limit. The
-    # times the TRIP starts and ends are fixed times too.
-    fixed = [fact.at for fact in file.facts if isinstance(fact, Start) and fact.at is not None]
-    fixed += [bound.at for bound in (file.trip_start(), file.trip_end()) if bound is not None]
-    for fact in file.facts:
-        if isinstance(fact, Complete):
-            fixed += [fact.earliest - 1, fact.latest + 1]
-    under, over = 0, max(fixed) - min(fixed) + 1 if fixed else 1
+    under, over = 0, _beyond(file)
     if enough(over):
         return None
     while over - under > 1:
