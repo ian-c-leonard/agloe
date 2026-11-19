@@ -8,9 +8,9 @@ from random import Random
 
 import pytest
 
-from agloe import compiler, report
+from agloe import answers, compiler, report
 from agloe.answers import Answer, CapRow, Cover, Plan
-from agloe.file import Booking, Cap, File, FileError, Money, Offer, Payment
+from agloe.file import Booking, Cap, File, FileError, Money, Offer
 from agloe.reference import (
     Broken,
     Constraint,
@@ -890,8 +890,69 @@ def test_the_answers_hold_for_one_way_to_pay_in_every_possible_world() -> None:
     assert split > 0
 
 
-def test_a_file_with_a_cap_is_served_by_the_reference_checker() -> None:
-    paid = booking("tour", "alex", paid="32.00 USD", budget="trip-money")
-    file = a_tour(paid, offer("tour", 2, price="32.00 USD"), caps=[cap("trip-money", "200.00 USD")])
-    assert compiler.check(file) == checked(file)
-    assert isinstance(file.decisions[-1], Cap) and Payment
+def two_capped_visits(rng: Random) -> File:
+    """Two visits at one PLACE with BOOKINGs, OFFERs, two BUDGETs and their caps.
+
+    Nothing about time is unknown. Rights, prices, payers and charges can be.
+    """
+    persons = ["alex", "sam", "jo"]
+    options = [stays("tour", "dock"), stays("talk", "dock")]
+    pots = [
+        budget("a", *rng.sample(persons, rng.randrange(1, 4))),
+        budget("b", *rng.sample(persons, 2)),
+    ]
+    facts: list[Document] = []
+    decisions: list[Document] = []
+    for number, option in enumerate(("tour", "talk")):
+        facts += at(option, 10 + 2 * number)
+        if rng.random() < 0.8:
+            facts.append(needs_right(option))
+        for count in range(rng.randrange(0, 3)):
+            paid = rng.choice([None, "0 USD", "1 USD", "2 USD"])
+            source = rng.choice([None, "a", "b"]) if paid else None
+            covered = rng.sample(persons, rng.randrange(1, 3))
+            ticket = f"{option}-ticket-{count}"
+            facts.append(booking(option, *covered, id=ticket, paid=paid, budget=source))
+        offers = [f"{option}-offer-{count}" for count in range(rng.randrange(0, 3))]
+        prices = ["0 USD", "1 USD", "2 USD", None]
+        facts += [
+            offer(option, rng.choice([1, 2]), id=name, price=rng.choice(prices)) for name in offers
+        ]
+        if rng.random() < 0.6:
+            facts.append(every_right(option, *offers))
+        if rng.random() < 0.8:
+            decisions.append(lock(option, *rng.sample(persons, rng.randrange(1, 4))))
+    decisions += [
+        cap(pot, f"{rng.randrange(0, 5)} USD") for pot in ("a", "b") if rng.random() < 0.8
+    ]
+    return trip(persons, ["dock"], options, facts, decisions, tickets=True, budgets=pots)
+
+
+def test_the_solver_gives_the_reference_checkers_report_for_trips_with_caps() -> None:
+    """With the solver's own search for every part of it, on random trips with two visits."""
+    rng = Random(4848)
+    seen: set[Answer] = set()
+    capped = with_plans = 0
+    for _ in range(250):
+        file = two_capped_visits(rng)
+        found = answers.check(file, compiler.shown, compiler.works, compiler.stuck)
+        assert found == answers.check(file)
+        seen.add(found.answer)
+        capped += bool(file.caps)
+        with_plans += bool(found.plans)
+    assert seen == set(Answer)
+    assert capped > 150
+    assert with_plans > 30
+
+
+def test_amounts_too_large_for_the_solver_go_to_the_reference_checker() -> None:
+    """A cap, and six hundred places at the largest price a FILE can state."""
+    most = "999999999999.9999 USD"
+    persons = [f"p{number}" for number in range(3)]
+    places = [offer("tour", 1, id=f"offer-{number}", price=most) for number in range(600)]
+    file = a_tour(*places, locked=["p0"], caps=[cap("trip-money", most)], persons=persons)
+    with pytest.raises(compiler.DoesNotFit):
+        compiler.works(file, worst_case(file))
+    found = compiler.check(file)
+    assert found == answers.check(file)
+    assert found.answer is Answer.FEASIBLE
