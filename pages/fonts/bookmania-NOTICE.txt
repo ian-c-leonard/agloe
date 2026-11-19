@@ -1,0 +1,6 @@
+Bookmania Regular Italic is a typeface by Mark Simonson Studio (marksimonson.com).
+
+agloe.ai uses it with the designer's permission. The file beside this notice holds only the
+letters this page needs. It is not covered by the Apache License of this repository, and it
+may not be copied, changed or used anywhere else. To use Bookmania, buy a licence from Mark
+Simonson Studio.

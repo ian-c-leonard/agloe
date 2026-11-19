@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agloe: a standard format for trips, and a compiler that checks them</title>
 <meta name="description" content="Agloe is a standard format for trips, a compiler that checks them, and an optimizer that finds the best version. Open source.">
-<meta name="theme-color" content="#17263c">
+<meta name="theme-color" content="#111417">
 <link rel="icon" href="favicon.svg">
 <link rel="canonical" href="https://agloe.ai/">
-<link rel="preload" href="fonts/besley-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="fonts/libre-franklin-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/bookmania-regular-italic-subset.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Agloe">
 <meta property="og:title" content="Agloe: a standard format for trips, and a compiler that checks them">
@@ -18,171 +18,240 @@
 <meta property="og:image" content="https://agloe.ai/img/social-preview.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="The name Agloe, beside a sketch map with a dashed circle where Agloe was drawn">
+<meta property="og:image:alt" content="The name Agloe, the line itineraries that compile, and the address agloe.ai">
 <meta name="twitter:card" content="summary_large_image">
 <style>
-@font-face { font-family: "Besley"; src: url("fonts/besley-latin-wght-normal.woff2") format("woff2"); font-weight: 400 900; font-style: normal; font-display: swap; }
-@font-face { font-family: "Besley"; src: url("fonts/besley-latin-wght-italic.woff2") format("woff2"); font-weight: 400 900; font-style: italic; font-display: swap; }
-@font-face { font-family: "Libre Franklin"; src: url("fonts/libre-franklin-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
-@font-face { font-family: "Atkinson Hyperlegible Mono"; src: url("fonts/atkinson-hyperlegible-mono-latin-wght-normal.woff2") format("woff2"); font-weight: 200 800; font-display: swap; }
+@font-face { font-family: "Bookmania"; src: url("fonts/bookmania-regular-italic-subset.woff2") format("woff2"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "Inter"; src: url("fonts/inter-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "IBM Plex Mono"; src: url("fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "IBM Plex Mono"; src: url("fonts/ibm-plex-mono-latin-500-normal.woff2") format("woff2"); font-weight: 500; font-display: swap; }
 
-/* The colours of a printed road map: paper, ink, road red, water blue,
-   woodland green, and the violet a survey uses for what nobody has checked. */
+/* The "transit" palette of the brand kit: ground, ink, one accent, and brass used sparingly.
+   Colour marks trouble: the accent for what cannot work, brass for what nobody knows yet. */
 :root {
-  --paper: #fbfcfa; --sheet: #ffffff;
-  --ink: #17263c; --ink-soft: #46566b; --rule: #c5d0d6;
-  --water: #e2edf1; --water-ink: #24628c;
-  --road: #b3212d; --wood: #256a44; --survey: #663a9c;
-  --night-text: #e8eff3; --night-dim: #a3b4c5;
-  --display: "Besley", Rockwell, Georgia, serif;
-  --text: "Libre Franklin", "Franklin Gothic Medium", "Helvetica Neue", Arial, sans-serif;
-  --mono: "Atkinson Hyperlegible Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ground: #FBFBF6; --surface: #FFFFFF; --tile: #F1F1EC;
+  --ink: #111417; --ink2: #50545A; --muted: #6C7074; --line: #D9D9D3; --travel: #5B6169;
+  --accent: #C7491F; --brass: #9A8330; --brass-ink: #6E5D1C; --stop: #C7491F;
+  --night: #111417; --night-ink: #EDEDE7; --night-dim: #979B9E; --night-accent: #F0875B; --night-brass: #CDBB6A; --night-stop: #F0875B;
+  --display: "Bookmania", "Bookman Old Style", "URW Bookman", Georgia, serif;
+  --text: "Inter", system-ui, "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --ease: cubic-bezier(.2, .7, .2, 1);
   color-scheme: light;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--paper); color: var(--ink); font: 1.125rem/1.6 var(--text); }
-h1, h2, h3 { font-family: var(--display); font-weight: 600; line-height: 1.15; margin: 0; text-wrap: balance; }
-h1 { font-size: clamp(2rem, 4.4vw, 3.3rem); font-weight: 500; letter-spacing: -0.012em; max-width: 33ch; }
-h2 { font-size: clamp(1.7rem, 3.2vw, 2.4rem); }
-h3 { font-size: 1.3rem; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 1.0625rem/1.62 var(--text); }
+h1, h2, h3 { font-family: var(--display); font-style: italic; font-weight: 400; margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(2.7rem, 5.4vw, 4.1rem); line-height: 1.04; letter-spacing: -0.012em; }
+h2 { font-size: clamp(2rem, 3.7vw, 2.9rem); line-height: 1.08; letter-spacing: -0.008em; }
+h3 { font-size: 1.5rem; line-height: 1.2; }
 p, ul, ol { margin: 0; }
-p { text-wrap: pretty; }
-a { color: inherit; text-decoration-color: var(--road); text-decoration-thickness: 2px; text-underline-offset: 3px; }
-a:hover { color: var(--road); }
-:focus-visible { outline: 3px solid var(--road); outline-offset: 3px; }
-code { font-family: var(--mono); font-size: 0.92em; }
-.skip { position: absolute; left: 16px; top: -80px; z-index: 10; padding: 10px 16px; background: var(--ink); color: var(--sheet); font-weight: 700; text-decoration: none; }
+a { color: inherit; text-decoration-color: var(--accent); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+a:hover { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+code { font-family: var(--mono); font-size: 0.9em; }
+.skip { position: absolute; left: 16px; top: -80px; z-index: 10; padding: 10px 16px; background: var(--ink); color: var(--ground); font-weight: 600; text-decoration: none; }
 .skip:focus { top: 12px; }
 .wrap { max-width: 1120px; margin-inline: auto; padding-inline: 24px; }
-.band { padding-block: clamp(52px, 7vw, 92px); }
-.water { background: var(--water); }
-.measure { max-width: 62ch; }
+.band { padding-block: clamp(60px, 8vw, 104px); }
+.tint { background: var(--tile); }
 .stack { display: grid; gap: 18px; align-content: start; }
-.soft { color: var(--ink-soft); }
-.small { font-size: 0.95rem; }
-
-/* A map's border: a heavy line with a fine one outside it. */
-.neatline { border: 2px solid var(--ink); outline: 1px solid var(--ink); outline-offset: 5px; }
+.lead { font-size: 1.2rem; line-height: 1.55; color: var(--ink2); max-width: 34em; }
+.small { font-size: 0.93rem; color: var(--muted); }
+.label { font: 500 0.72rem/1.4 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
+.split { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: clamp(32px, 5vw, 64px); align-items: center; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 3px; box-shadow: 0 26px 54px -30px rgba(17, 20, 23, 0.32); }
 
 /* Header */
-.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; padding-block: 18px; }
-.brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+.top { border-bottom: 1px solid var(--line); }
+.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; padding-block: 16px; }
+.brand { display: flex; align-items: center; gap: 13px; text-decoration: none; }
 .brand:hover { color: inherit; }
-.brand svg { width: 38px; height: 38px; flex: none; }
-.brand span { font-family: var(--display); font-weight: 600; font-size: 1.55rem; letter-spacing: -0.01em; }
-.links { display: flex; gap: 6px 24px; flex-wrap: wrap; font-size: 1rem; }
+.brand .mark { width: 38px; height: 38px; flex: none; }
+.brand .word { height: 34px; width: auto; display: block; overflow: visible; }
+.links { display: flex; gap: 6px 26px; flex-wrap: wrap; font-size: 0.98rem; }
 .links a { text-decoration: none; }
-.links a:hover { text-decoration: underline; text-decoration-color: var(--road); }
+.links a:hover { color: var(--accent); }
 
 /* Opening */
-.hero { padding-block: clamp(36px, 6vw, 72px) clamp(40px, 5vw, 60px); }
-.hero .wrap { display: grid; gap: 26px; }
-.lead { font-size: clamp(1.15rem, 1.6vw, 1.3rem); line-height: 1.55; max-width: 60ch; }
-.actions { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
-.button { display: inline-block; padding: 13px 22px; border: 2px solid var(--ink); background: var(--ink); color: var(--sheet); font-weight: 700; font-size: 1rem; text-decoration: none; }
-.button:hover { background: var(--road); border-color: var(--road); color: var(--sheet); }
+.hero { padding-block: clamp(44px, 6vw, 84px) clamp(52px, 7vw, 92px); }
+.hero .split { grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr); }
+.hero-text { display: grid; gap: 22px; }
+.actions { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 4px; }
+.button { display: inline-block; padding: 13px 22px; border: 1px solid var(--ink); border-radius: 2px; background: var(--ink); color: var(--ground); font-weight: 600; font-size: 1rem; text-decoration: none; }
+.button:hover { background: var(--accent); border-color: var(--accent); color: var(--ground); }
 .button.quiet { background: transparent; color: var(--ink); }
-.button.quiet:hover { background: var(--water); border-color: var(--ink); color: var(--ink); }
+.button.quiet:hover { background: var(--tile); border-color: var(--ink); color: var(--ink); }
 
-/* The example: one trip, four versions, and the report for each */
-.example { padding-block: 8px clamp(52px, 7vw, 92px); }
-.checker { display: grid; grid-template-columns: minmax(0, 0.73fr) minmax(0, 1.27fr); background: var(--sheet); }
-.trip { padding: clamp(22px, 2.6vw, 30px); display: grid; gap: 16px; align-content: start; }
-.trip h2 { font-size: clamp(1.6rem, 2.5vw, 1.95rem); }
-.trip p { font-size: 1.05rem; line-height: 1.55; }
-.versions { border: 0; margin: 4px 0 0; padding: 0; min-width: 0; display: grid; gap: 8px; }
-.versions legend { padding: 0; margin-bottom: 12px; font-size: 0.98rem; color: var(--ink-soft); }
-.versions label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; padding: 11px 14px; border: 1px solid var(--rule); font-size: 1rem; line-height: 1.45; cursor: pointer; }
-.versions label:hover { border-color: var(--ink); }
-.versions input { width: 1.05em; height: 1.05em; margin: 0.2em 0 0; accent-color: var(--ink); }
-.versions label:has(input:checked) { border-color: var(--ink); box-shadow: inset 4px 0 0 var(--road); }
-.versions label:has(input:focus-visible) { outline: 3px solid var(--road); outline-offset: 2px; }
+/* The trip, drawn as a day. Each bar is placed by FACTs of the FILE for the chosen version:
+   a time of day is in minutes after midnight, and a length of time is in minutes. */
+main { --visit-time: 840; --visit-length: 60; --train-length: 60; --train-length-longest: 60; --flight-time: 1020; --bag-drop: 45; }
+main:has(input[value="works"]:checked) { --visit-time: 840; --visit-length: 60; --train-length: 60; --train-length-longest: 60; --flight-time: 1020; --bag-drop: 45; }
+main:has(input[value="cannot-work"]:checked) { --visit-time: 870; --visit-length: 60; --train-length: 60; --train-length-longest: 60; --flight-time: 1020; --bag-drop: 45; }
+main:has(input[value="depends-on-the-cab"]:checked) { --visit-time: 870; --visit-length: 60; --train-length: 60; --train-length-longest: 60; --flight-time: 1020; --bag-drop: 45; }
+main:has(input[value="works-but-risky"]:checked) { --visit-time: 840; --visit-length: 60; --train-length: 60; --train-length-longest: 80; --flight-time: 1020; --bag-drop: 45; }
+
+.trip-card { padding: clamp(20px, 2.6vw, 30px); display: grid; gap: 18px; }
+.trip-card h2 { font-size: clamp(1.5rem, 2.4vw, 1.85rem); }
+.day { --t0: 810; --span: 262; --leave: calc(var(--visit-time) + var(--visit-length)); --close: calc(var(--flight-time) - var(--bag-drop));
+  --arrive: calc(var(--leave) + var(--train-length)); --arrive-late: calc(var(--leave) + var(--train-length-longest));
+  position: relative; height: 176px; }
+.day .hour { position: absolute; top: 0; bottom: 24px; left: calc((var(--at) - var(--t0)) / var(--span) * 100%); border-left: 1px solid var(--line); }
+.day .hour span { position: absolute; bottom: -24px; left: 0; transform: translateX(-50%); font: 0.68rem/1 var(--mono); letter-spacing: 0.06em; color: var(--muted); white-space: nowrap; }
+.bar { position: absolute; height: 30px; left: calc((var(--from) - var(--t0)) / var(--span) * 100%); width: calc(var(--len) / var(--span) * 100%);
+  display: flex; align-items: center; padding-inline: 9px; overflow: hidden; white-space: nowrap; border-radius: 2px;
+  font: 500 0.7rem/1 var(--mono); letter-spacing: 0.04em; color: var(--ground);
+  transition: left 0.75s var(--ease), width 0.75s var(--ease), opacity 0.4s ease; }
+.bar.visit { --from: var(--visit-time); --len: var(--visit-length); top: 10px; background: var(--ink); }
+.bar.train { --from: var(--leave); --len: var(--train-length); top: 52px; background: var(--travel); }
+.bar.slow { --from: var(--arrive); --len: calc(var(--train-length-longest) - var(--train-length)); top: 52px; padding: 0;
+  background: repeating-linear-gradient(135deg, var(--brass) 0 4px, transparent 4px 8px); border: 1px solid var(--brass); border-left: 0; border-radius: 0 2px 2px 0; }
+.bar.late { --from: var(--close); top: 52px; padding: 0; width: max(0%, calc((var(--arrive) - var(--close)) / var(--span) * 100%));
+  background: repeating-linear-gradient(135deg, var(--stop) 0 4px, #F1C9BA 4px 8px); border-radius: 0 2px 2px 0; }
+.bar.cab { --from: var(--leave); --len: calc(var(--close) - var(--leave)); top: 94px; opacity: 0; background: transparent; color: var(--brass);
+  border: 1.5px dashed var(--brass); }
+.bar.flight { --from: var(--flight-time); --len: calc(var(--t0) + var(--span) - var(--flight-time)); top: 94px; background: var(--ink);
+  border-radius: 2px 0 0 2px; -webkit-mask-image: linear-gradient(90deg, #000 55%, transparent); mask-image: linear-gradient(90deg, #000 55%, transparent); }
+.close { position: absolute; top: 40px; bottom: 24px; left: calc((var(--close) - var(--t0)) / var(--span) * 100%); border-left: 1.5px dashed var(--ink);
+  transition: left 0.75s var(--ease); }
+.close span { position: absolute; top: -30px; left: 0; transform: translateX(-50%); font: 0.68rem/1.25 var(--mono); letter-spacing: 0.04em; color: var(--ink2); white-space: nowrap; text-align: center; }
+main:has(input[value="depends-on-the-cab"]:checked) .bar.cab { opacity: 1; }
+main:has(input[value="depends-on-the-cab"]:checked) .bar.flight { top: 136px; }
+main:has(input[value="depends-on-the-cab"]:checked) .day { height: 218px; }
+.day { transition: height 0.5s var(--ease); }
+.bar.flight { transition: left 0.75s var(--ease), width 0.75s var(--ease), top 0.5s var(--ease); }
+
+/* The answer for the chosen version, under the day */
+.answers-now { display: grid; min-height: 3.4em; }
+.answer { grid-area: 1 / 1; display: grid; gap: 4px; align-content: start; font: 500 0.82rem/1.5 var(--mono); visibility: hidden; opacity: 0; transition: opacity 0.35s ease; }
+.answer p:first-child { padding-left: 20px; position: relative; }
+.answer p:first-child::before { content: ""; position: absolute; left: 0; top: 0.3em; width: 11px; height: 11px; border-radius: 50%; background: var(--dot); }
+.answer p + p { padding-left: 20px; color: var(--ink2); font-weight: 400; }
+.answer.feasible { --dot: var(--ink); color: var(--ink); }
+.answer.infeasible { --dot: var(--stop); color: var(--stop); }
+.answer.undetermined { --dot: var(--brass); color: var(--brass-ink); }
+.answer.risky { --dot: var(--ink); color: var(--ink); }
+.answer.risky p + p { color: var(--brass-ink); }
+
+.versions { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 6px; }
+.versions legend { padding: 0; margin-bottom: 10px; }
+.versions label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 11px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 2px; font-size: 0.93rem; line-height: 1.4; cursor: pointer; background: var(--ground); }
+.versions label:hover { border-color: var(--muted); }
+.versions input { width: 1em; height: 1em; margin: 0.2em 0 0; accent-color: var(--accent); }
+.versions label:has(input:checked) { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); background: var(--surface); }
+.versions label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .versions input:focus-visible { outline: none; }
-.reports { background: var(--ink); color: var(--night-text); padding: clamp(20px, 2.4vw, 28px) clamp(18px, 2.2vw, 26px); display: grid; gap: 30px; align-content: start; }
-.command { font: 0.82rem/1.6 var(--mono); color: var(--night-dim); margin-bottom: 14px; overflow-wrap: anywhere; }
-.report pre { margin: 0; font: 0.8rem/1.7 var(--mono); white-space: pre-wrap; overflow-wrap: break-word; }
-.report pre::first-line { font-weight: 700; }
-.report.feasible pre::first-line { color: #9fe0b3; }
-.report.infeasible pre::first-line { color: #ffa69e; }
-.report.undetermined pre::first-line { color: #d5bcfb; }
-.report.risky pre::first-line { color: #f4c96f; }
-/* Where the browser can tell which version is chosen, show only that report.
-   On a wide screen the reports share one cell, so the box keeps its height when
-   the choice changes. On a narrow screen the other reports take no room. */
-@supports selector(:has(*)) {
-  .reports { gap: 0; }
-  .report { grid-area: 1 / 1; visibility: hidden; display: var(--other-reports, block); }
-  .checker:has(input[value="works"]:checked) .report[data-version="works"],
-  .checker:has(input[value="cannot-work"]:checked) .report[data-version="cannot-work"],
-  .checker:has(input[value="depends-on-the-cab"]:checked) .report[data-version="depends-on-the-cab"],
-  .checker:has(input[value="works-but-risky"]:checked) .report[data-version="works-but-risky"] { visibility: visible; display: block; }
-}
 
-/* The key to the three answers, set like the key of a map */
-.answers { margin-top: 44px; display: grid; gap: 20px; }
-.key { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 36px; }
-.key li { padding-left: 30px; position: relative; font-size: 1.02rem; line-height: 1.5; }
-.key li::before { content: ""; position: absolute; left: 0; top: 0.3em; width: 16px; height: 16px; border: 2px solid var(--ink); }
-.key .feasible::before { background: var(--wood); }
-.key .infeasible::before { background: var(--road); }
-.key .undetermined::before { background: var(--survey); }
+/* The report, as the terminal prints it */
+.terminal { background: var(--night); color: var(--night-ink); border-radius: 3px; box-shadow: 0 26px 54px -30px rgba(17, 20, 23, 0.55); padding: clamp(18px, 2.4vw, 26px); font: 0.8rem/1.7 var(--mono); }
+.reports { display: grid; gap: 28px; }
+.command { color: var(--night-dim); margin-bottom: 12px; overflow-wrap: anywhere; }
+.report pre { margin: 0; font: inherit; white-space: pre-wrap; overflow-wrap: break-word; }
+.report pre::first-line { font-weight: 500; }
+.report.feasible pre::first-line, .report.risky pre::first-line { color: #FFFFFF; }
+.report.infeasible pre::first-line { color: var(--night-stop); }
+.report.undetermined pre::first-line { color: var(--night-brass); }
+
+/* Where the browser can tell which version is chosen, show only that version's answer and report. */
+@supports selector(:has(*)) {
+  .reports { display: block; height: 540px; overflow-y: auto; scrollbar-color: #3a3e43 transparent; }
+  .report { display: none; }
+  main:has(input[value="works"]:checked) .answer[data-version="works"],
+  main:has(input[value="cannot-work"]:checked) .answer[data-version="cannot-work"],
+  main:has(input[value="depends-on-the-cab"]:checked) .answer[data-version="depends-on-the-cab"],
+  main:has(input[value="works-but-risky"]:checked) .answer[data-version="works-but-risky"] { visibility: visible; opacity: 1; }
+  main:has(input[value="works"]:checked) .report[data-version="works"],
+  main:has(input[value="cannot-work"]:checked) .report[data-version="cannot-work"],
+  main:has(input[value="depends-on-the-cab"]:checked) .report[data-version="depends-on-the-cab"],
+  main:has(input[value="works-but-risky"]:checked) .report[data-version="works-but-risky"] { display: block; }
+  main:has(input[value="works"]:checked) .report[data-version="works"] pre,
+  main:has(input[value="cannot-work"]:checked) .report[data-version="cannot-work"] pre,
+  main:has(input[value="depends-on-the-cab"]:checked) .report[data-version="depends-on-the-cab"] pre,
+  main:has(input[value="works-but-risky"]:checked) .report[data-version="works-but-risky"] pre { animation: print 0.9s steps(18, end) both; }
+}
+@supports not selector(:has(*)) {
+  .answer { visibility: visible; opacity: 1; grid-area: auto; }
+}
+@keyframes print { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
+
+.key { list-style: none; padding: 0; display: grid; gap: 16px; }
+.key li { padding-left: 26px; position: relative; }
+.key li::before { content: ""; position: absolute; left: 0; top: 0.42em; width: 12px; height: 12px; border-radius: 50%; background: var(--dot); }
+.key .feasible { --dot: var(--ink); }
+.key .infeasible { --dot: var(--stop); }
+.key .undetermined { --dot: var(--brass); }
 
 /* The FILE */
-.file { display: grid; gap: 30px; }
-.document { margin: 0; background: var(--sheet); padding: 22px 24px; font: 0.8rem/1.65 var(--mono); overflow-x: auto; white-space: pre; tab-size: 2; }
+.document { margin: 0; padding: 20px 22px; max-height: 470px; overflow: auto; font: 0.76rem/1.7 var(--mono); white-space: pre; tab-size: 2; }
 
-/* Needs and parts, side by side so that each need lines up with its part */
-.pairs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(4, auto); gap: 0 56px; margin-top: 34px; }
-.pairs .col { display: grid; grid-row: 1 / span 4; grid-template-rows: subgrid; }
-.pairs h3 { padding-bottom: 14px; border-bottom: 2px solid var(--ink); }
-.pairs ol { list-style: none; padding: 0; counter-reset: item; display: grid; grid-row: 2 / span 3; grid-template-rows: subgrid; }
-.pairs li { counter-increment: item; position: relative; padding: 18px 0 18px 44px; border-bottom: 1px solid var(--rule); }
-.pairs li::before { content: counter(item); position: absolute; left: 0; top: 16px; font: 600 1.5rem/1.2 var(--display); }
-.after { margin-top: 34px; display: grid; gap: 16px; }
-.releases { margin-top: 44px; padding-top: 30px; border-top: 2px solid var(--ink); display: grid; grid-template-columns: minmax(0, 0.42fr) minmax(0, 1fr); gap: 20px 56px; }
-.releases ul { list-style: none; padding: 0; display: grid; gap: 12px; }
+/* The three parts */
+.parts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(28px, 4vw, 52px); margin-top: 40px; }
+.part { display: grid; gap: 14px; align-content: start; }
+.part svg { width: 54px; height: 54px; }
+.part svg * { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.part svg .t { stroke: var(--accent); }
+.part svg .b { stroke: var(--brass); }
+.part strong { display: block; font: italic 400 1.6rem/1.15 var(--display); margin-bottom: 8px; }
+.after { margin-top: 44px; max-width: 46em; display: grid; gap: 14px; color: var(--ink2); }
 
 /* What it must be */
-.musts { list-style: none; padding: 0; margin-top: 30px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 56px; }
-.musts li { padding: 15px 0; border-top: 1px solid #a9bcc6; font-size: 1.05rem; line-height: 1.5; }
-.musts strong { font-family: var(--display); font-weight: 600; font-size: 1.12rem; }
+.musts { list-style: none; padding: 0; margin-top: 34px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px clamp(32px, 5vw, 64px); }
+.musts li { font-size: 0.98rem; line-height: 1.55; color: var(--ink2); }
+.musts strong { display: block; font: italic 400 1.3rem/1.2 var(--display); color: var(--ink); margin-bottom: 3px; }
 
-/* Run it, and how it is built */
-.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 44px 56px; align-items: start; }
-.terminal { margin: 0; background: var(--ink); color: var(--night-text); padding: 20px 22px; font: 0.86rem/1.75 var(--mono); overflow-x: auto; }
+.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 44px clamp(32px, 5vw, 64px); align-items: start; }
+.terminal.plain { overflow-x: auto; white-space: pre; margin: 0; }
 
 /* The name */
-.night { background: var(--ink); color: var(--night-text); }
-.night a:hover { color: #ffb1aa; }
-.name { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 56px; align-items: center; }
-.name p { font-size: clamp(1.15rem, 1.7vw, 1.35rem); line-height: 1.55; }
-.map { display: block; width: 100%; height: auto; background: var(--paper); }
-.map .frame { fill: var(--paper); stroke: var(--ink); }
-.map .grid { stroke: var(--rule); stroke-width: 1; }
-.map .river { fill: none; stroke: #7fb2cf; stroke-width: 7; stroke-linecap: round; }
-.map .highway { fill: none; stroke: var(--road); stroke-width: 3.5; }
+.night { background: var(--ink); color: var(--ground); }
+.night .label { color: var(--night-accent); }
+.night a:hover { color: var(--night-accent); }
+.night p { font-size: 1.22rem; line-height: 1.55; color: #DDDDD7; }
+.map { display: block; width: 100%; height: auto; background: var(--ground); border-radius: 3px; }
+.map .grid { stroke: var(--line); stroke-width: 1; fill: none; }
+.map .river { fill: none; stroke: #C3CBCF; stroke-width: 7; stroke-linecap: round; }
+.map .highway { fill: none; stroke: var(--ink); stroke-width: 3.2; }
 .map .road { fill: none; stroke: var(--ink); stroke-width: 2; }
-.map .track { fill: none; stroke: var(--ink); stroke-width: 1.4; stroke-dasharray: 7 5; }
+.map .track { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 7 5; }
 .map .town { fill: var(--ink); }
-.map .not-there { fill: var(--paper); stroke: var(--road); stroke-width: 3.4; stroke-dasharray: 6 4.996; }
-.map text { font-family: var(--text); fill: var(--ink); }
-.map .place { font: 600 21px var(--display); }
-.map .place.big { font-size: 27px; }
-.map .water-name { font: italic 500 18px var(--display); fill: var(--water-ink); letter-spacing: 0.14em; }
-.map .note { font-size: 12.5px; fill: var(--ink-soft); }
+.map .not-there { fill: var(--ground); stroke: var(--accent); stroke-width: 4.4; stroke-linecap: round; stroke-dasharray: 0.01 7.33; }
+.map text { fill: var(--ink); }
+.map .place { font: italic 400 23px var(--display); }
+.map .place.big { font-size: 31px; }
+.map .water-name { font: italic 400 19px var(--display); fill: #65747C; letter-spacing: 0.12em; }
+.map .note { font: 11px var(--mono); letter-spacing: 0.08em; fill: var(--muted); text-transform: uppercase; }
 
-footer { padding-block: 34px 44px; font-size: 0.95rem; color: var(--ink-soft); }
+/* Motion. The day redraws when the version changes. The map draws itself once, when it is first seen. */
+@media (prefers-reduced-motion: no-preference) {
+  .map.unseen .draw { stroke-dasharray: 1; stroke-dashoffset: 1; }
+  .map .draw { stroke-dasharray: 1; stroke-dashoffset: 0; transition: stroke-dashoffset 1.6s var(--ease); }
+  .map .draw.second { transition-delay: 0.5s; }
+  .map .draw.third { transition-delay: 1.1s; }
+  .map .appear { transition: opacity 0.6s ease 1.5s; }
+  .map.unseen .appear { opacity: 0; }
+  .map .not-there { animation: march 14s linear infinite; }
+  .bar.visit, .bar.train, .bar.flight, .close { animation: arrive 0.8s var(--ease) both; }
+  .bar.train { animation-delay: 0.12s; }
+  .bar.flight { animation-delay: 0.24s; }
+  .close { animation-delay: 0.4s; }
+}
+@keyframes march { to { stroke-dashoffset: -88; } }
+@keyframes arrive { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .bar, .close, .day, .answer { transition: none; }
+  .report pre { animation: none !important; }
+}
+
+footer { padding-block: 34px 46px; font-size: 0.93rem; color: var(--muted); border-top: 1px solid var(--line); }
 footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 40px; }
 
-@media (max-width: 860px) {
-  body { font-size: 1.0625rem; }
-  .checker, .two, .name, .releases, .musts, footer .wrap { grid-template-columns: minmax(0, 1fr); }
-  .reports { --other-reports: none; }
-  .key { grid-template-columns: minmax(0, 1fr); }
-  .pairs { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; gap: 34px; }
-  .pairs .col, .pairs ol { grid-row: auto; grid-template-rows: none; }
-  .name { gap: 34px; }
-  .releases { gap: 16px; }
+@media (max-width: 900px) {
+  .split, .hero .split, .two, .parts, .musts, footer .wrap { grid-template-columns: minmax(0, 1fr); }
+  .reports { height: 420px; }
+  .day { --t0: 832; --span: 232; }
+  .bar { font-size: 0.6rem; letter-spacing: 0; padding-inline: 4px; }
+  .parts { gap: 34px; }
+  h1 { font-size: clamp(2.5rem, 11vw, 3.4rem); }
 }
 </style>
 </head>
@@ -193,8 +262,8 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
 <header class="top">
   <div class="wrap">
     <a class="brand" href="./" aria-label="Agloe home">
-      <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="11" fill="#fbfcfa" stroke="#17263c" stroke-width="4"/><path d="M4 46 60 31M23 4l10 56" stroke="#17263c" stroke-width="3" fill="none"/><circle cx="29.3" cy="39.2" r="12" fill="#fbfcfa" stroke="#b3212d" stroke-width="4.6" stroke-dasharray="6 3.425"/></svg>
-      <span>Agloe</span>
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#C7491F"/><path d="M37.7 39.7H64M24.3 53.1V64M10.9 39.7H0M24.3 26.3V0" stroke="#FBFBF6" stroke-width="2.6"/><circle cx="24.3" cy="39.7" r="9.6" fill="none" stroke="#FBFBF6" stroke-width="3.1" stroke-linecap="round" stroke-dasharray="0.01 5.02" stroke-dashoffset="2.51"/></svg>
+      <svg class="word" viewBox="64 -728 2584 927" role="img" aria-label="Agloe"><path fill="currentColor" transform="scale(1,-1)" d="M594 599 277 93C252 51 223 30 172 25L166 0H388L394 25C318 30 301 49 326 87L405 215H678L696 87C701 45 679 30 603 25L596 0H856L863 25C817 30 800 51 794 98L714 700H688C641 700 592 706 544 712C489 720 424 728 375 728C175 728 64 617 64 481C64 376 128 311 222 311C315 311 382 373 382 452C382 488 357 520 318 520C286 520 261 496 261 461C261 436 276 419 276 398C276 371 253 357 217 357C154 357 115 407 115 481C115 602 217 683 372 683C431 683 514 671 560 658C596 648 620 640 594 599ZM433 259 629 573 672 259ZM1049 -199C1195 -199 1290 -141 1290 -55C1290 13 1244 47 1101 52C965 56 935 62 935 95C935 116 956 135 1001 135C1060 135 1063 113 1133 113C1265 113 1350 204 1350 318C1350 352 1336 395 1296 425C1309 439 1331 455 1349 455C1373 455 1377 429 1405 429C1434 429 1450 452 1450 474C1450 499 1426 514 1395 514C1355 514 1304 496 1261 444C1241 457 1211 466 1172 466C1040 466 955 375 955 261C955 226 967 194 991 169C924 165 864 128 864 70C864 37 877 11 909 -5C865 -21 831 -52 831 -98C831 -176 920 -199 1049 -199ZM1134 152C1078 152 1043 180 1043 243C1043 327 1085 427 1171 427C1227 427 1261 400 1261 335C1261 252 1220 152 1134 152ZM1054 -160C956 -160 893 -137 893 -90C893 -59 911 -36 958 -23C989 -30 1027 -34 1075 -35C1174 -37 1206 -52 1206 -87C1206 -123 1162 -160 1054 -160ZM1354 0H1577L1583 25C1530 30 1521 41 1530 77L1688 715H1656L1511 637L1507 617H1543C1565 617 1571 608 1565 584L1440 77C1431 41 1416 30 1360 25ZM1881 440 1871 461C1775 425 1675 342 1675 190C1675 72 1758 -15 1888 -15C2049 -15 2160 109 2160 262C2160 383 2078 460 1982 460C1904 460 1847 399 1847 312C1847 248 1884 201 1930 203C1962 203 1980 224 1980 249C1980 272 1966 290 1937 295C1913 298 1896 313 1896 345C1896 386 1922 421 1973 421C2030 421 2069 383 2069 295C2069 194 2019 24 1890 24C1805 24 1767 78 1767 157C1767 272 1816 398 1881 440ZM2416 -15C2539 -15 2626 76 2626 151C2626 174 2614 199 2580 199C2554 199 2526 178 2526 143C2526 125 2537 113 2537 94C2537 66 2496 27 2428 27C2335 27 2299 87 2299 167C2299 180 2299 192 2301 209L2648 317C2648 423 2558 466 2469 466C2328 466 2205 359 2205 185C2205 73 2283 -15 2416 -15ZM2472 427C2530 427 2569 400 2567 335L2308 254C2325 339 2371 427 2472 427Z"/></svg>
     </a>
     <nav class="links" aria-label="Main">
       <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">Rules</a>
@@ -207,32 +276,65 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
 
 <main id="main">
   <section class="hero">
-    <div class="wrap">
-      <h1 data-from="README.md">Agloe is a standard format for trips, a compiler that checks them, and an optimizer that finds the best version.</h1>
-      <p class="lead" data-from="docs/VISION.md">AI agents are starting to plan trips. An agent can seat eight friends at dinner in its head. Seating 800 is different: it needs the guest list written down, the rules codified, and something that checks every seat against every rule. A real trip is the 800 case: many people, legs, bookings and times, all affecting each other.</p>
-      <div class="actions">
-        <a class="button" href="https://github.com/ian-c-leonard/agloe">See the code on GitHub</a>
-        <a class="button quiet" href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">Read the rules</a>
+    <div class="wrap split">
+      <div class="hero-text">
+        <span class="label">Open source · Being built in public</span>
+        <h1>Check whether a trip works.</h1>
+        <p class="lead" data-from="README.md">Agloe is a standard format for trips, a compiler that checks them, and an optimizer that finds the best version.</p>
+        <div class="actions">
+          <a class="button" href="https://github.com/ian-c-leonard/agloe">See the code on GitHub</a>
+          <a class="button quiet" href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">Read the rules</a>
+        </div>
+        <p class="small" data-from="README.md">Agloe is being built in public, and nothing is published to install yet.</p>
       </div>
-      <p class="small soft"><span data-from="README.md">Agloe is being built in public, and nothing is published to install yet.</span> It is open source under the Apache License 2.0.</p>
+
+      <div class="trip-card card">
+        <span class="label">One trip, four versions</span>
+        <h2 id="trip-title">Can Alex and Sam make their flight?</h2>
+        <div class="day" aria-hidden="true">
+          <i class="hour" style="--at: 840"><span>2 pm</span></i>
+          <i class="hour" style="--at: 900"><span>3 pm</span></i>
+          <i class="hour" style="--at: 960"><span>4 pm</span></i>
+          <i class="hour" style="--at: 1020"><span>5 pm</span></i>
+          <div class="bar visit">Museum visit</div>
+          <div class="bar train">Blue Line</div>
+          <div class="bar slow"></div>
+          <div class="bar late"></div>
+          <div class="bar cab">Cab ?</div>
+          <div class="bar flight">Flight home</div>
+          <div class="close"><span>Bag drop<br>closes</span></div>
+        </div>
+        <div class="answers-now" aria-live="polite">
+          <div class="answer feasible" data-version="works"><p data-lines-from="examples/flight-home/works.expected.txt">FEASIBLE: this trip works.</p></div>
+          <div class="answer infeasible" data-version="cannot-work"><p data-lines-from="examples/flight-home/cannot-work.expected.txt">INFEASIBLE: this trip cannot work.</p></div>
+          <div class="answer undetermined" data-version="depends-on-the-cab"><p data-lines-from="examples/flight-home/depends-on-the-cab.expected.txt">UNDETERMINED: the FILE does not say enough to tell.</p><p data-lines-from="examples/flight-home/depends-on-the-cab.expected.txt">The trip works if Cab to O'Hare takes 45 min or less.</p></div>
+          <div class="answer risky" data-version="works-but-risky"><p data-lines-from="examples/flight-home/works-but-risky.expected.txt">FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold.</p><p data-lines-from="examples/flight-home/works-but-risky.expected.txt">! Alex and Sam would be 5 min too late for this.</p></div>
+        </div>
+        <fieldset class="versions" aria-labelledby="trip-title">
+          <label><input type="radio" name="version" value="works" checked><span data-from="spec/rules.md">They leave the museum at 3:00 pm.</span></label>
+          <label><input type="radio" name="version" value="cannot-work"><span data-from="spec/rules.md">They leave at 3:30 pm, and a FACT says the Blue Line is the only way to O'Hare.</span></label>
+          <label><input type="radio" name="version" value="depends-on-the-cab"><span data-from="spec/rules.md">They leave at 3:30 pm. A cab is listed, but nobody has recorded how long it takes.</span></label>
+          <label><input type="radio" name="version" value="works-but-risky"><span data-from="spec/rules.md">They leave at 3:00 pm, and the Blue Line can take up to 80 minutes.</span></label>
+        </fieldset>
+      </div>
     </div>
   </section>
 
-  <section class="example" id="example" aria-labelledby="example-title">
-    <div class="wrap">
-      <div class="checker neatline">
-        <div class="trip">
-          <h2 id="example-title">Can Alex and Sam make their flight?</h2>
-          <p data-from="spec/rules.md">Alex and Sam spend their last afternoon in Chicago at the Art Institute, then fly home from O'Hare. The flight leaves at 5:00 pm, and bag drop closes 45 minutes earlier. The Blue Line takes an hour from the museum to the terminal.</p>
-          <fieldset class="versions">
-            <legend>Each version of this trip is one FILE. Choose a version to see the COMPILER's report for it.</legend>
-            <label><input type="radio" name="version" value="works" checked><span data-from="spec/rules.md">They leave the museum at 3:00 pm.</span></label>
-            <label><input type="radio" name="version" value="cannot-work"><span data-from="spec/rules.md">They leave at 3:30 pm, and a FACT says the Blue Line is the only way to O'Hare.</span></label>
-            <label><input type="radio" name="version" value="depends-on-the-cab"><span data-from="spec/rules.md">They leave at 3:30 pm. A cab is listed, but nobody has recorded how long it takes.</span></label>
-            <label><input type="radio" name="version" value="works-but-risky"><span data-from="spec/rules.md">They leave at 3:00 pm, and the Blue Line can take up to 80 minutes.</span></label>
-          </fieldset>
-        </div>
-        <div class="reports" aria-live="polite">
+  <section class="band tint" id="report" aria-labelledby="report-title">
+    <div class="wrap split">
+      <div class="stack">
+        <span class="label">The compiler</span>
+        <h2 id="report-title">One of three answers, each with its evidence.</h2>
+        <p class="lead" data-from="spec/rules.md">Alex and Sam spend their last afternoon in Chicago at the Art Institute, then fly home from O'Hare. The flight leaves at 5:00 pm, and bag drop closes 45 minutes earlier. The Blue Line takes an hour from the museum to the terminal.</p>
+        <ul class="key">
+          <li class="feasible" data-from="README.md"><strong>FEASIBLE:</strong> the trip works. The report shows a plan, and warns when the plan holds only if uncertain durations stay short.</li>
+          <li class="infeasible" data-from="README.md"><strong>INFEASIBLE:</strong> the trip cannot work. The report names the FACTs, WANTs and DECISIONs that clash.</li>
+          <li class="undetermined" data-from="README.md"><strong>UNDETERMINED:</strong> the file does not say enough to tell. The report names what it would have to say for the trip to work.</li>
+        </ul>
+        <p class="small" data-from="README.md">The <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">rules</a> say exactly what it checks, and every trip under <a href="https://github.com/ian-c-leonard/agloe/tree/main/examples"><code>examples/</code></a> is one of its tests.</p>
+      </div>
+      <div class="terminal">
+        <div class="reports">
           <div class="report feasible" data-version="works">
             <p class="command"><span aria-hidden="true">$ </span>uv run agloe check examples/flight-home/works.json</p>
             <pre data-from="examples/flight-home/works.expected.txt">FEASIBLE: this trip works.
@@ -308,26 +410,18 @@ The plan relies on these FACTs and DECISIONs:
           </div>
         </div>
       </div>
-
-      <div class="answers">
-        <p class="measure" data-from="README.md">Today the COMPILER reads a trip file and gives one of three answers, each with its evidence:</p>
-        <ul class="key">
-          <li class="feasible" data-from="README.md"><strong>FEASIBLE:</strong> the trip works. The report shows a plan, and warns when the plan holds only if uncertain durations stay short.</li>
-          <li class="infeasible" data-from="README.md"><strong>INFEASIBLE:</strong> the trip cannot work. The report names the FACTs, WANTs and DECISIONs that clash.</li>
-          <li class="undetermined" data-from="README.md"><strong>UNDETERMINED:</strong> the file does not say enough to tell. The report names what it would have to say for the trip to work.</li>
-        </ul>
-        <p class="measure" data-from="README.md">The <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">rules</a> say exactly what it checks, and every trip under <a href="https://github.com/ian-c-leonard/agloe/tree/main/examples"><code>examples/</code></a> is one of its tests.</p>
-      </div>
     </div>
   </section>
 
-  <section class="band water" id="file" aria-labelledby="file-title">
-    <div class="wrap file">
-      <div class="stack measure">
-        <h2 id="file-title">The FILE for that trip</h2>
-        <p><span data-from="spec/rules.md">A FILE lists PERSONs, PLACEs, OPTIONs, WAYs, WANTs, FACTs and DECISIONs.</span> This is the whole FILE for the first version above. The <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/vocabulary.md">vocabulary</a> says what each term in capitals means.</p>
+  <section class="band" id="file" aria-labelledby="file-title">
+    <div class="wrap split">
+      <div class="stack">
+        <span class="label">The format</span>
+        <h2 id="file-title">The whole trip is one FILE.</h2>
+        <p class="lead"><span data-from="spec/rules.md">A FILE lists PERSONs, PLACEs, OPTIONs, WAYs, WANTs, FACTs and DECISIONs.</span> This one is the first version of the trip above.</p>
+        <p class="small">The <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/vocabulary.md">vocabulary</a> says what each term in capitals means.</p>
       </div>
-      <pre class="document neatline" tabindex="0" aria-label="The FILE for the first version of the trip" data-from="examples/flight-home/works.json">{
+      <pre class="document card" tabindex="0" aria-label="The FILE for the first version of the trip" data-from="examples/flight-home/works.json">{
   "persons": [
     { "id": "alex", "name": "Alex" },
     { "id": "sam", "name": "Sam" }
@@ -366,49 +460,41 @@ The plan relies on these FACTs and DECISIONs:
     </div>
   </section>
 
-  <section class="band" id="why" aria-labelledby="why-title">
+  <section class="band tint" id="what" aria-labelledby="what-title">
     <div class="wrap">
-      <h2 id="why-title">What agents need, and what Agloe is</h2>
-      <div class="pairs">
-        <div class="col">
-          <h3 data-from="docs/VISION.md">So agents need three things:</h3>
-          <ol>
-            <li data-from="docs/VISION.md"><strong>A place to keep the plan.</strong> Agents can read and write far more detail than people, but they forget. Conversations get compressed, sessions end, and people switch agents. The plan must live somewhere lasting that any agent or person can pick up.</li>
-            <li data-from="docs/VISION.md"><strong>Codified rules, and a checker that applies them.</strong> The same answer every time, with the reason for every problem it finds.</li>
-            <li data-from="docs/VISION.md"><strong>A way to say what you want, not just what is possible.</strong> A plan can work and still be wrong for the people on it. Travelers need to state their priorities, so the best version can be found and its trade-offs shown.</li>
-          </ol>
+      <div class="stack">
+        <span class="label">The plan</span>
+        <h2 id="what-title" data-from="docs/VISION.md">What Agloe is</h2>
+      </div>
+      <div class="parts">
+        <div class="part">
+          <svg viewBox="0 0 54 54" aria-hidden="true"><path d="M12 5h20l10 10v34H12z"/><path d="M32 5v10h10"/><path class="t" d="M19 25h16M19 32h16M19 39h9"/></svg>
+          <p data-from="docs/VISION.md"><strong>A standard format</strong> that represents a trip and all its nuances, readable by people and machines. It is the lasting record.</p>
+          <span class="label">Release 0.1</span>
         </div>
-        <div class="col">
-          <h3 data-from="docs/VISION.md">What Agloe is</h3>
-          <ol>
-            <li data-from="docs/VISION.md"><strong>A standard format</strong> that represents a trip and all its nuances, readable by people and machines. It is the lasting record.</li>
-            <li data-from="docs/VISION.md"><strong>A compiler</strong> that checks the whole plan and explains every conflict.</li>
-            <li data-from="docs/VISION.md"><strong>An optimizer</strong> that finds the best version for the priorities people set.</li>
-          </ol>
+        <div class="part">
+          <svg viewBox="0 0 54 54" aria-hidden="true"><circle cx="27" cy="27" r="21"/><path class="t" d="m17 28 7 7 14-15"/></svg>
+          <p data-from="docs/VISION.md"><strong>A compiler</strong> that checks the whole plan and explains every conflict.</p>
+          <span class="label">Release 0.1 · Being built now</span>
+        </div>
+        <div class="part">
+          <svg viewBox="0 0 54 54" aria-hidden="true"><path d="M6 46h42"/><path d="M12 46V30h8v16M23 46V12h8v34M34 46V22h8v24"/><path class="b" d="m27 3 1.6 3.4 3.7.4-2.8 2.5.8 3.7-3.3-1.9-3.3 1.9.8-3.7-2.8-2.5 3.7-.4z"/></svg>
+          <p data-from="docs/VISION.md"><strong>An optimizer</strong> that finds the best version for the priorities people set.</p>
+          <span class="label">Release 0.2</span>
         </div>
       </div>
-      <div class="after measure">
-        <p data-from="docs/VISION.md">People planning without AI benefit in the same way.</p>
-        <p data-from="docs/VISION.md">Each part exists somewhere in narrow form: trip formats, plan checkers in research, route optimizers, group planning apps. Nobody joins them. Agloe's contribution is the combination and its rigor: precise rules, clear explanations, and a format that always ships with its checker.</p>
-      </div>
-      <div class="releases">
-        <h3>The releases</h3>
-        <div class="stack">
-          <ul>
-            <li data-from="README.md"><strong>0.1, the COMPILER:</strong> says whether a trip is FEASIBLE, INFEASIBLE or UNDETERMINED, and explains every finding with its evidence.</li>
-            <li data-from="README.md"><strong>0.2, the OPTIMIZER:</strong> finds the best version of a trip for the priorities people set.</li>
-          </ul>
-          <p><span data-from="README.md">The first release, the COMPILER, is being built in steps.</span> <span data-from="README.md">See the <a href="https://github.com/ian-c-leonard/agloe/blob/main/docs/ROADMAP.md">roadmap</a> for what each release contains.</span></p>
-        </div>
+      <div class="after">
+        <p data-from="docs/VISION.md">AI agents are starting to plan trips. An agent can seat eight friends at dinner in its head. Seating 800 is different: it needs the guest list written down, the rules codified, and something that checks every seat against every rule. A real trip is the 800 case: many people, legs, bookings and times, all affecting each other.</p>
+        <p><span data-from="docs/VISION.md">People planning without AI benefit in the same way.</span> <span data-from="README.md">See the <a href="https://github.com/ian-c-leonard/agloe/blob/main/docs/ROADMAP.md">roadmap</a> for what each release contains.</span></p>
       </div>
     </div>
   </section>
 
-  <section class="band water" id="must" aria-labelledby="must-title">
+  <section class="band" id="must" aria-labelledby="must-title">
     <div class="wrap">
-      <div class="stack measure">
+      <div class="stack">
+        <span class="label">The standard it is held to</span>
         <h2 id="must-title" data-from="docs/VISION.md">What it must be</h2>
-        <p>These are the qualities Agloe is being built to have.</p>
       </div>
       <ul class="musts">
         <li data-from="docs/VISION.md"><strong>Trustworthy.</strong> Anyone, person or agent, can check any trip, including one an AI drafted, and rely on the answer.</li>
@@ -425,17 +511,19 @@ The plan relies on these FACTs and DECISIONs:
     </div>
   </section>
 
-  <section class="band" id="run" aria-labelledby="run-title">
+  <section class="band tint" id="run" aria-labelledby="run-title">
     <div class="wrap two">
       <div class="stack">
-        <h2 id="run-title">Check a trip yourself</h2>
+        <span class="label">Try it</span>
+        <h2 id="run-title">Check a trip yourself.</h2>
         <p>You can run the COMPILER from a copy of the repository. You need git and <a href="https://docs.astral.sh/uv/">uv</a>.</p>
-        <pre class="terminal" tabindex="0" aria-label="Commands to get Agloe and check two example trips">git clone https://github.com/ian-c-leonard/agloe.git
+        <pre class="terminal plain" tabindex="0" aria-label="Commands to get Agloe and check two example trips">git clone https://github.com/ian-c-leonard/agloe.git
 cd agloe
 uv run agloe check examples/flight-home/works.json
 uv run agloe check examples/a-must/cannot-work.json</pre>
       </div>
       <div class="stack">
+        <span class="label">In the open</span>
         <h2 data-from="README.md">How it is built</h2>
         <p data-from="README.md">Ian Leonard designs Agloe and makes its product decisions. AI agents do much of the building: Claude Code writes the code, and Codex reviews each step and each release. The <a href="https://github.com/ian-c-leonard/agloe/blob/main/docs/PRINCIPLES.md">principles</a> and <a href="https://github.com/ian-c-leonard/agloe/tree/main/docs/decisions">decisions</a> are public, so anyone can see why Agloe works the way it does.</p>
       </div>
@@ -443,30 +531,29 @@ uv run agloe check examples/a-must/cannot-work.json</pre>
   </section>
 
   <section class="band night" id="name" aria-labelledby="name-title">
-    <div class="wrap name">
+    <div class="wrap split">
       <div class="stack">
+        <span class="label">A town that was not there</span>
         <h2 id="name-title" data-from="README.md">The name</h2>
         <p data-from="README.md">Agloe was a town that appeared on maps of New York State but did not exist. Mapmakers invented it in the 1930s to catch anyone copying their maps. Agloe the compiler catches the parts of a plan that are not really there.</p>
       </div>
       <svg class="map" viewBox="0 0 560 380" role="img" aria-labelledby="map-title map-desc">
         <title id="map-title">A sketch map with Agloe on it</title>
         <desc id="map-desc">A road runs north from the town of Roscoe, near the Beaver Kill. Where a track crosses the road, a dashed circle marks Agloe, the town that was not there.</desc>
-        <rect class="frame" x="1.5" y="1.5" width="557" height="377" stroke-width="3"/>
-        <rect class="frame" x="10.5" y="10.5" width="539" height="359" stroke-width="1"/>
-        <clipPath id="inside-the-border"><rect x="11" y="11" width="538" height="358"/></clipPath>
-        <g clip-path="url(#inside-the-border)">
-          <path class="grid" d="M150 11v358M290 11v358M430 11v358M11 130h538M11 250h538"/>
-          <path id="beaver-kill" class="river" d="M0 354C96 322 198 336 268 318 338 300 340 280 384 224 428 168 470 92 560 52"/>
-          <path class="highway" d="M560 320C470 300 392 282 322 264S150 300 0 318"/>
-          <path class="road" d="M322 264C316 220 286 196 272 160S252 116 232 96 204 44 194 0"/>
-          <path class="track" d="M96 64 232 96l150 36"/>
+        <clipPath id="sheet"><rect width="560" height="380" rx="3"/></clipPath>
+        <g clip-path="url(#sheet)">
+          <path class="grid" d="M140 0v380M280 0v380M420 0v380M0 127h560M0 254h560"/>
+          <path id="beaver-kill" class="river draw" pathLength="1" d="M0 354C96 322 198 336 268 318 338 300 340 280 384 224 428 168 470 92 560 52"/>
+          <path class="highway draw second" pathLength="1" d="M0 318C150 300 252 246 322 264S470 300 560 320"/>
+          <path class="road draw third" pathLength="1" d="M322 264C316 220 286 196 272 160S252 116 232 96 204 44 194 0"/>
+          <path class="track appear" d="M96 64 232 96l150 36"/>
         </g>
-        <circle class="town" cx="322" cy="264" r="7.5"/>
-        <circle class="not-there" cx="232" cy="96" r="14"/>
-        <text class="place" x="338" y="252">Roscoe</text>
-        <text class="place big" x="256" y="91">Agloe</text>
-        <text class="water-name" dy="-12"><textPath href="#beaver-kill" startOffset="66%">Beaver Kill</textPath></text>
-        <text class="note" x="538" y="358" text-anchor="end">A sketch, not to scale</text>
+        <circle class="town appear" cx="322" cy="264" r="7.5"/>
+        <circle class="not-there appear" cx="232" cy="96" r="14"/>
+        <text class="place appear" x="338" y="252">Roscoe</text>
+        <text class="place big appear" x="256" y="92">Agloe</text>
+        <text class="water-name appear" dy="-12"><textPath href="#beaver-kill" startOffset="66%">Beaver Kill</textPath></text>
+        <text class="note appear" x="544" y="364" text-anchor="end">A sketch, not to scale</text>
       </svg>
     </div>
   </section>
@@ -475,10 +562,42 @@ uv run agloe check examples/a-must/cannot-work.json</pre>
 <footer>
   <div class="wrap">
     <span>Agloe is open source under the <a href="https://github.com/ian-c-leonard/agloe/blob/main/LICENSE">Apache License 2.0</a>.</span>
-    <span>The trips in the examples are fictional. The typefaces are <a href="fonts/besley-OFL.txt">Besley</a>, <a href="fonts/libre-franklin-OFL.txt">Libre Franklin</a> and <a href="fonts/atkinson-hyperlegible-mono-OFL.txt">Atkinson Hyperlegible Mono</a>, each under the SIL Open Font License.</span>
+    <span>The trips in the examples are fictional.</span>
     <a href="https://github.com/ian-c-leonard/agloe">github.com/ian-c-leonard/agloe</a>
   </div>
 </footer>
+
+<script>
+// Two small touches. Nothing on the page needs them.
+(() => {
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // The map draws itself the first time it comes into view.
+  const map = document.querySelector(".map");
+  if (map && !still && "IntersectionObserver" in window) {
+    map.classList.add("unseen");
+    new IntersectionObserver((seen, watcher) => {
+      if (seen.some((entry) => entry.isIntersecting)) { map.classList.remove("unseen"); watcher.disconnect(); }
+    }, { threshold: 0.35 }).observe(map);
+  }
+  // The trip steps through its versions until the reader takes over.
+  const versions = [...document.querySelectorAll('input[name="version"]')];
+  const card = document.querySelector(".trip-card");
+  if (!versions.length || !card || still) return;
+  // It goes round once, and it stops for good if the reader touches it or scrolls on.
+  let turns = 0;
+  const turn = setInterval(() => {
+    if (document.hidden) return;
+    const now = versions.findIndex((version) => version.checked);
+    versions[(now + 1) % versions.length].checked = true;
+    if (++turns >= versions.length) clearInterval(turn);
+  }, 6500);
+  const stop = () => clearInterval(turn);
+  for (const kind of ["pointerdown", "keydown", "focusin"]) card.addEventListener(kind, stop, { once: true });
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver((seen) => { if (seen.some((entry) => !entry.isIntersecting)) stop(); }, { threshold: 0.4 }).observe(card);
+  }
+})();
+</script>
 
 </body>
 </html>

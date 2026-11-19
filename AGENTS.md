@@ -10,7 +10,7 @@ This file is for the AI agents and people who build Agloe. Read it before changi
 - [docs/PRINCIPLES.md](docs/PRINCIPLES.md): how Agloe is built. Follow all eight principles.
 - [docs/decisions/](docs/decisions/): why things are the way they are. When a decision changes, its record is rewritten to the new decision.
 - [docs/ROADMAP.md](docs/ROADMAP.md): what each release contains.
-- [pages/](pages/): the home page, [agloe.ai](https://agloe.ai). It quotes the documents and shows reports from the examples, and it marks each passage with the file it comes from. A test fails when a passage no longer matches its source, so change the page in the same pull request as the source. A merge to main that changes the page publishes it.
+- [pages/](pages/): the home page, [agloe.ai](https://agloe.ai). It quotes the documents and shows reports from the examples, and it marks each passage with the file it comes from. It also draws the first story as a day, from numbers that are FACTs of each FILE. A test fails when a passage or a number no longer matches its source, so change the page in the same pull request as the source. A merge to main that changes the page publishes it.
 
 ## Roles
 
