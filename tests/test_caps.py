@@ -173,9 +173,41 @@ def test_a_charge_counts_only_against_the_cap_of_its_budget_and_currency(
     pots = [budget("trip-money", *EVERYONE, holds=["USD", "EUR"]), budget("savings", "jo")]
     ticket = booking("tour", "jo", paid=paid, **parts)
     file = a_tour(ticket, locked=(), budgets=pots, caps=[cap("trip-money", "0 USD")])
-    assert checked(file).answer is answer
+    found = checked(file)
+    assert found.answer is answer
     if answer is Answer.UNDETERMINED:
         assert asked(file) == [[charged("tour-booking")]]
+    if answer is Answer.FEASIBLE:
+        # Nobody does anything, and the plan still relies on the cap and on what Jo's
+        # BOOKING says it charged.
+        assert found.relies_on == ("tour-booking", "trip-money-cap")
+
+
+def test_only_a_charge_that_a_cap_could_turn_on_is_an_unknown_fact() -> None:
+    """The trip money holds dollars and euros, and only its dollars have a cap."""
+    pots = [budget("trip-money", *EVERYONE, holds=["USD", "EUR"])]
+    tickets = [
+        booking("tour", "alex", id="unstated"),
+        booking("tour", "alex", id="dollars", paid="1 USD"),
+        booking("tour", "alex", id="nothing", paid="0 USD"),
+        booking("tour", "alex", id="euros", paid="1 EUR"),
+        booking("tour", "alex", id="named", paid="1 USD", budget="trip-money"),
+    ]
+    file = a_tour(*tickets, locked=(), budgets=pots, caps=[cap("trip-money", "9 USD")])
+    assert unknowns(file) == (
+        Unknown("another right", "tour", person="sam"),
+        Unknown("another right", "tour", person="jo"),
+        charged("unstated"),
+        charged("dollars"),
+    )
+
+
+def test_an_amount_in_a_row_is_never_rounded_to_the_decimal_places_of_the_cap() -> None:
+    half = booking("tour", "jo", paid="0.5 USD", budget="trip-money")
+    file = a_tour(half, locked=(), caps=[cap("trip-money", "1 USD")])
+    assert in_words(file)[-1] == (
+        "  trip-money-cap: at most 1 USD from trip-money: 0.5 paid; 0 still to buy"
+    )
 
 
 def test_a_payment_nobody_stated_has_no_upper_bound() -> None:
@@ -184,6 +216,22 @@ def test_a_payment_nobody_stated_has_no_upper_bound() -> None:
     assert checked(file).answer is Answer.UNDETERMINED
     stated = a_tour(booking("tour", "jo", paid=most), locked=(), caps=[cap("trip-money", most)])
     assert checked(stated).answer is Answer.FEASIBLE
+
+
+def test_a_payment_from_an_unknown_budget_is_shown_as_one_that_might_count() -> None:
+    """The trip money may spend 5 USD. A BOOKING paid 1 USD, and nobody knows from where."""
+    loose = booking("tour", "jo", id="loose", paid="1 USD")
+    file = a_tour(loose, locked=(), caps=[cap("trip-money", "5 USD")])
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert found.caps == (CapRow("trip-money-cap", 0, (("loose", 10000),), (), 0, 0),)
+    assert in_words(file)[-1] == (
+        "  trip-money-cap: at most 5 USD from trip-money: 0 paid; up to 1 more that loose might"
+        " have paid from it; 0 still to buy"
+    )
+    caps = report.as_json(file, found)["caps"]
+    assert isinstance(caps, list)
+    assert caps[0]["might_be_paid"] == [{"booking": "loose", "amount": "1"}]
 
 
 def test_a_cap_is_kept_to_the_ten_thousandth() -> None:
