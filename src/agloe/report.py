@@ -494,8 +494,9 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
             lines.append(f"  {record}: {_record(file, clock, record)}{used_for}")
     money = _money(file, report)
     if money is not None:
+        people, pots = _names(file.persons, "and"), _names(file.budgets)
         receipts = [
-            f"  {fact.id}: {_paid(file, fact.paid)}"
+            f"  {fact.id}: {_paid(fact.paid, people, pots)}"
             for fact in file.facts
             if isinstance(fact, Booking) and fact.paid is not None
         ]
@@ -770,16 +771,17 @@ def _record(file: File, clock: _Clock, record: str) -> str:
     return _cutoff(file, name, found)
 
 
-def _paid(file: File, paid: Payment) -> str:
+def _paid(paid: Payment, people: dict[str, str], pots: dict[str, str]) -> str:
     """What a BOOKING paid, in words: the amount, then who paid and the BUDGET, where stated.
 
-    Commas keep the parts apart, and a name that holds a comma is shown in quotes.
+    ``people`` and ``pots`` are the names to show for the PERSONs and the BUDGETs. Commas
+    keep the parts apart, and a name that holds a comma is shown in quotes.
     """
     parts = [str(paid.money) if paid.money.amount else "nothing"]
     if paid.by is not None:
-        parts.append(f"paid by {_people(file, (paid.by,))}")
+        parts.append(f"paid by {people[paid.by]}")
     if paid.budget is not None:
-        parts.append(f"from {_names(file.budgets)[paid.budget]}")
+        parts.append(f"from {pots[paid.budget]}")
     return ", ".join(parts)
 
 
