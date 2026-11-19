@@ -300,19 +300,26 @@ def _with_enough_of_each(
 ) -> Iterator[tuple[Unknown, ...]]:
     """Every way to pick so many FACTs with at least a stated number from each group.
 
-    No group shares a FACT with another. Only the picks that qualify are made, so a FILE with
-    many FACTs outside the groups costs nothing for the sizes that the groups rule out.
+    No group shares a FACT with another. Only the picks that qualify are made: a pick takes
+    from a group no more than the later groups leave room for. So a FILE with many FACTs
+    outside the groups costs nothing for the sizes that the groups rule out. The picks come
+    in no particular order.
     """
-    if not at_least:
-        yield from combinations(facts, size)
-        return
-    (group, number), rest = at_least[0], at_least[1:]
-    inside = [fact for fact in facts if fact in group]
-    outside = [fact for fact in facts if fact not in group]
-    for count in range(number, min(len(inside), size) + 1):
-        for first in combinations(inside, count):
-            for more in _with_enough_of_each(outside, rest, size - count):
-                yield (*first, *more)
+    grouped = frozenset[Unknown]().union(*(group for group, _ in at_least))
+    outside = [fact for fact in facts if fact not in grouped]
+    owed = [sum(number for _, number in at_least[index:]) for index in range(len(at_least) + 1)]
+    partly: list[tuple[int, tuple[Unknown, ...], int]] = [(0, (), size)]
+    while partly:
+        index, picked, left = partly.pop()
+        if index == len(at_least):
+            for more in combinations(outside, left):
+                yield (*picked, *more)
+            continue
+        group, number = at_least[index]
+        inside = [fact for fact in facts if fact in group]
+        for count in range(number, min(len(inside), left - owed[index + 1]) + 1):
+            for chosen in combinations(inside, count):
+                partly.append((index + 1, (*picked, *chosen), left - count))
 
 
 def _asked_by_a_lock(file: File) -> tuple[frozenset[Unknown], list[tuple[frozenset[Unknown], int]]]:

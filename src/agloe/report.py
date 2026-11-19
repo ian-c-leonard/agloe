@@ -583,15 +583,28 @@ def _names(records: Sequence[Person | Place | Option | Way | Want]) -> dict[str,
 
     A record whose name another record has shows its id too. If two would still show the same,
     every record shows its id: no two ids are the same.
+
+    A report joins names into lists: PERSONs with commas and "and", everything else with
+    commas and "or". A name that such a list could split in two is shown in quotes.
     """
     shared = Counter(record.name for record in records)
     shown = {
-        record.id: record.name if shared[record.name] == 1 else f"{record.name} ({record.id})"
+        record.id: _quoted(record)
+        if shared[record.name] == 1
+        else f"{_quoted(record)} ({record.id})"
         for record in records
     }
     if len(set(shown.values())) < len(shown):
-        return {record.id: f"{record.name} ({record.id})" for record in records}
+        return {record.id: f"{_quoted(record)} ({record.id})" for record in records}
     return shown
+
+
+def _quoted(record: Person | Place | Option | Way | Want) -> str:
+    """The name of a record, in quotes where a list of such names could split it in two."""
+    name, joins = record.name, "and" if isinstance(record, Person) else "or"
+    if "," in name or '"' in name or joins in name.casefold().split():
+        return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return name
 
 
 def _name(file: File, id: str | None) -> str:

@@ -11,7 +11,7 @@ import pytest
 
 from agloe import answers, compiler, report
 from agloe.answers import Answer, Cover
-from agloe.file import CompleteRights, File, FileError, Offer, read
+from agloe.file import CompleteRights, File, FileError, Offer, load, read
 from agloe.reference import (
     Broken,
     Constraint,
@@ -452,6 +452,52 @@ def test_only_the_sets_with_enough_of_each_group_are_made() -> None:
         assert len(made) == len(kept)
         assert {frozenset(pick) for pick in made} == {frozenset(pick) for pick in kept}
     assert list(answers._with_enough_of_each(facts, [], 2)) == list(combinations(facts, 2))  # pyright: ignore[reportPrivateUsage]
+
+
+def test_a_thousand_groups_are_picked_from_without_going_deeper_each_time() -> None:
+    """A thousand LOCKed visits that each need one more right give one pick of a thousand FACTs."""
+    rights = [right(f"visit-{number}", "alex") for number in range(1200)]
+    groups = [(frozenset({each}), 1) for each in rights]
+    picks = list(answers._with_enough_of_each(rights, groups, len(rights)))  # pyright: ignore[reportPrivateUsage]
+    assert [set(pick) for pick in picks] == [set(rights)]
+
+
+def named(*names: str) -> list[Document]:
+    return [{"id": f"person-{number}", "name": name} for number, name in enumerate(names)]
+
+
+def test_a_name_that_a_list_could_split_in_two_is_shown_in_quotes() -> None:
+    """Two FILEs have the same four names in a row, split in different places.
+
+    A LOCK names three of the four in each, and they still have to buy a right. The words
+    tell the two apart.
+    """
+
+    def words(*names: str) -> str:
+        document: Document = {
+            "persons": named(*names),
+            "places": [{"id": "dock", "name": "dock"}],
+            "options": [stays("tour", "dock")],
+            "ways": [],
+            "wants": [],
+            "facts": [*at_ten("tour"), needs_right("tour"), offer("tour", 3)],
+            "decisions": [lock("tour", "person-0", "person-1", "person-2")],
+        }
+        file = load(document)
+        return report.as_text(file, checked(file)).splitlines()[4]
+
+    one = words("Lee, Gray", "Lee", "Sam", "Jo")
+    other = words("Lee", "Gray, Lee", "Sam", "Jo")
+    assert (
+        one == '    ! "Lee, Gray", Lee and Sam still have to buy a right to this, from tour-offer.'
+    )
+    assert (
+        other
+        == '    ! Lee, "Gray, Lee" and Sam still have to buy a right to this, from tour-offer.'
+    )
+    assert words("Sam And Jo", "Lee", "Kim", "Pat").startswith('    ! "Sam And Jo", Lee and Kim')
+    pair = words("Sam and Jo", 'the "Duke"', "Lee", "Kim")
+    assert pair.startswith('    ! "Sam and Jo", "the \\"Duke\\"" and Lee still have to buy')
 
 
 def test_a_booking_that_covers_more_persons_than_the_plan_needs_says_whom_it_is_used_for() -> None:
