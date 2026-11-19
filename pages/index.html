@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agloe: a standard format for trips, and a compiler that checks them</title>
 <meta name="description" content="Agloe is a standard format for trips, a compiler that checks them, and an optimizer that finds the best version. Open source.">
-<meta name="theme-color" content="#1B2733">
+<meta name="theme-color" content="#111417">
 <link rel="icon" href="favicon.svg">
 <link rel="canonical" href="https://agloe.ai/">
 <link rel="preload" href="fonts/bookmania-regular-italic-subset.woff2" as="font" type="font/woff2" crossorigin>
@@ -18,7 +18,7 @@
 <meta property="og:image" content="https://agloe.ai/img/social-preview.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="The name Agloe in Bookmania italic, with the address agloe.ai">
+<meta property="og:image:alt" content="The name Agloe, the line itineraries that compile, and the address agloe.ai">
 <meta name="twitter:card" content="summary_large_image">
 <style>
 @font-face { font-family: "Bookmania"; src: url("fonts/bookmania-regular-italic-subset.woff2") format("woff2"); font-weight: 400; font-style: italic; font-display: swap; }
@@ -26,12 +26,13 @@
 @font-face { font-family: "IBM Plex Mono"; src: url("fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
 @font-face { font-family: "IBM Plex Mono"; src: url("fonts/ibm-plex-mono-latin-500-normal.woff2") format("woff2"); font-weight: 500; font-display: swap; }
 
-/* The "chart" palette of the brand kit: ground, ink, a teal accent, and brass used sparingly. */
+/* The "transit" palette of the brand kit: ground, ink, one accent, and brass used sparingly.
+   Colour marks trouble: the accent for what cannot work, brass for what nobody knows yet. */
 :root {
-  --ground: #F5F5F0; --surface: #FAF9F4; --tile: #EDEEE8;
-  --ink: #1B2733; --ink2: #4B5A66; --muted: #5E6E76; --line: #D8DAD2;
-  --teal: #26766E; --brass: #B9892F; --stop: #B3261E;
-  --night: #10161C; --night-ink: #E8E6DD; --night-dim: #93A3A8; --night-teal: #5FB3A8; --night-brass: #D4A94E; --night-stop: #F0857A;
+  --ground: #FBFBF6; --surface: #FFFFFF; --tile: #F1F1EC;
+  --ink: #111417; --ink2: #50545A; --muted: #6C7074; --line: #D9D9D3; --travel: #5B6169;
+  --accent: #C7491F; --brass: #9A8330; --brass-ink: #6E5D1C; --stop: #C7491F;
+  --night: #111417; --night-ink: #EDEDE7; --night-dim: #979B9E; --night-accent: #F0875B; --night-brass: #CDBB6A; --night-stop: #F0875B;
   --display: "Bookmania", "Bookman Old Style", "URW Bookman", Georgia, serif;
   --text: "Inter", system-ui, "Helvetica Neue", Arial, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -45,9 +46,9 @@ h1 { font-size: clamp(2.7rem, 5.4vw, 4.1rem); line-height: 1.04; letter-spacing:
 h2 { font-size: clamp(2rem, 3.7vw, 2.9rem); line-height: 1.08; letter-spacing: -0.008em; }
 h3 { font-size: 1.5rem; line-height: 1.2; }
 p, ul, ol { margin: 0; }
-a { color: inherit; text-decoration-color: var(--teal); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
-a:hover { color: var(--teal); }
-:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
+a { color: inherit; text-decoration-color: var(--accent); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+a:hover { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 code { font-family: var(--mono); font-size: 0.9em; }
 .skip { position: absolute; left: 16px; top: -80px; z-index: 10; padding: 10px 16px; background: var(--ink); color: var(--ground); font-weight: 600; text-decoration: none; }
 .skip:focus { top: 12px; }
@@ -57,9 +58,9 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .stack { display: grid; gap: 18px; align-content: start; }
 .lead { font-size: 1.2rem; line-height: 1.55; color: var(--ink2); max-width: 34em; }
 .small { font-size: 0.93rem; color: var(--muted); }
-.label { font: 500 0.72rem/1.4 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--teal); }
+.label { font: 500 0.72rem/1.4 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
 .split { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: clamp(32px, 5vw, 64px); align-items: center; }
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: 3px; box-shadow: 0 26px 54px -30px rgba(27, 39, 51, 0.38); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 3px; box-shadow: 0 26px 54px -30px rgba(17, 20, 23, 0.32); }
 
 /* Header */
 .top { border-bottom: 1px solid var(--line); }
@@ -70,7 +71,7 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .brand .word { height: 34px; width: auto; display: block; overflow: visible; }
 .links { display: flex; gap: 6px 26px; flex-wrap: wrap; font-size: 0.98rem; }
 .links a { text-decoration: none; }
-.links a:hover { color: var(--teal); }
+.links a:hover { color: var(--accent); }
 
 /* Opening */
 .hero { padding-block: clamp(44px, 6vw, 84px) clamp(52px, 7vw, 92px); }
@@ -78,7 +79,7 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .hero-text { display: grid; gap: 22px; }
 .actions { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 4px; }
 .button { display: inline-block; padding: 13px 22px; border: 1px solid var(--ink); border-radius: 2px; background: var(--ink); color: var(--ground); font-weight: 600; font-size: 1rem; text-decoration: none; }
-.button:hover { background: var(--teal); border-color: var(--teal); color: var(--ground); }
+.button:hover { background: var(--accent); border-color: var(--accent); color: var(--ground); }
 .button.quiet { background: transparent; color: var(--ink); }
 .button.quiet:hover { background: var(--tile); border-color: var(--ink); color: var(--ink); }
 
@@ -102,11 +103,11 @@ main:has(input[value="works-but-risky"]:checked) { --visit-time: 840; --visit-le
   font: 500 0.7rem/1 var(--mono); letter-spacing: 0.04em; color: var(--ground);
   transition: left 0.75s var(--ease), width 0.75s var(--ease), opacity 0.4s ease; }
 .bar.visit { --from: var(--visit-time); --len: var(--visit-length); top: 10px; background: var(--ink); }
-.bar.train { --from: var(--leave); --len: var(--train-length); top: 52px; background: var(--teal); }
+.bar.train { --from: var(--leave); --len: var(--train-length); top: 52px; background: var(--travel); }
 .bar.slow { --from: var(--arrive); --len: calc(var(--train-length-longest) - var(--train-length)); top: 52px; padding: 0;
   background: repeating-linear-gradient(135deg, var(--brass) 0 4px, transparent 4px 8px); border: 1px solid var(--brass); border-left: 0; border-radius: 0 2px 2px 0; }
 .bar.late { --from: var(--close); top: 52px; padding: 0; width: max(0%, calc((var(--arrive) - var(--close)) / var(--span) * 100%));
-  background: repeating-linear-gradient(135deg, var(--stop) 0 4px, #e9b9b3 4px 8px); border-radius: 0 2px 2px 0; }
+  background: repeating-linear-gradient(135deg, var(--stop) 0 4px, #F1C9BA 4px 8px); border-radius: 0 2px 2px 0; }
 .bar.cab { --from: var(--leave); --len: calc(var(--close) - var(--leave)); top: 94px; opacity: 0; background: transparent; color: var(--brass);
   border: 1.5px dashed var(--brass); }
 .bar.flight { --from: var(--flight-time); --len: calc(var(--t0) + var(--span) - var(--flight-time)); top: 94px; background: var(--ink);
@@ -126,34 +127,34 @@ main:has(input[value="depends-on-the-cab"]:checked) .day { height: 218px; }
 .answer p:first-child { padding-left: 20px; position: relative; }
 .answer p:first-child::before { content: ""; position: absolute; left: 0; top: 0.3em; width: 11px; height: 11px; border-radius: 50%; background: var(--dot); }
 .answer p + p { padding-left: 20px; color: var(--ink2); font-weight: 400; }
-.answer.feasible { --dot: var(--teal); color: var(--teal); }
+.answer.feasible { --dot: var(--ink); color: var(--ink); }
 .answer.infeasible { --dot: var(--stop); color: var(--stop); }
-.answer.undetermined { --dot: var(--brass); color: #8a6417; }
-.answer.risky { --dot: var(--teal); color: var(--teal); }
-.answer.risky p + p { color: #8a6417; }
+.answer.undetermined { --dot: var(--brass); color: var(--brass-ink); }
+.answer.risky { --dot: var(--ink); color: var(--ink); }
+.answer.risky p + p { color: var(--brass-ink); }
 
 .versions { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 6px; }
 .versions legend { padding: 0; margin-bottom: 10px; }
 .versions label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 11px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 2px; font-size: 0.93rem; line-height: 1.4; cursor: pointer; background: var(--ground); }
 .versions label:hover { border-color: var(--muted); }
-.versions input { width: 1em; height: 1em; margin: 0.2em 0 0; accent-color: var(--teal); }
-.versions label:has(input:checked) { border-color: var(--teal); box-shadow: inset 3px 0 0 var(--teal); background: var(--surface); }
-.versions label:has(input:focus-visible) { outline: 2px solid var(--teal); outline-offset: 2px; }
+.versions input { width: 1em; height: 1em; margin: 0.2em 0 0; accent-color: var(--accent); }
+.versions label:has(input:checked) { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); background: var(--surface); }
+.versions label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .versions input:focus-visible { outline: none; }
 
 /* The report, as the terminal prints it */
-.terminal { background: var(--night); color: var(--night-ink); border-radius: 3px; box-shadow: 0 26px 54px -30px rgba(27, 39, 51, 0.6); padding: clamp(18px, 2.4vw, 26px); font: 0.8rem/1.7 var(--mono); }
+.terminal { background: var(--night); color: var(--night-ink); border-radius: 3px; box-shadow: 0 26px 54px -30px rgba(17, 20, 23, 0.55); padding: clamp(18px, 2.4vw, 26px); font: 0.8rem/1.7 var(--mono); }
 .reports { display: grid; gap: 28px; }
 .command { color: var(--night-dim); margin-bottom: 12px; overflow-wrap: anywhere; }
 .report pre { margin: 0; font: inherit; white-space: pre-wrap; overflow-wrap: break-word; }
 .report pre::first-line { font-weight: 500; }
-.report.feasible pre::first-line, .report.risky pre::first-line { color: var(--night-teal); }
+.report.feasible pre::first-line, .report.risky pre::first-line { color: #FFFFFF; }
 .report.infeasible pre::first-line { color: var(--night-stop); }
 .report.undetermined pre::first-line { color: var(--night-brass); }
 
 /* Where the browser can tell which version is chosen, show only that version's answer and report. */
 @supports selector(:has(*)) {
-  .reports { display: block; height: 540px; overflow-y: auto; scrollbar-color: #3a4650 transparent; }
+  .reports { display: block; height: 540px; overflow-y: auto; scrollbar-color: #3a3e43 transparent; }
   .report { display: none; }
   main:has(input[value="works"]:checked) .answer[data-version="works"],
   main:has(input[value="cannot-work"]:checked) .answer[data-version="cannot-work"],
@@ -176,7 +177,7 @@ main:has(input[value="depends-on-the-cab"]:checked) .day { height: 218px; }
 .key { list-style: none; padding: 0; display: grid; gap: 16px; }
 .key li { padding-left: 26px; position: relative; }
 .key li::before { content: ""; position: absolute; left: 0; top: 0.42em; width: 12px; height: 12px; border-radius: 50%; background: var(--dot); }
-.key .feasible { --dot: var(--teal); }
+.key .feasible { --dot: var(--ink); }
 .key .infeasible { --dot: var(--stop); }
 .key .undetermined { --dot: var(--brass); }
 
@@ -188,7 +189,7 @@ main:has(input[value="depends-on-the-cab"]:checked) .day { height: 218px; }
 .part { display: grid; gap: 14px; align-content: start; }
 .part svg { width: 54px; height: 54px; }
 .part svg * { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.part svg .t { stroke: var(--teal); }
+.part svg .t { stroke: var(--accent); }
 .part svg .b { stroke: var(--brass); }
 .part strong { display: block; font: italic 400 1.6rem/1.15 var(--display); margin-bottom: 8px; }
 .after { margin-top: 44px; max-width: 46em; display: grid; gap: 14px; color: var(--ink2); }
@@ -203,21 +204,21 @@ main:has(input[value="depends-on-the-cab"]:checked) .day { height: 218px; }
 
 /* The name */
 .night { background: var(--ink); color: var(--ground); }
-.night .label { color: var(--night-teal); }
-.night a:hover { color: var(--night-teal); }
-.night p { font-size: 1.22rem; line-height: 1.55; color: #d9dcd6; }
+.night .label { color: var(--night-accent); }
+.night a:hover { color: var(--night-accent); }
+.night p { font-size: 1.22rem; line-height: 1.55; color: #DDDDD7; }
 .map { display: block; width: 100%; height: auto; background: var(--ground); border-radius: 3px; }
 .map .grid { stroke: var(--line); stroke-width: 1; fill: none; }
-.map .river { fill: none; stroke: #9cc7c1; stroke-width: 7; stroke-linecap: round; }
+.map .river { fill: none; stroke: #C3CBCF; stroke-width: 7; stroke-linecap: round; }
 .map .highway { fill: none; stroke: var(--ink); stroke-width: 3.2; }
 .map .road { fill: none; stroke: var(--ink); stroke-width: 2; }
 .map .track { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 7 5; }
 .map .town { fill: var(--ink); }
-.map .not-there { fill: var(--ground); stroke: var(--brass); stroke-width: 4; stroke-dasharray: 6.6 4.4; }
+.map .not-there { fill: var(--ground); stroke: var(--accent); stroke-width: 4.4; stroke-linecap: round; stroke-dasharray: 0.01 7.33; }
 .map text { fill: var(--ink); }
 .map .place { font: italic 400 23px var(--display); }
 .map .place.big { font-size: 31px; }
-.map .water-name { font: italic 400 19px var(--display); fill: var(--teal); letter-spacing: 0.12em; }
+.map .water-name { font: italic 400 19px var(--display); fill: #65747C; letter-spacing: 0.12em; }
 .map .note { font: 11px var(--mono); letter-spacing: 0.08em; fill: var(--muted); text-transform: uppercase; }
 
 /* Motion. The day redraws when the version changes. The map draws itself once, when it is first seen. */
@@ -261,8 +262,8 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
 <header class="top">
   <div class="wrap">
     <a class="brand" href="./" aria-label="Agloe home">
-      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#1B2733"/><path d="M41.7 39.7H64M24.3 57.1V64M6.9 39.7H0M24.3 22.3V0" stroke="#F5F5F0" stroke-width="3.5"/><circle cx="24.3" cy="39.7" r="12.2" fill="none" stroke="#B9892F" stroke-width="4.2" stroke-dasharray="5.54 4.04" stroke-dashoffset="7.56"/></svg>
-      <svg class="word" viewBox="58 -715 2617 914" role="img" aria-label="Agloe"><path fill="currentColor" transform="scale(1,-1)" d="M595 0H855L861 25C815 30 798 51 792 98L712 700H372C169 700 58 589 58 453C58 347 122 282 215 282C309 282 376 345 376 424C376 460 351 491 312 491C280 491 255 468 255 432C255 408 270 391 270 370C270 342 247 328 211 328C148 328 109 379 109 453C109 574 211 655 372 655H581C611 655 619 641 593 600L276 93C249 51 222 30 171 25L165 0H386L392 25C316 30 301 49 324 87L404 215H677L695 87C700 45 677 30 601 25ZM431 259 627 573 670 259ZM967 261C967 226 979 194 1003 169C936 165 876 128 876 70C876 37 889 11 921 -5C877 -21 843 -52 843 -98C843 -176 932 -199 1061 -199C1207 -199 1298 -141 1298 -55C1298 13 1256 47 1113 52C977 56 947 62 947 94C947 116 965 135 1012 135C1072 135 1073 113 1145 113C1277 113 1362 204 1362 318C1362 387 1310 448 1225 462C1234 520 1269 542 1305 548C1336 552 1357 568 1357 595C1357 618 1341 633 1313 633C1262 633 1202 560 1188 466H1184C1052 466 967 375 967 261ZM1055 243C1055 327 1097 427 1183 427C1239 427 1273 400 1273 335C1273 252 1232 152 1146 152C1090 152 1055 180 1055 243ZM1087 -35C1186 -37 1214 -52 1214 -87C1214 -123 1174 -160 1066 -160C968 -160 905 -137 905 -90C905 -59 923 -36 970 -23C1000 -30 1039 -34 1087 -35ZM1358 0H1581L1587 25C1534 30 1525 41 1534 77L1692 715H1660L1515 637L1511 617H1547C1569 617 1575 608 1569 584L1444 77C1435 41 1420 30 1364 25ZM1897 440 1887 461C1791 425 1691 342 1691 190C1691 72 1774 -15 1904 -15C2065 -15 2176 109 2176 262C2176 383 2094 460 1998 460C1920 460 1863 399 1863 312C1863 248 1900 201 1946 203C1978 203 1996 224 1996 249C1996 272 1982 290 1953 295C1929 298 1912 313 1912 345C1912 386 1938 421 1989 421C2046 421 2085 383 2085 295C2085 194 2035 24 1906 24C1821 24 1783 78 1783 157C1783 272 1832 398 1897 440ZM2341 274H2672C2692 408 2606 466 2497 466C2356 466 2233 359 2233 185C2233 73 2311 -15 2445 -15C2536 -15 2610 36 2662 122L2629 142C2584 70 2519 27 2456 27C2363 27 2327 87 2327 167C2327 198 2330 236 2341 274ZM2500 427C2564 427 2607 390 2592 314H2354C2378 375 2424 427 2500 427Z"/></svg>
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#C7491F"/><path d="M37.7 39.7H64M24.3 53.1V64M10.9 39.7H0M24.3 26.3V0" stroke="#FBFBF6" stroke-width="2.6"/><circle cx="24.3" cy="39.7" r="9.6" fill="none" stroke="#FBFBF6" stroke-width="3.1" stroke-linecap="round" stroke-dasharray="0.01 5.02" stroke-dashoffset="2.51"/></svg>
+      <svg class="word" viewBox="64 -728 2584 927" role="img" aria-label="Agloe"><path fill="currentColor" transform="scale(1,-1)" d="M594 599 277 93C252 51 223 30 172 25L166 0H388L394 25C318 30 301 49 326 87L405 215H678L696 87C701 45 679 30 603 25L596 0H856L863 25C817 30 800 51 794 98L714 700H688C641 700 592 706 544 712C489 720 424 728 375 728C175 728 64 617 64 481C64 376 128 311 222 311C315 311 382 373 382 452C382 488 357 520 318 520C286 520 261 496 261 461C261 436 276 419 276 398C276 371 253 357 217 357C154 357 115 407 115 481C115 602 217 683 372 683C431 683 514 671 560 658C596 648 620 640 594 599ZM433 259 629 573 672 259ZM1049 -199C1195 -199 1290 -141 1290 -55C1290 13 1244 47 1101 52C965 56 935 62 935 95C935 116 956 135 1001 135C1060 135 1063 113 1133 113C1265 113 1350 204 1350 318C1350 352 1336 395 1296 425C1309 439 1331 455 1349 455C1373 455 1377 429 1405 429C1434 429 1450 452 1450 474C1450 499 1426 514 1395 514C1355 514 1304 496 1261 444C1241 457 1211 466 1172 466C1040 466 955 375 955 261C955 226 967 194 991 169C924 165 864 128 864 70C864 37 877 11 909 -5C865 -21 831 -52 831 -98C831 -176 920 -199 1049 -199ZM1134 152C1078 152 1043 180 1043 243C1043 327 1085 427 1171 427C1227 427 1261 400 1261 335C1261 252 1220 152 1134 152ZM1054 -160C956 -160 893 -137 893 -90C893 -59 911 -36 958 -23C989 -30 1027 -34 1075 -35C1174 -37 1206 -52 1206 -87C1206 -123 1162 -160 1054 -160ZM1354 0H1577L1583 25C1530 30 1521 41 1530 77L1688 715H1656L1511 637L1507 617H1543C1565 617 1571 608 1565 584L1440 77C1431 41 1416 30 1360 25ZM1881 440 1871 461C1775 425 1675 342 1675 190C1675 72 1758 -15 1888 -15C2049 -15 2160 109 2160 262C2160 383 2078 460 1982 460C1904 460 1847 399 1847 312C1847 248 1884 201 1930 203C1962 203 1980 224 1980 249C1980 272 1966 290 1937 295C1913 298 1896 313 1896 345C1896 386 1922 421 1973 421C2030 421 2069 383 2069 295C2069 194 2019 24 1890 24C1805 24 1767 78 1767 157C1767 272 1816 398 1881 440ZM2416 -15C2539 -15 2626 76 2626 151C2626 174 2614 199 2580 199C2554 199 2526 178 2526 143C2526 125 2537 113 2537 94C2537 66 2496 27 2428 27C2335 27 2299 87 2299 167C2299 180 2299 192 2301 209L2648 317C2648 423 2558 466 2469 466C2328 466 2205 359 2205 185C2205 73 2283 -15 2416 -15ZM2472 427C2530 427 2569 400 2567 335L2308 254C2325 339 2371 427 2472 427Z"/></svg>
     </a>
     <nav class="links" aria-label="Main">
       <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">Rules</a>
@@ -560,8 +561,8 @@ uv run agloe check examples/a-must/cannot-work.json</pre>
 
 <footer>
   <div class="wrap">
-    <span>Agloe is open source under the <a href="https://github.com/ian-c-leonard/agloe/blob/main/LICENSE">Apache License 2.0</a>. The trips in the examples are fictional.</span>
-    <span>The name is set in Bookmania by Mark Simonson, <a href="fonts/bookmania-NOTICE.txt">used with his permission</a>. The text is in <a href="fonts/inter-OFL.txt">Inter</a> and <a href="fonts/ibm-plex-mono-OFL.txt">IBM Plex Mono</a>.</span>
+    <span>Agloe is open source under the <a href="https://github.com/ian-c-leonard/agloe/blob/main/LICENSE">Apache License 2.0</a>.</span>
+    <span>The trips in the examples are fictional.</span>
     <a href="https://github.com/ian-c-leonard/agloe">github.com/ian-c-leonard/agloe</a>
   </div>
 </footer>
