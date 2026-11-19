@@ -2,9 +2,6 @@ UNDETERMINED: the FILE does not say enough to tell.
 
 The trip works in any of these cases:
   1. A right to Skydeck visit is found for Sam, in addition to the 2 places on OFFER.
-  2. A BUDGET can pay for what Sam has to buy.
+  2. Each place that Sam has to buy can be paid from a BUDGET that lists Sam (one from skydeck-tickets for 32.00 USD).
 
-A place with a price above nothing is paid from a BUDGET that lists the PERSON who takes it and holds the currency of the price. This FILE names no BUDGET.
-
-The OFFERs with a place to pay for:
-  skydeck-tickets: a place in Skydeck visit costs 32.00 USD
+Who buys which place is from one plan that works in that case. A place with a price above nothing is paid from a BUDGET that lists the PERSON who takes it and holds the currency of the price. This FILE names no BUDGET.

@@ -13,19 +13,20 @@
       {
         "what": "funding",
         "person": "sam",
+        "buys": [
+          {
+            "person": "sam",
+            "option": "skydeck",
+            "offer": "skydeck-tickets",
+            "price": {
+              "amount": "32.00",
+              "currency": "USD"
+            }
+          }
+        ],
         "at_most": null
       }
     ]
   ],
-  "budgets": [],
-  "for_sale": [
-    {
-      "offer": "skydeck-tickets",
-      "option": "skydeck",
-      "price": {
-        "amount": "32.00",
-        "currency": "USD"
-      }
-    }
-  ]
+  "budgets": []
 }

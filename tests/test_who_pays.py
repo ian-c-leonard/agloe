@@ -53,6 +53,7 @@ PAID_FROM = (
     "A place with a price above nothing is paid from a BUDGET that lists the PERSON who takes it"
     " and holds the currency of the price."
 )
+ONE_WAY = f"Who buys which place is from one plan that works in that case. {PAID_FROM}"
 
 
 def at_ten(option: str) -> list[Document]:
@@ -127,6 +128,8 @@ def test_a_budget_lists_who_may_draw_on_it_and_the_currencies_it_holds() -> None
     assert file.pays("sam", five_euros) == file.budgets[0]
     assert file.pays("jo", five_euros) is None
     assert file.pays("sam", Money(Decimal(5), "GBP")) is None
+    two = a_boat_tour(budgets=[budget("first", "alex"), budget("second", "jo", holds=["EUR"])])
+    assert two.listed("jo") and not two.listed("sam")
 
 
 def test_a_price_of_nothing_draws_on_no_budget() -> None:
@@ -355,6 +358,25 @@ def test_a_place_that_none_of_them_can_pay_for_changes_nothing() -> None:
     assert compiler.check(short).answer is Answer.UNDETERMINED
 
 
+def test_a_person_who_can_pay_for_no_place_changes_nothing_for_the_others() -> None:
+    """Forty buyers of forty places in dollars, and one more PERSON whom no BUDGET lists."""
+    buyers = [f"p{number}" for number in range(40)]
+    facts = [*at_ten("tour"), needs_right("tour"), offer("tour", 40)]
+    options = [stays("tour", "dock")]
+    locked = [lock("tour", *buyers)]
+    pots = [budget("money", *buyers)]
+    file = trip([*buyers, "idle"], ["dock"], options, facts, locked, tickets=True, budgets=pots)
+    worst = worst_case(file)
+    assert placed(file, worst, "tour", [*buyers, "idle"]) == dict.fromkeys(buyers, "tour-offer")
+    found = compiler.check(file)
+    assert found.answer is Answer.FEASIBLE and len(found.rights) == 40
+    # The places are alike for the forty, so the solver counts them and chooses none.
+    model = compiler._Search(file, worst).model  # pyright: ignore[reportPrivateUsage]
+    assert "takes a place of" not in str(model.proto)
+    chosen = compiler._Search(a_chain(3), worst_case(a_chain(3))).model  # pyright: ignore[reportPrivateUsage]
+    assert "takes a place of" in str(chosen.proto)
+
+
 def test_each_person_takes_the_first_place_that_leaves_a_way_for_the_rest() -> None:
     """Sam can pay only in dollars. Alex can pay either way, and comes first in the FILE."""
     offers = [offer("tour", 1, id="dollar"), offer("tour", 1, id="euro", price="9.00 EUR")]
@@ -433,35 +455,36 @@ def test_where_no_budget_lists_a_person_nobody_knows_who_pays() -> None:
     found = checked(file)
     assert found.answer is Answer.UNDETERMINED
     assert asked(found) == [[right("tour", "sam")], [can_pay("sam")]]
-    assert in_words(file)[-8:] == [
+    to_buy = "each place that sam has to buy can be paid from a BUDGET that lists sam"
+    assert in_words(file)[-5:] == [
         "The trip works in any of these cases:",
         "  1. A right to tour is found for sam, in addition to the 2 places on OFFER.",
-        "  2. A BUDGET can pay for what sam has to buy.",
+        f"  2. E{to_buy[1:]} (one from tour-offer for 10.00 USD).",
         "",
-        f"{PAID_FROM} This FILE names no BUDGET.",
-        "",
-        "The OFFERs with a place to pay for:",
-        "  tour-offer: a place in tour costs 10.00 USD",
+        f"{ONE_WAY} This FILE names no BUDGET.",
     ]
     as_json = report.as_json(file, found)
+    ten_dollars = {"amount": "10.00", "currency": "USD"}
+    place = {"person": "sam", "option": "tour", "offer": "tour-offer", "price": ten_dollars}
     assert as_json["missing"] == [
         [{"what": "another right", "option": "tour", "person": "sam", "at_most": None}],
-        [{"what": "funding", "person": "sam", "at_most": None}],
+        [{"what": "funding", "person": "sam", "buys": [place], "at_most": None}],
     ]
     assert as_json["budgets"] == []
-    ten_dollars = {"amount": "10.00", "currency": "USD"}
-    assert as_json["for_sale"] == [{"offer": "tour-offer", "option": "tour", "price": ten_dollars}]
 
 
 def test_a_report_that_asks_who_pays_says_what_there_is_to_pay() -> None:
     """One place that Sam has to take, in euros or in pounds. The two reports differ."""
-    reports: list[str] = []
     for price in ("1 EUR", "1 GBP"):
         file = a_boat_tour(offer("tour", 1, price=price), every_right("tour", "tour-offer"))
         nobody_said = replace(file, budgets=())
-        assert asked(checked(nobody_said)) == [[can_pay("sam")]]
-        assert in_words(nobody_said)[-1] == f"  tour-offer: a place in tour costs {price}"
-        reports.append(str(report.as_json(nobody_said, checked(nobody_said))))
+        found = checked(nobody_said)
+        assert asked(found) == [[can_pay("sam")]]
+        assert in_words(nobody_said)[2].endswith(f"(one from tour-offer for {price}).")
+        amount, currency = price.split()
+        assert found.missing[0][0].buys == (
+            Cover("tour", "sam", "tour-offer", True, Money(Decimal(amount), currency)),
+        )
         in_euros = a_boat_tour(
             offer("tour", 1, price=price),
             every_right("tour", "tour-offer"),
@@ -469,7 +492,103 @@ def test_a_report_that_asks_who_pays_says_what_there_is_to_pay() -> None:
         )
         euros = price.endswith("EUR")
         assert checked(in_euros).answer is (Answer.FEASIBLE if euros else Answer.INFEASIBLE)
-    assert reports[0] != reports[1]
+
+
+def test_a_missing_price_names_the_person_whose_budget_it_has_to_fit() -> None:
+    """One place with no stated price. Alex holds euros and francs, Sam pounds and dollars."""
+    pots = [
+        budget("alexs", "alex", holds=["EUR", "CHF"]),
+        budget("sams", "sam", holds=["GBP", "CAD"]),
+    ]
+    facts = [*at_ten("tour"), needs_right("tour"), offer("tour", 1, price=None)]
+    facts.append(every_right("tour", "tour-offer"))
+    options = [stays("tour", "dock")]
+    for who in ("alex", "sam"):
+        locked = [lock("tour", who)]
+        file = trip(["alex", "sam"], ["dock"], options, facts, locked, tickets=True, budgets=pots)
+        for found in (checked(file), compiler.check(file)):
+            assert asked(found) == [[price_of("tour-offer")]]
+            assert found.missing[0][0].buys == (Cover("tour", who, "tour-offer", True),)
+        assert in_words(file)[2:] == [
+            f"The trip works if a place from tour-offer has a price that {who} can pay.",
+            "",
+            f"{ONE_WAY} The BUDGETs of this FILE:",
+            "  alexs: for alex; it holds EUR and CHF",
+            "  sams: for sam; it holds GBP and CAD",
+        ]
+    both = [lock("tour", "alex", "sam")]
+    two_places = [*facts[:-2], offer("tour", 2, price=None), facts[-1]]
+    file = trip(["alex", "sam"], ["dock"], options, two_places, both, tickets=True, budgets=pots)
+    assert in_words(file)[2] == (
+        "The trip works if a place from tour-offer has a price that alex and sam can each pay."
+    )
+
+
+def test_a_price_is_about_the_persons_who_take_a_place_of_its_offer() -> None:
+    """Sam and Jo both need a place. Who takes the one with no stated price depends."""
+    one_place = a_boat_tour(offer("tour", 1, price=None), locked=EVERYONE)
+    found = checked(one_place)
+    assert asked(found) == [
+        [right("tour", "sam"), right("tour", "jo")],
+        [right("tour", "sam"), price_of("tour-offer")],
+        [right("tour", "jo"), price_of("tour-offer")],
+    ]
+    # Whoever a right is found for buys no place, so the other one takes it.
+    assert [enough[1].buys[0].person for enough in found.missing[1:]] == ["jo", "sam"]
+    assert in_words(one_place)[4] == (
+        "  2. A right to tour is found for sam, in addition to the 1 place on OFFER and a place"
+        " from tour-offer has a price that jo can pay."
+    )
+    offers = [offer("tour", 1, id="priced"), offer("tour", 1, id="unpriced", price=None)]
+    two_offers = a_boat_tour(*offers, every_right("tour", "priced", "unpriced"), locked=EVERYONE)
+    found = checked(two_offers)
+    assert asked(found) == [[price_of("unpriced")]]
+    assert found.missing[0][0].buys == (Cover("tour", "jo", "unpriced", True),)
+
+
+def test_a_missing_payer_is_told_only_what_is_left_to_buy() -> None:
+    """Sam has to make two visits, one in dollars and one in euros. One of them is booked."""
+    options = [stays("tour", "dock"), stays("cruise", "dock")]
+    facts = [*at_ten("tour"), starts_at("cruise", 12), lasts("cruise", "PT1H")]
+    facts += [cutoff("cruise", "PT0S"), needs_right("tour"), needs_right("cruise")]
+    facts += [offer("tour", 1, price="1 USD"), offer("cruise", 1, price="1 EUR")]
+    facts += [every_right("tour", "tour-offer"), every_right("cruise", "cruise-offer")]
+    locked = [lock("tour", "sam"), lock("cruise", "sam")]
+    left = {"tour": "one from cruise-offer for 1 EUR", "cruise": "one from tour-offer for 1 USD"}
+    for booked, to_buy in left.items():
+        stated = [*facts, booking(booked, "sam")]
+        file = trip(["sam"], ["dock"], options, stated, locked, tickets=True, budgets=[])
+        assert asked(checked(file)) == [[can_pay("sam")]]
+        assert in_words(file)[2].endswith(f"a BUDGET that lists sam ({to_buy}).")
+    neither = trip(["sam"], ["dock"], options, facts, locked, tickets=True, budgets=[])
+    assert in_words(neither)[2].endswith(
+        "(one from tour-offer for 1 USD, one from cruise-offer for 1 EUR)."
+    )
+    free = [
+        offer("tour", 1, price="0 USD") if fact["id"] == "tour-offer" else fact for fact in facts
+    ]
+    one_free = trip(["sam"], ["dock"], options, free, locked, tickets=True, budgets=[])
+    assert in_words(one_free)[2].endswith(
+        "a BUDGET that lists sam (one from cruise-offer for 1 EUR)."
+    )
+    two_pots = [budget("dollars", "sam"), budget("euros", "sam", holds=["EUR"])]
+    paid = trip(["sam"], ["dock"], options, facts, locked, tickets=True, budgets=two_pots)
+    assert [cover.budget for cover in checked(paid).rights] == ["dollars", "euros"]
+
+
+def test_who_buys_which_place_follows_the_places_that_are_left() -> None:
+    """Alex holds euros, Jo holds pounds, and no BUDGET lists Sam. All three need a place."""
+    pots = [budget("alexs", "alex", holds=["EUR"]), budget("jos", "jo", holds=["GBP"])]
+    options = [stays("tour", "dock")]
+    locked = [lock("tour", *EVERYONE)]
+    for euros, pounds, sams in ((2, 1, "one from eur for 1 EUR"), (1, 2, "one from gbp for 1 GBP")):
+        offers = [offer("tour", euros, id="eur", price="1 EUR")]
+        offers.append(offer("tour", pounds, id="gbp", price="1 GBP"))
+        facts = [*at_ten("tour"), needs_right("tour"), *offers, every_right("tour", "eur", "gbp")]
+        file = trip(EVERYONE, ["dock"], options, facts, locked, tickets=True, budgets=pots)
+        for found in (checked(file), compiler.check(file)):
+            assert asked(found) == [[can_pay("sam")]]
+        assert in_words(file)[2].endswith(f"a BUDGET that lists sam ({sams}).")
 
 
 def test_a_budget_that_turns_out_to_pay_pays_for_a_place_with_no_stated_price() -> None:
@@ -487,11 +606,10 @@ def test_a_budget_that_turns_out_to_pay_pays_for_a_place_with_no_stated_price() 
     }
     for found in (checked(file), compiler.check(file)):
         assert asked(found) == [[can_pay("sam")]]
-    assert in_words(file)[-3:] == [
-        "The OFFERs with a place to pay for:",
-        "  tour-offer: nobody knows what a place in tour costs",
-        "  cruise-offer: nobody knows what a place in cruise costs",
-    ]
+    unknown = "at a price nobody knows"
+    assert in_words(file)[2].endswith(
+        f"(one from tour-offer {unknown}, one from cruise-offer {unknown})."
+    )
     one_visit = a_boat_tour(
         offer("tour", 1, price=None), every_right("tour", "tour-offer"), budgets=[]
     )
@@ -518,7 +636,7 @@ def test_a_person_whom_a_budget_lists_pays_from_no_other() -> None:
     assert has_no_record_to_spare(closed, conflict)
 
 
-def test_a_conflict_about_a_currency_shows_the_budgets_it_holds_fixed() -> None:
+def test_a_conflict_that_turns_on_who_can_pay_says_so_and_shows_the_budgets() -> None:
     """The four records rule out every plan only because Sam's BUDGET holds no euros."""
     facts = [*at_ten("tour"), needs_right("tour"), offer("tour", 1, price="1 EUR")]
     facts.append(every_right("tour", "tour-offer"))
@@ -529,16 +647,25 @@ def test_a_conflict_about_a_currency_shows_the_budgets_it_holds_fixed() -> None:
         return trip(["sam"], ["dock"], options, facts, locked, tickets=True, budgets=pots)
 
     file = with_budgets(budget("pot", "sam"))
-    found = checked(file)
-    assert found.conflict == ("tour-needs-right", "tour-offer", "every-right-to-tour", "lock-tour")
-    assert in_words(file)[-3:] == [
+    for found in (checked(file), compiler.check(file)):
+        assert found.conflict == (
+            "tour-needs-right",
+            "tour-offer",
+            "every-right-to-tour",
+            "lock-tour",
+        )
+        assert found.given_budgets
+    words = in_words(file)
+    assert words[2].startswith(
+        "These FACTs and DECISIONs rule out every plan, given the BUDGETs of this FILE. Take"
+    )
+    assert words[-3:] == [
         "",
-        f"The BUDGETs stay as the FILE lists them. {PAID_FROM} The BUDGETs of this FILE:",
+        f"{PAID_FROM} The BUDGETs of this FILE:",
         "  pot: for sam; it holds USD",
     ]
-    as_json = report.as_json(file, found)
+    as_json = report.as_json(file, checked(file))
     assert as_json["budgets"] == [{"id": "pot", "persons": ["sam"], "currencies": ["USD"]}]
-    assert "for_sale" not in as_json
     assert checked(with_budgets(budget("pot", "sam", holds=["EUR"]))).answer is Answer.FEASIBLE
     assert asked(checked(with_budgets())) == [[can_pay("sam")]]
 
@@ -548,26 +675,46 @@ def test_a_conflict_that_no_budget_bears_on_shows_none() -> None:
     file = a_boat_tour(offer("tour", 1), every_right("tour", "tour-offer"), locked=EVERYONE)
     found = checked(file)
     assert found.answer is Answer.INFEASIBLE and "tour-offer" in found.conflict
+    assert not found.given_budgets
     assert "budgets" not in report.as_json(file, found)
-    assert not any("BUDGET" in line for line in in_words(file))
+    words = in_words(file)
+    assert words[2].startswith("These FACTs and DECISIONs rule out every plan by themselves.")
+    assert not any("BUDGET" in line for line in words)
+    # Somebody who takes no part and cannot pay changes nothing: there are still too few places.
+    pots = [budget("dollars", "alex", "sam"), budget("jos", "jo", holds=["EUR"])]
+    with_an_onlooker = a_boat_tour(
+        offer("tour", 1),
+        every_right("tour", "tour-offer"),
+        booking("tour", "jo", id="jos-booking"),
+        locked=("alex", "sam", "jo"),
+        budgets=pots,
+    )
+    for found in (checked(with_an_onlooker), compiler.check(with_an_onlooker)):
+        assert found.answer is Answer.FEASIBLE
+    two_buyers = trip(
+        EVERYONE,
+        ["dock"],
+        [stays("tour", "dock")],
+        [*at_ten("tour"), needs_right("tour"), offer("tour", 1), every_right("tour", "tour-offer")],
+        [lock("tour", "alex", "sam")],
+        tickets=True,
+        budgets=pots,
+    )
+    for found in (checked(two_buyers), compiler.check(two_buyers)):
+        assert found.answer is Answer.INFEASIBLE and not found.given_budgets
 
 
-def test_a_report_that_asks_for_a_right_shows_who_cannot_pay_for_the_place_on_offer() -> None:
-    """A place is on OFFER in euros, and Sam holds dollars. So the report asks for a right."""
-    file = a_boat_tour(offer("tour", 2, price="9.00 EUR"))
-    assert asked(checked(file)) == [[right("tour", "sam")]]
-    assert in_words(file)[-7:] == [
-        "The trip works if a right to tour is found for sam, in addition to the 2 places on OFFER.",
-        "",
-        f"{PAID_FROM} The BUDGETs of this FILE:",
-        "  money: for alex, sam and jo; it holds USD",
-        "",
-        "The OFFERs with a place to pay for:",
-        "  tour-offer: a place in tour costs 9.00 EUR",
-    ]
-    enough_places = a_boat_tour(offer("tour", 1), locked=EVERYONE)
-    assert asked(checked(enough_places)) == [[right("tour", "sam")], [right("tour", "jo")]]
-    assert "budgets" not in report.as_json(enough_places, checked(enough_places))
+def test_a_set_names_those_who_cannot_all_have_a_place_they_can_pay_for() -> None:
+    """Alex and Sam hold euros, and Jo holds pounds. One place is in euros and one in pounds."""
+    pots = [budget("euros", "alex", "sam", holds=["EUR"]), budget("pounds", "jo", holds=["GBP"])]
+    offers = [offer("tour", 1, id="eur", price="1 EUR"), offer("tour", 1, id="gbp", price="1 GBP")]
+    facts = [*at_ten("tour"), needs_right("tour"), *offers]
+    options = [stays("tour", "dock")]
+    locked = [lock("tour", *EVERYONE)]
+    file = trip(EVERYONE, ["dock"], options, facts, locked, tickets=True, budgets=pots)
+    for found in (checked(file), compiler.check(file)):
+        assert asked(found) == [[right("tour", "alex")], [right("tour", "sam")]]
+    assert "budgets" not in report.as_json(file, checked(file))
 
 
 def test_an_unknown_payer_does_not_make_a_trip_infeasible() -> None:
@@ -580,25 +727,22 @@ def test_nobody_can_count_on_a_place_with_no_stated_price() -> None:
     file = a_boat_tour(unpriced)
     found = checked(file)
     assert asked(found) == [[right("tour", "sam")], [price_of("tour-offer")]]
-    assert in_words(file)[-8:] == [
+    assert in_words(file)[-5:] == [
         "  1. A right to tour is found for sam, in addition to the 2 places on OFFER.",
-        "  2. A place from tour-offer has a price that each PERSON who takes one can pay.",
+        "  2. A place from tour-offer has a price that sam can pay.",
         "",
-        f"{PAID_FROM} The BUDGETs of this FILE:",
+        f"{ONE_WAY} The BUDGETs of this FILE:",
         "  money: for alex, sam and jo; it holds USD",
-        "",
-        "The OFFERs with a place to pay for:",
-        "  tour-offer: nobody knows what a place in tour costs",
     ]
     as_json = report.as_json(file, found)
     missing = as_json["missing"]
     assert isinstance(missing, list)
+    place = {"person": "sam", "option": "tour", "offer": "tour-offer", "price": None}
     assert missing[1] == [
-        {"what": "price", "option": "tour", "offer": "tour-offer", "at_most": None}
+        {"what": "price", "option": "tour", "offer": "tour-offer", "buys": [place], "at_most": None}
     ]
     everybody = {"id": "money", "persons": EVERYONE, "currencies": ["USD"]}
     assert as_json["budgets"] == [everybody]
-    assert as_json["for_sale"] == [{"offer": "tour-offer", "option": "tour", "price": None}]
 
 
 def test_a_conflict_names_an_offer_with_no_stated_price_as_that() -> None:
@@ -626,7 +770,7 @@ def test_the_unknown_facts_about_money_have_their_place_in_the_order() -> None:
 
 
 def test_nothing_about_money_is_unknown_where_nobody_has_to_pay() -> None:
-    """A place of an OPTION that needs no right, and a place that costs nothing."""
+    """A place of an OPTION that needs no right, a place that costs nothing, and a BOOKING."""
     options = [stays("tour", "dock")]
     timed = at_ten("tour")
     unpriced = offer("tour", 1, price=None)
@@ -637,17 +781,26 @@ def test_nothing_about_money_is_unknown_where_nobody_has_to_pay() -> None:
     free = [*timed, needs_right("tour"), offer("tour", 1, price="0 USD")]
     costs_nothing = trip(["sam"], ["dock"], options, free, [], tickets=True, budgets=[])
     assert [unknown.what for unknown in unknowns(costs_nothing)] == ["another right"]
+    booked = [*timed, needs_right("tour"), unpriced, booking("tour", "sam")]
+    has_a_right = trip(["sam"], ["dock"], options, booked, [], tickets=True, budgets=[])
+    assert unknowns(has_a_right) == ()
+    only_jo = trip(["sam", "jo"], ["dock"], options, booked, [], tickets=True, budgets=[])
+    assert unknowns(only_jo) == (right("tour", "jo"), price_of("tour-offer"), can_pay("jo"))
 
 
-def test_offers_that_nobody_can_need_cost_the_search_nothing() -> None:
-    """Three visits that need no right, with no stated length. One has sixteen OFFERs.
+@pytest.mark.parametrize("booked", [False, True])
+def test_offers_that_nobody_can_need_cost_the_search_nothing(booked: bool) -> None:
+    """Three visits with no stated length. One has sixteen OFFERs that nobody can need.
 
-    The last visit can take any length of time, so the report asks about the first two.
+    The visits need no right, or they need one and Sam has a BOOKING for each. The last visit
+    can take any length of time, so the report asks about the first two.
     """
     names = ["tour", "cruise", "walk"]
     options = [stays(name, "dock") for name in names]
     facts = [starts_at(name, 10 + 2 * number) for number, name in enumerate(names)]
     facts += [cutoff(name, "PT0S") for name in names]
+    if booked:
+        facts += [fact for name in names for fact in (needs_right(name), booking(name, "sam"))]
     locked = [lock(name, "sam") for name in names]
     unpriced = [offer("tour", 1, id=f"offer-{number}", price=None) for number in range(16)]
     calls: list[int] = []
@@ -659,7 +812,7 @@ def test_offers_that_nobody_can_need_cost_the_search_nothing() -> None:
     counts: list[int] = []
     for more in ([], unpriced):
         calls.clear()
-        file = trip(["sam"], ["dock"], options, [*facts, *more], locked)
+        file = trip(["sam"], ["dock"], options, [*facts, *more], locked, tickets=booked)
         found = answers.check(file, works=counted)
         assert [unknown.what for unknown in asked(found)[0]] == ["duration"] * 2
         counts.append(len(calls))
@@ -786,6 +939,68 @@ def test_the_three_answers_hold_for_every_way_money_could_turn_out() -> None:
                 assert not works_on_the_grid(file, [with_these_at_best(file, fewer)])
     assert seen == set(Answer)
     assert {"price", "funding", "another right"} <= kinds
+
+
+def test_what_a_report_asks_about_money_is_enough_once_the_file_states_it() -> None:
+    """A set of one FACT about money names who buys what. The FILE then states just that.
+
+    For a missing payer, it gets a BUDGET that lists the PERSON and holds the currencies of
+    the places named. For a missing price, the OFFER gets a price in a currency that every
+    PERSON named can pay. Either way the TRIP becomes FEASIBLE.
+    """
+    rng = Random(4141)
+    payers = prices = 0
+    for _ in range(400):
+        file = two_tours_with_money(rng)
+        found = compiler.check(file)
+        for enough in found.missing:
+            needed = enough[0]
+            if len(enough) > 1 or needed.unknown.what not in ("price", "funding"):
+                continue
+            assert needed.buys
+            if needed.unknown.what == "funding":
+                stated = [cover.price for cover in needed.buys if cover.price is not None]
+                if len(stated) < len(needed.buys):
+                    continue
+                who = needed.unknown.person or ""
+                held = tuple(dict.fromkeys(price.currency for price in stated))
+                pots = (*file.budgets, Budget("found", "found", (who,), held))
+                assert checked(replace(file, budgets=pots)).answer is Answer.FEASIBLE
+                payers += 1
+            else:
+                buyers = [cover.person for cover in needed.buys]
+                shared = [
+                    currency
+                    for currency in ("USD", "EUR")
+                    if all(file.pays(who, Money(Decimal(1), currency)) for who in buyers)
+                ]
+                if not shared:
+                    continue
+                priced = tuple(
+                    replace(fact, price=Money(Decimal(1), shared[0]))
+                    if isinstance(fact, Offer) and fact.id == needed.unknown.about
+                    else fact
+                    for fact in file.facts
+                )
+                assert checked(replace(file, facts=priced)).answer is Answer.FEASIBLE
+                prices += 1
+    assert payers > 10
+    assert prices > 10
+
+
+def test_a_conflict_that_does_not_turn_on_the_budgets_holds_without_them() -> None:
+    rng = Random(4242)
+    either: set[bool] = set()
+    for _ in range(300):
+        file = two_tours_with_money(rng)
+        found = compiler.check(file)
+        if found.answer is not Answer.INFEASIBLE:
+            continue
+        assert found == checked(file)
+        either.add(found.given_budgets)
+        if not found.given_budgets:
+            assert checked(replace(file, budgets=())).answer is Answer.INFEASIBLE
+    assert either == {False, True}
 
 
 def test_what_a_report_says_about_each_purchase_follows_the_rules_on_random_trips() -> None:

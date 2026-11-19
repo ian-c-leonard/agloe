@@ -177,10 +177,12 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
     That an OPTION SATISFIES a WANT can help only where the WANT is a must for some PERSON,
     and that it does not only where the WANT is a must-not for some PERSON. So only those are
     listed. Where a FACT says a WANT's set is COMPLETE, nothing about the WANT is unknown.
-    A price and who pays can help only where somebody might have to buy a place. So they are
-    listed only for the OFFERs that ``for_sale`` gives.
+    A price and who pays can help only where somebody might have to pay for a place. So a
+    price is listed only for an OFFER that ``might_buy`` gives for some PERSON, and who pays
+    only for a PERSON for whom it gives an OFFER.
     """
-    to_pay = {offer.id for offer in for_sale(file)}
+    buyers = [person.id for person in file.persons if might_buy(file, person.id)]
+    to_pay = {offer.id for person in buyers for offer in might_buy(file, person)}
     musts = [
         want
         for want in file.wants
@@ -216,27 +218,28 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
         for destination in file.places:
             if origin != destination:
                 out.append(Unknown("other ways", origin=origin.id, destination=destination.id))
-    if to_pay:
-        for person in file.persons:
-            if not file.listed(person.id):
-                out.append(Unknown("funding", person=person.id))
+    for person in buyers:
+        if not file.listed(person):
+            out.append(Unknown("funding", person=person))
     for want in musts:
         for person in _in_file_order_of_persons(file, want.musts):
             out.append(Unknown("another option", want=want.id, person=person))
     return tuple(out)
 
 
-def for_sale(file: File) -> list[Offer]:
-    """The OFFERs with a place that somebody might have to pay for, in the FILE's order.
+def might_buy(file: File, person: str) -> list[Offer]:
+    """The OFFERs with a place that this PERSON might have to pay for, in the FILE's order.
 
-    It leaves out an OFFER for an OPTION that a FACT says needs no right: nobody buys a place
-    of it. It leaves out an OFFER whose price is nothing: nobody pays for a place of it.
+    It leaves out an OFFER for an OPTION that a FACT says needs no right, and one for an
+    OPTION that a BOOKING covers the PERSON for: they buy no place of it. It leaves out an
+    OFFER whose price is nothing: nobody pays for a place of it.
     """
     return [
         fact
         for fact in file.facts
         if isinstance(fact, Offer)
         and file.needs_right(fact.option) is not False
+        and file.booking(fact.option, person) is None
         and (fact.price is None or fact.price.amount)
     ]
 
@@ -641,13 +644,14 @@ def placed(file: File, world: World, option: str, persons: Sequence[str]) -> dic
     a place is kept throughout. A PERSON finds a place by moving others along: they take a
     place, its holder takes another, and so on to a place that is free.
     """
+    listed = file.offers(option)
+    persons = [who for who in persons if any((each.id, who) in world.payable for each in listed)]
     offers = [
-        offer
-        for offer in file.offers(option)
-        if any((offer.id, person) in world.payable for person in persons)
+        offer for offer in listed if any((offer.id, person) in world.payable for person in persons)
     ]
     if all((offer.id, person) in world.payable for offer in offers for person in persons):
-        # Everybody can pay for every place that anybody can, so the places go round in order.
+        # Each of them who can pay for a place at all can pay for every place that anybody
+        # can. So the places go round in order.
         spread = (offer.id for offer in offers for _ in range(min(offer.places, len(persons))))
         return dict(zip(persons, spread, strict=False))
     room = {offer.id: offer.places for offer in offers}

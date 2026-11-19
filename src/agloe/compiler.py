@@ -393,39 +393,39 @@ class _Search:
         They are the PERSONs with no right of their own to it. No place is taken twice.
         ``given`` holds the records that all have to be switched on for this to hold.
 
-        An OFFER that none of them can pay for is left out. Where each of them can pay for a
-        place of every other OFFER, the places are alike, and it is enough to count them.
-        Otherwise the model chooses an OFFER for each PERSON.
+        A PERSON who can pay for no place stays out, and an OFFER that none of them can pay
+        for is left out. Where each of the others can pay for a place of every other OFFER,
+        the places are alike, and it is enough to count them. Otherwise the model chooses an
+        OFFER for each PERSON.
         """
         model, world, option = self.model, self.world, self.file.options[index]
         people = self.file.persons
-        offers = [
-            offer
-            for offer in self.file.offers(option.id)
-            if any((offer.id, people[number].id) in world.payable for number in without)
-        ]
-        places = sum(offer.places for offer in offers)
         able = {
-            number: [offer for offer in offers if (offer.id, people[number].id) in world.payable]
+            number: [
+                offer
+                for offer in self.file.offers(option.id)
+                if (offer.id, people[number].id) in world.payable
+            ]
             for number in without
         }
-        if all(len(able[number]) == len(offers) for number in without):
-            if places >= len(without):
-                return
-            if not places and not given:
-                for number in without:
-                    self._rule_out(number, index)
-                return
-            limit = model.add(sum(self.takes[number][index] for number in without) <= places)
-            if given:
-                _when(limit, *given)
+        for number in without:
+            if not able[number] and given:
+                _when(model.add(self.takes[number][index] == 0), *given)
+            elif not able[number]:
+                self._rule_out(number, index)
+        buyers = [number for number in without if able[number]]
+        wanted = {offer.id for number in buyers for offer in able[number]}
+        offers = [offer for offer in self.file.offers(option.id) if offer.id in wanted]
+        places = sum(offer.places for offer in offers)
+        if all(len(able[number]) == len(offers) for number in buyers):
+            if places < len(buyers):
+                limit = model.add(sum(self.takes[number][index] for number in buyers) <= places)
+                if given:
+                    _when(limit, *given)
             return
         taken: dict[str, list[cp_model.IntVar]] = {offer.id: [] for offer in offers}
-        for number in without:
+        for number in buyers:
             takes = self.takes[number][index]
-            if not able[number] and not given:
-                self._rule_out(number, index)
-                continue
             picks = [
                 model.new_bool_var(f"{people[number].id} takes a place of {offer.id}")
                 for offer in able[number]

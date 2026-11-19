@@ -8,7 +8,7 @@ the answers and the evidence are worked out here in either case.
 """
 
 from collections.abc import Callable, Iterable, Iterator, Sequence, Set
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from itertools import combinations
 
@@ -56,14 +56,6 @@ class Answer(Enum):
 
 
 @dataclass(frozen=True)
-class Missing:
-    """An unknown FACT the answer depends on, and the most seconds it can be for a FEASIBLE TRIP."""
-
-    unknown: Unknown
-    at_most: int | None
-
-
-@dataclass(frozen=True)
 class Cover:
     """What gives a PERSON their right to an OPTION in the plan shown.
 
@@ -81,13 +73,29 @@ class Cover:
 
 
 @dataclass(frozen=True)
+class Missing:
+    """An unknown FACT the answer depends on.
+
+    ``at_most`` is the most seconds a length of time can be for a FEASIBLE TRIP. ``buys``
+    comes with a FACT about money, and says who buys which place in one plan that works when
+    the FACT's set turns out well. For a price, they are the places of its OFFER. For a
+    BUDGET that can pay for a PERSON, they are the places that PERSON has to pay for.
+    """
+
+    unknown: Unknown
+    at_most: int | None
+    buys: tuple[Cover, ...] = ()
+
+
+@dataclass(frozen=True)
 class Report:
     """The answer and its evidence.
 
     FEASIBLE: the ITINERARY shown, the FACTs, WANTs and DECISIONs it relies on, whether it is
     ROBUST, what it breaks when every CONTINGENT duration runs longest, and what gives each
     PERSON their right to each OPTION that needs one or might. INFEASIBLE: FACTs and DECISIONs
-    that conflict. UNDETERMINED: each smallest set of unknown FACTs that would be enough.
+    that conflict, and whether they conflict only ``given_budgets``: with the BUDGETs as the
+    FILE lists them. UNDETERMINED: each smallest set of unknown FACTs that would be enough.
     """
 
     answer: Answer
@@ -97,6 +105,7 @@ class Report:
     at_worst: tuple[Broken, ...] = ()
     rights: tuple[Cover, ...] = ()
     conflict: tuple[str, ...] = ()
+    given_budgets: bool = False
     missing: tuple[tuple[Missing, ...], ...] = ()
 
 
@@ -153,8 +162,9 @@ def check(
         return Report(Answer.FEASIBLE, chosen, tuple(relies_on), robust, at_worst, rights)
     enough = stuck(Remaining(file))
     if enough is not None:
-        return Report(Answer.INFEASIBLE, conflict=_conflict(file, stuck, enough))
-    return Report(Answer.UNDETERMINED, missing=_missing(file, works))
+        conflict, given_budgets = _conflict(file, stuck, enough)
+        return Report(Answer.INFEASIBLE, conflict=conflict, given_budgets=given_budgets)
+    return Report(Answer.UNDETERMINED, missing=_missing(file, works, shown))
 
 
 def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> bool:
@@ -180,28 +190,31 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> 
     return fact.option in {step.option or step.way for step in itinerary}
 
 
-def _covers(file: File, worst: World, itinerary: Itinerary) -> tuple[Cover, ...]:
-    """What gives each PERSON in a plan their right to each of its OPTIONs.
+def _covers(file: File, world: World, itinerary: Itinerary) -> tuple[Cover, ...]:
+    """What gives each PERSON in a plan their right to each of its OPTIONs, in this world.
 
-    It leaves out an OPTION that a FACT says needs no right. A PERSON whom a BOOKING covers
-    has the first such BOOKING in the FILE. The other PERSONs who take part take places of
-    the OPTION's OFFERs that they can pay for, as ``placed`` shares them out, and each place
-    is paid from the first BUDGET in the FILE that can pay it. The plan works in the worst
-    case, which has no other right, so there is a place for each of them.
+    It leaves out an OPTION that needs no right in this world. A PERSON whom a BOOKING covers
+    has the first such BOOKING in the FILE. A PERSON with another right in this world is left
+    out: no record gives it. The other PERSONs who take part take places of the OPTION's
+    OFFERs that they can pay for, as ``placed`` shares them out, and each place is paid from
+    the first BUDGET in the FILE that can pay it. The plan works in this world, so there is a
+    place for each of them.
     """
     order = {person.id: number for number, person in enumerate(file.persons)}
     covers: list[Cover] = []
     for step in itinerary:
-        if step.option is None or file.needs_right(step.option) is False:
+        if step.option is None or step.option not in world.needs_right:
             continue
         persons = sorted(step.persons, key=order.__getitem__)
-        without = [person for person in persons if file.booking(step.option, person) is None]
-        taken = placed(file, worst, step.option, without)
+        without = [person for person in persons if (step.option, person) not in world.rights]
+        taken = placed(file, world, step.option, without)
         offers = {offer.id: offer for offer in file.offers(step.option)}
         for person in persons:
             booked = file.booking(step.option, person)
             if booked is not None:
                 covers.append(Cover(step.option, person, booked.id, False))
+                continue
+            if person not in taken:
                 continue
             price = offers[taken[person]].price
             payer = None if price is None else file.pays(person, price)
@@ -225,7 +238,7 @@ def _settles(file: File, itinerary: Itinerary, whole: CompleteFor) -> bool:
     )
 
 
-def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[str, ...]:
+def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[tuple[str, ...], bool]:
     """FACTs and DECISIONs that make the TRIP INFEASIBLE by themselves; none can be removed.
 
     It goes through the records in the FILE's order and removes each one that the TRIP stays
@@ -234,6 +247,12 @@ def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[str, ..
     of ``enough``, and one more record never lets an ITINERARY work in the best case that did
     not work without it. A FACT that is taken out is unknown, and the best case gives every
     unknown its most helpful value.
+
+    The BUDGETs stay as the FILE lists them throughout. The last test takes them all out at
+    once: then nobody knows who pays for anybody, and the best case has a BUDGET for each
+    PERSON. The second value returned says whether the records rule out every ITINERARY only
+    with the BUDGETs there. Only a place with a price above nothing needs a BUDGET, so the
+    test is made only where a record left is an OFFER with one.
     """
     kept = Remaining(file)
     skipped = False
@@ -247,7 +266,13 @@ def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[str, ..
             kept, enough = without, smaller
     if skipped and stuck(kept) is None:
         raise AssertionError("records said to rule out every ITINERARY do not")
-    return tuple(_records(kept.file))
+    priced = any(
+        isinstance(fact, Offer) and fact.price is not None and fact.price.amount
+        for fact in kept.file.facts
+    )
+    with_no_budget = replace(kept, file=replace(kept.file, budgets=()))
+    given_budgets = bool(priced and file.budgets) and stuck(with_no_budget) is None
+    return tuple(_records(kept.file)), given_budgets
 
 
 def _records(file: File) -> list[str]:
@@ -256,11 +281,12 @@ def _records(file: File) -> list[str]:
     return [*(fact.id for fact in file.facts), *wants, *(each.id for each in file.decisions)]
 
 
-def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
+def _missing(file: File, works: Works, shown: Shown) -> tuple[tuple[Missing, ...], ...]:
     """The sets of unknown FACTs that would be enough if they turned out well.
 
     Each set makes the TRIP FEASIBLE with every other unknown FACT at its worst. A set of one
-    length of time comes with its limit.
+    length of time comes with its limit. A FACT about money comes with who buys which place
+    in the ITINERARY that would be shown if its set turned out well.
 
     Which sets a report names is a choice, and the rules page states it. A report says first
     what to find out about the OPTIONs and WAYs the FILE lists. "Another OPTION is found for
@@ -303,10 +329,41 @@ def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
             if enough:
                 alone = count + size == 1
                 return tuple(
-                    tuple(Missing(u, _limit(file, u, works) if alone else None) for u in some)
+                    tuple(
+                        Missing(u, _limit(file, u, works) if alone else None, bought)
+                        for u, bought in zip(some, _bought(file, some, shown), strict=True)
+                    )
                     for some in enough
                 )
     raise AssertionError("the best case works, so some unknown FACTs make it work")
+
+
+def _bought(file: File, enough: Sequence[Unknown], shown: Shown) -> list[tuple[Cover, ...]]:
+    """For each FACT of a set that is enough, who buys which place because of it.
+
+    The places are those of the ITINERARY shown in the world where the set turns out well and
+    every other unknown FACT badly. A price is about the places of its OFFER. That a BUDGET
+    can pay for a PERSON is about the places that PERSON takes and that cost more than
+    nothing, or that nobody knows the price of. Any other FACT has none, and a set that asks
+    nothing about money is not searched.
+    """
+    if not any(unknown.what in ("price", "funding") for unknown in enough):
+        return [() for _ in enough]
+    world = with_these_at_best(file, enough)
+    plan = shown(file, world)
+    if plan is None:
+        raise AssertionError("a set of unknown FACTs that is enough shows no ITINERARY")
+    places = [cover for cover in _covers(file, world, plan) if cover.to_buy]
+    bought: list[tuple[Cover, ...]] = []
+    for unknown in enough:
+        if unknown.what == "price":
+            bought.append(tuple(cover for cover in places if cover.by == unknown.about))
+        elif unknown.what == "funding":
+            to_pay = (cover for cover in places if cover.price is None or cover.price.amount)
+            bought.append(tuple(cover for cover in to_pay if cover.person == unknown.person))
+        else:
+            bought.append(())
+    return bought
 
 
 def _with_enough_of_each(

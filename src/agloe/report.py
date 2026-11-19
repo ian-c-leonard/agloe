@@ -45,7 +45,7 @@ from agloe.file import (
     local,
     written,
 )
-from agloe.reference import Broken, Constraint, Itinerary, Step, for_sale
+from agloe.reference import Broken, Constraint, Itinerary, Step
 
 _WITH_AN_ID = re.compile(r" \([a-z0-9]+(-[a-z0-9]+)*\)$")  # how a name ends when its id is shown
 _DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
@@ -104,44 +104,22 @@ def as_json(file: File, report: Report) -> dict[str, object]:
         out["missing"] = [
             [_missing_as_json(needed) for needed in enough] for enough in report.missing
         ]
-    if _turns_on_who_pays(file, report):
+    if _turns_on_who_pays(report):
         out["budgets"] = [
             {"id": each.id, "persons": list(each.persons), "currencies": list(each.currencies)}
             for each in file.budgets
         ]
-        if report.missing:
-            out["for_sale"] = [
-                {"offer": offer.id, "option": offer.option, "price": _money_as_json(offer.price)}
-                for offer in for_sale(file)
-            ]
     return out
 
 
-def _turns_on_who_pays(file: File, report: Report) -> bool:
+def _turns_on_who_pays(report: Report) -> bool:
     """Whether a report needs the BUDGETs of the FILE beside it, to be checked against.
 
-    An UNDETERMINED report does where a set asks for a price or for a BUDGET that can pay. It
-    also does where a set asks for another right to an OPTION, and a place of the OPTION is on
-    OFFER at a price that some PERSON on a BUDGET cannot pay. An INFEASIBLE report does where
-    its conflict holds such an OFFER. No BUDGET is a record of a conflict: the BUDGETs stay as
-    the FILE lists them.
+    An UNDETERMINED report does where a set asks for a price or for a BUDGET that can pay. An
+    INFEASIBLE one does where its records conflict only with the BUDGETs as the FILE lists them.
     """
-    asked = [needed.unknown for enough in report.missing for needed in enough]
-    if any(unknown.what in ("price", "funding") for unknown in asked):
-        return True
-    short = {unknown.option for unknown in asked if unknown.what == "another right"}
-    priced = [
-        fact.price
-        for fact in file.facts
-        if isinstance(fact, Offer)
-        and fact.price is not None
-        and (fact.id in report.conflict or fact.option in short)
-    ]
-    return any(
-        price.amount and file.listed(person.id) and file.pays(person.id, price) is None
-        for price in priced
-        for person in file.persons
-    )
+    asked = {needed.unknown.what for enough in report.missing for needed in enough}
+    return report.given_budgets or bool(asked & {"price", "funding"})
 
 
 def _to_buy(report: Report) -> dict[tuple[str, str, str | None], list[Cover]]:
@@ -187,6 +165,16 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
         out["person"] = unknown.person
     if unknown.about is not None:
         out["offer"] = unknown.about
+    if needed.buys:
+        out["buys"] = [
+            {
+                "person": cover.person,
+                "option": cover.option,
+                "offer": cover.by,
+                "price": _money_as_json(cover.price),
+            }
+            for cover in needed.buys
+        ]
     out["at_most"] = None if needed.at_most is None else length_written(needed.at_most)
     return out
 
@@ -272,16 +260,17 @@ def as_text(file: File, report: Report) -> str:
     if report.answer is Answer.FEASIBLE:
         lines = _feasible(file, clock, report)
     elif report.answer is Answer.INFEASIBLE:
+        how = ", given the BUDGETs of this FILE" if report.given_budgets else " by themselves"
         lines = [
             "INFEASIBLE: this trip cannot work.",
             "",
-            f"These {_kinds(file, report.conflict)} rule out every plan by themselves. Take"
+            f"These {_kinds(file, report.conflict)} rule out every plan{how}. Take"
             " any one away and they no longer do. A FACT that is taken away leaves what it"
             f" said unknown. Times are in {file.zone}.",
             *(f"  {record}: {_record(file, clock, record)}" for record in report.conflict),
         ]
-        if _turns_on_who_pays(file, report):
-            lines += ["", *_budgets(file, "The BUDGETs stay as the FILE lists them. ")]
+        if report.given_budgets:
+            lines += ["", *_budgets(file)]
     else:
         lines = ["UNDETERMINED: the FILE does not say enough to tell.", ""]
         cases = [_case(file, enough) for enough in report.missing]
@@ -321,15 +310,9 @@ def as_text(file: File, report: Report) -> str:
                     f"{helps}, and only if they SATISFY nothing that is a must-not for a PERSON"
                     " who takes them."
                 )
-        if _turns_on_who_pays(file, report):
-            lines += ["", *_budgets(file)]
-            lines += ["", "The OFFERs with a place to pay for:"]
-            for offer in for_sale(file):
-                place = f"a place in {_name(file, offer.option)}"
-                costs = f"{place} costs {offer.price}"
-                if offer.price is None:
-                    costs = f"nobody knows what {place} costs"
-                lines.append(f"  {offer.id}: {costs}")
+        if _turns_on_who_pays(report):
+            one_way = "Who buys which place is from one plan that works in that case. "
+            lines += ["", *_budgets(file, one_way)]
         if "another option" in kinds:
             lines += [
                 "",
@@ -559,9 +542,20 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
     if unknown.what == "does not satisfy":
         return f"{_name(file, unknown.option)} does not SATISFY {_want(file, unknown.want)}"
     if unknown.what == "price":
-        return f"a place from {unknown.about} has a price that each PERSON who takes one can pay"
+        buyers = tuple(cover.person for cover in needed.buys)
+        each = " each" if len(buyers) > 1 else ""
+        who = _people(file, buyers)
+        return f"a place from {unknown.about} has a price that {who} can{each} pay"
     if unknown.what == "funding":
-        return f"a BUDGET can pay for what {_people(file, (unknown.person or '',))} has to buy"
+        who = _people(file, (unknown.person or "",))
+        places = [
+            f"one from {cover.by} at a price nobody knows"
+            if cover.price is None
+            else f"one from {cover.by} for {cover.price}"
+            for cover in needed.buys
+        ]
+        can_be_paid = f"can be paid from a BUDGET that lists {who}"
+        return f"each place that {who} has to buy {can_be_paid} ({', '.join(places)})"
     if unknown.what == "other ways":
         places = _names(file.places)
         there = f"there are other WAYs from {places[unknown.origin or '']} to "
