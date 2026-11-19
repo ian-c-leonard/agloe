@@ -58,12 +58,13 @@ type _Reached = list[tuple[cp_model.IntVar, reference.Route, _Amount | None]]
 class DoesNotFit(Exception):
     """A TRIP does not fit the solver, and the reference checker gives its answer.
 
-    The numbers of its model do not fit in the 64 bits the solver counts with, or more routes
-    join two of its PLACEs than a model can choose between.
+    The numbers of its model do not fit in the 64 bits the solver counts with. Or the TRIP has
+    a cap, and listing the routes between two of its PLACEs takes too long: the reference
+    checker lists only the routes a plan needs, and it is the one that answers then.
     """
 
 
-_MOST_ROUTES = 10_000  # between two PLACEs, before the solver gives the TRIP up
+_MOST_STEPS = 200_000  # to list the routes between two PLACEs of a TRIP with a cap
 
 
 def check(file: File) -> Report:
@@ -246,7 +247,7 @@ class _Search:
         # choice that takes it.
         self.routes: list[dict[tuple[int, int], _Taken]] = []
         self.legs: list[tuple[cp_model.IntVar, int]] = []  # a route taken, and how many WAYs it has
-        self.known = reference.Routes(file, world, _MOST_ROUTES)
+        self.known = reference.Routes(file, world, _MOST_STEPS if file.caps else None)
         self._worth_trying: dict[tuple[str, str, bool], list[reference.Route]] = {}
         for number in range(len(file.persons)):
             self._lay_out_path(number)
@@ -916,7 +917,7 @@ class _Search:
             try:
                 possible = self.known.between(here, there, last)
             except reference.TooManyRoutes:
-                raise DoesNotFit(f"too many routes join {here} and {there}") from None
+                raise DoesNotFit(f"the routes from {here} to {there} take too long") from None
             if not self.facts and not self.switch:
                 possible = _quickest(self.world, possible)
             self._worth_trying[here, there, last] = possible

@@ -1362,7 +1362,7 @@ type Route = tuple[Leg, ...]
 
 
 class TooManyRoutes(Exception):
-    """More routes join two PLACEs than the caller is ready to take."""
+    """Looking for the routes between two PLACEs takes more steps than the caller allows."""
 
 
 def routes(
@@ -1370,9 +1370,10 @@ def routes(
 ) -> list[Route]:
     """Every route from one PLACE to another by WAYs alone that is worth trying, shortest first.
 
-    ``last`` says that the PERSON does nothing after the route. ``at_most`` is how many routes
-    the caller is ready to take: with more, this raises ``TooManyRoutes``. Three kinds of
-    route are left out, because another route is never worse.
+    ``last`` says that the PERSON does nothing after the route. ``at_most`` is how many steps
+    the caller allows the search: one for each WAY it tries to add to a route, whether or
+    not that leads anywhere. Past that, this raises ``TooManyRoutes``. Three kinds of route
+    are left out, because another route is never worse.
 
     - A route that passes through a PLACE twice. A PERSON who came back to a PLACE could have
       waited there instead: every WAY they take after that starts at the same time either way,
@@ -1425,7 +1426,11 @@ def routes(
     begun: list[tuple[tuple[str, ...], Route, Iterator[tuple[str | None, str]]]] = [
         ((here,), (), onward(here))
     ]
+    steps = 0
     while begun:
+        steps += 1
+        if at_most is not None and steps > at_most:
+            raise TooManyRoutes
         passed, legs, ahead = begun[-1]
         step = next(ahead, None)
         if step is None:
@@ -1439,8 +1444,6 @@ def routes(
             continue
         if place == there:
             found.append(longer)
-            if at_most is not None and len(found) > at_most:
-                raise TooManyRoutes
         else:
             begun.append(((*passed, place), longer, onward(place)))
     return sorted(found, key=lambda route: (len(route), _legs_in_file_order(file, route)))

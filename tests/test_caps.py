@@ -15,6 +15,7 @@ from agloe.reference import (
     Broken,
     Constraint,
     Remaining,
+    Routes,
     Step,
     Unknown,
     broken,
@@ -977,19 +978,55 @@ def test_bookings_that_pass_a_cap_are_found_before_any_route_is_built() -> None:
     assert found.conflict == ("ride-booking", "money-cap")
 
 
-@pytest.mark.parametrize("capped", [False, True])
-def test_a_trip_with_too_many_routes_goes_to_the_reference_checker(capped: bool) -> None:
-    """A ride that nobody needs starts thirty legs away, and two WAYs make each leg."""
-    places = [f"p{number}" for number in range(32)]
-    legs = [way(f"w{n}-{k}", f"p{n}", f"p{n + 1}") for n in range(30) for k in range(2)]
-    options = [stays("visit", "p0"), moves("ride", "p30", "p31")]
+def a_ride_nobody_needs(legs: int, *decisions: Document, dead_end: int = 0) -> File:
+    """Sam has a visit where he starts. A ride leaves from a PLACE that is some legs away.
+
+    Two WAYs make each leg. ``dead_end`` adds a chain of that many legs that leads nowhere.
+    """
+    places = [f"p{number}" for number in range(legs + 2)]
+    ways = [way(f"w{n}-{k}", f"p{n}", f"p{n + 1}") for n in range(legs) for k in range(2)]
+    places += [f"d{number}" for number in range(dead_end)]
+    chain = ["p0", *(f"d{number}" for number in range(dead_end))]
+    ways += [way(f"x{n}-{k}", chain[n], chain[n + 1]) for n in range(dead_end) for k in range(2)]
+    options = [stays("visit", "p0"), moves("ride", f"p{legs}", f"p{legs + 1}")]
     facts = [*at("visit", 9), needs_right("visit"), offer("visit", 1, price="1 USD")]
     facts += [*at("ride", 20), needs_right("ride"), offer("ride", 1, price="1 USD")]
-    facts += [starts_from("sam", "p0"), *(takes(each["id"], "PT1M") for each in legs)]
-    decisions = [lock("visit", "sam"), *([cap("money", "2 USD")] if capped else [])]
-    file = trip(["sam"], places, options, facts, decisions, ways=legs, tickets=True)
+    facts += [starts_from("sam", "p0"), *(takes(each["id"], "PT1M") for each in ways)]
+    locked = [lock("visit", "sam"), *decisions]
+    return trip(["sam"], places, options, facts, locked, ways=ways, tickets=True)
+
+
+def test_a_trip_with_a_cap_and_too_many_routes_goes_to_the_reference_checker() -> None:
+    """The ride starts thirty legs away, so more than a thousand million routes lead to it."""
+    file = a_ride_nobody_needs(30, cap("money", "2 USD"))
     with pytest.raises(compiler.DoesNotFit):
         compiler.shown(file, worst_case(file))
     found = compiler.check(file)
     assert found == answers.check(file)
     assert [step.option for step in found.itinerary] == ["visit"]
+
+
+def test_routes_that_lead_nowhere_count_too() -> None:
+    """One leg leads to the ride. A chain of sixty-three legs beside it leads nowhere."""
+    file = a_ride_nobody_needs(1, cap("money", "2 USD"), dead_end=63)
+    with pytest.raises(compiler.DoesNotFit):
+        compiler.shown(file, worst_case(file))
+    found = compiler.check(file)
+    assert found == answers.check(file)
+    assert [step.option for step in found.itinerary] == ["visit"]
+
+
+def test_a_trip_with_no_cap_keeps_the_solver_however_many_routes_it_has() -> None:
+    """Seventeen legs of two WAYs take more steps than a TRIP with a cap is allowed.
+
+    The solver lists the routes of a TRIP with no cap however long that takes, as it always
+    has: the reference checker is not known to be quicker there.
+    """
+    file = a_ride_nobody_needs(17)
+    routes = Routes(file, worst_case(file))
+    assert len(routes.between("p0", "p17")) == 2**17
+    capped = a_ride_nobody_needs(17, cap("money", "2 USD"))
+    with pytest.raises(compiler.DoesNotFit):
+        compiler.shown(capped, worst_case(capped))
+    search = compiler._Search(file, worst_case(file))  # pyright: ignore[reportPrivateUsage]
+    assert len(search.known.between("p0", "p17")) == 2**17
