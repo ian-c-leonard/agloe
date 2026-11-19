@@ -42,15 +42,16 @@ def names(found: list[tuple[tuple[str | None, str, str], ...]]) -> list[list[str
 # ------------------------------- A WAY that is never the better one ----------------------------
 
 
-def test_a_way_is_left_out_where_an_earlier_way_is_never_slower() -> None:
+def test_a_way_is_left_out_where_an_earlier_way_takes_no_longer() -> None:
     """Five WAYs from the museum to the hall. The first takes ten minutes."""
     ways = [way(name, "museum", "hall") for name in ("first", "same", "quicker", "range", "open")]
     facts = [takes("first", "PT10M"), takes("same", "PT10M"), takes("quicker", "PT5M")]
     facts.append(takes_between("range", "PT5M", "PT20M"))
     file = a_visit_then_a_show(ways, facts)
     worst = worst_case(file)
-    # A WAY as slow as the first is left out. So is one that an earlier WAY is quicker than at
-    # its shortest and at its longest. A WAY with no known length can only come last.
+    # A WAY as slow as the first is left out. So is one that an earlier WAY takes no longer
+    # than, both when they run shortest and when they run longest. A WAY with no known length
+    # can only come last.
     assert names(routes(file, worst, "museum", "hall")) == [["first"], ["quicker"]]
     assert names(routes(file, worst, "museum", "hall", last=True)) == [
         ["first"],
@@ -246,3 +247,35 @@ def test_places_that_no_way_reaches_cost_the_search_nothing() -> None:
     """Four thousand PLACEs beside the two that matter: sixteen million pairs of PLACEs."""
     file = a_chain(1, places=4000)
     assert names(routes(file, worst_case(file), "p0", "p1")) == [["w0-0"]]
+
+
+def test_ways_back_to_a_place_already_passed_are_not_compared() -> None:
+    """Two thousand WAYs lead back to the start, each quicker than the one before."""
+    ways = [way("direct", "a", "c"), way("out", "a", "b"), way("on", "b", "c")]
+    back = [way(f"back-{number}", "b", "a") for number in range(2000)]
+    facts = [takes("direct", "PT1H"), takes("out", "PT10M"), takes("on", "PT10M")]
+    facts += [takes(each["id"], f"PT{3000 - number}S") for number, each in enumerate(back)]
+    options = [stays("first", "a"), stays("last", "c")]
+    timed = [starts_at("first", 9), lasts("first", "PT1H"), cutoff("first", "PT0S")]
+    timed += [starts_at("last", 20), lasts("last", "PT1H"), cutoff("last", "PT0S")]
+    locked = [lock("first", "sam"), lock("last", "sam")]
+    file = trip(["sam"], ["a", "b", "c"], options, [*timed, *facts], locked, ways=[*ways, *back])
+    assert names(routes(file, worst_case(file), "a", "c")) == [["direct"], ["out", "on"]]
+
+
+def test_a_way_that_no_route_can_take_leads_nowhere() -> None:
+    """A chain of sixty-three legs ends in a WAY to the hall that nobody knows the length of."""
+    chain = ["museum", *(f"d{number}" for number in range(63))]
+    ways = [way("direct", "museum", "hall")]
+    ways += [way(f"x{n}-{k}", chain[n], chain[n + 1]) for n in range(63) for k in range(2)]
+    ways.append(way("exit", "d62", "hall"))
+    facts = [takes("direct", "PT10M")]
+    # The second WAY of each leg is the quicker one, so neither is left out.
+    facts += [takes(f"x{n}-{k}", f"PT{2 - k}S") for n in range(63) for k in range(2)]
+    options = [stays("visit", "museum"), stays("show", "hall")]
+    timed = [starts_at("visit", 9), lasts("visit", "PT1H"), cutoff("visit", "PT0S")]
+    timed += [starts_at("show", 11), lasts("show", "PT1H"), cutoff("show", "PT0S")]
+    locked = [lock("visit", "sam"), lock("show", "sam")]
+    places = [*chain, "hall"]
+    file = trip(["sam"], places, options, [*timed, *facts], locked, ways=ways)
+    assert names(routes(file, worst_case(file), "museum", "hall")) == [["direct"]]
