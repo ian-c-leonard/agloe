@@ -1,0 +1,44 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "alex-skydeck-ticket",
+    "jo-talk-ticket",
+    "trip-cap"
+  ],
+  "caps": [
+    {
+      "cap": "trip-cap",
+      "budget": "trip-money",
+      "currency": "USD",
+      "limit": "50.00"
+    }
+  ],
+  "payments": [
+    {
+      "booking": "alex-skydeck-ticket",
+      "amount": "32.00",
+      "currency": "USD",
+      "budget": "trip-money",
+      "by": "alex"
+    },
+    {
+      "booking": "jo-talk-ticket",
+      "amount": "25.00",
+      "currency": "USD",
+      "budget": "trip-money",
+      "by": "jo"
+    }
+  ],
+  "budgets": [
+    {
+      "id": "trip-money",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "currencies": [
+        "USD"
+      ]
+    }
+  ]
+}

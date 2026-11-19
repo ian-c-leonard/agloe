@@ -1,0 +1,129 @@
+{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "skydeck",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T10:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T11:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "alex-skydeck-ticket",
+        "sam": "skydeck-tickets"
+      }
+    },
+    {
+      "option": "gallery-talk",
+      "persons": [
+        "jo"
+      ],
+      "start": "2027-05-15T10:30:00-05:00[America/Chicago]",
+      "end": "2027-05-15T11:30:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "walk-from-tower",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T11:30:00-05:00[America/Chicago]",
+      "end": "2027-05-15T11:50:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "walk-from-tower",
+      "persons": [
+        "sam"
+      ],
+      "start": "2027-05-15T11:30:00-05:00[America/Chicago]",
+      "end": "2027-05-15T11:50:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "walk-from-museum",
+      "persons": [
+        "jo"
+      ],
+      "start": "2027-05-15T11:30:00-05:00[America/Chicago]",
+      "end": "2027-05-15T11:35:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "lunch",
+      "persons": [
+        "alex",
+        "sam",
+        "jo"
+      ],
+      "start": "2027-05-15T12:15:00-05:00[America/Chicago]",
+      "end": "2027-05-15T13:15:00-05:00[America/Chicago]"
+    }
+  ],
+  "relies_on": [
+    "skydeck-time",
+    "skydeck-length",
+    "skydeck-needs-a-ticket",
+    "alex-skydeck-ticket",
+    "skydeck-tickets",
+    "talk-time",
+    "talk-length",
+    "talk-is-walk-up",
+    "lunch-time",
+    "lunch-length",
+    "lunch-table",
+    "lunch-is-walk-up",
+    "walk-from-tower-length",
+    "walk-from-museum-length",
+    "lock-skydeck",
+    "lock-gallery-talk",
+    "lock-lunch",
+    "trip-cap"
+  ],
+  "robust": true,
+  "to_buy": [
+    {
+      "option": "skydeck",
+      "offer": "skydeck-tickets",
+      "persons": [
+        "sam"
+      ],
+      "only_if_needed": false,
+      "price": {
+        "amount": "32.00",
+        "currency": "USD"
+      },
+      "budget": "trip-money"
+    }
+  ],
+  "money": {
+    "paid": [
+      {
+        "booking": "alex-skydeck-ticket",
+        "amount": "32.00",
+        "currency": "USD",
+        "budget": "trip-money",
+        "by": "alex"
+      }
+    ],
+    "not_stated": [],
+    "totals": [
+      {
+        "currency": "USD",
+        "paid": "32.00",
+        "to_buy": "32.00",
+        "to_buy_at_most_if_needed": "0"
+      }
+    ]
+  },
+  "caps": [
+    {
+      "cap": "trip-cap",
+      "budget": "trip-money",
+      "currency": "USD",
+      "limit": "200.00",
+      "paid": "32.00",
+      "might_be_paid": [],
+      "asked": [],
+      "to_buy": "32.00",
+      "to_buy_at_most_if_needed": "0.00"
+    }
+  ]
+}

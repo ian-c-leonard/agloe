@@ -1,0 +1,8 @@
+UNDETERMINED: the FILE does not say enough to tell.
+
+The trip works if the FILE states what alex-skydeck-ticket paid and from which BUDGET.
+  One plan that works then: Sam buys a place from skydeck-tickets for 32.00 USD from the trip money.
+  trip-cap, on the trip money: what alex-skydeck-ticket charged it plus 32.00 still to buy has to be at most 50.00 USD.
+
+Who buys which place is from one plan that works in that case. A place with a price above nothing is paid from a BUDGET that lists the PERSON who takes it and holds the currency of the price. The BUDGETs of this FILE:
+  the trip money: for Alex and Sam; it holds USD

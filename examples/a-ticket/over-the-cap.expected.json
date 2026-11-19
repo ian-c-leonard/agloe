@@ -1,0 +1,40 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "skydeck-needs-a-ticket",
+    "alex-skydeck-ticket",
+    "skydeck-tickets",
+    "skydeck-is-sold-out-otherwise",
+    "lock-skydeck",
+    "trip-cap"
+  ],
+  "caps": [
+    {
+      "cap": "trip-cap",
+      "budget": "trip-money",
+      "currency": "USD",
+      "limit": "50.00"
+    }
+  ],
+  "payments": [
+    {
+      "booking": "alex-skydeck-ticket",
+      "amount": "32.00",
+      "currency": "USD",
+      "budget": "trip-money",
+      "by": "alex"
+    }
+  ],
+  "budgets": [
+    {
+      "id": "trip-money",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "currencies": [
+        "USD"
+      ]
+    }
+  ]
+}

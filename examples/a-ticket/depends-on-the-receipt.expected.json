@@ -1,0 +1,62 @@
+{
+  "answer": "UNDETERMINED",
+  "missing": [
+    [
+      {
+        "what": "charged",
+        "option": "skydeck",
+        "offer": "alex-skydeck-ticket",
+        "at_most": null
+      }
+    ]
+  ],
+  "plans": [
+    {
+      "buys": [
+        {
+          "person": "sam",
+          "option": "skydeck",
+          "offer": "skydeck-tickets",
+          "price": {
+            "amount": "32.00",
+            "currency": "USD"
+          },
+          "budget": "trip-money",
+          "only_if_needed": false
+        }
+      ],
+      "caps": [
+        {
+          "cap": "trip-cap",
+          "budget": "trip-money",
+          "currency": "USD",
+          "limit": "50.00",
+          "paid": "0.00",
+          "might_be_paid": [
+            {
+              "booking": "alex-skydeck-ticket",
+              "amount": null
+            }
+          ],
+          "asked": [
+            "alex-skydeck-ticket"
+          ],
+          "to_buy": "32.00",
+          "to_buy_at_most_if_needed": "0.00"
+        }
+      ]
+    }
+  ],
+  "budgets": [
+    {
+      "id": "trip-money",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "currencies": [
+        "USD"
+      ]
+    }
+  ]
+}
