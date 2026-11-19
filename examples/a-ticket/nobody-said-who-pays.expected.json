@@ -16,5 +16,16 @@
         "at_most": null
       }
     ]
+  ],
+  "budgets": [],
+  "for_sale": [
+    {
+      "offer": "skydeck-tickets",
+      "option": "skydeck",
+      "price": {
+        "amount": "32.00",
+        "currency": "USD"
+      }
+    }
   ]
 }

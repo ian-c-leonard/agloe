@@ -17,5 +17,24 @@
         "at_most": null
       }
     ]
+  ],
+  "budgets": [
+    {
+      "id": "trip-money",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "currencies": [
+        "USD"
+      ]
+    }
+  ],
+  "for_sale": [
+    {
+      "offer": "skydeck-tickets",
+      "option": "skydeck",
+      "price": null
+    }
   ]
 }

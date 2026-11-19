@@ -45,7 +45,7 @@ from agloe.file import (
     local,
     written,
 )
-from agloe.reference import Broken, Constraint, Itinerary, Step
+from agloe.reference import Broken, Constraint, Itinerary, Step, for_sale
 
 _WITH_AN_ID = re.compile(r" \([a-z0-9]+(-[a-z0-9]+)*\)$")  # how a name ends when its id is shown
 _DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
@@ -104,7 +104,44 @@ def as_json(file: File, report: Report) -> dict[str, object]:
         out["missing"] = [
             [_missing_as_json(needed) for needed in enough] for enough in report.missing
         ]
+    if _turns_on_who_pays(file, report):
+        out["budgets"] = [
+            {"id": each.id, "persons": list(each.persons), "currencies": list(each.currencies)}
+            for each in file.budgets
+        ]
+        if report.missing:
+            out["for_sale"] = [
+                {"offer": offer.id, "option": offer.option, "price": _money_as_json(offer.price)}
+                for offer in for_sale(file)
+            ]
     return out
+
+
+def _turns_on_who_pays(file: File, report: Report) -> bool:
+    """Whether a report needs the BUDGETs of the FILE beside it, to be checked against.
+
+    An UNDETERMINED report does where a set asks for a price or for a BUDGET that can pay. It
+    also does where a set asks for another right to an OPTION, and a place of the OPTION is on
+    OFFER at a price that some PERSON on a BUDGET cannot pay. An INFEASIBLE report does where
+    its conflict holds such an OFFER. No BUDGET is a record of a conflict: the BUDGETs stay as
+    the FILE lists them.
+    """
+    asked = [needed.unknown for enough in report.missing for needed in enough]
+    if any(unknown.what in ("price", "funding") for unknown in asked):
+        return True
+    short = {unknown.option for unknown in asked if unknown.what == "another right"}
+    priced = [
+        fact.price
+        for fact in file.facts
+        if isinstance(fact, Offer)
+        and fact.price is not None
+        and (fact.id in report.conflict or fact.option in short)
+    ]
+    return any(
+        price.amount and file.listed(person.id) and file.pays(person.id, price) is None
+        for price in priced
+        for person in file.persons
+    )
 
 
 def _to_buy(report: Report) -> dict[tuple[str, str, str | None], list[Cover]]:
@@ -243,6 +280,8 @@ def as_text(file: File, report: Report) -> str:
             f" said unknown. Times are in {file.zone}.",
             *(f"  {record}: {_record(file, clock, record)}" for record in report.conflict),
         ]
+        if _turns_on_who_pays(file, report):
+            lines += ["", *_budgets(file, "The BUDGETs stay as the FILE lists them. ")]
     else:
         lines = ["UNDETERMINED: the FILE does not say enough to tell.", ""]
         cases = [_case(file, enough) for enough in report.missing]
@@ -282,8 +321,15 @@ def as_text(file: File, report: Report) -> str:
                     f"{helps}, and only if they SATISFY nothing that is a must-not for a PERSON"
                     " who takes them."
                 )
-        if kinds & {"price", "funding"}:
+        if _turns_on_who_pays(file, report):
             lines += ["", *_budgets(file)]
+            lines += ["", "The OFFERs with a place to pay for:"]
+            for offer in for_sale(file):
+                place = f"a place in {_name(file, offer.option)}"
+                costs = f"{place} costs {offer.price}"
+                if offer.price is None:
+                    costs = f"nobody knows what {place} costs"
+                lines.append(f"  {offer.id}: {costs}")
         if "another option" in kinds:
             lines += [
                 "",
@@ -299,11 +345,18 @@ def as_text(file: File, report: Report) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _budgets(file: File) -> list[str]:
-    """The BUDGETs of a FILE in words: who may draw on each, and the currencies it holds."""
+def _budgets(file: File, first: str = "") -> list[str]:
+    """The BUDGETs of a FILE in words: who may draw on each, and the currencies it holds.
+
+    ``first`` is a sentence to start with.
+    """
+    rule = (
+        f"{first}A place with a price above nothing is paid from a BUDGET that lists the PERSON"
+        " who takes it and holds the currency of the price."
+    )
     if not file.budgets:
-        return ["This FILE names no BUDGET, so nobody has said who pays for a place."]
-    lines = ["A place is paid from a BUDGET that lists the PERSON and holds the currency:"]
+        return [f"{rule} This FILE names no BUDGET."]
+    lines = [f"{rule} The BUDGETs of this FILE:"]
     for budget in file.budgets:
         who = _people(file, budget.persons) or "nobody"
         holds = _listed(budget.currencies) or "no currency"

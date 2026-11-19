@@ -4,4 +4,7 @@ The trip works in any of these cases:
   1. A right to Skydeck visit is found for Sam, in addition to the 2 places on OFFER.
   2. A BUDGET can pay for what Sam has to buy.
 
-This FILE names no BUDGET, so nobody has said who pays for a place.
+A place with a price above nothing is paid from a BUDGET that lists the PERSON who takes it and holds the currency of the price. This FILE names no BUDGET.
+
+The OFFERs with a place to pay for:
+  skydeck-tickets: a place in Skydeck visit costs 32.00 USD

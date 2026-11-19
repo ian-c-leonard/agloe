@@ -104,8 +104,9 @@
           "items": { "$ref": "#/$defs/id" }
         },
         "currencies": {
-          "description": "The currencies the BUDGET holds.",
+          "description": "The currencies the BUDGET holds: one or more.",
           "type": "array",
+          "minItems": 1,
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/currency" }
         }

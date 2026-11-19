@@ -378,7 +378,7 @@ class File:
 
     def listed(self, person: str) -> bool:
         """Whether some BUDGET lists this PERSON. If none does, nobody has said who pays."""
-        return any(person in budget.persons for budget in self.budgets)
+        return person in self._listed
 
     def pays(self, person: str, price: Money) -> Budget | None:
         """The BUDGET that pays this price for this PERSON: the first one the FILE lists.
@@ -386,14 +386,21 @@ class File:
         It lists the PERSON and holds the currency. None where no BUDGET does, and for a price
         of nothing, which draws on no BUDGET.
         """
-        if not price.amount:
-            return None
-        able = (
-            budget
-            for budget in self.budgets
-            if person in budget.persons and price.currency in budget.currencies
-        )
-        return next(able, None)
+        return self._payers.get((person, price.currency)) if price.amount else None
+
+    @cached_property
+    def _listed(self) -> frozenset[str]:
+        return frozenset(person for budget in self.budgets for person in budget.persons)
+
+    @cached_property
+    def _payers(self) -> dict[tuple[str, str], Budget]:
+        """The first BUDGET that lists each PERSON and holds each currency, looked up once."""
+        first: dict[tuple[str, str], Budget] = {}
+        for budget in self.budgets:
+            for person in budget.persons:
+                for currency in budget.currencies:
+                    first.setdefault((person, currency), budget)
+        return first
 
     def offers(self, option: str) -> tuple[Offer, ...]:
         """The OFFERs for this OPTION, in the FILE's order."""

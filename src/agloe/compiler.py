@@ -393,13 +393,18 @@ class _Search:
         They are the PERSONs with no right of their own to it. No place is taken twice.
         ``given`` holds the records that all have to be switched on for this to hold.
 
-        Where each of them can pay for a place of every OFFER, the places are alike, and it is
-        enough to count them. Otherwise the model chooses an OFFER for each PERSON.
+        An OFFER that none of them can pay for is left out. Where each of them can pay for a
+        place of every other OFFER, the places are alike, and it is enough to count them.
+        Otherwise the model chooses an OFFER for each PERSON.
         """
         model, world, option = self.model, self.world, self.file.options[index]
-        places = world.places.get(option.id, 0)
-        offers = self.file.offers(option.id) if places else ()
         people = self.file.persons
+        offers = [
+            offer
+            for offer in self.file.offers(option.id)
+            if any((offer.id, people[number].id) in world.payable for number in without)
+        ]
+        places = sum(offer.places for offer in offers)
         able = {
             number: [offer for offer in offers if (offer.id, people[number].id) in world.payable]
             for number in without
