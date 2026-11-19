@@ -89,6 +89,38 @@ class Missing:
 
 
 @dataclass(frozen=True)
+class CapRow:
+    """What a report says about one cap, so that anybody can check its sum.
+
+    ``paid`` is what the BOOKINGs charged to it for sure. ``might`` holds each BOOKING that
+    might have charged it besides, with the amount where the FILE states one, and None where
+    the BOOKING states no payment. ``asked`` holds those among them whose charge a set of
+    unknown FACTs asks about. ``to_buy`` is what the plan buys from it, and ``if_needed`` the
+    most it buys besides, if OPTIONs turn out to need a right. The amounts are whole
+    ten-thousandths of the cap's currency.
+    """
+
+    cap: str
+    paid: int
+    might: tuple[tuple[str, int | None], ...]
+    asked: tuple[str, ...]
+    to_buy: int
+    if_needed: int
+
+
+@dataclass(frozen=True)
+class Plan:
+    """One plan that works where a set of unknown FACTs turns out well, in a FILE with a cap.
+
+    ``buys`` says who buys which place, at what price and from which BUDGET. ``caps`` gives
+    the sum that has to hold for each cap.
+    """
+
+    buys: tuple[Cover, ...]
+    caps: tuple[CapRow, ...]
+
+
+@dataclass(frozen=True)
 class Report:
     """The answer and its evidence.
 
@@ -97,6 +129,9 @@ class Report:
     PERSON their right to each OPTION that needs one or might. INFEASIBLE: FACTs and DECISIONs
     that conflict, and whether they conflict only ``given_budgets``: with the BUDGETs as the
     FILE lists them. UNDETERMINED: each smallest set of unknown FACTs that would be enough.
+
+    In a FILE with a cap, a FEASIBLE Report has a row for each cap in ``caps``, and an
+    UNDETERMINED one has a plan for each set of ``missing`` in ``plans``, in the same order.
     """
 
     answer: Answer
@@ -108,6 +143,8 @@ class Report:
     conflict: tuple[str, ...] = ()
     given_budgets: bool = False
     missing: tuple[tuple[Missing, ...], ...] = ()
+    caps: tuple[CapRow, ...] = ()
+    plans: tuple[Plan, ...] = ()
 
 
 type Shown = Callable[[File, World], Itinerary | None]
@@ -161,12 +198,17 @@ def check(
         if not robust:
             # The steps keep the order the ITINERARY lists them in: that is the plan shown.
             at_worst = tuple(broken_as_listed(file, longest, in_world(longest, chosen)))
-        return Report(Answer.FEASIBLE, chosen, tuple(relies_on), robust, at_worst, rights)
+        caps = _cap_rows(file, rights, ())
+        return Report(
+            Answer.FEASIBLE, chosen, tuple(relies_on), robust, at_worst, rights, caps=caps
+        )
     enough = stuck(Remaining(file))
     if enough is not None:
         conflict, given_budgets = _conflict(file, stuck, enough)
         return Report(Answer.INFEASIBLE, conflict=conflict, given_budgets=given_budgets)
-    return Report(Answer.UNDETERMINED, missing=_missing(file, works, shown))
+    missing = _missing(file, works, shown)
+    plans = tuple(_plan(file, [needed.unknown for needed in some], shown) for some in missing)
+    return Report(Answer.UNDETERMINED, missing=missing, plans=plans if file.caps else ())
 
 
 def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> bool:
@@ -356,11 +398,7 @@ def _bought(file: File, enough: Sequence[Unknown], shown: Shown) -> list[tuple[C
     """
     if not any(unknown.what in ("price", "funding") for unknown in enough):
         return [() for _ in enough]
-    world = with_these_at_best(file, enough)
-    plan = shown(file, world)
-    if plan is None:
-        raise AssertionError("a set of unknown FACTs that is enough shows no ITINERARY")
-    places = [cover for cover in _covers(file, world, plan) if cover.to_buy]
+    places = _purchases(file, enough, shown)
     quoted = {unknown.about for unknown in enough if unknown.what == "price"}
     bought: list[tuple[Cover, ...]] = []
     for unknown in enough:
@@ -376,6 +414,66 @@ def _bought(file: File, enough: Sequence[Unknown], shown: Shown) -> list[tuple[C
         else:
             bought.append(())
     return bought
+
+
+def _purchases(file: File, enough: Sequence[Unknown], shown: Shown) -> list[Cover]:
+    """Who buys which place in the ITINERARY shown where a set of unknown FACTs turns out well.
+
+    Every other unknown FACT turns out badly there.
+    """
+    world = with_these_at_best(file, enough)
+    plan = shown(file, world)
+    if plan is None:
+        raise AssertionError("a set of unknown FACTs that is enough shows no ITINERARY")
+    return [cover for cover in _covers(file, world, plan) if cover.to_buy]
+
+
+def _plan(file: File, enough: Sequence[Unknown], shown: Shown) -> Plan:
+    """One plan that works where this set turns out well, with the sum for each cap."""
+    if not file.caps:
+        return Plan((), ())
+    buys = _purchases(file, enough, shown)
+    asked = [unknown.about or "" for unknown in enough if unknown.what == "charged"]
+    return Plan(tuple(buys), _cap_rows(file, buys, asked))
+
+
+def _cap_rows(file: File, covers: Sequence[Cover], asked: Sequence[str]) -> tuple[CapRow, ...]:
+    """A row for each cap of the FILE, in the FILE's order, for a plan with these purchases.
+
+    A BOOKING that names the cap's BUDGET in its currency charged it for sure. One that states
+    no payment might have charged any cap, and one that states a payment with no BUDGET might
+    have charged any cap in its currency.
+    """
+    rows: list[CapRow] = []
+    bookings = [fact for fact in file.facts if isinstance(fact, Booking)]
+    for cap in file.caps.values():
+        currency = cap.limit.currency
+        paid = sum(
+            fact.paid.money.units
+            for fact in bookings
+            if fact.paid is not None
+            and fact.paid.budget == cap.budget
+            and fact.paid.money.currency == currency
+        )
+        might = tuple(
+            (fact.id, None if fact.paid is None else fact.paid.money.units)
+            for fact in bookings
+            if file.charge_is_open(fact)
+            and (fact.paid is None or fact.paid.money.currency == currency)
+        )
+        mine = [
+            cover
+            for cover in covers
+            if cover.to_buy
+            and cover.price is not None
+            and cover.budget == cap.budget
+            and cover.price.currency == currency
+        ]
+        sure = sum(c.price.units for c in mine if c.price and file.needs_right(c.option) is True)
+        most = sum(c.price.units for c in mine if c.price and file.needs_right(c.option) is None)
+        named = tuple(booking for booking, _ in might if booking in asked)
+        rows.append(CapRow(cap.id, paid, might, named, sure, most))
+    return tuple(rows)
 
 
 def _with_enough_of_each(
