@@ -217,7 +217,7 @@ A seller's proposal, recorded as a FACT: the right to use certain OPTIONs, for c
 
 ### BOOKING
 
-An accepted agreement with a seller, recorded as a FACT, that secures the right to use certain OPTIONs: a seat on the 11:15 ferry, a room for two nights. A BOOKING records its dated terms, such as what cancelling or changing costs on each date. It states separately how many units it secures, how many uses each unit allows, and which PERSONs or OBJECTs each covers. The PERSONs a BOOKING names hold its rights; they are not necessarily the PERSONs who take part. A BOOKING gives a right over a period; it never places anyone anywhere, and it does not put an OPTION into an ITINERARY; a LOCK does. Cancelling a BOOKING ends its right and leaves any LOCK in place.
+An accepted agreement with a seller, recorded as a FACT, that secures the right to use certain OPTIONs: a seat on the 11:15 ferry, a room for two nights. A BOOKING records its dated terms, such as what cancelling or changing costs on each date. It states separately how many units it secures, how many uses each unit allows, and which PERSONs or OBJECTs each covers. The PERSONs a BOOKING covers hold its rights; they are not necessarily the PERSONs who take part. A BOOKING gives a right over a period; it never places anyone anywhere, and it does not put an OPTION into an ITINERARY; a LOCK does. Cancelling a BOOKING ends its right and leaves any LOCK in place.
 
 *Uses:* FACT, OPTION, PERSON, OBJECT, → ITINERARY, → LOCK.
 

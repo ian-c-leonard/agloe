@@ -93,14 +93,6 @@
     }
   ],
   "money": {
-    "totals": [
-      {
-        "currency": "USD",
-        "paid": "32.00",
-        "to_pay": "32.00",
-        "to_pay_if_needed": "0"
-      }
-    ],
     "paid": [
       {
         "booking": "alex-skydeck-ticket",
@@ -110,6 +102,14 @@
         "by": "alex"
       }
     ],
-    "not_stated": []
+    "not_stated": [],
+    "totals": [
+      {
+        "currency": "USD",
+        "paid": "32.00",
+        "to_buy": "32.00",
+        "to_buy_at_most_if_needed": "0"
+      }
+    ]
   }
 }

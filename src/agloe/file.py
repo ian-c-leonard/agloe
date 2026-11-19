@@ -744,6 +744,7 @@ def load(document: object) -> File:
         )
 
     held = {budget.id: budget.currencies for budget in budgets}
+    budget_ids = set(held)
     options: list[Option] = []
     for index, option in enumerate(raw["options"]):
         where = f"/options/{index}"
@@ -850,7 +851,7 @@ def load(document: object) -> File:
                 receipt = agreed["paid"]
                 money = Money(Decimal(receipt["amount"]), receipt["currency"])
                 source, payer = receipt.get("budget"), receipt.get("by")
-                listed = source is not None and known(where, source, "BUDGET", set(held))
+                listed = source is not None and known(where, source, "BUDGET", budget_ids)
                 if source is not None and listed and money.currency not in held[source]:
                     problems.append(f"{where}: {source} holds no {money.currency}")
                 if payer is not None:

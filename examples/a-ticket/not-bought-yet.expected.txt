@@ -14,7 +14,7 @@ The plan relies on these FACTs and DECISIONs:
   skydeck-time: Skydeck visit starts at 10:00 am on Saturday 15 May 2027
   skydeck-length: Skydeck visit takes 1 h 30 min
   skydeck-needs-a-ticket: people need a right to take part in Skydeck visit
-  alex-skydeck-ticket: a BOOKING for Skydeck visit covers Alex; Alex paid 32.00 USD for it from the trip money
+  alex-skydeck-ticket: a BOOKING for Skydeck visit covers Alex
   skydeck-tickets: an OFFER has 2 places for Skydeck visit that can still be bought, for 32.00 USD each
   talk-time: Gallery talk starts at 10:30 am on Saturday 15 May 2027
   talk-length: Gallery talk takes 1 h
@@ -29,5 +29,8 @@ The plan relies on these FACTs and DECISIONs:
   lock-gallery-talk: Jo takes part in Gallery talk
   lock-lunch: Alex, Sam and Jo take part in Lunch in the park
 
-What is paid, and what this plan still has to pay:
-  32.00 USD paid (alex-skydeck-ticket); 32.00 USD still to pay (skydeck-tickets)
+What the BOOKINGs state that they paid:
+  alex-skydeck-ticket: 32.00 USD, paid by Alex, from the trip money
+
+The money of this plan, by currency:
+  USD: 32.00 paid; 32.00 still to buy (skydeck-tickets)
