@@ -501,6 +501,11 @@ def test_a_name_that_a_list_could_split_in_two_is_shown_in_quotes() -> None:
     assert words("Lee", "Lee", "Kim", "Pat").startswith(
         "    ! Lee (person-0), Lee (person-1) and Kim"
     )
+    # The quotes go on before the id: the first two share a name, and the third mimics one.
+    alike = words("Lee and Jo", "Lee and Jo", "Lee and Jo (person-0)", "Sam")
+    assert alike.startswith(
+        '    ! "Lee and Jo" (person-0), "Lee and Jo" (person-1) and "Lee and Jo (person-0)" still'
+    )
     pair = words("Sam and Jo", 'the "Duke"', "Lee", "Kim")
     assert pair.startswith('    ! "Sam and Jo", "the \\"Duke\\"" and Lee still have to buy')
 

@@ -253,7 +253,9 @@ def as_text(file: File, report: Report) -> str:
             and file.rights_complete(unknown.option or "") is None
         }
         if might_be_booked:
-            names = [_name(file, each.id) for each in file.options if each.id in might_be_booked]
+            names = [
+                _name(file, each.id, "or") for each in file.options if each.id in might_be_booked
+            ]
             lines += [
                 "",
                 f"If {_listed(names, 'or')} does need a right, a BOOKING for each PERSON who"
@@ -431,7 +433,7 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
         if unknown.what == "another option":
             for_whom.setdefault(unknown.want, []).append(unknown.person or "")
         elif unknown.what == "needs no right":
-            names = [_name(file, needed.unknown.option) for needed in group]
+            names = [_name(file, needed.unknown.option, "or") for needed in group]
             parts.append(f"nobody needs a right to take part in {_listed(names, 'or')}")
         elif unknown.what == "another right":
             # A right that is found is one more than the places on OFFER, and the words say so.
@@ -527,7 +529,7 @@ def _record(file: File, clock: _Clock, record: str) -> str:
         return f"the TRIP ends at {clock.moment(found.at)}"
     if isinstance(found, CompleteFor):
         which = [
-            _name(file, fact.option)
+            _name(file, fact.option, "and")
             for fact in file.facts
             if isinstance(fact, Satisfies) and fact.want == found.want and fact.degree > 0
         ]
@@ -580,41 +582,41 @@ def _starts_at(file: File, option: str | None) -> str:
     return _names(file.places)[origin]
 
 
-def _names(records: Sequence[Person | Place | Option | Way | Want]) -> dict[str, str]:
+def _names(
+    records: Sequence[Person | Place | Option | Way | Want], joins: str | None = None
+) -> dict[str, str]:
     """The name to show for each record, so that no two records show the same.
 
     A record whose name another record has shows its id too. If two would still show the same,
     every record shows its id: no two ids are the same.
 
     A name is shown in quotes where it could be taken for something else: one with a comma
-    or a quote mark, and one that ends like a name with its id. ``_listed`` does the same for
-    a name with the word that joins its list.
+    or a quote mark, one that ends like a name with its id, and one that holds the word
+    ``joins``, which joins the list the names are for. The quotes go on before the id.
     """
     shared = Counter(record.name for record in records)
     shown = {
-        record.id: _quoted(record)
+        record.id: _quoted(record.name, joins)
         if shared[record.name] == 1
-        else f"{_quoted(record)} ({record.id})"
+        else f"{_quoted(record.name, joins)} ({record.id})"
         for record in records
     }
     if len(set(shown.values())) < len(shown):
-        return {record.id: f"{_quoted(record)} ({record.id})" for record in records}
+        return {record.id: f"{_quoted(record.name, joins)} ({record.id})" for record in records}
     return shown
 
 
-def _quoted(record: Person | Place | Option | Way | Want) -> str:
-    """The name of a record, in quotes where it could be taken for something else."""
-    name = record.name
-    return _in_quotes(name) if "," in name or '"' in name or _WITH_AN_ID.search(name) else name
+def _quoted(name: str, joins: str | None) -> str:
+    """A name, in quotes where it could be taken for something else."""
+    splits = "," in name or (joins is not None and joins in name.casefold().split())
+    if splits or '"' in name or _WITH_AN_ID.search(name):
+        return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return name
 
 
-def _in_quotes(name: str) -> str:
-    return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-
-def _name(file: File, id: str | None) -> str:
-    """The name of an OPTION or a WAY."""
-    return _names((*file.options, *file.ways)).get(id or "", "another WAY")
+def _name(file: File, id: str | None, joins: str | None = None) -> str:
+    """The name of an OPTION or a WAY. ``joins`` is the word of the list it is for, if any."""
+    return _names((*file.options, *file.ways), joins).get(id or "", "another WAY")
 
 
 def _want(file: File, id: str | None) -> str:
@@ -624,19 +626,12 @@ def _want(file: File, id: str | None) -> str:
 
 def _people(file: File, persons: tuple[str, ...]) -> str:
     """Names joined as a sentence would: Alex, Sam and Jo."""
-    shown = _names(file.persons)
+    shown = _names(file.persons, "and")
     return _listed([shown[person.id] for person in file.persons if person.id in persons])
 
 
 def _listed(names: Sequence[str], last: str = "and") -> str:
-    """Names joined as a sentence would: one, two and three.
-
-    A name that holds the joining word could be read as two names, so it is put in quotes.
-    """
-    names = [
-        _in_quotes(name) if last in name.casefold().split() and not name.startswith('"') else name
-        for name in names
-    ]
+    """Names joined as a sentence would: one, two and three."""
     if len(names) < 2:
         return "".join(names)
     return f"{', '.join(names[:-1])} {last} {names[-1]}"
