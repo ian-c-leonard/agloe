@@ -230,7 +230,8 @@ class _Search:
         # choice that takes it.
         self.routes: list[dict[tuple[int, int], _Taken]] = []
         self.legs: list[tuple[cp_model.IntVar, int]] = []  # a route taken, and how many WAYs it has
-        self.known = reference.Routes(file, world)
+        # A FACT that can be switched off can change how long a WAY takes.
+        self.known = reference.Routes(file, world, thin=not self.switch)
         self._worth_trying: dict[tuple[str, str, bool], list[reference.Route]] = {}
         for number in range(len(file.persons)):
             self._lay_out_path(number)
