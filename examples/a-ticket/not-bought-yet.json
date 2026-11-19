@@ -26,7 +26,7 @@
     { "id": "skydeck-time", "option": "skydeck", "starts_at": "2027-05-15T10:00:00-05:00[America/Chicago]" },
     { "id": "skydeck-length", "option": "skydeck", "duration": "PT1H30M" },
     { "id": "skydeck-needs-a-ticket", "option": "skydeck", "needs_right": true },
-    { "id": "alex-skydeck-ticket", "booking": { "option": "skydeck", "covers": ["alex"] } },
+    { "id": "alex-skydeck-ticket", "booking": { "option": "skydeck", "covers": ["alex"], "paid": { "amount": "32.00", "currency": "USD", "budget": "trip-money", "by": "alex" } } },
     { "id": "skydeck-tickets", "offer": { "option": "skydeck", "places": 2, "prices": [{ "amount": "32.00", "currency": "USD" }] } },
     { "id": "talk-time", "option": "gallery-talk", "starts_at": "2027-05-15T10:30:00-05:00[America/Chicago]" },
     { "id": "talk-length", "option": "gallery-talk", "duration": "PT1H" },

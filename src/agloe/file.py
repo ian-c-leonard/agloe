@@ -244,12 +244,29 @@ class NeedsRight:
 
 
 @dataclass(frozen=True)
+class Payment:
+    """What a BOOKING paid: its whole price, with nothing left to pay.
+
+    ``budget`` is the BUDGET the money came from, and ``by`` the PERSON who paid. None: nobody
+    knows.
+    """
+
+    money: Money
+    budget: str | None = None
+    by: str | None = None
+
+
+@dataclass(frozen=True)
 class Booking:
-    """A FACT: a BOOKING. It secures a right to one OPTION for each PERSON it covers."""
+    """A FACT: a BOOKING. It secures a right to one OPTION for each PERSON it covers.
+
+    ``paid`` is what it paid. None: nobody knows.
+    """
 
     id: str
     option: str
     covers: tuple[str, ...]
+    paid: Payment | None = None
 
 
 @dataclass(frozen=True)
@@ -726,6 +743,8 @@ def load(document: object) -> File:
             )
         )
 
+    held = {budget.id: budget.currencies for budget in budgets}
+    budget_ids = set(held)
     options: list[Option] = []
     for index, option in enumerate(raw["options"]):
         where = f"/options/{index}"
@@ -827,7 +846,18 @@ def load(document: object) -> File:
                 known(where, person, "PERSON", person_ids)
             for person in sorted({person for person in covers if covers.count(person) > 1}):
                 problems.append(f"{where}: {person} is covered more than once")
-            facts.append(Booking(fact["id"], agreed["option"], tuple(covers)))
+            paid = None
+            if "paid" in agreed:
+                receipt = agreed["paid"]
+                money = Money(Decimal(receipt["amount"]), receipt["currency"])
+                source, payer = receipt.get("budget"), receipt.get("by")
+                listed = source is not None and known(where, source, "BUDGET", budget_ids)
+                if source is not None and listed and money.currency not in held[source]:
+                    problems.append(f"{where}: {source} holds no {money.currency}")
+                if payer is not None:
+                    known(where, payer, "PERSON", person_ids)
+                paid = Payment(money, source, payer)
+            facts.append(Booking(fact["id"], agreed["option"], tuple(covers), paid))
             continue
         if "offer" in fact:
             known(where, fact["offer"]["option"], "OPTION", option_ids)

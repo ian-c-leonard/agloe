@@ -28,3 +28,9 @@ The plan relies on these FACTs and DECISIONs:
   lock-skydeck: Alex and Sam take part in Skydeck visit
   lock-gallery-talk: Jo takes part in Gallery talk
   lock-lunch: Alex, Sam and Jo take part in Lunch in the park
+
+What the BOOKINGs state that they paid:
+  alex-skydeck-ticket: 32.00 USD, paid by Alex, from the trip money
+
+The money of this plan, by currency:
+  USD: 32.00 paid; 32.00 still to buy (skydeck-tickets)

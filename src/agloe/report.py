@@ -13,8 +13,9 @@ about. So the words never have to describe which step they mean.
 import re
 from collections import Counter
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
+from decimal import Decimal
 from itertools import groupby
 
 from agloe.answers import Answer, Cover, Missing, Report
@@ -32,6 +33,7 @@ from agloe.file import (
     NeedsRight,
     Offer,
     Option,
+    Payment,
     Person,
     Place,
     Satisfies,
@@ -96,6 +98,30 @@ def as_json(file: File, report: Report) -> dict[str, object]:
                 }
                 for (option, offer, budget), covers in _to_buy(report).items()
             ]
+        money = _money(file, report)
+        if money is not None:
+            out["money"] = {
+                "paid": [
+                    {
+                        "booking": fact.id,
+                        **(_money_as_json(fact.paid.money) or {}),
+                        "budget": fact.paid.budget,
+                        "by": fact.paid.by,
+                    }
+                    for fact in file.facts
+                    if isinstance(fact, Booking) and fact.paid is not None
+                ],
+                "not_stated": _with_no_payment(file),
+                "totals": [
+                    {
+                        "currency": currency,
+                        "paid": _added(sums.paid),
+                        "to_buy": _added(sums.to_buy),
+                        "to_buy_at_most_if_needed": _added(sums.if_needed),
+                    }
+                    for currency, sums in money.items()
+                ],
+            }
     if report.at_worst:
         out["at_worst"] = [_broken_as_json(file, report, found) for found in report.at_worst]
     if report.conflict:
@@ -120,6 +146,72 @@ def _turns_on_who_pays(report: Report) -> bool:
     """
     asked = {needed.unknown.what for enough in report.missing for needed in enough}
     return report.given_budgets or bool(asked & {"price", "funding"})
+
+
+@dataclass
+class _Sums:
+    """The money of one currency: what BOOKINGs state they paid, and what the plan shown buys.
+
+    ``if_needed`` holds the prices of the places it buys only if an OPTION turns out to need
+    a right. The OPTIONs are separate, so their sum is the most that those can come to. The
+    places bought come with the ids of their OFFERs.
+    """
+
+    paid: list[Decimal] = field(default_factory=list[Decimal])
+    to_buy: list[Decimal] = field(default_factory=list[Decimal])
+    if_needed: list[Decimal] = field(default_factory=list[Decimal])
+    offers: dict[str, None] = field(default_factory=dict[str, None])
+    offers_if_needed: dict[str, None] = field(default_factory=dict[str, None])
+
+
+def _money(file: File, report: Report) -> dict[str, _Sums] | None:
+    """The money of a plan for each currency, or None where the FILE and the plan state none.
+
+    That is where no BOOKING states a payment and the plan buys no place at a price above
+    nothing. Every BOOKING of the FILE that states a payment counts, used or not: the money
+    is spent. A payment or a price of nothing counts in no currency, so the result can be
+    empty.
+    """
+    money: dict[str, _Sums] = {}
+    stated = False
+    for fact in file.facts:
+        if isinstance(fact, Booking) and fact.paid is not None:
+            stated = True
+            if fact.paid.money.amount:
+                money.setdefault(fact.paid.money.currency, _Sums()).paid.append(
+                    fact.paid.money.amount
+                )
+    for cover in report.rights:
+        if cover.to_buy and cover.price is not None and cover.price.amount:
+            sums = money.setdefault(cover.price.currency, _Sums())
+            if file.needs_right(cover.option) is None:
+                sums.if_needed.append(cover.price.amount)
+                sums.offers_if_needed[cover.by] = None
+            else:
+                sums.to_buy.append(cover.price.amount)
+                sums.offers[cover.by] = None
+    return money if money or stated else None
+
+
+def _added(amounts: Sequence[Decimal]) -> str:
+    """The sum of amounts, as text. It is exact whatever decimal settings the caller has.
+
+    The amounts are added as whole ten-thousandths. The sum shows as many decimal places as
+    the amount that states the most.
+    """
+    places = units = 0
+    for amount in amounts:
+        _, digits, exponent = amount.as_tuple()
+        shift = int(exponent)
+        places = max(places, -shift)
+        units += int("".join(str(digit) for digit in digits)) * 10 ** (4 + shift)
+    whole, rest = divmod(units, 10**4)
+    return f"{whole}.{rest:04d}"[: len(str(whole)) + 1 + places] if places else str(whole)
+
+
+def _with_no_payment(file: File) -> list[str]:
+    """Each BOOKING that states no payment, in the FILE's order."""
+    return [fact.id for fact in file.facts if isinstance(fact, Booking) and fact.paid is None]
 
 
 def _to_buy(report: Report) -> dict[tuple[str, str, str | None], list[Cover]]:
@@ -400,6 +492,31 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
             if isinstance(found, Booking) and set(credited) != set(found.covers):
                 used_for = f"; this plan uses it for {_people(file, credited)}"
             lines.append(f"  {record}: {_record(file, clock, record)}{used_for}")
+    money = _money(file, report)
+    if money is not None:
+        people, pots = _names(file.persons, "and"), _names(file.budgets)
+        receipts = [
+            f"  {fact.id}: {_paid(fact.paid, people, pots)}"
+            for fact in file.facts
+            if isinstance(fact, Booking) and fact.paid is not None
+        ]
+        unstated = _with_no_payment(file)
+        if unstated:
+            receipts.append(f"  No payment is stated for {_listed(unstated)}.")
+        if receipts:
+            lines += ["", "What the BOOKINGs state that they paid:", *receipts]
+        if money:
+            lines += ["", "The money of this plan, by currency:"]
+        for currency, sums in money.items():
+            parts = [f"{_added(sums.paid)} paid"] if sums.paid else []
+            if sums.to_buy:
+                parts.append(f"{_added(sums.to_buy)} still to buy ({_listed(list(sums.offers))})")
+            if sums.if_needed:
+                parts.append(
+                    f"up to {_added(sums.if_needed)} more, depending on which OPTIONs need a"
+                    f" right ({_listed(list(sums.offers_if_needed))})"
+                )
+            lines.append(f"  {currency}: {'; '.join(parts)}")
     return lines
 
 
@@ -652,6 +769,20 @@ def _record(file: File, clock: _Clock, record: str) -> str:
             closed += f", except from {_listed(found.offers)}"
         return f"the FILE lists every right to {name}: {closed}"
     return _cutoff(file, name, found)
+
+
+def _paid(paid: Payment, people: dict[str, str], pots: dict[str, str]) -> str:
+    """What a BOOKING paid, in words: the amount, then who paid and the BUDGET, where stated.
+
+    ``people`` and ``pots`` are the names to show for the PERSONs and the BUDGETs. Commas
+    keep the parts apart, and a name that holds a comma is shown in quotes.
+    """
+    parts = [str(paid.money) if paid.money.amount else "nothing"]
+    if paid.by is not None:
+        parts.append(f"paid by {people[paid.by]}")
+    if paid.budget is not None:
+        parts.append(f"from {pots[paid.budget]}")
+    return ", ".join(parts)
 
 
 def _cutoff(file: File, name: str, found: Cutoff) -> str:

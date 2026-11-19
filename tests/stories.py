@@ -144,9 +144,27 @@ def needs_right(option: str) -> Document:
     return {"id": f"{option}-needs-right", "option": option, "needs_right": True}
 
 
-def booking(option: str, *persons: str, id: str | None = None) -> Document:
-    """A BOOKING for an OPTION that covers these PERSONs."""
-    covers = {"option": option, "covers": list(persons)}
+def booking(
+    option: str,
+    *persons: str,
+    id: str | None = None,
+    paid: str | None = None,
+    budget: str | None = None,
+    by: str | None = None,
+) -> Document:
+    """A BOOKING for an OPTION that covers these PERSONs.
+
+    ``paid`` is what it paid, such as "32.00 USD", ``budget`` the BUDGET the money came from
+    and ``by`` the PERSON who paid.
+    """
+    covers: Document = {"option": option, "covers": list(persons)}
+    if paid is not None:
+        amount, currency = paid.split()
+        covers["paid"] = {"amount": amount, "currency": currency}
+        if budget is not None:
+            covers["paid"]["budget"] = budget
+        if by is not None:
+            covers["paid"]["by"] = by
     return {"id": id or f"{option}-booking", "booking": covers}
 
 

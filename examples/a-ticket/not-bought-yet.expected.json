@@ -91,5 +91,25 @@
       },
       "budget": "trip-money"
     }
-  ]
+  ],
+  "money": {
+    "paid": [
+      {
+        "booking": "alex-skydeck-ticket",
+        "amount": "32.00",
+        "currency": "USD",
+        "budget": "trip-money",
+        "by": "alex"
+      }
+    ],
+    "not_stated": [],
+    "totals": [
+      {
+        "currency": "USD",
+        "paid": "32.00",
+        "to_buy": "32.00",
+        "to_buy_at_most_if_needed": "0"
+      }
+    ]
+  }
 }
