@@ -121,9 +121,10 @@
       "limit": "200.00",
       "paid": "32.00",
       "might_be_paid": [],
+      "asked": [],
       "to_buy": "32.00",
       "to_buy_at_most_if_needed": "0.00",
-      "depends_on": []
+      "left": "136.00"
     }
   ]
 }

@@ -37,4 +37,4 @@ The money of this plan, by currency:
   USD: 32.00 paid; 32.00 still to buy (skydeck-tickets)
 
 The caps:
-  trip-cap: at most 200.00 USD from the trip money: 32.00 paid; 32.00 still to buy
+  trip-cap: at most 200.00 USD from the trip money: 32.00 paid; 32.00 still to buy; 136.00 left

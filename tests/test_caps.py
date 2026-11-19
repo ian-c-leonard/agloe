@@ -9,7 +9,7 @@ from random import Random
 import pytest
 
 from agloe import compiler, report
-from agloe.answers import Answer, CapRow, Cover, Open, Plan
+from agloe.answers import Answer, CapRow, Cover, Plan
 from agloe.file import Booking, Cap, File, FileError, Money, Offer, Payment
 from agloe.reference import (
     Broken,
@@ -47,6 +47,7 @@ from tests.stories import (
 from tests.test_where_a_path_ends import checked, has_no_record_to_spare, ruled_out
 
 EVERYONE = ["alex", "sam", "jo"]
+LEAVES = "for whatever else is charged to it."
 
 
 def at(option: str, hour: int) -> list[Document]:
@@ -158,7 +159,7 @@ def test_a_booking_counts_once_however_many_it_covers() -> None:
     file = a_tour(for_three, locked=EVERYONE, caps=[cap("trip-money", "50 USD")])
     found = checked(file)
     assert found.answer is Answer.FEASIBLE
-    assert found.caps == (CapRow("trip-money-cap", 500000, (), 0, 0),)
+    assert found.caps == (CapRow("trip-money-cap", 500000, (), (), 0, 0, 0),)
 
 
 @pytest.mark.parametrize(
@@ -188,6 +189,7 @@ def test_a_charge_counts_only_against_the_cap_of_its_budget_and_currency(
         # Nobody does anything, and the plan still relies on the cap and on what Jo's
         # BOOKING says it charged.
         assert found.relies_on == ("tour-booking", "trip-money-cap")
+        assert not any("this plan uses it for" in line for line in in_words(file))
 
 
 def test_only_a_charge_that_a_cap_could_turn_on_is_an_unknown_fact() -> None:
@@ -213,7 +215,7 @@ def test_an_amount_in_a_row_is_never_rounded_to_the_decimal_places_of_the_cap() 
     half = booking("tour", "jo", paid="0.5 USD", budget="trip-money")
     file = a_tour(half, locked=(), caps=[cap("trip-money", "1 USD")])
     assert in_words(file)[-1] == (
-        "  trip-money-cap: at most 1 USD from trip-money: 0.5 paid; 0 still to buy"
+        "  trip-money-cap: at most 1 USD from trip-money: 0.5 paid; 0 still to buy; 0.5 left"
     )
 
 
@@ -231,10 +233,10 @@ def test_a_payment_from_an_unknown_budget_is_shown_as_one_that_might_count() -> 
     file = a_tour(loose, locked=(), caps=[cap("trip-money", "5 USD")])
     found = checked(file)
     assert found.answer is Answer.FEASIBLE
-    assert found.caps == (CapRow("trip-money-cap", 0, (("loose", 10000),), 0, 0),)
+    assert found.caps == (CapRow("trip-money-cap", 0, (("loose", 10000),), (), 0, 0, 40000),)
     assert in_words(file)[-1] == (
         "  trip-money-cap: at most 5 USD from trip-money: 0 paid; up to 1 more that loose might"
-        " have paid from it; 0 still to buy"
+        " have paid from it; 0 still to buy; 4 left"
     )
     caps = report.as_json(file, found)["caps"]
     assert isinstance(caps, list)
@@ -249,7 +251,8 @@ def test_a_cap_is_kept_to_the_ten_thousandth() -> None:
     exact = a_tour(*tickets, locked=(), caps=[cap("trip-money", "0.0003 USD")])
     assert checked(exact).answer is Answer.FEASIBLE
     assert in_words(exact)[-1] == (
-        "  trip-money-cap: at most 0.0003 USD from trip-money: 0.0003 paid; 0.0000 still to buy"
+        "  trip-money-cap: at most 0.0003 USD from trip-money: 0.0003 paid; 0.0000 still to buy;"
+        " 0.0000 left"
     )
     short = a_tour(*tickets, locked=(), caps=[cap("trip-money", "0.00029 USD".replace("9", ""))])
     assert checked(short).answer is Answer.INFEASIBLE
@@ -279,13 +282,13 @@ def test_an_earlier_purchase_leaves_the_only_budget_a_later_one_can_use() -> Non
         Cover("talk", "jo", "talk-offer", True, ten, "a"),
     )
     assert found.caps == (
-        CapRow("a-cap", 0, (), 100000, 0),
-        CapRow("b-cap", 0, (), 100000, 0),
+        CapRow("a-cap", 0, (), (), 100000, 0, 0),
+        CapRow("b-cap", 0, (), (), 100000, 0, 0),
     )
     assert in_words(file)[-3:] == [
         "The caps:",
-        "  a-cap: at most 10 USD from a: 0 paid; 10 still to buy",
-        "  b-cap: at most 10 USD from b: 0 paid; 10 still to buy",
+        "  a-cap: at most 10 USD from a: 0 paid; 10 still to buy; 0 left",
+        "  b-cap: at most 10 USD from b: 0 paid; 10 still to buy; 0 left",
     ]
     roomy = two_visits(budgets=pots, caps=[cap("a", "20 USD"), cap("b", "10 USD")])
     assert [cover.budget for cover in checked(roomy).rights] == ["a", "a"]
@@ -306,21 +309,20 @@ def test_one_way_to_pay_has_to_work_wherever_an_old_payment_came_from() -> None:
     assert found.answer is Answer.UNDETERMINED
     assert asked(file) == [[charged("old")]]
     one = Money(Decimal(1), "USD")
-    asked_about = Open("charged", "old", (), 10000)
     assert found.plans == (
         Plan(
             (Cover("tour", "sam", "tour-offer", True, one, "a"),),
             (
-                CapRow("a-cap", 0, (("old", 10000),), 10000, 0, (asked_about,)),
-                CapRow("b-cap", 0, (("old", 10000),), 0, 0, (asked_about,)),
+                CapRow("a-cap", 0, (("old", 10000),), ("old",), 10000, 0, 0),
+                CapRow("b-cap", 0, (("old", 10000),), ("old",), 0, 0, 10000),
             ),
         ),
     )
     assert in_words(file)[2:6] == [
         "The trip works if the FILE states which BUDGET the 1 USD of old came from.",
         "  One plan that works then: sam buys a place from tour-offer for 1 USD from a.",
-        "  a-cap, on a: what old charged it plus 1 still to buy has to be at most 1 USD.",
-        "  b-cap, on b: what old charged it has to be at most 1 USD.",
+        f"  a-cap, on a: 1 still to buy, of at most 1 USD. That leaves 0 USD {LEAVES}",
+        f"  b-cap, on b: nothing so far, of at most 1 USD. That leaves 1 USD {LEAVES}",
     ]
     for source, answer in (("a", Answer.FEASIBLE), ("b", Answer.FEASIBLE)):
         named = booking("tour", "alex", id="old", paid="1 USD", budget=source)
@@ -381,10 +383,10 @@ def test_what_a_report_asks_for_says_that_it_has_to_fit_the_caps() -> None:
     options = [stays("tour", "dock")]
     decisions = [lock("tour", "sam"), cap("money", "0 USD")]
     might = trip(["sam"], ["dock"], options, at("tour", 10), decisions, tickets=True)
-    assert in_words(might)[-4] == (
+    assert (
         "If tour does need a right, a BOOKING for each PERSON who takes part in it is enough"
         " instead, if what those BOOKINGs paid fits the caps."
-    )
+    ) in in_words(might)
     needs = trip(
         ["sam"], ["dock"], options, [*at("tour", 10), needs_right("tour")], decisions, tickets=True
     )
@@ -448,10 +450,10 @@ def test_a_place_bought_only_if_needed_is_counted_as_if_it_were() -> None:
     file = with_tickets()
     found = checked(file)
     assert found.answer is Answer.FEASIBLE
-    assert found.caps == (CapRow("trip-money-cap", 0, (), 0, 10000),)
+    assert found.caps == (CapRow("trip-money-cap", 0, (), (), 0, 10000, 0),)
     assert in_words(file)[-1] == (
         "  trip-money-cap: at most 1 USD from trip-money: 0 paid; 0 still to buy;"
-        " up to 1 more to buy, depending on which OPTIONs need a right"
+        " up to 1 more to buy, depending on which OPTIONs need a right; 0 left"
     )
     spent = with_tickets(booking("tour", "jo", paid="1 USD", budget="trip-money"))
     assert asked(spent) == [[Unknown("needs no right", "tour")]]
@@ -465,15 +467,15 @@ def test_two_receipts_that_might_charge_one_cap_are_in_one_sum() -> None:
     file = a_tour(*tickets, locked=(), caps=[cap("trip-money", "1 USD")])
     found = checked(file)
     assert asked(file) == [[charged("first"), charged("second")]]
-    both = (Open("charged", "first", (), None), Open("charged", "second", (), None))
-    row = CapRow("trip-money-cap", 0, (("first", None), ("second", None)), 0, 0, both)
+    both = (("first", None), ("second", None))
+    row = CapRow("trip-money-cap", 0, both, ("first", "second"), 0, 0, 10000)
     assert found.plans == (Plan((), (row,)),)
     assert in_words(file)[2:5] == [
         "The trip works if the FILE states what first paid and from which BUDGET and the FILE"
         " states what second paid and from which BUDGET.",
         "  One plan that works then: nobody buys anything.",
-        "  trip-money-cap, on trip-money: what first and second charged it has to be at most"
-        " 1 USD.",
+        "  trip-money-cap, on trip-money: nothing so far, of at most 1 USD. That leaves 1 USD"
+        f" {LEAVES}",
     ]
 
 
@@ -487,11 +489,11 @@ def test_a_receipt_that_no_set_asks_about_is_still_in_the_sum() -> None:
     found = checked(file)
     assert asked(file) == [[charged("unstated")]]
     might = (("unstated", None), ("loose", 30000))
-    asked_about = (Open("charged", "unstated", (), None),)
-    assert found.plans == (Plan((), (CapRow("trip-money-cap", 0, might, 0, 0, asked_about),)),)
+    row = CapRow("trip-money-cap", 0, might, ("unstated",), 0, 0, 70000)
+    assert found.plans == (Plan((), (row,)),)
     assert in_words(file)[4] == (
-        "  trip-money-cap, on trip-money: what unstated charged it plus up to 3 that loose might"
-        " have charged it has to be at most 10 USD."
+        "  trip-money-cap, on trip-money: up to 3 that loose might have charged it, of at most"
+        f" 10 USD. That leaves 7 USD {LEAVES}"
     )
     plans = report.as_json(file, found)["plans"]
     assert plans == [
@@ -510,7 +512,8 @@ def test_a_receipt_that_no_set_asks_about_is_still_in_the_sum() -> None:
                     ],
                     "to_buy": "0",
                     "to_buy_at_most_if_needed": "0",
-                    "depends_on": [{"what": "charged", "booking": "unstated", "amount": None}],
+                    "asked": ["unstated"],
+                    "left": "7",
                 }
             ],
         }
@@ -530,9 +533,11 @@ def test_two_files_that_ask_for_the_same_price_show_what_the_cap_has_left() -> N
         quoted = [offer("tour", 1, price="1 USD"), place[1]]
         told = a_tour(ticket, *quoted, budgets=pots, caps=[cap("a", "1 USD")])
         assert checked(told).answer is answer
-    quote = "the price of each place from tour-offer that it pays for"
-    assert reports[0][4] == f"  a-cap, on a: {quote} has to be at most 1 USD."
-    assert reports[1][4] == f"  a-cap, on a: 1 paid plus {quote} has to be at most 1 USD."
+    assert (
+        reports[0][4]
+        == f"  a-cap, on a: nothing so far, of at most 1 USD. That leaves 1 USD {LEAVES}"
+    )
+    assert reports[1][4] == f"  a-cap, on a: 1 paid, of at most 1 USD. That leaves 0 USD {LEAVES}"
 
 
 def test_a_price_for_two_buyers_is_in_the_sum_twice() -> None:
@@ -543,12 +548,12 @@ def test_a_price_for_two_buyers_is_in_the_sum_twice() -> None:
     file = a_tour(*places, whole, locked=("sam", "jo"), budgets=pots, caps=[cap("a", "1 USD")])
     found = checked(file)
     assert asked(file) == [[Unknown("price", "tour", about="first")]]
-    both = Open("price", "first", ("sam", "jo"), None)
-    assert found.plans[0].caps == (CapRow("a-cap", 0, (), 0, 0, (both,)),)
-    assert in_words(file)[4] == (
-        "  a-cap, on a: the price of each place from first that it pays for has to be at most"
-        " 1 USD."
-    )
+    assert found.plans[0].caps == (CapRow("a-cap", 0, (), (), 0, 0, 10000),)
+    assert in_words(file)[3:5] == [
+        "  One plan that works then: sam buys a place from first at a price that the FILE has yet"
+        " to state; jo buys a place from first at a price that the FILE has yet to state.",
+        f"  a-cap, on a: nothing so far, of at most 1 USD. That leaves 1 USD {LEAVES}",
+    ]
     for quote, answer in (("0.50 USD", Answer.FEASIBLE), ("0.51 USD", Answer.INFEASIBLE)):
         stated = [offer("tour", 2, id="first", price=quote), places[1]]
         told = a_tour(*stated, whole, locked=("sam", "jo"), budgets=pots, caps=[cap("a", "1 USD")])
@@ -580,53 +585,53 @@ def test_the_plan_for_a_length_of_time_works_at_the_limit_the_report_gives() -> 
     ]
 
 
-def test_a_price_nobody_knows_is_in_the_sum_of_each_budget_that_might_pay_it() -> None:
+def test_a_price_nobody_knows_has_to_fit_in_what_each_budget_has_left() -> None:
     """A lists Sam and Jo, and B lists Jo. Each may spend 1 USD. Two places have no price."""
     pots = [budget("a", "sam", "jo"), budget("b", "jo")]
     places = [offer("tour", 2, id="first", price=None), every_right("tour", "first")]
     caps = [cap("a", "1 USD"), cap("b", "1 USD")]
     file = a_tour(*places, locked=("sam", "jo"), budgets=pots, caps=caps)
-    rows = checked(file).plans[0].caps
-    assert [row.open for row in rows] == [
-        (Open("price", "first", ("sam", "jo"), None),),
-        (Open("price", "first", ("jo",), None),),
-    ]
-    # At 1 USD a place, A pays for Sam and B for Jo: each sum holds.
+    assert [row.left for row in checked(file).plans[0].caps] == [10000, 10000]
+    # At 1 USD a place, A pays for Sam and B for Jo: each fits in what its cap has left.
     stated = [offer("tour", 2, id="first", price="1 USD"), places[1]]
     told = checked(a_tour(*stated, locked=("sam", "jo"), budgets=pots, caps=caps))
     assert [cover.budget for cover in told.rights] == ["a", "b"]
+    dearer = [offer("tour", 2, id="first", price="1.01 USD"), places[1]]
+    assert checked(a_tour(*dearer, locked=("sam", "jo"), budgets=pots, caps=caps)).answer is (
+        Answer.INFEASIBLE
+    )
 
 
-def test_a_right_that_is_found_and_a_new_payer_are_in_the_sum_too() -> None:
-    """What the writer finds can cost money, and a cap counts it where its BUDGET pays."""
+def test_what_the_writer_finds_has_to_fit_in_what_a_cap_has_left() -> None:
+    """A right that is found and a new payer can cost money. The report says what is left."""
     low = [cap("trip-money", "1 USD")]
-    found = checked(a_tour(caps=low, persons=["sam"]))
-    assert found.plans[0].caps[0].open == (Open("another right", "tour", ("sam",), None),)
-    assert in_words(a_tour(caps=low, persons=["sam"]))[2:5] == [
+    file = a_tour(caps=low, persons=["sam"])
+    assert in_words(file)[2:7] == [
         "The trip works if a right to tour is found for sam, at a cost that fits the caps.",
         "  One plan that works then: nobody buys anything.",
-        "  trip-money-cap, on trip-money: the cost of the right found for sam if it pays for it"
-        " has to be at most 1 USD.",
+        "  trip-money-cap, on trip-money: nothing so far, of at most 1 USD. That leaves 1 USD"
+        f" {LEAVES}",
+        "",
+        "Whatever the FILE comes to state counts against a cap like everything else: what a"
+        " BOOKING paid from its BUDGET in its currency, and each place that its BUDGET pays for."
+        " All of it has to fit in what the cap has left.",
     ]
-    nobody_listed = [budget("a")]
+    # A BOOKING that is found counts where it was paid from, whoever that BUDGET lists.
+    pots = [budget("a", "sam"), budget("b")]
+    for paid, answer in (("1 USD", Answer.FEASIBLE), ("1.01 USD", Answer.INFEASIBLE)):
+        ticket = booking("tour", "sam", paid=paid, budget="b")
+        told = a_tour(ticket, budgets=pots, caps=[cap("b", "1 USD")], persons=["sam"])
+        assert checked(told).answer is answer
+    # Two places at 1 USD for Sam and Jo, whom no BUDGET lists. A may spend 1 USD.
     places = [offer("tour", 2, price="1 USD"), every_right("tour", "tour-offer")]
-    file = a_tour(*places, locked=("sam", "jo"), budgets=nobody_listed, caps=[cap("a", "1 USD")])
-    assert checked(file).plans[0].caps[0].open == (
-        Open("funding", None, ("sam",), 10000),
-        Open("funding", None, ("jo",), 10000),
-    )
-    assert in_words(file)[4] == (
-        "  a-cap, on a: the 1 that sam has to buy if it pays for them plus the 1 that jo has to"
-        " buy if it pays for them has to be at most 1 USD."
-    )
-    both_on_a = a_tour(
-        *places, locked=("sam", "jo"), budgets=[budget("a", "sam", "jo")], caps=[cap("a", "1 USD")]
-    )
-    assert checked(both_on_a).answer is Answer.INFEASIBLE
+    one_cap = [cap("a", "1 USD")]
+    nobody = a_tour(*places, locked=("sam", "jo"), budgets=[budget("a")], caps=one_cap)
+    assert [row.left for row in checked(nobody).plans[0].caps] == [10000]
+    both_on_a = [budget("a", "sam", "jo")]
     apart = [budget("a", "sam"), budget("b", "jo")]
-    assert checked(
-        a_tour(*places, locked=("sam", "jo"), budgets=apart, caps=[cap("a", "1 USD")])
-    ).answer is (Answer.FEASIBLE)
+    for pots, answer in ((both_on_a, Answer.INFEASIBLE), (apart, Answer.FEASIBLE)):
+        told = a_tour(*places, locked=("sam", "jo"), budgets=pots, caps=one_cap)
+        assert checked(told).answer is answer
 
 
 def test_the_plan_for_any_length_of_time_works_however_long_it_is() -> None:

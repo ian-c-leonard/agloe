@@ -89,42 +89,26 @@ class Missing:
 
 
 @dataclass(frozen=True)
-class Open:
-    """What a cap would count if an unknown FACT of a set turned out another way than its best.
-
-    The best way charges a cap nothing: a BOOKING charged nothing to it, a price is nothing,
-    money from outside the FILE pays for a PERSON whom no BUDGET lists, and another right is
-    free. What the writer finds can charge the cap, and the sum has to hold then too.
-
-    ``what`` is the kind of the unknown FACT. ``about`` is its BOOKING, its OFFER or its
-    OPTION, and ``persons`` the PERSONs whose places it is about. ``units`` is an amount the
-    FILE states, in ten-thousandths: what the places of a PERSON cost. None: nobody knows.
-    """
-
-    what: str
-    about: str | None
-    persons: tuple[str, ...]
-    units: int | None
-
-
-@dataclass(frozen=True)
 class CapRow:
-    """What a report says about one cap, so that anybody can check its sum.
+    """What a report says about one cap, so that anybody can check it.
 
     ``paid`` is what the BOOKINGs charged to it for sure. ``might`` holds each BOOKING that
     might have charged it besides, with the amount where the FILE states one, and None where
-    the BOOKING states no payment. ``to_buy`` is what the plan buys from it, and
-    ``if_needed`` the most it buys besides, if OPTIONs turn out to need a right. ``open``
-    holds what each unknown FACT of the set could add. The amounts are whole ten-thousandths
-    of the cap's currency.
+    the BOOKING states no payment. ``asked`` holds those among them whose charge a set of
+    unknown FACTs asks about. ``to_buy`` is what the plan buys from it, and ``if_needed`` the
+    most it buys besides, if OPTIONs turn out to need a right. ``left`` is what the cap still
+    allows after all of that, with each BOOKING in ``might`` counted in full unless the set
+    asks about it. Whatever else comes to be charged to the cap has to fit in it. The
+    amounts are whole ten-thousandths of the cap's currency.
     """
 
     cap: str
     paid: int
     might: tuple[tuple[str, int | None], ...]
+    asked: tuple[str, ...]
     to_buy: int
     if_needed: int
-    open: tuple[Open, ...] = ()
+    left: int
 
 
 @dataclass(frozen=True)
@@ -463,20 +447,20 @@ def _plan(file: File, enough: Sequence[Missing], shown: Shown) -> Plan:
         longest = enough[0].at_most
         world = with_this_long(file, unknowns[0], _beyond(file) if longest is None else longest)
     buys = _purchases(file, unknowns, shown, world)
-    return Plan(tuple(buys), _cap_rows(file, buys, unknowns))
+    asked = [unknown.about or "" for unknown in unknowns if unknown.what == "charged"]
+    return Plan(tuple(buys), _cap_rows(file, buys, asked))
 
 
-def _cap_rows(file: File, covers: Sequence[Cover], enough: Sequence[Unknown]) -> tuple[CapRow, ...]:
+def _cap_rows(file: File, covers: Sequence[Cover], asked: Sequence[str]) -> tuple[CapRow, ...]:
     """A row for each cap of the FILE, in the FILE's order, for a plan with these purchases.
 
     A BOOKING that names the cap's BUDGET in its currency charged it for sure. One that states
     no payment might have charged any cap, and one that states a payment with no BUDGET might
-    have charged any cap in its currency. ``enough`` is the set of unknown FACTs the plan is
-    for, and each of them is in the row of each cap it could add to.
+    have charged any cap in its currency. ``asked`` holds the BOOKINGs whose charge the set
+    of the plan asks about: what they charged is not counted, and has to fit in what is left.
     """
     rows: list[CapRow] = []
     bookings = [fact for fact in file.facts if isinstance(fact, Booking)]
-    buys = [cover for cover in covers if cover.to_buy]
     for cap in file.caps.values():
         currency = cap.limit.currency
         paid = sum(
@@ -494,37 +478,18 @@ def _cap_rows(file: File, covers: Sequence[Cover], enough: Sequence[Unknown]) ->
         )
         mine = [
             cover
-            for cover in buys
-            if cover.price is not None
+            for cover in covers
+            if cover.to_buy
+            and cover.price is not None
             and cover.budget == cap.budget
             and cover.price.currency == currency
         ]
         sure = sum(c.price.units for c in mine if c.price and file.needs_right(c.option) is True)
         most = sum(c.price.units for c in mine if c.price and file.needs_right(c.option) is None)
-        may_draw = next(each.persons for each in file.budgets if each.id == cap.budget)
-        added: list[Open] = []
-        for unknown in enough:
-            person = unknown.person or ""
-            if unknown.what == "charged":
-                amounts = [units for booking, units in might if booking == unknown.about]
-                added += [Open("charged", unknown.about, (), units) for units in amounts]
-            elif unknown.what == "price":
-                buyers = [c.person for c in buys if c.by == unknown.about and c.person in may_draw]
-                if buyers:
-                    added.append(Open("price", unknown.about, tuple(buyers), None))
-            elif unknown.what == "funding":
-                # Whoever lists this PERSON on a BUDGET decides which one pays for them.
-                theirs = [c for c in buys if c.person == person and c.budget is None]
-                stated = [c.price.units for c in theirs if c.price and c.price.currency == currency]
-                if any(c.price is None for c in theirs):
-                    added.append(Open("funding", None, (person,), None))
-                elif sum(stated):
-                    added.append(Open("funding", None, (person,), sum(stated)))
-            elif unknown.what == "another right" and (
-                person in may_draw or not file.listed(person)
-            ):
-                added.append(Open("another right", unknown.option, (person,), None))
-        rows.append(CapRow(cap.id, paid, might, sure, most, tuple(added)))
+        named = tuple(booking for booking, _ in might if booking in asked)
+        besides = sum(units or 0 for booking, units in might if booking not in named)
+        left = cap.limit.units - paid - besides - sure - most
+        rows.append(CapRow(cap.id, paid, might, named, sure, most, left))
     return tuple(rows)
 
 
