@@ -96,18 +96,26 @@ def a_want_held_both_ways(count: int) -> File:
     return trip(["alex", "sam"], ["a", "b"], options, facts, [], wants=wants, tickets=True)
 
 
-def solves_counted(monkeypatch: pytest.MonkeyPatch) -> list[int]:
-    """A list that gains, each time the solver is given a model, how hard it had to search."""
-    solves: list[int] = []
+def solves_counted(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, bool]]:
+    """A list that gains an entry each time the solver is given a model.
+
+    The entry says how hard the solver had to search, as the conflicts it met, and whether
+    the model had something to make as small as possible.
+    """
+    solves: list[tuple[int, bool]] = []
     solve = cp_model.CpSolver.solve
 
     def counted(self: cp_model.CpSolver, model: cp_model.CpModel) -> object:
         status = solve(self, model)
-        solves.append(self.num_conflicts)
+        solves.append((self.num_conflicts, model.has_objective()))
         return status
 
     monkeypatch.setattr(cp_model.CpSolver, "solve", counted)
     return solves
+
+
+def searched(solves: list[tuple[int, bool]]) -> int:
+    return sum(conflicts for conflicts, _ in solves)
 
 
 def test_the_solver_answers_one_question_with_one_solve_however_many_pairs_are_open(
@@ -190,13 +198,13 @@ def test_two_talks_at_the_same_hour_are_seen_to_clash_at_once(
     """Sam is LOCKed into twelve talks at one PLACE, and the last two both start at noon.
 
     The other times go one by one, and each time the two talks at noon still clash. The
-    model says outright that no two OPTIONs of a PERSON overlap, so the solver sees that
-    with next to no search, however many talks could come between the two.
+    model of a plain question says outright that no two OPTIONs of a PERSON overlap, so the
+    solver sees that with next to no search, however many talks could come between the two.
     """
     names = [f"talk-{number}" for number in range(12)]
     facts: list[Document] = []
     for number, name in enumerate(names[:10]):
-        facts += [starts_at(name, 8 + number // 2, 30 * (number % 2)), lasts(name, "PT25M")]
+        facts += [starts_at(name, 7 + number // 2, 30 * (number % 2)), lasts(name, "PT25M")]
     for name in names[10:]:
         facts += [starts_at(name, 12), lasts(name, "PT25M")]
     locks = [lock(name, "sam") for name in names]
@@ -208,7 +216,80 @@ def test_two_talks_at_the_same_hour_are_seen_to_clash_at_once(
         *(f"{name}-{what}" for name in late for what in ("time", "length")),
         *(f"lock-{name}" for name in late),
     )
-    assert sum(solves) < 10_000
+    assert searched(solves) < 10_000
+
+
+def test_a_talk_of_no_length_cannot_start_inside_another(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sam is LOCKed into nine talks in one hall. The last starts ten minutes into the eighth.
+
+    With the FACT about its length taken out, the last talk takes no time in the best case.
+    It still cannot start inside the eighth, and the solver sees that with little search.
+    """
+    names = [f"talk-{number}" for number in range(9)]
+    facts: list[Document] = []
+    for number, name in enumerate(names[:8]):
+        minutes = 40 * number
+        facts += [starts_at(name, 9 + minutes // 60, minutes % 60), lasts(name, "PT25M")]
+    facts += [starts_at("talk-8", 13, 50), lasts("talk-8", "PT25M")]
+    locks = [lock(name, "sam") for name in names]
+    file = trip(["sam"], ["hall"], [stays(name, "hall") for name in names], facts, locks)
+    solves = solves_counted(monkeypatch)
+    found = compiler.check(file)
+    assert found.conflict == (
+        "talk-7-time",
+        "talk-7-length",
+        "talk-8-time",
+        "lock-talk-7",
+        "lock-talk-8",
+    )
+    assert searched(solves) < 10_000
+    left = Remaining(file).without("talk-8-length")
+    assert not compiler.can_work(left) and not reference.can_work(left)
+
+
+def test_the_plan_for_workshops_that_overlap_is_chosen_with_little_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Six colleagues each need three topics, and each topic has two workshops that overlap.
+
+    The model that looks for the plan to show does not say outright that no two OPTIONs of a
+    PERSON overlap. With that in it, the solver met eighty times as many conflicts here.
+    """
+    people = [f"colleague-{number}" for number in range(6)]
+    options: list[Document] = []
+    facts: list[Document] = []
+    wants: list[Document] = []
+    for topic in range(3):
+        wants.append(must(f"topic-{topic}", *people))
+        facts.append(every(f"topic-{topic}"))
+        for which in range(2):
+            name = f"workshop-{topic}-{which}"
+            options.append(stays(name, "venue"))
+            facts += [starts_at(name, 9 + 3 * topic, 30 * which), lasts(name, "PT1H30M")]
+            facts.append(satisfies(name, f"topic-{topic}"))
+    file = trip(people, ["venue"], options, facts, [], wants=wants)
+    solves = solves_counted(monkeypatch)
+    found = compiler.check(file)
+    assert found.answer is Answer.FEASIBLE
+    assert searched(solves) < 30_000
+
+
+def test_one_check_asks_the_solver_once_about_one_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sam is LOCKed into one stay, and nobody knows whether it needs a right.
+
+    The search for a conflict and the search for missing FACTs both ask whether anything
+    works in the best case. The solver answers that once.
+    """
+    facts = [starts_at("stay", 9), lasts("stay", "PT25M")]
+    file = trip(["sam"], ["a"], [stays("stay", "a")], facts, [lock("stay", "sam")], tickets=True)
+    solves = solves_counted(monkeypatch)
+    found = compiler.check(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert [aims for _, aims in solves if not aims] == [False]
 
 
 def test_rides_that_two_persons_are_locked_into_are_asked_about_one_lock_at_a_time() -> None:

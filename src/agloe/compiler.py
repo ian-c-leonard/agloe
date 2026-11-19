@@ -84,7 +84,7 @@ def shown(file: File, world: World) -> Itinerary | None:
 
 def works(file: File, world: World, asked: _Asked | None = None) -> bool:
     """Whether any ITINERARY works in this world. ``asked`` is as for ``can_work``."""
-    choice = _plan(_Search(file, world), asked)
+    choice = _plan(_Search(file, world, plain=True), asked)
     if choice is not None:
         _checked(file, world, choice)
     return choice is not None
@@ -108,7 +108,7 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
     """
     file = remaining.file
     world, open_pairs = reference.best_case_left(remaining)
-    search = _Search(file, world, open_pairs)
+    search = _Search(file, world, open_pairs, plain=True)
     choice = _plan(search, asked)
     if choice is None:
         return False
@@ -155,7 +155,7 @@ def _solver(relax: bool = True) -> cp_model.CpSolver:
 
     ``relax`` keeps its linear relaxation, which it needs to prove a best value in good
     time. The plain questions, with nothing to make smaller, are asked without it. On the
-    trips measured that is as quick or quicker, once the model says outright that no two
+    trips measured that is as quick or quicker, with a model that says outright that no two
     OPTIONs of a PERSON overlap.
 
     Its simplification step is switched off. In OR-Tools 9.15 that step reported that nothing
@@ -221,14 +221,20 @@ class _Search:
     """
 
     def __init__(
-        self, file: File, world: World, open_pairs: Sequence[tuple[str, str]] = ()
+        self,
+        file: File,
+        world: World,
+        open_pairs: Sequence[tuple[str, str]] = (),
+        plain: bool = False,
     ) -> None:
         """Build the model of this world.
 
         ``open_pairs`` are left to the solver: each an OPTION and a WANT, and whether the
-        OPTION SATISFIES the WANT. The world must say that they do not.
+        OPTION SATISFIES the WANT. The world must say that they do not. ``plain`` says that
+        the model is for the plain question whether anything works, with nothing to make
+        smaller.
         """
-        self.file, self.world = file, world
+        self.file, self.world, self.plain = file, world, plain
         self.model = cp_model.CpModel()
         # The choice for each open pair, and the pairs that held in the last answer.
         self.does = {
@@ -507,7 +513,8 @@ class _Search:
                 arcs.append((before, after, next_))
                 _when(model.add(self.turn[after] >= self.turn[before] + 1), next_)
         model.add_circuit(arcs)
-        self._keep_apart(number)
+        if self.plain:
+            self._keep_apart(number)
         self.nothing.append(nothing)
         self.follows.append(follows)
         self.routes.append(between)
@@ -516,15 +523,21 @@ class _Search:
         """No two OPTIONs that this PERSON takes part in overlap.
 
         The path says so already: each OPTION on it starts no earlier than the one before it
-        ends. Said outright, the solver sees at once that two OPTIONs at the same hour cannot
-        both be taken, however many others lie between them on a path. An OPTION that takes
-        no time, or has no limit to how long it takes, is left to the path.
+        ends. Said outright, the solver sees at once that two talks that take time cannot both
+        be taken at the same hour, however many others lie between them on a path. An OPTION
+        that takes no time can be at the start or at the end of another one and never inside
+        it, by the path and by the solver's own rule for intervals. An OPTION with no limit to
+        how long it takes is left to the path.
+
+        This is only in the model of a plain question. It helps the solver prove that nothing
+        works. Where the solver looks for a best value, it made the search longer on trips
+        with many OPTIONs that overlap.
         """
         model, takes = self.model, self.takes[number]
         person = self.file.persons[number]
         spans: list[cp_model.IntervalVar] = []
         for index, option in enumerate(self.file.options):
-            if (number, index) in self.left_out or self.endless[index] or not self.lasts[index]:
+            if (number, index) in self.left_out or self.endless[index]:
                 continue
             name = f"{person.id} in {option.id}"
             start, lasts = self.start[index], self.lasts[index]
