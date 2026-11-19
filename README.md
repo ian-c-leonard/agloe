@@ -4,6 +4,8 @@ Agloe is a standard format for trips, a compiler that checks them, and an optimi
 
 AI agents are starting to plan trips. They need three things: a lasting place to keep the plan, codified rules that check their work, and a way to say what people want rather than only what is possible. Agloe provides all three. People planning without AI benefit in the same way.
 
+The home page is [agloe.ai](https://agloe.ai).
+
 ## Status
 
 Agloe is being built in public, and nothing is published to install yet. The first release, the COMPILER, is being built in steps.

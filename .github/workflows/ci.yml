@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The pages workflow runs these checks before it publishes agloe.ai.
+  workflow_call:
 
 permissions:
   contents: read

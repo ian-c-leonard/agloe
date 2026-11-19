@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agloe: a standard format for trips, and a compiler that checks them</title>
+<meta name="description" content="Agloe is a standard format for trips, a compiler that checks them, and an optimizer that finds the best version. Open source.">
+<meta name="theme-color" content="#17263c">
+<link rel="icon" href="favicon.svg">
+<link rel="canonical" href="https://agloe.ai/">
+<link rel="preload" href="fonts/besley-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/libre-franklin-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Agloe">
+<meta property="og:title" content="Agloe: a standard format for trips, and a compiler that checks them">
+<meta property="og:description" content="Agloe is a standard format for trips, a compiler that checks them, and an optimizer that finds the best version. Open source.">
+<meta property="og:url" content="https://agloe.ai/">
+<meta property="og:image" content="https://agloe.ai/img/social-preview.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The name Agloe, beside a sketch map with a dashed circle where Agloe was drawn">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+@font-face { font-family: "Besley"; src: url("fonts/besley-latin-wght-normal.woff2") format("woff2"); font-weight: 400 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Besley"; src: url("fonts/besley-latin-wght-italic.woff2") format("woff2"); font-weight: 400 900; font-style: italic; font-display: swap; }
+@font-face { font-family: "Libre Franklin"; src: url("fonts/libre-franklin-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "Atkinson Hyperlegible Mono"; src: url("fonts/atkinson-hyperlegible-mono-latin-wght-normal.woff2") format("woff2"); font-weight: 200 800; font-display: swap; }
+
+/* The colours of a printed road map: paper, ink, road red, water blue,
+   woodland green, and the violet a survey uses for what nobody has checked. */
+:root {
+  --paper: #fbfcfa; --sheet: #ffffff;
+  --ink: #17263c; --ink-soft: #46566b; --rule: #c5d0d6;
+  --water: #e2edf1; --water-ink: #24628c;
+  --road: #b3212d; --wood: #256a44; --survey: #663a9c;
+  --night-text: #e8eff3; --night-dim: #a3b4c5;
+  --display: "Besley", Rockwell, Georgia, serif;
+  --text: "Libre Franklin", "Franklin Gothic Medium", "Helvetica Neue", Arial, sans-serif;
+  --mono: "Atkinson Hyperlegible Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 1.125rem/1.6 var(--text); }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; line-height: 1.15; margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(2rem, 4.4vw, 3.3rem); font-weight: 500; letter-spacing: -0.012em; max-width: 33ch; }
+h2 { font-size: clamp(1.7rem, 3.2vw, 2.4rem); }
+h3 { font-size: 1.3rem; }
+p, ul, ol { margin: 0; }
+p { text-wrap: pretty; }
+a { color: inherit; text-decoration-color: var(--road); text-decoration-thickness: 2px; text-underline-offset: 3px; }
+a:hover { color: var(--road); }
+:focus-visible { outline: 3px solid var(--road); outline-offset: 3px; }
+code { font-family: var(--mono); font-size: 0.92em; }
+.skip { position: absolute; left: 16px; top: -80px; z-index: 10; padding: 10px 16px; background: var(--ink); color: var(--sheet); font-weight: 700; text-decoration: none; }
+.skip:focus { top: 12px; }
+.wrap { max-width: 1120px; margin-inline: auto; padding-inline: 24px; }
+.band { padding-block: clamp(52px, 7vw, 92px); }
+.water { background: var(--water); }
+.measure { max-width: 62ch; }
+.stack { display: grid; gap: 18px; align-content: start; }
+.soft { color: var(--ink-soft); }
+.small { font-size: 0.95rem; }
+
+/* A map's border: a heavy line with a fine one outside it. */
+.neatline { border: 2px solid var(--ink); outline: 1px solid var(--ink); outline-offset: 5px; }
+
+/* Header */
+.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; padding-block: 18px; }
+.brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+.brand:hover { color: inherit; }
+.brand svg { width: 38px; height: 38px; flex: none; }
+.brand span { font-family: var(--display); font-weight: 600; font-size: 1.55rem; letter-spacing: -0.01em; }
+.links { display: flex; gap: 6px 24px; flex-wrap: wrap; font-size: 1rem; }
+.links a { text-decoration: none; }
+.links a:hover { text-decoration: underline; text-decoration-color: var(--road); }
+
+/* Opening */
+.hero { padding-block: clamp(36px, 6vw, 72px) clamp(40px, 5vw, 60px); }
+.hero .wrap { display: grid; gap: 26px; }
+.lead { font-size: clamp(1.15rem, 1.6vw, 1.3rem); line-height: 1.55; max-width: 60ch; }
+.actions { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.button { display: inline-block; padding: 13px 22px; border: 2px solid var(--ink); background: var(--ink); color: var(--sheet); font-weight: 700; font-size: 1rem; text-decoration: none; }
+.button:hover { background: var(--road); border-color: var(--road); color: var(--sheet); }
+.button.quiet { background: transparent; color: var(--ink); }
+.button.quiet:hover { background: var(--water); border-color: var(--ink); color: var(--ink); }
+
+/* The example: one trip, four versions, and the report for each */
+.example { padding-block: 8px clamp(52px, 7vw, 92px); }
+.checker { display: grid; grid-template-columns: minmax(0, 0.73fr) minmax(0, 1.27fr); background: var(--sheet); }
+.trip { padding: clamp(22px, 2.6vw, 30px); display: grid; gap: 16px; align-content: start; }
+.trip h2 { font-size: clamp(1.6rem, 2.5vw, 1.95rem); }
+.trip p { font-size: 1.05rem; line-height: 1.55; }
+.versions { border: 0; margin: 4px 0 0; padding: 0; min-width: 0; display: grid; gap: 8px; }
+.versions legend { padding: 0; margin-bottom: 12px; font-size: 0.98rem; color: var(--ink-soft); }
+.versions label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; padding: 11px 14px; border: 1px solid var(--rule); font-size: 1rem; line-height: 1.45; cursor: pointer; }
+.versions label:hover { border-color: var(--ink); }
+.versions input { width: 1.05em; height: 1.05em; margin: 0.2em 0 0; accent-color: var(--ink); }
+.versions label:has(input:checked) { border-color: var(--ink); box-shadow: inset 4px 0 0 var(--road); }
+.versions label:has(input:focus-visible) { outline: 3px solid var(--road); outline-offset: 2px; }
+.versions input:focus-visible { outline: none; }
+.reports { background: var(--ink); color: var(--night-text); padding: clamp(20px, 2.4vw, 28px) clamp(18px, 2.2vw, 26px); display: grid; gap: 30px; align-content: start; }
+.command { font: 0.82rem/1.6 var(--mono); color: var(--night-dim); margin-bottom: 14px; overflow-wrap: anywhere; }
+.report pre { margin: 0; font: 0.8rem/1.7 var(--mono); white-space: pre-wrap; overflow-wrap: break-word; }
+.report pre::first-line { font-weight: 700; }
+.report.feasible pre::first-line { color: #9fe0b3; }
+.report.infeasible pre::first-line { color: #ffa69e; }
+.report.undetermined pre::first-line { color: #d5bcfb; }
+.report.risky pre::first-line { color: #f4c96f; }
+/* Where the browser can tell which version is chosen, show only that report.
+   On a wide screen the reports share one cell, so the box keeps its height when
+   the choice changes. On a narrow screen the other reports take no room. */
+@supports selector(:has(*)) {
+  .reports { gap: 0; }
+  .report { grid-area: 1 / 1; visibility: hidden; display: var(--other-reports, block); }
+  .checker:has(input[value="works"]:checked) .report[data-version="works"],
+  .checker:has(input[value="cannot-work"]:checked) .report[data-version="cannot-work"],
+  .checker:has(input[value="depends-on-the-cab"]:checked) .report[data-version="depends-on-the-cab"],
+  .checker:has(input[value="works-but-risky"]:checked) .report[data-version="works-but-risky"] { visibility: visible; display: block; }
+}
+
+/* The key to the three answers, set like the key of a map */
+.answers { margin-top: 44px; display: grid; gap: 20px; }
+.key { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 36px; }
+.key li { padding-left: 30px; position: relative; font-size: 1.02rem; line-height: 1.5; }
+.key li::before { content: ""; position: absolute; left: 0; top: 0.3em; width: 16px; height: 16px; border: 2px solid var(--ink); }
+.key .feasible::before { background: var(--wood); }
+.key .infeasible::before { background: var(--road); }
+.key .undetermined::before { background: var(--survey); }
+
+/* The FILE */
+.file { display: grid; gap: 30px; }
+.document { margin: 0; background: var(--sheet); padding: 22px 24px; font: 0.8rem/1.65 var(--mono); overflow-x: auto; white-space: pre; tab-size: 2; }
+
+/* Needs and parts, side by side so that each need lines up with its part */
+.pairs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(4, auto); gap: 0 56px; margin-top: 34px; }
+.pairs .col { display: grid; grid-row: 1 / span 4; grid-template-rows: subgrid; }
+.pairs h3 { padding-bottom: 14px; border-bottom: 2px solid var(--ink); }
+.pairs ol { list-style: none; padding: 0; counter-reset: item; display: grid; grid-row: 2 / span 3; grid-template-rows: subgrid; }
+.pairs li { counter-increment: item; position: relative; padding: 18px 0 18px 44px; border-bottom: 1px solid var(--rule); }
+.pairs li::before { content: counter(item); position: absolute; left: 0; top: 16px; font: 600 1.5rem/1.2 var(--display); }
+.after { margin-top: 34px; display: grid; gap: 16px; }
+.releases { margin-top: 44px; padding-top: 30px; border-top: 2px solid var(--ink); display: grid; grid-template-columns: minmax(0, 0.42fr) minmax(0, 1fr); gap: 20px 56px; }
+.releases ul { list-style: none; padding: 0; display: grid; gap: 12px; }
+
+/* What it must be */
+.musts { list-style: none; padding: 0; margin-top: 30px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 56px; }
+.musts li { padding: 15px 0; border-top: 1px solid #a9bcc6; font-size: 1.05rem; line-height: 1.5; }
+.musts strong { font-family: var(--display); font-weight: 600; font-size: 1.12rem; }
+
+/* Run it, and how it is built */
+.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 44px 56px; align-items: start; }
+.terminal { margin: 0; background: var(--ink); color: var(--night-text); padding: 20px 22px; font: 0.86rem/1.75 var(--mono); overflow-x: auto; }
+
+/* The name */
+.night { background: var(--ink); color: var(--night-text); }
+.night a:hover { color: #ffb1aa; }
+.name { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 56px; align-items: center; }
+.name p { font-size: clamp(1.15rem, 1.7vw, 1.35rem); line-height: 1.55; }
+.map { display: block; width: 100%; height: auto; background: var(--paper); }
+.map .frame { fill: var(--paper); stroke: var(--ink); }
+.map .grid { stroke: var(--rule); stroke-width: 1; }
+.map .river { fill: none; stroke: #7fb2cf; stroke-width: 7; stroke-linecap: round; }
+.map .highway { fill: none; stroke: var(--road); stroke-width: 3.5; }
+.map .road { fill: none; stroke: var(--ink); stroke-width: 2; }
+.map .track { fill: none; stroke: var(--ink); stroke-width: 1.4; stroke-dasharray: 7 5; }
+.map .town { fill: var(--ink); }
+.map .not-there { fill: var(--paper); stroke: var(--road); stroke-width: 3.4; stroke-dasharray: 6 4.996; }
+.map text { font-family: var(--text); fill: var(--ink); }
+.map .place { font: 600 21px var(--display); }
+.map .place.big { font-size: 27px; }
+.map .water-name { font: italic 500 18px var(--display); fill: var(--water-ink); letter-spacing: 0.14em; }
+.map .note { font-size: 12.5px; fill: var(--ink-soft); }
+
+footer { padding-block: 34px 44px; font-size: 0.95rem; color: var(--ink-soft); }
+footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 40px; }
+
+@media (max-width: 860px) {
+  body { font-size: 1.0625rem; }
+  .checker, .two, .name, .releases, .musts, footer .wrap { grid-template-columns: minmax(0, 1fr); }
+  .reports { --other-reports: none; }
+  .key { grid-template-columns: minmax(0, 1fr); }
+  .pairs { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; gap: 34px; }
+  .pairs .col, .pairs ol { grid-row: auto; grid-template-rows: none; }
+  .name { gap: 34px; }
+  .releases { gap: 16px; }
+}
+</style>
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to the content</a>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="./" aria-label="Agloe home">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="11" fill="#fbfcfa" stroke="#17263c" stroke-width="4"/><path d="M4 46 60 31M23 4l10 56" stroke="#17263c" stroke-width="3" fill="none"/><circle cx="29.3" cy="39.2" r="12" fill="#fbfcfa" stroke="#b3212d" stroke-width="4.6" stroke-dasharray="6 3.425"/></svg>
+      <span>Agloe</span>
+    </a>
+    <nav class="links" aria-label="Main">
+      <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">Rules</a>
+      <a href="https://github.com/ian-c-leonard/agloe/tree/main/examples">Examples</a>
+      <a href="https://github.com/ian-c-leonard/agloe/blob/main/docs/ROADMAP.md">Roadmap</a>
+      <a href="https://github.com/ian-c-leonard/agloe">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero">
+    <div class="wrap">
+      <h1 data-from="README.md">Agloe is a standard format for trips, a compiler that checks them, and an optimizer that finds the best version.</h1>
+      <p class="lead" data-from="docs/VISION.md">AI agents are starting to plan trips. An agent can seat eight friends at dinner in its head. Seating 800 is different: it needs the guest list written down, the rules codified, and something that checks every seat against every rule. A real trip is the 800 case: many people, legs, bookings and times, all affecting each other.</p>
+      <div class="actions">
+        <a class="button" href="https://github.com/ian-c-leonard/agloe">See the code on GitHub</a>
+        <a class="button quiet" href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">Read the rules</a>
+      </div>
+      <p class="small soft"><span data-from="README.md">Agloe is being built in public, and nothing is published to install yet.</span> It is open source under the Apache License 2.0.</p>
+    </div>
+  </section>
+
+  <section class="example" id="example" aria-labelledby="example-title">
+    <div class="wrap">
+      <div class="checker neatline">
+        <div class="trip">
+          <h2 id="example-title">Can Alex and Sam make their flight?</h2>
+          <p data-from="spec/rules.md">Alex and Sam spend their last afternoon in Chicago at the Art Institute, then fly home from O'Hare. The flight leaves at 5:00 pm, and bag drop closes 45 minutes earlier. The Blue Line takes an hour from the museum to the terminal.</p>
+          <fieldset class="versions">
+            <legend>Each version of this trip is one FILE. Choose a version to see the COMPILER's report for it.</legend>
+            <label><input type="radio" name="version" value="works" checked><span data-from="spec/rules.md">They leave the museum at 3:00 pm.</span></label>
+            <label><input type="radio" name="version" value="cannot-work"><span data-from="spec/rules.md">They leave at 3:30 pm, and a FACT says the Blue Line is the only way to O'Hare.</span></label>
+            <label><input type="radio" name="version" value="depends-on-the-cab"><span data-from="spec/rules.md">They leave at 3:30 pm. A cab is listed, but nobody has recorded how long it takes.</span></label>
+            <label><input type="radio" name="version" value="works-but-risky"><span data-from="spec/rules.md">They leave at 3:00 pm, and the Blue Line can take up to 80 minutes.</span></label>
+          </fieldset>
+        </div>
+        <div class="reports" aria-live="polite">
+          <div class="report feasible" data-version="works">
+            <p class="command"><span aria-hidden="true">$ </span>uv run agloe check examples/flight-home/works.json</p>
+            <pre data-from="examples/flight-home/works.expected.txt">FEASIBLE: this trip works.
+
+Saturday 15 May 2027 (times in America/Chicago)
+  2:00 pm to 3:00 pm: Museum visit, Alex and Sam
+  3:00 pm to 4:00 pm: Blue Line to O'Hare, Alex and Sam
+  5:00 pm to 7:30 pm: Flight home, Alex and Sam
+
+The plan relies on these FACTs and DECISIONs:
+  visit-time: Museum visit starts at 2:00 pm on Saturday 15 May 2027
+  visit-length: Museum visit takes 1 h
+  visit-needs-a-ticket: people need a right to take part in Museum visit
+  museum-tickets: a BOOKING for Museum visit covers Alex and Sam
+  train-time: Blue Line to O'Hare can start at any time
+  train-length: Blue Line to O'Hare takes 1 h
+  train-is-walk-up: nobody needs a right to take part in Blue Line to O'Hare
+  flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
+  flight-length: Flight home takes 2 h 30 min
+  bag-drop: people must be at O'Hare 45 min before Flight home starts
+  flight-needs-a-ticket: people need a right to take part in Flight home
+  flight-tickets: a BOOKING for Flight home covers Alex and Sam
+  lock-visit: Alex and Sam take part in Museum visit
+  lock-flight: Alex and Sam take part in Flight home</pre>
+          </div>
+          <div class="report infeasible" data-version="cannot-work">
+            <p class="command"><span aria-hidden="true">$ </span>uv run agloe check examples/flight-home/cannot-work.json</p>
+            <pre data-from="examples/flight-home/cannot-work.expected.txt">INFEASIBLE: this trip cannot work.
+
+These FACTs and DECISIONs rule out every plan by themselves. Take any one away and they no longer do. A FACT that is taken away leaves what it said unknown. Times are in America/Chicago.
+  visit-time: Museum visit starts at 2:30 pm on Saturday 15 May 2027
+  visit-length: Museum visit takes 1 h
+  train-length: Blue Line to O'Hare takes 1 h
+  flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
+  bag-drop: people must be at O'Hare 45 min before Flight home starts
+  ways-to-ohare: every way straight to O'Hare that leaves between 12:00 pm on Saturday 15 May 2027 and 6:00 pm is listed
+  lock-visit: Alex and Sam take part in Museum visit
+  lock-flight: Alex and Sam take part in Flight home</pre>
+          </div>
+          <div class="report undetermined" data-version="depends-on-the-cab">
+            <p class="command"><span aria-hidden="true">$ </span>uv run agloe check examples/flight-home/depends-on-the-cab.json</p>
+            <pre data-from="examples/flight-home/depends-on-the-cab.expected.txt">UNDETERMINED: the FILE does not say enough to tell.
+
+The trip works if Cab to O'Hare takes 45 min or less.</pre>
+          </div>
+          <div class="report risky" data-version="works-but-risky">
+            <p class="command"><span aria-hidden="true">$ </span>uv run agloe check examples/flight-home/works-but-risky.json</p>
+            <pre data-from="examples/flight-home/works-but-risky.expected.txt">FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold.
+
+Saturday 15 May 2027 (times in America/Chicago)
+  2:00 pm to 3:00 pm: Museum visit, Alex and Sam
+  3:00 pm to 4:00 pm: Blue Line to O'Hare, Alex and Sam
+  5:00 pm to 7:30 pm: Flight home, Alex and Sam
+    ! Alex and Sam would be 5 min too late for this.
+
+WARNING: no plan is sure to hold if the uncertain parts take their longest. Each line marked "!" says what would go wrong at the step above it.
+
+The plan relies on these FACTs and DECISIONs:
+  visit-time: Museum visit starts at 2:00 pm on Saturday 15 May 2027
+  visit-length: Museum visit takes 1 h
+  visit-needs-a-ticket: people need a right to take part in Museum visit
+  museum-tickets: a BOOKING for Museum visit covers Alex and Sam
+  train-time: Blue Line to O'Hare can start at any time
+  train-is-walk-up: nobody needs a right to take part in Blue Line to O'Hare
+  train-length: Blue Line to O'Hare takes between 1 h and 1 h 20 min
+  flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
+  flight-length: Flight home takes 2 h 30 min
+  bag-drop: people must be at O'Hare 45 min before Flight home starts
+  flight-needs-a-ticket: people need a right to take part in Flight home
+  flight-tickets: a BOOKING for Flight home covers Alex and Sam
+  lock-visit: Alex and Sam take part in Museum visit
+  lock-flight: Alex and Sam take part in Flight home</pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="answers">
+        <p class="measure" data-from="README.md">Today the COMPILER reads a trip file and gives one of three answers, each with its evidence:</p>
+        <ul class="key">
+          <li class="feasible" data-from="README.md"><strong>FEASIBLE:</strong> the trip works. The report shows a plan, and warns when the plan holds only if uncertain durations stay short.</li>
+          <li class="infeasible" data-from="README.md"><strong>INFEASIBLE:</strong> the trip cannot work. The report names the FACTs, WANTs and DECISIONs that clash.</li>
+          <li class="undetermined" data-from="README.md"><strong>UNDETERMINED:</strong> the file does not say enough to tell. The report names what it would have to say for the trip to work.</li>
+        </ul>
+        <p class="measure" data-from="README.md">The <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">rules</a> say exactly what it checks, and every trip under <a href="https://github.com/ian-c-leonard/agloe/tree/main/examples"><code>examples/</code></a> is one of its tests.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="band water" id="file" aria-labelledby="file-title">
+    <div class="wrap file">
+      <div class="stack measure">
+        <h2 id="file-title">The FILE for that trip</h2>
+        <p><span data-from="spec/rules.md">A FILE lists PERSONs, PLACEs, OPTIONs, WAYs, WANTs, FACTs and DECISIONs.</span> This is the whole FILE for the first version above. The <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/vocabulary.md">vocabulary</a> says what each term in capitals means.</p>
+      </div>
+      <pre class="document neatline" tabindex="0" aria-label="The FILE for the first version of the trip" data-from="examples/flight-home/works.json">{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" }
+  ],
+  "places": [
+    { "id": "art-institute", "name": "the Art Institute" },
+    { "id": "ohare", "name": "O'Hare" },
+    { "id": "home", "name": "home" }
+  ],
+  "options": [
+    { "id": "museum-visit", "name": "Museum visit", "place": "art-institute" },
+    { "id": "blue-line", "name": "Blue Line to O'Hare", "from": "art-institute", "to": "ohare" },
+    { "id": "flight", "name": "Flight home", "from": "ohare", "to": "home" }
+  ],
+  "ways": [],
+  "wants": [],
+  "facts": [
+    { "id": "visit-time", "option": "museum-visit", "starts_at": "2027-05-15T14:00:00-05:00[America/Chicago]" },
+    { "id": "visit-length", "option": "museum-visit", "duration": "PT1H" },
+    { "id": "visit-needs-a-ticket", "option": "museum-visit", "needs_right": true },
+    { "id": "museum-tickets", "booking": { "option": "museum-visit", "covers": ["alex", "sam"] } },
+    { "id": "train-time", "option": "blue-line", "starts_any_time": true },
+    { "id": "train-length", "option": "blue-line", "duration": "PT1H" },
+    { "id": "train-is-walk-up", "option": "blue-line", "needs_right": false },
+    { "id": "flight-time", "option": "flight", "starts_at": "2027-05-15T17:00:00-05:00[America/Chicago]" },
+    { "id": "flight-length", "option": "flight", "duration": "PT2H30M" },
+    { "id": "bag-drop", "option": "flight", "arrive_before_start": "PT45M" },
+    { "id": "flight-needs-a-ticket", "option": "flight", "needs_right": true },
+    { "id": "flight-tickets", "booking": { "option": "flight", "covers": ["alex", "sam"] } }
+  ],
+  "decisions": [
+    { "id": "lock-visit", "lock": "museum-visit", "persons": ["alex", "sam"] },
+    { "id": "lock-flight", "lock": "flight", "persons": ["alex", "sam"] }
+  ]
+}</pre>
+    </div>
+  </section>
+
+  <section class="band" id="why" aria-labelledby="why-title">
+    <div class="wrap">
+      <h2 id="why-title">What agents need, and what Agloe is</h2>
+      <div class="pairs">
+        <div class="col">
+          <h3 data-from="docs/VISION.md">So agents need three things:</h3>
+          <ol>
+            <li data-from="docs/VISION.md"><strong>A place to keep the plan.</strong> Agents can read and write far more detail than people, but they forget. Conversations get compressed, sessions end, and people switch agents. The plan must live somewhere lasting that any agent or person can pick up.</li>
+            <li data-from="docs/VISION.md"><strong>Codified rules, and a checker that applies them.</strong> The same answer every time, with the reason for every problem it finds.</li>
+            <li data-from="docs/VISION.md"><strong>A way to say what you want, not just what is possible.</strong> A plan can work and still be wrong for the people on it. Travelers need to state their priorities, so the best version can be found and its trade-offs shown.</li>
+          </ol>
+        </div>
+        <div class="col">
+          <h3 data-from="docs/VISION.md">What Agloe is</h3>
+          <ol>
+            <li data-from="docs/VISION.md"><strong>A standard format</strong> that represents a trip and all its nuances, readable by people and machines. It is the lasting record.</li>
+            <li data-from="docs/VISION.md"><strong>A compiler</strong> that checks the whole plan and explains every conflict.</li>
+            <li data-from="docs/VISION.md"><strong>An optimizer</strong> that finds the best version for the priorities people set.</li>
+          </ol>
+        </div>
+      </div>
+      <div class="after measure">
+        <p data-from="docs/VISION.md">People planning without AI benefit in the same way.</p>
+        <p data-from="docs/VISION.md">Each part exists somewhere in narrow form: trip formats, plan checkers in research, route optimizers, group planning apps. Nobody joins them. Agloe's contribution is the combination and its rigor: precise rules, clear explanations, and a format that always ships with its checker.</p>
+      </div>
+      <div class="releases">
+        <h3>The releases</h3>
+        <div class="stack">
+          <ul>
+            <li data-from="README.md"><strong>0.1, the COMPILER:</strong> says whether a trip is FEASIBLE, INFEASIBLE or UNDETERMINED, and explains every finding with its evidence.</li>
+            <li data-from="README.md"><strong>0.2, the OPTIMIZER:</strong> finds the best version of a trip for the priorities people set.</li>
+          </ul>
+          <p><span data-from="README.md">The first release, the COMPILER, is being built in steps.</span> <span data-from="README.md">See the <a href="https://github.com/ian-c-leonard/agloe/blob/main/docs/ROADMAP.md">roadmap</a> for what each release contains.</span></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band water" id="must" aria-labelledby="must-title">
+    <div class="wrap">
+      <div class="stack measure">
+        <h2 id="must-title" data-from="docs/VISION.md">What it must be</h2>
+        <p>These are the qualities Agloe is being built to have.</p>
+      </div>
+      <ul class="musts">
+        <li data-from="docs/VISION.md"><strong>Trustworthy.</strong> Anyone, person or agent, can check any trip, including one an AI drafted, and rely on the answer.</li>
+        <li data-from="docs/VISION.md"><strong>Flexible.</strong> It works for any kind of trip.</li>
+        <li data-from="docs/VISION.md"><strong>Whole-lifecycle.</strong> It covers the first idea, planning, booking, the live trip, recovery when things go wrong, and the record afterwards. The file keeps the agreed plan, the current forecast and what actually happened.</li>
+        <li data-from="docs/VISION.md"><strong>Intuitive.</strong> It is easy to read and understand.</li>
+        <li data-from="docs/VISION.md"><strong>Multiplayer.</strong> Several people and their agents share one plan. They propose changes, the file records what the group decided and why, and the trip stays fair to everyone.</li>
+        <li data-from="docs/VISION.md"><strong>Open.</strong> It imports what travelers already have, publishes to the tools they already use, and hands purchases to the services that sell them.</li>
+        <li data-from="docs/VISION.md"><strong>Durable.</strong> The file outlives any app, the way a calendar file does.</li>
+        <li data-from="docs/VISION.md"><strong>Agent-ready.</strong> AI agents write the file and use it as shared memory across sessions and tools.</li>
+        <li data-from="docs/VISION.md"><strong>Self-explaining.</strong> Every finding shows its evidence, and what is still missing.</li>
+        <li data-from="docs/VISION.md"><strong>Deterministic.</strong> The same file gives the same answer on any machine, on any day.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="band" id="run" aria-labelledby="run-title">
+    <div class="wrap two">
+      <div class="stack">
+        <h2 id="run-title">Check a trip yourself</h2>
+        <p>You can run the COMPILER from a copy of the repository. You need git and <a href="https://docs.astral.sh/uv/">uv</a>.</p>
+        <pre class="terminal" tabindex="0" aria-label="Commands to get Agloe and check two example trips">git clone https://github.com/ian-c-leonard/agloe.git
+cd agloe
+uv run agloe check examples/flight-home/works.json
+uv run agloe check examples/a-must/cannot-work.json</pre>
+      </div>
+      <div class="stack">
+        <h2 data-from="README.md">How it is built</h2>
+        <p data-from="README.md">Ian Leonard designs Agloe and makes its product decisions. AI agents do much of the building: Claude Code writes the code, and Codex reviews each step and each release. The <a href="https://github.com/ian-c-leonard/agloe/blob/main/docs/PRINCIPLES.md">principles</a> and <a href="https://github.com/ian-c-leonard/agloe/tree/main/docs/decisions">decisions</a> are public, so anyone can see why Agloe works the way it does.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="band night" id="name" aria-labelledby="name-title">
+    <div class="wrap name">
+      <div class="stack">
+        <h2 id="name-title" data-from="README.md">The name</h2>
+        <p data-from="README.md">Agloe was a town that appeared on maps of New York State but did not exist. Mapmakers invented it in the 1930s to catch anyone copying their maps. Agloe the compiler catches the parts of a plan that are not really there.</p>
+      </div>
+      <svg class="map" viewBox="0 0 560 380" role="img" aria-labelledby="map-title map-desc">
+        <title id="map-title">A sketch map with Agloe on it</title>
+        <desc id="map-desc">A road runs north from the town of Roscoe, near the Beaver Kill. Where a track crosses the road, a dashed circle marks Agloe, the town that was not there.</desc>
+        <rect class="frame" x="1.5" y="1.5" width="557" height="377" stroke-width="3"/>
+        <rect class="frame" x="10.5" y="10.5" width="539" height="359" stroke-width="1"/>
+        <clipPath id="inside-the-border"><rect x="11" y="11" width="538" height="358"/></clipPath>
+        <g clip-path="url(#inside-the-border)">
+          <path class="grid" d="M150 11v358M290 11v358M430 11v358M11 130h538M11 250h538"/>
+          <path id="beaver-kill" class="river" d="M0 354C96 322 198 336 268 318 338 300 340 280 384 224 428 168 470 92 560 52"/>
+          <path class="highway" d="M560 320C470 300 392 282 322 264S150 300 0 318"/>
+          <path class="road" d="M322 264C316 220 286 196 272 160S252 116 232 96 204 44 194 0"/>
+          <path class="track" d="M96 64 232 96l150 36"/>
+        </g>
+        <circle class="town" cx="322" cy="264" r="7.5"/>
+        <circle class="not-there" cx="232" cy="96" r="14"/>
+        <text class="place" x="338" y="252">Roscoe</text>
+        <text class="place big" x="256" y="91">Agloe</text>
+        <text class="water-name" dy="-12"><textPath href="#beaver-kill" startOffset="66%">Beaver Kill</textPath></text>
+        <text class="note" x="538" y="358" text-anchor="end">A sketch, not to scale</text>
+      </svg>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Agloe is open source under the <a href="https://github.com/ian-c-leonard/agloe/blob/main/LICENSE">Apache License 2.0</a>.</span>
+    <span>The trips in the examples are fictional. The typefaces are <a href="fonts/besley-OFL.txt">Besley</a>, <a href="fonts/libre-franklin-OFL.txt">Libre Franklin</a> and <a href="fonts/atkinson-hyperlegible-mono-OFL.txt">Atkinson Hyperlegible Mono</a>, each under the SIL Open Font License.</span>
+    <a href="https://github.com/ian-c-leonard/agloe">github.com/ian-c-leonard/agloe</a>
+  </div>
+</footer>
+
+</body>
+</html>
