@@ -461,10 +461,10 @@ def test_a_shortage_among_many_locked_persons_takes_few_searches(
     calls = 0
     solver = compiler.works
 
-    def counted(file: File, world: World) -> bool:
+    def counted(file: File, world: World, asked: object = None) -> bool:
         nonlocal calls
         calls += 1
-        return solver(file, world)
+        return solver(file, world, asked)  # pyright: ignore[reportArgumentType]
 
     monkeypatch.setattr(compiler, "works", counted)
     found = compiler.check(file)

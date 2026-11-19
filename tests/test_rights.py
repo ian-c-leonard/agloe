@@ -661,10 +661,10 @@ def test_a_file_that_says_nothing_about_rights_gets_its_report_at_once(
         calls += 1
         return answers.any_works(file, world)
 
-    def counted_solver(file: File, world: World) -> bool:
+    def counted_solver(file: File, world: World, asked: object = None) -> bool:
         nonlocal calls
         calls += 1
-        return solver(file, world)
+        return solver(file, world, asked)  # pyright: ignore[reportArgumentType]
 
     found = answers.check(file, works=counted)
     assert asked(found) == [[free(name) for name in names]]
