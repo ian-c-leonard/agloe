@@ -243,6 +243,12 @@ class TripEnd(TypedDict):
     trip_ends_at: Time
 
 
+class Cap(TypedDict):
+    id: Id
+    budget: Id
+    spend_at_most: Money
+
+
 class Lock(TypedDict):
     id: Id
     lock: Id
@@ -273,4 +279,4 @@ class File(TypedDict):
         | OfferFact
         | CompleteRights
     ]
-    decisions: list[Lock | TripStart | TripEnd]
+    decisions: list[Lock | TripStart | TripEnd | Cap]

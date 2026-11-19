@@ -22,6 +22,7 @@ from agloe.answers import Answer, Cover, Missing, Report
 from agloe.file import (
     Booking,
     Budget,
+    Cap,
     Complete,
     CompleteFor,
     CompleteRights,
@@ -723,6 +724,8 @@ def _record(file: File, clock: _Clock, record: str) -> str:
         else:
             ways = f"every way straight from {places[found.origin]} to {places[found.destination]}"
         return f"{ways} that leaves between {span} is listed"
+    if isinstance(found, Cap):
+        return f"the TRIP spends at most {found.limit} from {_names(file.budgets)[found.budget]}"
     if isinstance(found, TripStart):
         return f"the TRIP starts at {clock.moment(found.at)}"
     if isinstance(found, TripEnd):

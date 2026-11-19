@@ -65,6 +65,12 @@ class Money:
     def __str__(self) -> str:
         return f"{self.amount} {self.currency}"
 
+    @property
+    def units(self) -> int:
+        """The amount in whole ten-thousandths. A FILE states no finer amount."""
+        _, digits, exponent = self.amount.as_tuple()
+        return int("".join(str(digit) for digit in digits)) * 10 ** (4 + int(exponent))
+
 
 @dataclass(frozen=True)
 class Budget:
@@ -226,6 +232,18 @@ class TripEnd:
 
 
 @dataclass(frozen=True)
+class Cap:
+    """A DECISION: the TRIP spends at most this much from a BUDGET, in the currency of the amount.
+
+    The cap is for the whole TRIP, with what is already paid.
+    """
+
+    id: str
+    budget: str
+    limit: Money
+
+
+@dataclass(frozen=True)
 class StartsFrom:
     """A FACT: where a PERSON starts from. The PERSON's path begins at this PLACE."""
 
@@ -309,7 +327,7 @@ type Fact = (
     | Offer
     | CompleteRights
 )
-type Decision = Lock | TripStart | TripEnd
+type Decision = Lock | TripStart | TripEnd | Cap
 
 
 @dataclass(frozen=True)
@@ -418,6 +436,49 @@ class File:
                 for currency in budget.currencies:
                     first.setdefault((person, currency), budget)
         return first
+
+    def payers(self, person: str, currency: str) -> tuple[Budget, ...]:
+        """The BUDGETs that list this PERSON and hold this currency, in the FILE's order."""
+        return tuple(
+            budget
+            for budget in self.budgets
+            if person in budget.persons and currency in budget.currencies
+        )
+
+    @cached_property
+    def caps(self) -> dict[tuple[str, str], Cap]:
+        """The cap on each BUDGET and currency that has one."""
+        return {
+            (each.budget, each.limit.currency): each
+            for each in self.decisions
+            if isinstance(each, Cap)
+        }
+
+    def bookings(self, option: str) -> tuple[Booking, ...]:
+        """The BOOKINGs for this OPTION, in the FILE's order."""
+        return self._bookings_for.get(option, ())
+
+    @cached_property
+    def _bookings_for(self) -> dict[str, tuple[Booking, ...]]:
+        found: dict[str, tuple[Booking, ...]] = {}
+        for fact in self.facts:
+            if isinstance(fact, Booking):
+                found[fact.option] = (*found.get(fact.option, ()), fact)
+        return found
+
+    def charge_is_open(self, booking: Booking) -> bool:
+        """Whether a cap could turn on what this BOOKING charged, and the FILE does not say.
+
+        That is a BOOKING with no stated payment, in a FILE with a cap. It is also a payment
+        above nothing that names no BUDGET, in a currency that some cap is in.
+        """
+        if not self.caps:
+            return False
+        if booking.paid is None:
+            return True
+        money = booking.paid.money
+        capped = any(currency == money.currency for _, currency in self.caps)
+        return bool(money.amount) and booking.paid.budget is None and capped
 
     def offers(self, option: str) -> tuple[Offer, ...]:
         """The OFFERs for this OPTION, in the FILE's order."""
@@ -941,6 +1002,7 @@ def load(document: object) -> File:
                 problems.append(f"{at}: {said}")
 
     decisions: list[Decision] = []
+    capped: set[tuple[str, str]] = set()
     for index, decision in enumerate(raw["decisions"]):
         where = f"/decisions/{index}"
         claim(where, decision["id"])
@@ -949,6 +1011,20 @@ def load(document: object) -> File:
             for person in decision["persons"]:
                 known(where, person, "PERSON", person_ids)
             decisions.append(Lock(decision["id"], decision["lock"], tuple(decision["persons"])))
+            continue
+        if "spend_at_most" in decision:
+            source = decision["budget"]
+            most = decision["spend_at_most"]
+            limit = Money(Decimal(most["amount"]), most["currency"])
+            if known(where, source, "BUDGET", budget_ids):
+                if limit.currency not in held[source]:
+                    problems.append(f"{where}: {source} holds no {limit.currency}")
+                if (source, limit.currency) in capped:
+                    problems.append(
+                        f"{where}: another DECISION already caps {source} in {limit.currency}"
+                    )
+                capped.add((source, limit.currency))
+            decisions.append(Cap(decision["id"], source, limit))
             continue
         if "trip_starts_at" in decision:
             kind, at = TripStart, when(where, decision["trip_starts_at"])

@@ -46,7 +46,8 @@
         "oneOf": [
           { "$ref": "#/$defs/lock" },
           { "$ref": "#/$defs/trip_start" },
-          { "$ref": "#/$defs/trip_end" }
+          { "$ref": "#/$defs/trip_end" },
+          { "$ref": "#/$defs/cap" }
         ]
       }
     }
@@ -546,6 +547,18 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "trip_ends_at": { "$ref": "#/$defs/time" }
+      }
+    },
+    "cap": {
+      "title": "Cap",
+      "description": "A DECISION: a cap on what the TRIP spends from one BUDGET in one currency, with what is already paid.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "budget", "spend_at_most"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "budget": { "$ref": "#/$defs/id" },
+        "spend_at_most": { "$ref": "#/$defs/money" }
       }
     },
     "lock": {

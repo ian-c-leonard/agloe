@@ -187,6 +187,13 @@ def budget(id: str, *persons: str, holds: Sequence[str] = ("USD",)) -> Document:
     return {"id": id, "name": id, "persons": list(persons), "currencies": list(holds)}
 
 
+def cap(pot: str, most: str, id: str | None = None) -> Document:
+    """A DECISION: the TRIP spends at most this much from a BUDGET, such as "50.00 USD"."""
+    amount, currency = most.split()
+    limit = {"amount": amount, "currency": currency}
+    return {"id": id or f"{pot}-cap", "budget": pot, "spend_at_most": limit}
+
+
 def every_right(option: str, *offers: str) -> Document:
     """A FACT that the rights to an OPTION are COMPLETE. It names the OFFERs that are still open."""
     whole: Document = {"rights_to": option}
