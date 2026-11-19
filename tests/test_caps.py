@@ -8,13 +8,14 @@ from random import Random
 
 import pytest
 
-from agloe import compiler, report
+from agloe import answers, compiler, report
 from agloe.answers import Answer, CapRow, Cover, Plan
-from agloe.file import Booking, Cap, File, FileError, Money, Offer, Payment
+from agloe.file import Booking, Cap, File, FileError, Money, Offer
 from agloe.reference import (
     Broken,
     Constraint,
     Remaining,
+    Routes,
     Step,
     Unknown,
     broken,
@@ -28,6 +29,7 @@ from tests.stories import (
     booking,
     budget,
     cap,
+    complete,
     cutoff,
     every,
     every_right,
@@ -41,8 +43,11 @@ from tests.stories import (
     satisfies,
     seconds,
     starts_at,
+    starts_from,
     stays,
+    takes,
     trip,
+    way,
 )
 from tests.test_where_a_path_ends import checked, has_no_record_to_spare, ruled_out
 
@@ -890,8 +895,138 @@ def test_the_answers_hold_for_one_way_to_pay_in_every_possible_world() -> None:
     assert split > 0
 
 
-def test_a_file_with_a_cap_is_served_by_the_reference_checker() -> None:
-    paid = booking("tour", "alex", paid="32.00 USD", budget="trip-money")
-    file = a_tour(paid, offer("tour", 2, price="32.00 USD"), caps=[cap("trip-money", "200.00 USD")])
-    assert compiler.check(file) == checked(file)
-    assert isinstance(file.decisions[-1], Cap) and Payment
+def two_capped_visits(rng: Random) -> File:
+    """Two visits at one PLACE with BOOKINGs, OFFERs, two BUDGETs and their caps.
+
+    Nothing about time is unknown. Rights, prices, payers and charges can be.
+    """
+    persons = ["alex", "sam", "jo"]
+    options = [stays("tour", "dock"), stays("talk", "dock")]
+    pots = [
+        budget("a", *rng.sample(persons, rng.randrange(1, 4))),
+        budget("b", *rng.sample(persons, 2)),
+    ]
+    facts: list[Document] = []
+    decisions: list[Document] = []
+    for number, option in enumerate(("tour", "talk")):
+        facts += at(option, 10 + 2 * number)
+        if rng.random() < 0.8:
+            facts.append(needs_right(option))
+        for count in range(rng.randrange(0, 3)):
+            paid = rng.choice([None, "0 USD", "1 USD", "2 USD"])
+            source = rng.choice([None, "a", "b"]) if paid else None
+            covered = rng.sample(persons, rng.randrange(1, 3))
+            ticket = f"{option}-ticket-{count}"
+            facts.append(booking(option, *covered, id=ticket, paid=paid, budget=source))
+        offers = [f"{option}-offer-{count}" for count in range(rng.randrange(0, 3))]
+        prices = ["0 USD", "1 USD", "2 USD", None]
+        facts += [
+            offer(option, rng.choice([1, 2]), id=name, price=rng.choice(prices)) for name in offers
+        ]
+        if rng.random() < 0.6:
+            facts.append(every_right(option, *offers))
+        if rng.random() < 0.8:
+            decisions.append(lock(option, *rng.sample(persons, rng.randrange(1, 4))))
+    decisions += [
+        cap(pot, f"{rng.randrange(0, 5)} USD") for pot in ("a", "b") if rng.random() < 0.8
+    ]
+    return trip(persons, ["dock"], options, facts, decisions, tickets=True, budgets=pots)
+
+
+def test_the_solver_gives_the_reference_checkers_report_for_trips_with_caps() -> None:
+    """With the solver's own search for every part of it, on random trips with two visits."""
+    rng = Random(4848)
+    seen: set[Answer] = set()
+    capped = with_plans = 0
+    for _ in range(250):
+        file = two_capped_visits(rng)
+        found = answers.check(file, compiler.shown, compiler.works, compiler.stuck)
+        assert found == answers.check(file)
+        seen.add(found.answer)
+        capped += bool(file.caps)
+        with_plans += bool(found.plans)
+    assert seen == set(Answer)
+    assert capped > 150
+    assert with_plans > 30
+
+
+def test_amounts_too_large_for_the_solver_go_to_the_reference_checker() -> None:
+    """A cap, and six hundred places at the largest price a FILE can state."""
+    most = "999999999999.9999 USD"
+    persons = [f"p{number}" for number in range(3)]
+    places = [offer("tour", 1, id=f"offer-{number}", price=most) for number in range(600)]
+    file = a_tour(*places, locked=["p0"], caps=[cap("trip-money", most)], persons=persons)
+    with pytest.raises(compiler.DoesNotFit):
+        compiler.works(file, worst_case(file))
+    found = compiler.check(file)
+    assert found == answers.check(file)
+    assert found.answer is Answer.FEASIBLE
+
+
+def test_bookings_that_pass_a_cap_are_found_before_any_route_is_built() -> None:
+    """Twenty-one PLACEs with COMPLETE travel at each, and one BOOKING that paid too much."""
+    places = ["home", "stop", *(f"p{number}" for number in range(21))]
+    facts = [starts_from("sam", "home"), needs_right("ride")]
+    facts.append(booking("ride", "sam", paid="2 USD", budget="money"))
+    for number, place in enumerate(places):
+        for whole in (complete(place, None), complete(None, place)):
+            facts.append({**whole, "id": f"{whole['id']}-{number}-{len(facts)}"})
+    options = [moves("ride", "stop", "home")]
+    file = trip(["sam"], places, options, facts, [cap("money", "1 USD")], tickets=True)
+    found = compiler.check(file)
+    assert found.answer is Answer.INFEASIBLE
+    assert found.conflict == ("ride-booking", "money-cap")
+
+
+def a_ride_nobody_needs(legs: int, *decisions: Document, dead_end: int = 0) -> File:
+    """Sam has a visit where he starts. A ride leaves from a PLACE that is some legs away.
+
+    Two WAYs make each leg, and the one listed second is the quicker, so a route can take
+    either. ``dead_end`` adds a chain of that many legs that leads nowhere.
+    """
+    places = [f"p{number}" for number in range(legs + 2)]
+    ways = [way(f"w{n}-{k}", f"p{n}", f"p{n + 1}") for n in range(legs) for k in range(2)]
+    places += [f"d{number}" for number in range(dead_end)]
+    chain = ["p0", *(f"d{number}" for number in range(dead_end))]
+    ways += [way(f"x{n}-{k}", chain[n], chain[n + 1]) for n in range(dead_end) for k in range(2)]
+    options = [stays("visit", "p0"), moves("ride", f"p{legs}", f"p{legs + 1}")]
+    facts = [*at("visit", 9), needs_right("visit"), offer("visit", 1, price="1 USD")]
+    facts += [*at("ride", 20), needs_right("ride"), offer("ride", 1, price="1 USD")]
+    facts.append(starts_from("sam", "p0"))
+    facts += [takes(each["id"], "PT1M" if each["id"].endswith("1") else "PT2M") for each in ways]
+    locked = [lock("visit", "sam"), *decisions]
+    return trip(["sam"], places, options, facts, locked, ways=ways, tickets=True)
+
+
+def test_a_trip_with_a_cap_and_too_many_routes_goes_to_the_reference_checker() -> None:
+    """The ride starts thirty legs away, so more than a thousand million routes lead to it."""
+    file = a_ride_nobody_needs(30, cap("money", "2 USD"))
+    with pytest.raises(compiler.DoesNotFit):
+        compiler.shown(file, worst_case(file))
+    found = compiler.check(file)
+    assert found == answers.check(file)
+    assert [step.option for step in found.itinerary] == ["visit"]
+
+
+def test_a_chain_that_leads_nowhere_costs_a_trip_with_a_cap_nothing() -> None:
+    """One leg leads to the ride. A chain of sixty-three legs beside it leads nowhere."""
+    file = a_ride_nobody_needs(1, cap("money", "2 USD"), dead_end=63)
+    found = answers.check(file, compiler.shown, compiler.works, compiler.stuck)
+    assert found == answers.check(file)
+    assert [step.option for step in found.itinerary] == ["visit"]
+
+
+def test_a_trip_with_no_cap_keeps_the_solver_however_many_routes_it_has() -> None:
+    """Seventeen legs of two WAYs take more steps than a TRIP with a cap is allowed.
+
+    The solver lists the routes of a TRIP with no cap however long that takes, as it always
+    has: the reference checker is not known to be quicker there.
+    """
+    file = a_ride_nobody_needs(17)
+    routes = Routes(file, worst_case(file))
+    assert len(routes.between("p0", "p17")) == 2**17
+    capped = a_ride_nobody_needs(17, cap("money", "2 USD"))
+    with pytest.raises(compiler.DoesNotFit):
+        compiler.shown(capped, worst_case(capped))
+    search = compiler._Search(file, worst_case(file))  # pyright: ignore[reportPrivateUsage]
+    assert len(search.known.between("p0", "p17")) == 2**17

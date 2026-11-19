@@ -678,13 +678,52 @@ def _rights(file: File, world: World, taking_part: Mapping[str, tuple[str, ...]]
             out.append(Broken(Constraint.RIGHT, option, left_out[free:]))
         if left_out[:free]:
             out.append(Broken(Constraint.PAID, option, left_out[:free]))
-    for key, cap in file.caps.items():
-        charged = world.spent.get(key, 0)
-        if charged is None or charged > cap.limit.units:
-            out.append(Broken(Constraint.CAP, None, (), cap=cap.id))
+    out += [
+        Broken(Constraint.CAP, None, (), cap=cap) for cap in passed_by_the_bookings(file, world)
+    ]
     if file.caps and not out and way_to_pay(file, world, taking_part) is None:
         out.append(Broken(Constraint.CAP, None, ()))
     return out
+
+
+def passed_by_the_bookings(file: File, world: World) -> list[str]:
+    """Each cap that what the BOOKINGs charged passes in this world, or might, by itself."""
+    return [
+        cap.id
+        for key, cap in file.caps.items()
+        if (charged := world.spent.get(key, 0)) is None or charged > cap.limit.units
+    ]
+
+
+type Pair = tuple[str, str | None, tuple[str, str] | None, int]
+
+
+def pairs_to_pay(file: File, world: World, option: str, person: str) -> list[Pair]:
+    """Each pair of an OFFER and a BUDGET this PERSON can take for a place, in the FILE's order.
+
+    A pair holds the OFFER, the BUDGET, the cap that counts the purchase by its BUDGET and
+    currency, and the price in ten-thousandths. The BUDGET is None for a place that costs
+    nothing, and where money from outside the FILE pays: no cap counts those. BUDGETs with no
+    cap in the currency of the price are alike, so only the first of them makes a pair.
+    """
+    able: list[Pair] = []
+    for offer in file.offers(option):
+        if (offer.id, person) not in world.payable:
+            continue
+        price = offer.price
+        sources = () if price is None or not price.amount else file.payers(person, price.currency)
+        if price is None or not sources:
+            able.append((offer.id, None, None, 0))
+            continue
+        free_to_spend = False
+        for budget in sources:
+            key = (budget.id, price.currency)
+            if key in file.caps:
+                able.append((offer.id, budget.id, key, price.units))
+            elif not free_to_spend:
+                able.append((offer.id, budget.id, None, price.units))
+                free_to_spend = True
+    return able
 
 
 def way_to_pay(
@@ -730,31 +769,7 @@ def way_to_pay(
         if charged is None or charged > cap.limit.units:
             return None
         room[key] = cap.limit.units - charged
-    # Each pair a purchase can take: the OFFER, the BUDGET, and what it draws on which cap.
-    pairs: list[list[tuple[str, str | None, tuple[str, str] | None, int]]] = []
-    for option, person in buyers:
-        able: list[tuple[str, str | None, tuple[str, str] | None, int]] = []
-        for offer in file.offers(option):
-            if (offer.id, person) not in world.payable:
-                continue
-            price = offer.price
-            sources = (
-                () if price is None or not price.amount else file.payers(person, price.currency)
-            )
-            if price is None or not sources:
-                # It costs nothing, or money from outside the FILE pays: no cap counts it.
-                able.append((offer.id, None, None, 0))
-                continue
-            free_to_spend = False
-            for budget in sources:
-                key = (budget.id, price.currency)
-                if key in room:
-                    able.append((offer.id, budget.id, key, price.units))
-                elif not free_to_spend:
-                    # BUDGETs with no cap in this currency are alike: the first one pays.
-                    able.append((offer.id, budget.id, None, price.units))
-                    free_to_spend = True
-        pairs.append(able)
+    pairs = [pairs_to_pay(file, world, option, person) for option, person in buyers]
     left = {offer.id: offer.places for option in taking_part for offer in file.offers(option)}
     picked: list[int] = []
     start = 0
@@ -1348,13 +1363,25 @@ def _orders(
 type Route = tuple[Leg, ...]
 
 
+class TooManyRoutes(Exception):
+    """Looking for the routes between two PLACEs takes more steps than the caller allows."""
+
+
 def routes(
-    file: File, world: World, here: str, there: str, last: bool = False, thin: bool = True
+    file: File,
+    world: World,
+    here: str,
+    there: str,
+    last: bool = False,
+    thin: bool = True,
+    at_most: int | None = None,
 ) -> list[Route]:
     """Every route from one PLACE to another by WAYs alone that is worth trying, shortest first.
 
-    ``last`` says that the PERSON does nothing after the route. Four kinds of route are left
-    out, because another route is never worse.
+    ``last`` says that the PERSON does nothing after the route. ``at_most`` is how many steps
+    the caller allows the search: one each time it looks for the next WAY from a PLACE,
+    whether or not it finds one. Past that, this raises ``TooManyRoutes``. Four kinds of
+    route are left out, because another route is never worse.
 
     - A route that passes through a PLACE twice. A PERSON who came back to a PLACE could have
       waited there instead: every WAY they take after that starts at the same time either way,
@@ -1452,7 +1479,11 @@ def routes(
     begun: list[tuple[tuple[str, ...], Route, Iterator[tuple[str | None, str]]]] = [
         ((here,), (), onward((here,)))
     ]
+    steps = 0
     while begun:
+        steps += 1
+        if at_most is not None and steps > at_most:
+            raise TooManyRoutes
         passed, legs, ahead = begun[-1]
         step = next(ahead, None)
         if step is None:
@@ -1474,12 +1505,15 @@ def routes(
 class Routes:
     """The routes between the PLACEs of one world, with each pair worked out once."""
 
-    def __init__(self, file: File, world: World, thin: bool = True) -> None:
-        """``thin`` leaves out a route with a WAY that an earlier WAY is never slower than.
+    def __init__(
+        self, file: File, world: World, thin: bool = True, at_most: int | None = None
+    ) -> None:
+        """``thin`` leaves out a route with a WAY that an earlier WAY takes no longer than.
 
-        That is right where each WAY takes as long as this world says.
+        That is right where each WAY takes as long as this world says. ``at_most`` is how
+        many steps the search for the routes between two PLACEs may take.
         """
-        self._file, self._world, self._thin = file, world, thin
+        self._file, self._world, self._thin, self._at_most = file, world, thin, at_most
         self._found: dict[tuple[str, str, bool], list[Route]] = {}
 
     def between(self, here: str, there: str, last: bool = False) -> list[Route]:
@@ -1489,7 +1523,7 @@ class Routes:
         """
         if (here, there, last) not in self._found:
             self._found[here, there, last] = routes(
-                self._file, self._world, here, there, last, self._thin
+                self._file, self._world, here, there, last, self._thin, self._at_most
             )
         return self._found[here, there, last]
 

@@ -68,14 +68,8 @@ FILES = sorted(
 
 @pytest.mark.parametrize("path", FILES, ids=lambda path: f"{path.parent.name}/{path.stem}")
 def test_the_compiler_gives_the_reference_checkers_report(path: Path) -> None:
-    """With the solver's own search for every part of it: no example is too big for the solver.
-
-    A FILE with a cap is the exception: the COMPILER hands it to the reference checker.
-    """
+    """With the solver's own search for every part of it: no example is too big for the solver."""
     file = read(path)
-    if file.caps:
-        assert compiler.check(file) == answers.check(file)
-        return
     found = answers.check(file, compiler.shown, compiler.works, compiler.stuck)
     assert found == answers.check(file)
 

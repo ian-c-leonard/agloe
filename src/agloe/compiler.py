@@ -56,25 +56,29 @@ type _Reached = list[tuple[cp_model.IntVar, reference.Route, _Amount | None]]
 
 
 class DoesNotFit(Exception):
-    """The numbers of a TRIP's model do not fit in the 64 bits the solver counts with."""
+    """A TRIP does not fit the solver, and the reference checker gives its answer.
+
+    The numbers of its model do not fit in the 64 bits the solver counts with. Or the TRIP has
+    a cap, and listing the routes between two of its PLACEs takes too long: the reference
+    checker lists only the routes a plan needs, and it is the one that answers then.
+    """
+
+
+_MOST_STEPS = 200_000  # to list the routes between two PLACEs of a TRIP with a cap
 
 
 def check(file: File) -> Report:
-    """The answer for this TRIP, with its evidence. The same Report as the reference checker's.
-
-    A FILE with a cap goes to the reference checker: the solver does not yet share out what
-    each BUDGET can still spend.
-    """
-    if file.caps:
-        return answers.check(file)
+    """The answer for this TRIP, with its evidence. The same Report as the reference checker's."""
     try:
         return answers.check(file, shown=shown, works=works, stuck=stuck)
-    except DoesNotFit:
+    except DoesNotFit, reference.TooManyRoutes:
         return answers.check(file)
 
 
 def shown(file: File, world: World) -> Itinerary | None:
     """The ITINERARY that "Which ITINERARY is shown" puts first in this world, or None."""
+    if reference.passed_by_the_bookings(file, world):
+        return None
     search = _Search(file, world)
     choice = search.first_in_file_order()
     return None if choice is None else _checked(file, world, choice, search.known)
@@ -82,6 +86,8 @@ def shown(file: File, world: World) -> Itinerary | None:
 
 def works(file: File, world: World) -> bool:
     """Whether any ITINERARY works in this world."""
+    if reference.passed_by_the_bookings(file, world):
+        return False
     choice = _Search(file, world).any()
     if choice is not None:
         _checked(file, world, choice)
@@ -103,6 +109,17 @@ def stuck(remaining: Remaining) -> frozenset[str] | None:
     """
     file = remaining.file
     world = reference.best_case(file)
+    for key, cap in file.caps.items():
+        # What the BOOKINGs state already passes this cap: no plan and no route is needed.
+        charging = [
+            fact
+            for fact in file.facts
+            if isinstance(fact, Booking)
+            and fact.paid is not None
+            and (fact.paid.budget, fact.paid.money.currency) == key
+        ]
+        if sum(fact.paid.money.units for fact in charging if fact.paid) > cap.limit.units:
+            return frozenset({cap.id, *(fact.id for fact in charging)})
     search = _Search(file, world, remaining)
     records = [record.id for record in (*file.facts, *file.wants, *file.decisions)]
     choice, needed = search.clash(records)
@@ -231,7 +248,8 @@ class _Search:
         self.routes: list[dict[tuple[int, int], _Taken]] = []
         self.legs: list[tuple[cp_model.IntVar, int]] = []  # a route taken, and how many WAYs it has
         # A FACT that can be switched off can change how long a WAY takes.
-        self.known = reference.Routes(file, world, thin=not self.switch)
+        most = _MOST_STEPS if file.caps else None
+        self.known = reference.Routes(file, world, thin=not self.switch, at_most=most)
         self._worth_trying: dict[tuple[str, str, bool], list[reference.Route]] = {}
         for number in range(len(file.persons)):
             self._lay_out_path(number)
@@ -368,6 +386,10 @@ class _Search:
         """
         file, world = self.file, self.world
         people = list(enumerate(file.persons))
+        # What the purchases draw on each cap: the price and the choice that draws it.
+        self.drawn: dict[tuple[str, str], list[tuple[int, cp_model.IntVar]]] = {
+            key: [] for key in file.caps
+        }
         if not self.switch:
             for index, option in enumerate(file.options):
                 if option.id in world.needs_right:
@@ -375,6 +397,7 @@ class _Search:
                         n for n, person in people if (option.id, person.id) not in world.rights
                     ]
                     self._share_out(index, without)
+            self._hold_to_the_caps()
             return
         needs = {fact.option: fact for fact in file.facts if isinstance(fact, NeedsRight)}
         for index, option in enumerate(file.options):
@@ -391,6 +414,50 @@ class _Search:
             closed = [self.switch[needed.id], self.switch[whole.id], *listed]
             without = [n for n, person in people if file.booking(option.id, person.id) is None]
             self._share_out(index, without, closed)
+        self._hold_to_the_caps()
+
+    def _hold_to_the_caps(self) -> None:
+        """No cap is passed: what the BOOKINGs charged, plus what is bought, is within it.
+
+        In one world, ``World.spent`` says what the BOOKINGs might have charged to each cap.
+        Where records can be switched off, the best case decides: a BOOKING charged what it
+        states to the BUDGET it names while it is switched on, and nothing otherwise. A cap
+        limits nothing while it is switched off.
+
+        The amounts are whole ten-thousandths, and the largest a FILE can state takes 54 bits.
+        So a sum of many can pass what the solver counts with, and then the TRIP does not fit.
+        """
+        model, file = self.model, self.file
+        for key, cap in file.caps.items():
+            limit = cap.limit.units
+            terms = list(self.drawn[key])
+            if self.switch:
+                terms += [
+                    (fact.paid.money.units, self.switch[fact.id])
+                    for fact in file.facts
+                    if isinstance(fact, Booking)
+                    and fact.paid is not None
+                    and (fact.paid.budget, fact.paid.money.currency) == key
+                ]
+                room = limit
+            else:
+                charged = self.world.spent.get(key, 0)
+                room = -1 if charged is None else limit - charged
+                # A place that costs more than the cap has left is never paid from it.
+                for units, pick in terms:
+                    if units > room:
+                        model.add(pick == 0)
+                terms = [(units, pick) for units, pick in terms if units <= room]
+            if limit + sum(units for units, _ in terms) >= 2**62:
+                raise DoesNotFit("the amounts of this TRIP are too large to add up")
+            total = sum(units * pick for units, pick in terms)
+            if room < 0:
+                # The BOOKINGs alone pass the cap, or might: nothing works in this world.
+                model.add_bool_or([])
+            elif self.switch:
+                _when(model.add(total <= room), self.switch[cap.id])
+            elif terms:
+                model.add(total <= room)
 
     def _share_out(
         self, index: int, without: Sequence[int], given: Sequence[cp_model.IntVar] = ()
@@ -403,11 +470,40 @@ class _Search:
         A PERSON who is ruled out of the OPTION needs no place. A PERSON who can pay for no
         place stays out, and an OFFER that none of them can pay for is left out. Where each of
         the others can pay for a place of every other OFFER, the places are alike, and it is
-        enough to count them. Otherwise the model chooses an OFFER for each PERSON.
+        enough to count them. Otherwise the model chooses an OFFER for each PERSON. Where a
+        cap counts a purchase that one of them could make, it chooses the BUDGET too: each
+        takes one of the pairs that ``reference.pairs_to_pay`` gives.
         """
         model, world, option = self.model, self.world, self.file.options[index]
         people = self.file.persons
         without = [number for number in without if (number, index) not in self.left_out]
+        pairs = {
+            number: reference.pairs_to_pay(self.file, world, option.id, people[number].id)
+            for number in (without if self.file.caps else ())
+        }
+        if any(key is not None for able in pairs.values() for _, _, key, _ in able):
+            # A cap counts some of these purchases, so the model chooses a BUDGET as well.
+            filled: dict[str, list[cp_model.IntVar]] = {}
+            for number in without:
+                takes = self.takes[number][index]
+                picks: list[cp_model.IntVar] = []
+                for offer, budget, key, units in pairs[number]:
+                    name = f"{people[number].id} takes a place of {offer} paid from {budget}"
+                    pick = model.new_bool_var(name)
+                    picks.append(pick)
+                    filled.setdefault(offer, []).append(pick)
+                    if key is not None:
+                        self.drawn[key].append((units, pick))
+                if not picks and not given:
+                    self._rule_out(number, index)
+                    continue
+                has_a_place = model.add(sum(picks) >= takes)
+                if given:
+                    _when(has_a_place, *given)
+            for offer in self.file.offers(option.id):
+                if len(filled.get(offer.id, ())) > offer.places:
+                    model.add(sum(filled[offer.id]) <= offer.places)
+            return
         able = {
             number: [
                 offer
@@ -820,7 +916,10 @@ class _Search:
         a route matter, so the quickest of each length is enough.
         """
         if (here, there, last) not in self._worth_trying:
-            possible = self.known.between(here, there, last)
+            try:
+                possible = self.known.between(here, there, last)
+            except reference.TooManyRoutes:
+                raise DoesNotFit(f"the routes from {here} to {there} take too long") from None
             if not self.facts and not self.switch:
                 possible = _quickest(self.world, possible)
             self._worth_trying[here, there, last] = possible
