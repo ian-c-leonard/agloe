@@ -42,6 +42,7 @@ from tests.stories import (
     trip,
 )
 from tests.test_cross_check import any_choice, possible_world, random_trip, works_on_the_grid
+from tests.test_where_a_path_ends import the_solver_rules_out
 
 
 def at_seven(option: str, minutes: int = 60) -> list[Document]:
@@ -297,7 +298,7 @@ def test_a_conflict_is_exact_where_a_fact_about_a_want_held_both_ways_is_taken_o
         forgotten = Remaining(file).without("show-gives-deep-dish")
         assert len(list(best_cases(forgotten))) == 2
         assert cannot_work(forgotten)
-        assert compiler.stuck(forgotten) is not None
+        assert the_solver_rules_out(forgotten)
 
 
 def test_every_conflict_is_enough_and_has_no_record_to_spare() -> None:

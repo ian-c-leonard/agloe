@@ -152,30 +152,16 @@ class Report:
 
 type Shown = Callable[[File, World], Itinerary | None]
 type Works = Callable[[File, World], bool]
-type Stuck = Callable[[Remaining], frozenset[str] | None]
 
 
-def check(
-    file: File, shown: Shown = first_shown, works: Works = any_works, stuck: Stuck | None = None
-) -> Report:
+def check(file: File, shown: Shown = first_shown, works: Works = any_works) -> Report:
     """The answer for this TRIP, with its evidence.
 
     ``shown`` and ``works`` are how ITINERARIES are found. By default the reference checker tries
     every choice. A solver can stand in for that search. The answers and the evidence are worked
-    out here in either case.
-
-    ``stuck`` names FACTs and DECISIONs that rule out every ITINERARY by themselves, or None when
-    one works in the best case. The set need not be small. A search that can name a small one
-    saves most of the work of finding the conflict. Without it, every record counts.
+    out here in either case, from what the search says: the ITINERARY that the rule puts first
+    in a world, and whether any ITINERARY works in a world.
     """
-    if stuck is None:
-
-        def every_record(given: Remaining) -> frozenset[str] | None:
-            if any(works(given.file, world) for world in best_cases(given)):
-                return None
-            return frozenset(_records(given.file))
-
-        stuck = every_record
     worst = worst_case(file)
     plain = shown(file, worst)
     if plain is not None:
@@ -205,9 +191,9 @@ def check(
         return Report(
             Answer.FEASIBLE, chosen, tuple(relies_on), robust, at_worst, rights, caps=caps
         )
-    enough = stuck(Remaining(file))
-    if enough is not None:
-        conflict, given_budgets = _conflict(file, stuck, enough)
+    found = _conflict(file, works)
+    if found is not None:
+        conflict, given_budgets = found
         return Report(Answer.INFEASIBLE, conflict=conflict, given_budgets=given_budgets)
     missing = _missing(file, works, shown)
     plans = tuple(_plan(file, some, shown) for some in missing) if file.caps else ()
@@ -285,15 +271,24 @@ def _settles(file: File, itinerary: Itinerary, whole: CompleteFor) -> bool:
     )
 
 
-def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[tuple[str, ...], bool]:
-    """FACTs and DECISIONs that make the TRIP INFEASIBLE by themselves; none can be removed.
+def _conflict(file: File, works: Works) -> tuple[tuple[str, ...], bool] | None:
+    """FACTs, WANTs and DECISIONs that make the TRIP INFEASIBLE by themselves, or None.
 
-    It goes through the records in the FILE's order and removes each one that the TRIP stays
-    INFEASIBLE without. ``enough`` is a set of records known to make the TRIP INFEASIBLE by
-    themselves. A record outside it can go without another search: what is left still holds all
-    of ``enough``, and one more record never lets an ITINERARY work in the best case that did
-    not work without it. A FACT that is taken out is unknown, and the best case gives every
-    unknown its most helpful value.
+    None says that an ITINERARY works in the best case, so the TRIP is not INFEASIBLE.
+    Otherwise no record can be removed from the set returned.
+
+    The search asks one question again and again: with these records taken out, does anything
+    work in a best case of what is left? A FACT that is taken out is unknown, and a best case
+    gives every unknown its most helpful value. So one more record never lets an ITINERARY
+    work in the best case that did not work without it.
+
+    The records are tried in the FILE's order, a block at a time. A block goes where the TRIP
+    stays INFEASIBLE without all of it. A block that cannot go is cut in two: its first half
+    is tried, and then its second half, against what is left by then. A block of one record
+    that cannot go stays. Where a whole block can go, each of its records could have gone one
+    after another, since what is left then still holds everything that is left without the
+    block. So the set that stays is the one that taking the records out one by one leaves,
+    and a FILE where a few records conflict needs few questions.
 
     The BUDGETs stay as the FILE lists them throughout. The last test takes them all out at
     once: then nobody knows who pays for anybody, and the best case has a BUDGET for each
@@ -302,18 +297,36 @@ def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[tuple[s
     test is made only where a record left is an OFFER with one. A conflict that holds a cap
     needs no test: the cap is about its BUDGET.
     """
-    kept = Remaining(file)
-    skipped = False
-    for record in _records(file):
-        without = kept.without(record)
-        if record not in enough:
-            kept, skipped = without, True
-            continue
-        smaller = stuck(without)
-        if smaller is not None:
-            kept, enough = without, smaller
-    if skipped and stuck(kept) is None:
-        raise AssertionError("records said to rule out every ITINERARY do not")
+
+    def ruled_out(given: Remaining) -> bool:
+        return not any(works(given.file, world) for world in best_cases(given))
+
+    def take_out(
+        kept: Remaining, block: Sequence[str], stays: bool = False
+    ) -> tuple[Remaining, bool]:
+        """What is left once each record of a block that can go is gone, and whether all went.
+
+        ``stays`` says that the block is already known not to go as a whole.
+        """
+        if not stays:
+            smaller = kept
+            for record in block:
+                smaller = smaller.without(record)
+            if ruled_out(smaller):
+                return smaller, True
+        if len(block) == 1:
+            return kept, False
+        half = len(block) // 2
+        kept, went = take_out(kept, block[:half])
+        # Where the first half went, the second cannot all go: the two together could not.
+        kept, _ = take_out(kept, block[half:], stays=went)
+        return kept, False
+
+    whole = Remaining(file)
+    if not ruled_out(whole):
+        return None
+    records = _records(file)
+    kept = take_out(whole, records)[0] if records else whole
     priced = any(
         isinstance(fact, Offer) and fact.price is not None and fact.price.amount
         for fact in kept.file.facts
@@ -322,7 +335,7 @@ def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[tuple[s
         # A cap names its BUDGET, so the conflict is about the BUDGETs as they are.
         return tuple(_records(kept.file)), True
     with_no_budget = replace(kept, file=replace(kept.file, budgets=()))
-    given_budgets = bool(priced and file.budgets) and stuck(with_no_budget) is None
+    given_budgets = bool(priced and file.budgets) and not ruled_out(with_no_budget)
     return tuple(_records(kept.file)), given_budgets
 
 

@@ -52,7 +52,12 @@ from tests.test_cross_check import (
     random_trip,
     works_on_the_grid,
 )
-from tests.test_where_a_path_ends import checked, has_no_record_to_spare, ruled_out
+from tests.test_where_a_path_ends import (
+    checked,
+    has_no_record_to_spare,
+    ruled_out,
+    the_solver_rules_out,
+)
 
 EVERYONE = ["alex", "sam", "jo"]
 TIMES = ("tour-time", "tour-length", "tour-cutoff")
@@ -381,13 +386,7 @@ def test_a_booking_that_is_taken_out_might_cover_anybody() -> None:
     assert left.open_to_all == {"tour"}
     assert left.might_cover() == {("tour", person) for person in EVERYONE}
     assert ruled_out(Remaining(file)) and not ruled_out(left)
-    assert compiler.stuck(left) is None
-    assert compiler.stuck(Remaining(file)) == {
-        "tour-needs-right",
-        "tour-booking",
-        "every-right-to-tour",
-        "lock-tour",
-    }
+    assert the_solver_rules_out(Remaining(file)) and not the_solver_rules_out(left)
 
 
 def test_complete_rights_do_not_settle_an_option_that_might_need_none() -> None:

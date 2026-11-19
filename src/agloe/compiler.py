@@ -17,7 +17,6 @@ search tries everything, so it is meant for small TRIPs.
 """
 
 from collections.abc import Sequence
-from dataclasses import replace
 from itertools import combinations
 from math import inf
 
@@ -68,7 +67,7 @@ def check(file: File) -> Report:
     if file.caps:
         return answers.check(file)
     try:
-        return answers.check(file, shown=shown, works=works, stuck=stuck)
+        return answers.check(file, shown=shown, works=works)
     except DoesNotFit:
         return answers.check(file)
 
@@ -86,48 +85,6 @@ def works(file: File, world: World) -> bool:
     if choice is not None:
         _checked(file, world, choice)
     return choice is not None
-
-
-def stuck(remaining: Remaining) -> frozenset[str] | None:
-    """FACTs, WANTs and DECISIONs that rule out every ITINERARY by themselves, or None.
-
-    The question is asked in the best case of what is left of a FILE. The set returned is small:
-    no record can be taken out of it. It need not be the conflict the report names, which is
-    found in the FILE's order. This search goes the other way, from the last record to the
-    first. That takes the DECISIONs out before the FACTs, and with fewer LOCKs to honor each
-    proof is quick.
-
-    Where something works, the solver has chosen a plan and a possible world for it: which
-    OPTIONs SATISFY which WANTs, where nobody knows. The reference checker then checks that
-    plan in that world.
-    """
-    file = remaining.file
-    world = reference.best_case(file)
-    search = _Search(file, world, remaining)
-    records = [record.id for record in (*file.facts, *file.wants, *file.decisions)]
-    choice, needed = search.clash(records)
-    if choice is not None:
-        does = search.turned_out
-        rights = world.rights | remaining.might_cover()
-        chosen = replace(world, satisfies=does, might_satisfy=does, rights=rights)
-        _checked(file, chosen, choice)
-        return None
-    while True:  # ask again with only the records the proof used, until it uses them all
-        choice, fewer = search.clash([record for record in records if record in needed])
-        if choice is not None:
-            raise AssertionError("records the solver's proof used do not rule out every choice")
-        if fewer == needed:
-            break
-        needed = fewer
-    kept = [record for record in records if record in needed]
-    for record in reversed(list(kept)):
-        if record in needed:
-            choice, fewer = search.clash([other for other in kept if other != record])
-            if choice is not None:
-                continue
-            needed = fewer
-        kept.remove(record)
-    return frozenset(kept)
 
 
 def _checked(
