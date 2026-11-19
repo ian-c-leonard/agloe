@@ -706,9 +706,9 @@ def test_the_search_that_tries_every_choice_is_asked_about_no_world_it_is_slow_i
     """Five optional stays with no stated start, and five PERSONs. Alex needs two of the stays.
 
     A world where four of the stays can start has a million choices of who takes part, and the
-    search that tries every choice goes through them all to find that none works. So the
-    search for missing FACTs asks only about the best case, the upper bound, and the sets it
-    tries.
+    search that tries every choice goes through them all to find that none works. So after
+    the one question about the best case, the search for missing FACTs asks only about the
+    upper bound and the sets it tries.
     """
     people = ["alex", "sam", "jo", "pat", "kim"]
     names = [f"stay-{number}" for number in range(5)]
@@ -726,5 +726,5 @@ def test_the_search_that_tries_every_choice_is_asked_about_no_world_it_is_slow_i
     found = answers.check(file, works=recorded)
     assert asked(found) == [[Unknown("start", "stay-0"), Unknown("start", "stay-1")]]
     can_start = [sum(terms.free_start for terms in world.terms.values()) for world in asked_about]
-    assert sorted(count for count in can_start if count > 2) == [5, 5]
+    assert sorted(count for count in can_start if count > 2) == [5]
     assert compiler.check(file) == found
