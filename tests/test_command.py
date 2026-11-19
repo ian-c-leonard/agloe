@@ -746,7 +746,10 @@ def test_an_end_in_another_year_shows_its_year() -> None:
 
 
 def test_no_two_records_are_shown_by_the_same_name() -> None:
-    """Two travelers are called Alex. A third is called "Alex (b)", as the second is shown."""
+    """Two travelers are called Alex. A third is called "Alex (b)", as the second is shown.
+
+    A name that ends like a name with its id is put in quotes, so the three stay apart.
+    """
     document = {
         "persons": [
             {"id": "a", "name": "Alex"},
@@ -762,7 +765,7 @@ def test_no_two_records_are_shown_by_the_same_name() -> None:
     }
     file = load(document)
     words = report.as_text(file, compiler.check(file)).splitlines()
-    assert words[3] == "  9:00 am to 9:30 am: call, Alex (a), Alex (b) and Alex (b) (c)"
+    assert words[3] == '  9:00 am to 9:30 am: call, Alex (a), Alex (b) and "Alex (b)"'
 
 
 def test_a_warning_falls_under_the_day_it_is_about() -> None:

@@ -10,6 +10,7 @@ What a plan would break at the longest durations is printed under the line of th
 about. So the words never have to describe which step they mean.
 """
 
+import re
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -44,6 +45,7 @@ from agloe.file import (
 )
 from agloe.reference import Broken, Constraint, Itinerary, Step
 
+_WITH_AN_ID = re.compile(r" \([a-z0-9]+(-[a-z0-9]+)*\)$")  # how a name ends when its id is shown
 _DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 _MONTHS = [
     "January",
@@ -584,8 +586,9 @@ def _names(records: Sequence[Person | Place | Option | Way | Want]) -> dict[str,
     A record whose name another record has shows its id too. If two would still show the same,
     every record shows its id: no two ids are the same.
 
-    A report joins names into lists: PERSONs with commas and "and", everything else with
-    commas and "or". A name that such a list could split in two is shown in quotes.
+    A name is shown in quotes where it could be taken for something else: one with a comma
+    or a quote mark, and one that ends like a name with its id. ``_listed`` does the same for
+    a name with the word that joins its list.
     """
     shared = Counter(record.name for record in records)
     shown = {
@@ -600,11 +603,13 @@ def _names(records: Sequence[Person | Place | Option | Way | Want]) -> dict[str,
 
 
 def _quoted(record: Person | Place | Option | Way | Want) -> str:
-    """The name of a record, in quotes where a list of such names could split it in two."""
-    name, joins = record.name, "and" if isinstance(record, Person) else "or"
-    if "," in name or '"' in name or joins in name.casefold().split():
-        return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
-    return name
+    """The name of a record, in quotes where it could be taken for something else."""
+    name = record.name
+    return _in_quotes(name) if "," in name or '"' in name or _WITH_AN_ID.search(name) else name
+
+
+def _in_quotes(name: str) -> str:
+    return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def _name(file: File, id: str | None) -> str:
@@ -624,7 +629,14 @@ def _people(file: File, persons: tuple[str, ...]) -> str:
 
 
 def _listed(names: Sequence[str], last: str = "and") -> str:
-    """Names joined as a sentence would: one, two and three."""
+    """Names joined as a sentence would: one, two and three.
+
+    A name that holds the joining word could be read as two names, so it is put in quotes.
+    """
+    names = [
+        _in_quotes(name) if last in name.casefold().split() and not name.startswith('"') else name
+        for name in names
+    ]
     if len(names) < 2:
         return "".join(names)
     return f"{', '.join(names[:-1])} {last} {names[-1]}"

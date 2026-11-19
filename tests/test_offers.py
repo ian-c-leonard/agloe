@@ -496,8 +496,48 @@ def test_a_name_that_a_list_could_split_in_two_is_shown_in_quotes() -> None:
         == '    ! Lee, "Gray, Lee" and Sam still have to buy a right to this, from tour-offer.'
     )
     assert words("Sam And Jo", "Lee", "Kim", "Pat").startswith('    ! "Sam And Jo", Lee and Kim')
+    with_an_id = words("Lee (person-1)", "Lee", "Kim", "Pat")
+    assert with_an_id.startswith('    ! "Lee (person-1)", Lee and Kim still have to buy')
+    assert words("Lee", "Lee", "Kim", "Pat").startswith(
+        "    ! Lee (person-0), Lee (person-1) and Kim"
+    )
     pair = words("Sam and Jo", 'the "Duke"', "Lee", "Kim")
     assert pair.startswith('    ! "Sam and Jo", "the \\"Duke\\"" and Lee still have to buy')
+
+
+def test_a_list_joined_with_and_shows_a_name_that_holds_and_in_quotes() -> None:
+    """One OPTION called River and Walk, or two called River and Walk: the words differ.
+
+    Calm is a must for Jo, the FILE states every OPTION that gives it, and Jo has a right to
+    none of them. So the conflict names the COMPLETE set, with its OPTIONs.
+    """
+
+    def record(*names: str) -> str:
+        ids = [f"option-{number}" for number in range(len(names))]
+        facts = [fact for id in ids for fact in at_ten(id)]
+        facts += [fact for id in ids for fact in (needs_right(id), every_right(id))]
+        facts += [satisfies(id, "calm") for id in ids]
+        document: Document = {
+            "persons": named("Jo"),
+            "places": [{"id": "dock", "name": "dock"}],
+            "options": [
+                {"id": id, "name": name, "place": "dock"}
+                for id, name in zip(ids, names, strict=True)
+            ],
+            "ways": [],
+            "wants": [must("calm", "person-0")],
+            "facts": [*facts, {"id": "every-calm", "complete": {"satisfies": "calm"}}],
+            "decisions": [],
+        }
+        file = load(document)
+        found = checked(file)
+        assert found.answer is Answer.INFEASIBLE
+        lines = report.as_text(file, found).splitlines()
+        return next(line for line in lines if line.startswith("  every-calm: "))
+
+    one = "  every-calm: the FILE states every OPTION that SATISFIES calm: "
+    assert record("River and Walk") == one + '"River and Walk"'
+    assert record("River", "Walk") == one + "River and Walk"
 
 
 def test_a_booking_that_covers_more_persons_than_the_plan_needs_says_whom_it_is_used_for() -> None:
