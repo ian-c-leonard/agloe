@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Sequence
+from decimal import Decimal
 from itertools import combinations
 from pathlib import Path
 from random import Random
@@ -11,7 +12,7 @@ import pytest
 
 from agloe import answers, compiler, report
 from agloe.answers import Answer, Cover
-from agloe.file import CompleteRights, File, FileError, Offer, load, read
+from agloe.file import CompleteRights, File, FileError, Money, Offer, load, read
 from agloe.reference import (
     Broken,
     Constraint,
@@ -31,6 +32,7 @@ from agloe.reference import (
 from tests.stories import (
     Document,
     booking,
+    budget,
     cutoff,
     every_right,
     lasts,
@@ -67,6 +69,14 @@ def a_boat_tour(*more: Document, locked: Sequence[str] = ("alex", "sam")) -> Fil
     return trip(EVERYONE, ["dock"], [stays("tour", "dock")], facts, decisions, tickets=True)
 
 
+TEN = Money(Decimal("10.00"), "USD")
+
+
+def bought(option: str, person: str, offer: str) -> Cover:
+    """A place of an OFFER that a PERSON takes, at ten dollars from the BUDGET called money."""
+    return Cover(option, person, offer, True, TEN, "money")
+
+
 def on_the_tour(*persons: str) -> Itinerary:
     return (Step("tour", "dock", "dock", persons, seconds(10), seconds(11)),)
 
@@ -94,7 +104,10 @@ def problems(*facts: Document) -> str:
 
 def test_an_offer_has_places_for_one_option() -> None:
     file = a_boat_tour(offer("tour", 2), offer("tour", 1, id="more"))
-    assert file.offers("tour") == (Offer("tour-offer", "tour", 2), Offer("more", "tour", 1))
+    assert file.offers("tour") == (
+        Offer("tour-offer", "tour", 2, TEN),
+        Offer("more", "tour", 1, TEN),
+    )
     assert file.places_on_offer("tour") == 3
     assert a_boat_tour().places_on_offer("tour") == 0
 
@@ -202,7 +215,7 @@ def test_a_plan_that_takes_a_place_works_and_gets_a_warning() -> None:
     assert found.robust is True
     assert found.rights == (
         Cover("tour", "alex", "tour-booking", False),
-        Cover("tour", "sam", "tour-offer", True),
+        bought("tour", "sam", "tour-offer"),
     )
     assert found.relies_on == (
         *TIMES,
@@ -215,15 +228,25 @@ def test_a_plan_that_takes_a_place_works_and_gets_a_warning() -> None:
     assert (
         words[0] == "FEASIBLE, with a WARNING: this trip works, but not everything is booked yet."
     )
-    assert words[4] == "    ! sam still has to buy a right to this, from tour-offer."
+    paid = "for 10.00 USD from money"
+    assert words[4] == f"    ! sam still has to buy a right to this, from tour-offer, {paid}."
     assert words[6] == (
         'WARNING: not everything is booked yet. A line marked "!" that names an OFFER says who'
         " still has to buy a right. Only a BOOKING secures one."
     )
-    assert "  tour-offer: an OFFER has 2 places for tour that can still be bought" in words
+    offered = "an OFFER has 2 places for tour that can still be bought, for 10.00 USD each"
+    assert f"  tour-offer: {offered}" in words
     as_json = report.as_json(file, found)
-    to_buy = {"option": "tour", "offer": "tour-offer", "persons": ["sam"], "only_if_needed": False}
-    assert as_json["to_buy"] == [to_buy]
+    assert as_json["to_buy"] == [
+        {
+            "option": "tour",
+            "offer": "tour-offer",
+            "persons": ["sam"],
+            "only_if_needed": False,
+            "price": {"amount": "10.00", "currency": "USD"},
+            "budget": "money",
+        }
+    ]
     steps = cast("list[dict[str, object]]", as_json["itinerary"])
     assert steps[0]["rights"] == {"alex": "tour-booking", "sam": "tour-offer"}
 
@@ -243,17 +266,19 @@ def test_the_persons_who_take_part_take_the_places_in_the_files_order() -> None:
     file = a_boat_tour(*offers, locked=("sam", "jo"))
     found = checked(file)
     assert found.rights == (
-        Cover("tour", "sam", "first", True),
-        Cover("tour", "jo", "second", True),
+        bought("tour", "sam", "first"),
+        bought("tour", "jo", "second"),
     )
     words = in_words(file)
     assert words[4:6] == [
-        "    ! sam still has to buy a right to this, from first.",
-        "    ! jo still has to buy a right to this, from second.",
+        "    ! sam still has to buy a right to this, from first, for 10.00 USD from money.",
+        "    ! jo still has to buy a right to this, from second, for 10.00 USD from money.",
     ]
     one = a_boat_tour(offer("tour", 2), locked=("sam", "jo"))
     assert (
-        in_words(one)[4] == "    ! sam and jo still have to buy a right to this, from tour-offer."
+        in_words(one)[4]
+        == "    ! sam and jo still have to buy a right to this, from tour-offer, for 10.00 USD each"
+        " from money."
     )
 
 
@@ -265,7 +290,10 @@ def test_a_right_has_to_be_bought_only_if_the_option_needs_one() -> None:
     found = checked(file)
     assert found.answer is Answer.FEASIBLE
     assert found.relies_on == (*TIMES, "tour-offer", "lock-tour")
-    mark = "    ! alex and sam still have to buy a right to this if it needs one, from tour-offer."
+    mark = (
+        "    ! alex and sam still have to buy a right to this if it needs one, from tour-offer, for"
+        " 10.00 USD each from money."
+    )
     assert in_words(file)[4] == mark
     to_buy = cast("list[dict[str, object]]", report.as_json(file, found)["to_buy"])
     assert [each["only_if_needed"] for each in to_buy] == [True]
@@ -316,12 +344,14 @@ def test_a_robust_plan_that_takes_a_place_comes_before_a_booked_one_that_may_run
     found = checked(file)
     assert [step.option for step in found.itinerary] == ["deck", "lunch"]
     assert found.robust is True
-    assert found.rights == (Cover("deck", "alex", "deck-offer", True),)
+    assert found.rights == (bought("deck", "alex", "deck-offer"),)
     words = in_words(file)
     assert (
         words[0] == "FEASIBLE, with a WARNING: this trip works, but not everything is booked yet."
     )
-    assert words[4] == "    ! alex still has to buy a right to this, from deck-offer."
+    assert words[4] == (
+        "    ! alex still has to buy a right to this, from deck-offer, for 10.00 USD from money."
+    )
 
 
 def test_a_booked_plan_comes_before_one_that_takes_a_place_where_neither_is_robust() -> None:
@@ -346,11 +376,11 @@ def test_a_report_can_give_both_warnings() -> None:
     file = trip(["alex"], ["dock"], options, facts, locks, tickets=True)
     found = checked(file)
     assert found.robust is False
-    assert found.rights == (Cover("tour", "alex", "tour-offer", True),)
+    assert found.rights == (bought("tour", "alex", "tour-offer"),)
     words = in_words(file)
     assert words[0].startswith("FEASIBLE, with a WARNING: this trip can work")
     assert words[5:7] == [
-        "    ! alex still has to buy a right to this, from tour-offer.",
+        "    ! alex still has to buy a right to this, from tour-offer, for 10.00 USD from money.",
         "    ! alex would still be busy for 1 h when this starts.",
     ]
     assert [line for line in words if line.startswith("WARNING:")] == [
@@ -380,7 +410,8 @@ def test_too_few_places_make_a_trip_infeasible_where_the_rights_are_complete() -
     assert found.conflict == conflict
     assert has_no_record_to_spare(file, conflict)
     assert (
-        in_words(file)[-3] == "  tour-offer: an OFFER has 1 place for tour that can still be bought"
+        in_words(file)[-3]
+        == "  tour-offer: an OFFER has 1 place for tour that can still be bought, for 10.00 USD"
     )
     whole = "nobody on the trip holds another or can get one, except from tour-offer"
     assert (
@@ -477,6 +508,7 @@ def test_a_name_that_a_list_could_split_in_two_is_shown_in_quotes() -> None:
         document: Document = {
             "persons": named(*names),
             "places": [{"id": "dock", "name": "dock"}],
+            "budgets": [budget("money", *(f"person-{number}" for number in range(len(names))))],
             "options": [stays("tour", "dock")],
             "ways": [],
             "wants": [],
@@ -486,16 +518,13 @@ def test_a_name_that_a_list_could_split_in_two_is_shown_in_quotes() -> None:
         file = load(document)
         return report.as_text(file, checked(file)).splitlines()[4]
 
+    buy = "still have to buy a right to this, from tour-offer, for 10.00 USD each from money."
     one = words("Lee, Gray", "Lee", "Sam", "Jo")
     other = words("Lee", "Gray, Lee", "Sam", "Jo")
-    assert (
-        one == '    ! "Lee, Gray", Lee and Sam still have to buy a right to this, from tour-offer.'
-    )
-    assert (
-        other
-        == '    ! Lee, "Gray, Lee" and Sam still have to buy a right to this, from tour-offer.'
-    )
-    assert words("Sam And Jo", "Lee", "Kim", "Pat").startswith('    ! "Sam And Jo", Lee and Kim')
+    assert one == f'    ! "Lee, Gray", Lee and Sam {buy}'
+    assert other == f'    ! Lee, "Gray, Lee" and Sam {buy}'
+    capital = words("Sam And Jo", "Lee", "Kim", "Pat")
+    assert capital.startswith('    ! "Sam And Jo", Lee and Kim')
     with_an_id = words("Lee (person-1)", "Lee", "Kim", "Pat")
     assert with_an_id.startswith('    ! "Lee (person-1)", Lee and Kim still have to buy')
     assert words("Lee", "Lee", "Kim", "Pat").startswith(
@@ -569,7 +598,7 @@ def test_enough_places_work_though_the_rights_are_complete() -> None:
     file = a_boat_tour(booking("tour", "alex"), offer("tour", 1), every_right("tour", "tour-offer"))
     found = checked(file)
     assert found.answer is Answer.FEASIBLE
-    assert found.rights[1] == Cover("tour", "sam", "tour-offer", True)
+    assert found.rights[1] == bought("tour", "sam", "tour-offer")
 
 
 def test_an_offer_that_is_taken_out_might_have_a_place_for_everybody() -> None:

@@ -313,7 +313,6 @@ class _Search:
         self.used = [model.new_bool_var(f"used {option.id}") for option in file.options]
         self.left_out: set[tuple[int, int]] = set()  # each PERSON and OPTION that is ruled out
         meets = self._hold_to_the_wants()
-        self._hold_to_the_rights()
         for index, option in enumerate(file.options):
             model.add_max_equality(self.used[index], [0, *(row[index] for row in self.takes)])
             for number, person in enumerate(file.persons):
@@ -339,6 +338,7 @@ class _Search:
                     switches = [each for each in asking if each is not None]
                     if len(switches) == len(asking):
                         model.add_bool_or([takes.negated(), *switches])
+        self._hold_to_the_rights()
 
     def _rule_out(self, number: int, index: int) -> None:
         """This PERSON takes no part in this OPTION, whatever else is chosen.
@@ -367,7 +367,7 @@ class _Search:
                     without = [
                         n for n, person in people if (option.id, person.id) not in world.rights
                     ]
-                    self._share_out(index, without, world.places.get(option.id, 0))
+                    self._share_out(index, without)
             return
         needs = {fact.option: fact for fact in file.facts if isinstance(fact, NeedsRight)}
         for index, option in enumerate(file.options):
@@ -383,25 +383,62 @@ class _Search:
             ]
             closed = [self.switch[needed.id], self.switch[whole.id], *listed]
             without = [n for n, person in people if file.booking(option.id, person.id) is None]
-            self._share_out(index, without, file.places_on_offer(option.id), closed)
+            self._share_out(index, without, closed)
 
     def _share_out(
-        self, index: int, without: Sequence[int], places: int, given: Sequence[cp_model.IntVar] = ()
+        self, index: int, without: Sequence[int], given: Sequence[cp_model.IntVar] = ()
     ) -> None:
-        """No more of these PERSONs take part in an OPTION than it has places on OFFER.
+        """Each of these PERSONs who takes part in an OPTION takes a place they can pay for.
 
-        They are the PERSONs with no right of their own to it. ``given`` holds the records that
-        all have to be switched on for the limit to hold.
+        They are the PERSONs with no right of their own to it. No place is taken twice.
+        ``given`` holds the records that all have to be switched on for this to hold.
+
+        A PERSON who is ruled out of the OPTION needs no place. A PERSON who can pay for no
+        place stays out, and an OFFER that none of them can pay for is left out. Where each of
+        the others can pay for a place of every other OFFER, the places are alike, and it is
+        enough to count them. Otherwise the model chooses an OFFER for each PERSON.
         """
-        if places >= len(without):
-            return
-        if not places and not given:
-            for number in without:
+        model, world, option = self.model, self.world, self.file.options[index]
+        people = self.file.persons
+        without = [number for number in without if (number, index) not in self.left_out]
+        able = {
+            number: [
+                offer
+                for offer in self.file.offers(option.id)
+                if (offer.id, people[number].id) in world.payable
+            ]
+            for number in without
+        }
+        for number in without:
+            if not able[number] and given:
+                _when(model.add(self.takes[number][index] == 0), *given)
+            elif not able[number]:
                 self._rule_out(number, index)
+        buyers = [number for number in without if able[number]]
+        wanted = {offer.id for number in buyers for offer in able[number]}
+        offers = [offer for offer in self.file.offers(option.id) if offer.id in wanted]
+        places = sum(offer.places for offer in offers)
+        if all(len(able[number]) == len(offers) for number in buyers):
+            if places < len(buyers):
+                limit = model.add(sum(self.takes[number][index] for number in buyers) <= places)
+                if given:
+                    _when(limit, *given)
             return
-        limit = self.model.add(sum(self.takes[number][index] for number in without) <= places)
-        if given:
-            _when(limit, *given)
+        taken: dict[str, list[cp_model.IntVar]] = {offer.id: [] for offer in offers}
+        for number in buyers:
+            takes = self.takes[number][index]
+            picks = [
+                model.new_bool_var(f"{people[number].id} takes a place of {offer.id}")
+                for offer in able[number]
+            ]
+            for offer, pick in zip(able[number], picks, strict=True):
+                taken[offer.id].append(pick)
+            has_a_place = model.add(sum(picks) >= takes)
+            if given:
+                _when(has_a_place, *given)
+        for offer in offers:
+            if len(taken[offer.id]) > offer.places:
+                model.add(sum(taken[offer.id]) <= offer.places)
 
     def _hold_to_the_wants(self) -> list[set[int]]:
         """Every must is met and every must-not is kept. Returns what could meet a must.

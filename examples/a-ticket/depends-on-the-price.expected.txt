@@ -1,0 +1,8 @@
+UNDETERMINED: the FILE does not say enough to tell.
+
+The trip works in any of these cases:
+  1. A right to Skydeck visit is found for Sam, in addition to the 2 places on OFFER.
+  2. A place from skydeck-tickets has a price that Sam can pay.
+
+Who buys which place is from one plan that works in that case. A place with a price above nothing is paid from a BUDGET that lists the PERSON who takes it and holds the currency of the price. The BUDGETs of this FILE:
+  the trip money: for Alex and Sam; it holds USD

@@ -1,0 +1,32 @@
+{
+  "answer": "UNDETERMINED",
+  "missing": [
+    [
+      {
+        "what": "another right",
+        "option": "skydeck",
+        "person": "sam",
+        "at_most": null
+      }
+    ],
+    [
+      {
+        "what": "funding",
+        "person": "sam",
+        "buys": [
+          {
+            "person": "sam",
+            "option": "skydeck",
+            "offer": "skydeck-tickets",
+            "price": {
+              "amount": "32.00",
+              "currency": "USD"
+            }
+          }
+        ],
+        "at_most": null
+      }
+    ]
+  ],
+  "budgets": []
+}

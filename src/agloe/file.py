@@ -56,6 +56,31 @@ class Person:
 
 
 @dataclass(frozen=True)
+class Money:
+    """An amount in one currency, kept exactly. Two ways to write one amount are equal."""
+
+    amount: Decimal
+    currency: str
+
+    def __str__(self) -> str:
+        return f"{self.amount} {self.currency}"
+
+
+@dataclass(frozen=True)
+class Budget:
+    """A named source of money.
+
+    ``persons`` may draw on it for what the TRIP still has to buy, and it pays only prices in
+    the ``currencies`` it holds.
+    """
+
+    id: str
+    name: str
+    persons: tuple[str, ...]
+    currencies: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Place:
     id: str
     name: str
@@ -229,11 +254,15 @@ class Booking:
 
 @dataclass(frozen=True)
 class Offer:
-    """A FACT: an OFFER. Rights to one OPTION can still be bought, one for each of its places."""
+    """A FACT: an OFFER. Rights to one OPTION can still be bought, one for each of its places.
+
+    ``price`` is what one place costs. None: nobody knows.
+    """
 
     id: str
     option: str
     places: int
+    price: Money | None = None
 
 
 @dataclass(frozen=True)
@@ -278,6 +307,7 @@ class File:
     facts: tuple[Fact, ...]
     decisions: tuple[Decision, ...]
     zone: str = "UTC"  # the time zone of the first time in the FILE; reports show times in it
+    budgets: tuple[Budget, ...] = ()
 
     @property
     def locks(self) -> tuple[Lock, ...]:
@@ -345,6 +375,32 @@ class File:
     def booking(self, option: str, person: str) -> Booking | None:
         """The BOOKING that covers this PERSON for this OPTION: the first one the FILE lists."""
         return self._bookings.get((option, person))
+
+    def listed(self, person: str) -> bool:
+        """Whether some BUDGET lists this PERSON. If none does, nobody has said who pays."""
+        return person in self._listed
+
+    def pays(self, person: str, price: Money) -> Budget | None:
+        """The BUDGET that pays this price for this PERSON: the first one the FILE lists.
+
+        It lists the PERSON and holds the currency. None where no BUDGET does, and for a price
+        of nothing, which draws on no BUDGET.
+        """
+        return self._payers.get((person, price.currency)) if price.amount else None
+
+    @cached_property
+    def _listed(self) -> frozenset[str]:
+        return frozenset(person for budget in self.budgets for person in budget.persons)
+
+    @cached_property
+    def _payers(self) -> dict[tuple[str, str], Budget]:
+        """The first BUDGET that lists each PERSON and holds each currency, looked up once."""
+        first: dict[tuple[str, str], Budget] = {}
+        for budget in self.budgets:
+            for person in budget.persons:
+                for currency in budget.currencies:
+                    first.setdefault((person, currency), budget)
+        return first
 
     def offers(self, option: str) -> tuple[Offer, ...]:
         """The OFFERs for this OPTION, in the FILE's order."""
@@ -658,6 +714,17 @@ def load(document: object) -> File:
             claim(f"/{kind}/{index}", record.id)
     person_ids = {person.id for person in persons}
     place_ids = {place.id for place in places}
+    budgets: list[Budget] = []
+    for index, budget in enumerate(raw.get("budgets", ())):
+        where = f"/budgets/{index}"
+        claim(where, budget["id"])
+        for person in budget["persons"]:
+            known(where, person, "PERSON", person_ids)
+        budgets.append(
+            Budget(
+                budget["id"], budget["name"], tuple(budget["persons"]), tuple(budget["currencies"])
+            )
+        )
 
     options: list[Option] = []
     for index, option in enumerate(raw["options"]):
@@ -765,7 +832,13 @@ def load(document: object) -> File:
         if "offer" in fact:
             known(where, fact["offer"]["option"], "OPTION", option_ids)
             offered.append((where, fact["id"], fact["offer"]["option"]))
-            facts.append(Offer(fact["id"], fact["offer"]["option"], int(fact["offer"]["places"])))
+            quoted = [
+                Money(Decimal(each["amount"]), each["currency"])
+                for each in fact["offer"].get("prices", ())
+            ]
+            on_offer = int(fact["offer"]["places"])
+            price = next(iter(quoted), None)
+            facts.append(Offer(fact["id"], fact["offer"]["option"], on_offer, price))
             continue
         if "person" in fact:
             known(where, fact["person"], "PERSON", person_ids)
@@ -873,6 +946,7 @@ def load(document: object) -> File:
         tuple(facts),
         tuple(decisions),
         zone,
+        tuple(budgets),
     )
 
 

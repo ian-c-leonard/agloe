@@ -17,9 +17,10 @@ from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from itertools import groupby
 
-from agloe.answers import Answer, Missing, Report
+from agloe.answers import Answer, Cover, Missing, Report
 from agloe.file import (
     Booking,
+    Budget,
     Complete,
     CompleteFor,
     CompleteRights,
@@ -27,6 +28,7 @@ from agloe.file import (
     Duration,
     File,
     Lock,
+    Money,
     NeedsRight,
     Offer,
     Option,
@@ -87,10 +89,12 @@ def as_json(file: File, report: Report) -> dict[str, object]:
                 {
                     "option": option,
                     "offer": offer,
-                    "persons": persons,
+                    "persons": [cover.person for cover in covers],
                     "only_if_needed": file.needs_right(option) is None,
+                    "price": _money_as_json(covers[0].price),
+                    "budget": budget,
                 }
-                for (option, offer), persons in _to_buy(report).items()
+                for (option, offer, budget), covers in _to_buy(report).items()
             ]
     if report.at_worst:
         out["at_worst"] = [_broken_as_json(file, report, found) for found in report.at_worst]
@@ -100,16 +104,35 @@ def as_json(file: File, report: Report) -> dict[str, object]:
         out["missing"] = [
             [_missing_as_json(needed) for needed in enough] for enough in report.missing
         ]
+    if _turns_on_who_pays(report):
+        out["budgets"] = [
+            {"id": each.id, "persons": list(each.persons), "currencies": list(each.currencies)}
+            for each in file.budgets
+        ]
     return out
 
 
-def _to_buy(report: Report) -> dict[tuple[str, str], list[str]]:
-    """The PERSONs who still have to buy a right, for each OPTION and each OFFER it is from."""
-    buyers: dict[tuple[str, str], list[str]] = {}
+def _turns_on_who_pays(report: Report) -> bool:
+    """Whether a report needs the BUDGETs of the FILE beside it, to be checked against.
+
+    An UNDETERMINED report does where a set asks for a price or for a BUDGET that can pay. An
+    INFEASIBLE one does where its records conflict only with the BUDGETs as the FILE lists them.
+    """
+    asked = {needed.unknown.what for enough in report.missing for needed in enough}
+    return report.given_budgets or bool(asked & {"price", "funding"})
+
+
+def _to_buy(report: Report) -> dict[tuple[str, str, str | None], list[Cover]]:
+    """Who still has to buy a right, for each OPTION, each OFFER it is from and each BUDGET."""
+    buyers: dict[tuple[str, str, str | None], list[Cover]] = {}
     for cover in report.rights:
         if cover.to_buy:
-            buyers.setdefault((cover.option, cover.by), []).append(cover.person)
+            buyers.setdefault((cover.option, cover.by, cover.budget), []).append(cover)
     return buyers
+
+
+def _money_as_json(price: Money | None) -> dict[str, str] | None:
+    return None if price is None else {"amount": str(price.amount), "currency": price.currency}
 
 
 def _broken_as_json(file: File, report: Report, found: Broken) -> dict[str, object]:
@@ -140,6 +163,18 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
         out["want"] = unknown.want
     if unknown.person is not None:
         out["person"] = unknown.person
+    if unknown.about is not None:
+        out["offer"] = unknown.about
+    if needed.buys:
+        out["buys"] = [
+            {
+                "person": cover.person,
+                "option": cover.option,
+                "offer": cover.by,
+                "price": _money_as_json(cover.price),
+            }
+            for cover in needed.buys
+        ]
     out["at_most"] = None if needed.at_most is None else length_written(needed.at_most)
     return out
 
@@ -225,14 +260,17 @@ def as_text(file: File, report: Report) -> str:
     if report.answer is Answer.FEASIBLE:
         lines = _feasible(file, clock, report)
     elif report.answer is Answer.INFEASIBLE:
+        how = ", given the BUDGETs of this FILE" if report.given_budgets else " by themselves"
         lines = [
             "INFEASIBLE: this trip cannot work.",
             "",
-            f"These {_kinds(file, report.conflict)} rule out every plan by themselves. Take"
+            f"These {_kinds(file, report.conflict)} rule out every plan{how}. Take"
             " any one away and they no longer do. A FACT that is taken away leaves what it"
             f" said unknown. Times are in {file.zone}.",
             *(f"  {record}: {_record(file, clock, record)}" for record in report.conflict),
         ]
+        if report.given_budgets:
+            lines += ["", *_budgets(file)]
     else:
         lines = ["UNDETERMINED: the FILE does not say enough to tell.", ""]
         cases = [_case(file, enough) for enough in report.missing]
@@ -272,6 +310,9 @@ def as_text(file: File, report: Report) -> str:
                     f"{helps}, and only if they SATISFY nothing that is a must-not for a PERSON"
                     " who takes them."
                 )
+        if _turns_on_who_pays(report):
+            one_way = "Who buys which place is from one plan that works in that case. "
+            lines += ["", *_budgets(file, one_way)]
         if "another option" in kinds:
             lines += [
                 "",
@@ -285,6 +326,26 @@ def as_text(file: File, report: Report) -> str:
             if most > 1:
                 lines[-1] += " One OPTION can be found for several PERSONs and several WANTs."
     return "\n".join(lines) + "\n"
+
+
+def _budgets(file: File, first: str = "") -> list[str]:
+    """The BUDGETs of a FILE in words: who may draw on each, and the currencies it holds.
+
+    ``first`` is a sentence to start with.
+    """
+    rule = (
+        f"{first}A place with a price above nothing is paid from a BUDGET that lists the PERSON"
+        " who takes it and holds the currency of the price."
+    )
+    if not file.budgets:
+        return [f"{rule} This FILE names no BUDGET."]
+    lines = [f"{rule} The BUDGETs of this FILE:"]
+    for budget in file.budgets:
+        who = _people(file, budget.persons)
+        whose = f"for {who}" if who else "it lists no PERSON"
+        holds = _listed(budget.currencies)
+        lines.append(f"  {_names(file.budgets)[budget.id]}: {whose}; it holds {holds}")
+    return lines
 
 
 def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
@@ -396,9 +457,16 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
         number = line_of[found.step] if found.step is not None else line_of_option[found.option]
         together.setdefault((number, found.constraint, found.late), []).extend(found.persons)
     marks: dict[int, list[str]] = {}
-    for (option, offer), buyers in _to_buy(report).items():
+    for (option, offer, budget), covers in _to_buy(report).items():
+        buyers = [cover.person for cover in covers]
         have = "has" if len(buyers) == 1 else "have"
         if_needed = "" if file.needs_right(option) else " if it needs one"
+        price = covers[0].price
+        if price is not None and budget is not None:
+            each = " each" if len(buyers) > 1 else ""
+            offer = f"{offer}, for {price}{each} from {_names(file.budgets)[budget]}"
+        elif price is not None:
+            offer = f"{offer}, at no cost"
         mark = f"{_people(file, tuple(buyers))} still {have} to buy a right to this{if_needed}"
         marks.setdefault(line_of_option[option], []).append(f"{mark}, from {offer}.")
     for (number, constraint, late), persons in together.items():
@@ -474,6 +542,21 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
         return f"{_name(file, unknown.option)} SATISFIES {_want(file, unknown.want)}"
     if unknown.what == "does not satisfy":
         return f"{_name(file, unknown.option)} does not SATISFY {_want(file, unknown.want)}"
+    if unknown.what == "price":
+        buyers = tuple(cover.person for cover in needed.buys)
+        each = " each" if len(buyers) > 1 else ""
+        who = _people(file, buyers)
+        return f"a place from {unknown.about} has a price that {who} can{each} pay"
+    if unknown.what == "funding":
+        who = _people(file, (unknown.person or "",))
+        places = [
+            f"one from {cover.by} at a price that the FILE has yet to state"
+            if cover.price is None
+            else f"one from {cover.by} for {cover.price}"
+            for cover in needed.buys
+        ]
+        can_be_paid = f"can be paid from a BUDGET that lists {who}"
+        return f"each place that {who} has to buy {can_be_paid} ({', '.join(places)})"
     if unknown.what == "other ways":
         places = _names(file.places)
         there = f"there are other WAYs from {places[unknown.origin or '']} to "
@@ -560,7 +643,9 @@ def _record(file: File, clock: _Clock, record: str) -> str:
     if isinstance(found, Booking):
         return f"a BOOKING for {name} covers {_people(file, found.covers)}"
     if isinstance(found, Offer):
-        return f"an OFFER has {_places(found.places)} for {name} that can still be bought"
+        each = " each" if found.places > 1 else ""
+        price = "; nobody knows the price" if found.price is None else f", for {found.price}{each}"
+        return f"an OFFER has {_places(found.places)} for {name} that can still be bought{price}"
     if isinstance(found, CompleteRights):
         closed = "nobody on the trip holds another or can get one"
         if found.offers:
@@ -583,16 +668,17 @@ def _starts_at(file: File, option: str | None) -> str:
 
 
 def _names(
-    records: Sequence[Person | Place | Option | Way | Want], joins: str | None = None
+    records: Sequence[Person | Place | Option | Way | Want | Budget], joins: str | None = None
 ) -> dict[str, str]:
     """The name to show for each record, so that no two records show the same.
 
     A record whose name another record has shows its id too. If two would still show the same,
     every record shows its id: no two ids are the same.
 
-    A name is shown in quotes where it could be taken for something else: one with a comma
-    or a quote mark, one that ends like a name with its id, and one that holds the word
-    ``joins``, which joins the list the names are for. The quotes go on before the id.
+    A name is shown in quotes where it could be taken for something else: one with a comma,
+    a colon, a semicolon or a quote mark, one that ends like a name with its id, and one that
+    holds the word ``joins``, which joins the list the names are for. The quotes go on
+    before the id.
     """
     shared = Counter(record.name for record in records)
     shown = {
@@ -608,7 +694,8 @@ def _names(
 
 def _quoted(name: str, joins: str | None) -> str:
     """A name, in quotes where it could be taken for something else."""
-    splits = "," in name or (joins is not None and joins in name.casefold().split())
+    marks = any(mark in name for mark in ",:;")  # what a report puts between its own parts
+    splits = marks or (joins is not None and joins in name.casefold().split())
     if splits or '"' in name or _WITH_AN_ID.search(name):
         return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
     return name

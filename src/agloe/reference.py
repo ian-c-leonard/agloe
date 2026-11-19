@@ -15,6 +15,7 @@ section "Which ITINERARY is shown". The sections "The three answers", "ROBUST" a
 are in ``answers``, which works them out from this module's search or from a faster one.
 """
 
+from collections import deque
 from collections.abc import Iterable, Iterator, Mapping, Sequence, Sized
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -39,6 +40,7 @@ class Constraint(Enum):
     MUST_NOT = "Every must-not is kept"
     WITHIN = "Everything happens within the TRIP"
     RIGHT = "Each PERSON has the rights they need"
+    PAID = "Each place is paid for"
 
 
 @dataclass(frozen=True)
@@ -122,7 +124,9 @@ class World:
     ``needs_right`` holds each OPTION that a PERSON can take part in only with a right.
     ``rights`` holds each OPTION and PERSON where the PERSON has one: a BOOKING covers them, or
     another right is found for them. ``places`` says how many more PERSONs can take part in an
-    OPTION that needs a right: each takes one place of an OFFER.
+    OPTION that needs a right: each takes one place of an OFFER. ``payable`` holds each OFFER
+    and PERSON where the PERSON can pay for a place of it: the place costs nothing, or a
+    BUDGET that lists the PERSON holds the currency of its price.
     """
 
     terms: Mapping[str, Terms]
@@ -137,6 +141,7 @@ class World:
     needs_right: frozenset[str] = frozenset()
     rights: frozenset[tuple[str, str]] = frozenset()
     places: Mapping[str, int] = field(default_factory=dict[str, int])
+    payable: frozenset[tuple[str, str]] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -160,6 +165,7 @@ class Unknown:
     way: str | None = None
     want: str | None = None
     person: str | None = None
+    about: str | None = None
 
 
 # ------------------------------- What is unknown -------------------------------
@@ -171,7 +177,17 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
     That an OPTION SATISFIES a WANT can help only where the WANT is a must for some PERSON,
     and that it does not only where the WANT is a must-not for some PERSON. So only those are
     listed. Where a FACT says a WANT's set is COMPLETE, nothing about the WANT is unknown.
+    A price and who pays can help only where somebody might have to pay for a place. So a
+    price is listed only for an OFFER that ``for_sale`` gives, and who pays only for a PERSON
+    with no BOOKING for the OPTION of one of those.
     """
+    sold = for_sale(file)
+    to_pay = {offer.id for offer in sold}
+    buyers = [
+        person.id
+        for person in file.persons
+        if any(file.booking(offer.option, person.id) is None for offer in sold)
+    ]
     musts = [
         want
         for want in file.wants
@@ -191,6 +207,9 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
             for person in file.persons:
                 if file.booking(option.id, person.id) is None:
                     out.append(Unknown("another right", option.id, person=person.id))
+        for offer in file.offers(option.id):
+            if offer.price is None and offer.id in to_pay:
+                out.append(Unknown("price", option.id, about=offer.id))
         for want in file.wants:
             if file.says(option.id, want.id) is None:
                 if want.musts:
@@ -204,10 +223,32 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
         for destination in file.places:
             if origin != destination:
                 out.append(Unknown("other ways", origin=origin.id, destination=destination.id))
+    for person in buyers:
+        if not file.listed(person):
+            out.append(Unknown("funding", person=person))
     for want in musts:
         for person in _in_file_order_of_persons(file, want.musts):
             out.append(Unknown("another option", want=want.id, person=person))
     return tuple(out)
+
+
+def for_sale(file: File) -> list[Offer]:
+    """The OFFERs with a place that somebody might have to pay for.
+
+    Only a PERSON with no BOOKING for an OPTION takes a place of it. An OFFER is left out
+    where its price is nothing, where a FACT says its OPTION needs no right, and where the
+    OPTION has a place that costs nothing for each of those PERSONs: nobody has to pay then.
+    """
+    sold: list[Offer] = []
+    for option in file.options:
+        offers = file.offers(option.id)
+        free = sum(
+            each.places for each in offers if each.price is not None and not each.price.amount
+        )
+        buyers = sum(file.booking(option.id, person.id) is None for person in file.persons)
+        if file.needs_right(option.id) is not False and free < buyers:
+            sold += [each for each in offers if each.price is None or each.price.amount]
+    return sold
 
 
 def has_to_end_at(file: File, person: str) -> list[Want]:
@@ -296,7 +337,7 @@ def best_cases(remaining: Remaining) -> Iterator[World]:
 
 def with_no_offer(world: World) -> World:
     """The same world with every OFFER left out: what works here takes no place of one."""
-    return replace(world, places={})
+    return replace(world, places={}, payable=frozenset())
 
 
 def worst_case(file: File) -> World:
@@ -466,6 +507,26 @@ def _world(
         and file.complete_for(want.id) is None
         and well(Unknown("another option", want=want.id, person=person))
     )
+    # Who can pay for a place of each OFFER. A price of nothing needs nobody to pay. A price
+    # that nobody knows is one quote for all the places: at best nothing, at worst one that
+    # no BUDGET of the FILE is sure to hold. Where no BUDGET lists a PERSON, nobody knows who
+    # pays for them: at best a BUDGET that pays for whatever they take, at worst none.
+    funded = {
+        person.id
+        for person in file.persons
+        if not file.listed(person.id) and well(Unknown("funding", person=person.id))
+    }
+    payable: set[tuple[str, str]] = set()
+    for offer in (fact for fact in file.facts if isinstance(fact, Offer)):
+        price = offer.price
+        if price is None:
+            free = well(Unknown("price", offer.option, about=offer.id))
+        else:
+            free = not price.amount
+        for person in file.persons:
+            paid = price is not None and file.pays(person.id, price) is not None
+            if free or paid or person.id in funded:
+                payable.add((offer.id, person.id))
     return World(
         terms,
         unlisted,
@@ -477,6 +538,7 @@ def _world(
         frozenset(needs_right),
         frozenset(rights),
         {option.id: file.places_on_offer(option.id) for option in file.options},
+        frozenset(payable),
     )
 
 
@@ -540,7 +602,7 @@ def works_as_listed(file: File, world: World, itinerary: Itinerary) -> bool:
 
 
 def _each_alone(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
-    """The seven CONSTRAINTs that hold or not whatever order the steps happen in."""
+    """The CONSTRAINTs that hold or not whatever order the steps happen in."""
     taking_part = {step.option: step.persons for step in itinerary if step.option is not None}
     return [
         *_locks(file, itinerary),
@@ -554,16 +616,109 @@ def _each_alone(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
 
 
 def _rights(file: File, world: World, taking_part: Mapping[str, tuple[str, ...]]) -> list[Broken]:
-    """Each PERSON has the rights they need: one to each OPTION they take part in that needs one."""
+    """Each PERSON has the rights they need, and each place they take is paid for.
+
+    The PERSONs with no right of their own take the places of the OPTION's OFFERs, as
+    ``placed`` shares them out: as many as can pay for one have one. The others go in the
+    FILE's order. Each takes a place that is still free, and cannot pay for it. Once no place
+    is free, the rest have no right.
+    """
     out: list[Broken] = []
     for option, persons in taking_part.items():
-        without = [person for person in persons if (option, person) not in world.rights]
-        places = world.places.get(option, 0)
-        if option in world.needs_right and len(without) > places:
-            # The first of them, in the FILE's order, take the places of the OFFERs.
-            who = _in_file_order_of_persons(file, without)[places:]
-            out.append(Broken(Constraint.RIGHT, option, who))
+        if option not in world.needs_right:
+            continue
+        lacking = [person for person in persons if (option, person) not in world.rights]
+        without = _in_file_order_of_persons(file, lacking)
+        taken = placed(file, world, option, without)
+        left_out = tuple(person for person in without if person not in taken)
+        free = max(world.places.get(option, 0) - len(taken), 0)
+        if left_out[free:]:
+            out.append(Broken(Constraint.RIGHT, option, left_out[free:]))
+        if left_out[:free]:
+            out.append(Broken(Constraint.PAID, option, left_out[:free]))
     return out
+
+
+def placed(file: File, world: World, option: str, persons: Sequence[str]) -> dict[str, str]:
+    """The OFFER whose place each of these PERSONs takes, for as many as can have one.
+
+    They are the PERSONs in an OPTION with no right of their own, in the FILE's order. Each
+    can take only a place they can pay for, and no place is taken twice. A PERSON gets a place
+    if there is a way to give one to them and to everybody before them who got one. Then each
+    takes a place of the first OFFER, in the FILE's order, that leaves a way for the rest.
+
+    This is bipartite matching, done with augmenting paths. One way to seat everybody who has
+    a place is kept throughout. A PERSON finds a place by moving others along: they take a
+    place, its holder takes another, and so on to a place that is free.
+    """
+    listed = file.offers(option)
+    persons = [who for who in persons if any((each.id, who) in world.payable for each in listed)]
+    offers = [
+        offer for offer in listed if any((offer.id, person) in world.payable for person in persons)
+    ]
+    if all((offer.id, person) in world.payable for offer in offers for person in persons):
+        # Each of them who can pay for a place at all can pay for every place that anybody
+        # can. So the places go round in order.
+        spread = (offer.id for offer in offers for _ in range(min(offer.places, len(persons))))
+        return dict(zip(persons, spread, strict=False))
+    room = {offer.id: offer.places for offer in offers}
+    can_pay = {
+        person: [offer.id for offer in offers if (offer.id, person) in world.payable]
+        for person in persons
+    }
+    place: dict[str, str] = {}
+    holders: dict[str, dict[str, None]] = {offer.id: {} for offer in offers}
+    settled: set[str] = set()
+
+    def take(person: str, offer: str) -> None:
+        if person in place:
+            del holders[place[person]][person]
+        place[person] = offer
+        holders[offer][person] = None
+
+    def find_a_place(seekers: Sequence[str], full: str | None = None) -> bool:
+        """Moves one of these PERSONs to a place that is free, or changes nothing.
+
+        Whoever is in the way moves along, except a PERSON who is settled. Nobody moves to a
+        place of the OFFER that is ``full``.
+        """
+        first = frozenset(seekers)
+        reached: dict[str, str] = {}
+        waiting = deque(seekers)
+        while waiting:
+            person = waiting.popleft()
+            for offer in can_pay[person]:
+                if offer in reached or offer == full:
+                    continue
+                reached[offer] = person
+                if len(holders[offer]) >= room[offer]:
+                    waiting.extend(each for each in holders[offer] if each not in settled)
+                    continue
+                while person not in first:
+                    left = place[person]
+                    take(person, offer)
+                    offer, person = left, reached[left]
+                take(person, offer)
+                return True
+        return False
+
+    for person in persons:
+        find_a_place([person])
+    for person in persons:
+        if person not in place:
+            continue
+        settled.add(person)
+        last = place[person]
+        for offer in can_pay[person]:
+            if offer == last:
+                break
+            take(person, offer)
+            if len(holders[offer]) <= room[offer]:
+                break
+            if find_a_place([each for each in holders[offer] if each not in settled], offer):
+                break
+            take(person, last)
+    return {person: place[person] for person in persons if person in place}
 
 
 def _within(file: File, itinerary: Itinerary) -> list[Broken]:

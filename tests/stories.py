@@ -150,9 +150,23 @@ def booking(option: str, *persons: str, id: str | None = None) -> Document:
     return {"id": id or f"{option}-booking", "booking": covers}
 
 
-def offer(option: str, places: int, id: str | None = None) -> Document:
-    """An OFFER: this many PERSONs can still buy a right to an OPTION."""
-    return {"id": id or f"{option}-offer", "offer": {"option": option, "places": places}}
+def offer(
+    option: str, places: int, id: str | None = None, price: str | None = "10.00 USD"
+) -> Document:
+    """An OFFER: this many PERSONs can still buy a right to an OPTION, at this price each.
+
+    With no price, nobody knows what a place costs.
+    """
+    offered: Document = {"option": option, "places": places}
+    if price is not None:
+        amount, currency = price.split()
+        offered["prices"] = [{"amount": amount, "currency": currency}]
+    return {"id": id or f"{option}-offer", "offer": offered}
+
+
+def budget(id: str, *persons: str, holds: Sequence[str] = ("USD",)) -> Document:
+    """A BUDGET that these PERSONs may draw on, and the currencies it holds."""
+    return {"id": id, "name": id, "persons": list(persons), "currencies": list(holds)}
 
 
 def every_right(option: str, *offers: str) -> Document:
@@ -172,17 +186,24 @@ def trip(
     ways: Sequence[Document] = (),
     wants: Sequence[Document] = (),
     tickets: bool = False,
+    budgets: Sequence[Document] | None = None,
 ) -> File:
     """A FILE. None of its OPTIONs needs a right, unless the story is about tickets.
 
     After the FACTs given, one more for each OPTION says that nobody needs a right to it. With
     ``tickets``, the FILE says about rights only what ``facts`` says.
+
+    Unless the story is about money, one BUDGET called money pays for everybody, in USD.
+    ``budgets`` are the BUDGETs of a story that is.
     """
+    if budgets is None:
+        budgets = [budget("money", *persons)]
     stated = facts if tickets else [*facts, *(needs_no_right(option["id"]) for option in options)]
     return load(
         {
             "persons": named(*persons),
             "places": named(*places),
+            "budgets": list(budgets),
             "options": options,
             "ways": list(ways),
             "wants": list(wants),
