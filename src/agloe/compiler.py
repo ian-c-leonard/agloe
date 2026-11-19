@@ -60,7 +60,13 @@ class DoesNotFit(Exception):
 
 
 def check(file: File) -> Report:
-    """The answer for this TRIP, with its evidence. The same Report as the reference checker's."""
+    """The answer for this TRIP, with its evidence. The same Report as the reference checker's.
+
+    A FILE with a cap goes to the reference checker: the solver does not yet share out what
+    each BUDGET can still spend.
+    """
+    if file.caps:
+        return answers.check(file)
     try:
         return answers.check(file, shown=shown, works=works, stuck=stuck)
     except DoesNotFit:

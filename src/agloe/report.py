@@ -18,10 +18,11 @@ from datetime import date, timedelta
 from decimal import Decimal
 from itertools import groupby
 
-from agloe.answers import Answer, Cover, Missing, Report
+from agloe.answers import Answer, CapRow, Cover, Missing, Plan, Report
 from agloe.file import (
     Booking,
     Budget,
+    Cap,
     Complete,
     CompleteFor,
     CompleteRights,
@@ -130,6 +131,48 @@ def as_json(file: File, report: Report) -> dict[str, object]:
         out["missing"] = [
             [_missing_as_json(needed) for needed in enough] for enough in report.missing
         ]
+    if report.caps:
+        out["caps"] = [_cap_as_json(file, row) for row in report.caps]
+    if report.plans:
+        out["plans"] = [
+            {
+                "buys": [
+                    {
+                        "person": cover.person,
+                        "option": cover.option,
+                        "offer": cover.by,
+                        "price": _money_as_json(cover.price),
+                        "budget": cover.budget,
+                        "only_if_needed": file.needs_right(cover.option) is None,
+                    }
+                    for cover in plan.buys
+                ],
+                "caps": [_cap_as_json(file, row) for row in plan.caps],
+            }
+            for plan in report.plans
+        ]
+    if report.conflict and file.caps:
+        held = [each for each in file.caps.values() if each.id in report.conflict]
+        out["caps"] = [
+            {
+                "cap": each.id,
+                "budget": each.budget,
+                "currency": each.limit.currency,
+                "limit": str(each.limit.amount),
+            }
+            for each in held
+        ]
+        out["payments"] = [
+            {
+                "booking": fact.id,
+                **(_money_as_json(fact.paid.money) or {}),
+                "budget": fact.paid.budget,
+                "by": fact.paid.by,
+            }
+            for fact in file.facts
+            if isinstance(fact, Booking) and fact.paid is not None and fact.id in report.conflict
+        ]
+        out["not_stated"] = [each for each in _with_no_payment(file) if each in report.conflict]
     if _turns_on_who_pays(report):
         out["budgets"] = [
             {"id": each.id, "persons": list(each.persons), "currencies": list(each.currencies)}
@@ -138,14 +181,46 @@ def as_json(file: File, report: Report) -> dict[str, object]:
     return out
 
 
+def _cap_as_json(file: File, row: CapRow) -> dict[str, object]:
+    """One cap with the amounts of its sum, each as text in the cap's currency."""
+    cap = next(each for each in file.caps.values() if each.id == row.cap)
+    places = -int(cap.limit.amount.as_tuple().exponent)
+    return {
+        "cap": cap.id,
+        "budget": cap.budget,
+        "currency": cap.limit.currency,
+        "limit": str(cap.limit.amount),
+        "paid": _amount(row.paid, places),
+        "might_be_paid": [
+            {"booking": booking, "amount": None if units is None else _amount(units, places)}
+            for booking, units in row.might
+        ],
+        "asked": list(row.asked),
+        "to_buy": _amount(row.to_buy, places),
+        "to_buy_at_most_if_needed": _amount(row.if_needed, places),
+        "left": _amount(row.left, places),
+    }
+
+
+def _amount(units: int, places: int) -> str:
+    """An amount of whole ten-thousandths as text, with at least so many decimal places.
+
+    It shows more where the amount needs them, so nothing is rounded.
+    """
+    whole, rest = divmod(units, 10**4)
+    digits = f"{rest:04d}".rstrip("0")
+    return f"{whole}.{digits.ljust(places, '0')}" if digits or places else str(whole)
+
+
 def _turns_on_who_pays(report: Report) -> bool:
     """Whether a report needs the BUDGETs of the FILE beside it, to be checked against.
 
-    An UNDETERMINED report does where a set asks for a price or for a BUDGET that can pay. An
-    INFEASIBLE one does where its records conflict only with the BUDGETs as the FILE lists them.
+    An UNDETERMINED report does where a set asks for a price or for a BUDGET that can pay, and
+    wherever the FILE has a cap. An INFEASIBLE one does where its records conflict only with
+    the BUDGETs as the FILE lists them.
     """
     asked = {needed.unknown.what for enough in report.missing for needed in enough}
-    return report.given_budgets or bool(asked & {"price", "funding"})
+    return report.given_budgets or bool(report.plans) or bool(asked & {"price", "funding"})
 
 
 @dataclass
@@ -256,7 +331,7 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
     if unknown.person is not None:
         out["person"] = unknown.person
     if unknown.about is not None:
-        out["offer"] = unknown.about
+        out["booking" if unknown.what == "charged" else "offer"] = unknown.about
     if needed.buys:
         out["buys"] = [
             {
@@ -366,13 +441,15 @@ def as_text(file: File, report: Report) -> str:
     else:
         lines = ["UNDETERMINED: the FILE does not say enough to tell.", ""]
         cases = [_case(file, enough) for enough in report.missing]
+        plans = [_plan_in_words(file, plan) for plan in report.plans] or [[] for _ in cases]
         if len(cases) == 1:
             lines.append(f"The trip works if {cases[0]}.")
+            lines += [f"  {line}" for line in plans[0]]
         else:
             lines.append("The trip works in any of these cases:")
-            lines += [
-                f"  {number}. {case[0].upper()}{case[1:]}." for number, case in enumerate(cases, 1)
-            ]
+            for number, (case, plan) in enumerate(zip(cases, plans, strict=True), 1):
+                lines.append(f"  {number}. {case[0].upper()}{case[1:]}.")
+                lines += [f"     {line}" for line in plan]
         asked = [needed.unknown for enough in report.missing for needed in enough]
         kinds = {unknown.what for unknown in asked}
         # A BOOKING can stand in for that answer, for an OPTION whose rights are not COMPLETE.
@@ -391,6 +468,8 @@ def as_text(file: File, report: Report) -> str:
                 f"If {_listed(names, 'or')} does need a right, a BOOKING for each PERSON who"
                 " takes part in it is enough instead.",
             ]
+            if file.caps:
+                lines[-1] = lines[-1][:-1] + ", if what those BOOKINGs paid fits the caps."
         if "other ways" in kinds:
             helps = (
                 "Other WAYs help only if they can be taken when the plan needs them, with a"
@@ -402,6 +481,13 @@ def as_text(file: File, report: Report) -> str:
                     f"{helps}, and only if they SATISFY nothing that is a must-not for a PERSON"
                     " who takes them."
                 )
+        if report.plans:
+            lines += [
+                "",
+                "Whatever the FILE comes to state counts against a cap like everything else: what"
+                " a BOOKING paid from its BUDGET in its currency, and each place that its BUDGET"
+                " pays for. All of it has to fit in what the cap has left.",
+            ]
         if _turns_on_who_pays(report):
             one_way = "Who buys which place is from one plan that works in that case. "
             lines += ["", *_budgets(file, one_way)]
@@ -489,7 +575,10 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
             found = next((fact for fact in file.facts if fact.id == record), None)
             credited = tuple(cover.person for cover in report.rights if cover.by == record)
             used_for = ""
-            if isinstance(found, Booking) and set(credited) != set(found.covers):
+            if isinstance(found, Booking) and not credited:
+                # In a FILE with a cap, a plan relies on a BOOKING whose right nobody uses.
+                used_for = "; this plan counts what it paid, and nobody uses its right"
+            elif isinstance(found, Booking) and set(credited) != set(found.covers):
                 used_for = f"; this plan uses it for {_people(file, credited)}"
             lines.append(f"  {record}: {_record(file, clock, record)}{used_for}")
     money = _money(file, report)
@@ -517,6 +606,8 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
                     f" right ({_listed(list(sums.offers_if_needed))})"
                 )
             lines.append(f"  {currency}: {'; '.join(parts)}")
+    if report.caps:
+        lines += ["", "The caps:", *(f"  {_cap_in_words(file, row)}" for row in report.caps)]
     return lines
 
 
@@ -624,6 +715,7 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
             # A right that is found is one more than the places on OFFER, and the words say so.
             places = file.places_on_offer(unknown.option or "")
             more = "" if not places else f", in addition to the {_places(places)} on OFFER"
+            more += ", at a cost that fits the caps" if file.caps else ""
             each = "each of " if len(group) > 1 else ""
             who = _people(file, tuple(needed.unknown.person or "" for needed in group))
             parts.append(f"a right to {_name(file, unknown.option)} is found for {each}{who}{more}")
@@ -664,6 +756,13 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
         each = " each" if len(buyers) > 1 else ""
         who = _people(file, buyers)
         return f"a place from {unknown.about} has a price that {who} can{each} pay"
+    if unknown.what == "charged":
+        booking = next(
+            fact for fact in file.facts if isinstance(fact, Booking) and fact.id == unknown.about
+        )
+        if booking.paid is None:
+            return f"the FILE states what {booking.id} paid and from which BUDGET"
+        return f"the FILE states which BUDGET the {booking.paid.money} of {booking.id} came from"
     if unknown.what == "funding":
         who = _people(file, (unknown.person or "",))
         places = [
@@ -672,7 +771,8 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
             else f"one from {cover.by} for {cover.price}"
             for cover in needed.buys
         ]
-        can_be_paid = f"can be paid from a BUDGET that lists {who}"
+        within = ", within its caps" if file.caps else ""
+        can_be_paid = f"can be paid from a BUDGET that lists {who}{within}"
         return f"each place that {who} has to buy {can_be_paid} ({', '.join(places)})"
     if unknown.what == "other ways":
         places = _names(file.places)
@@ -723,6 +823,8 @@ def _record(file: File, clock: _Clock, record: str) -> str:
         else:
             ways = f"every way straight from {places[found.origin]} to {places[found.destination]}"
         return f"{ways} that leaves between {span} is listed"
+    if isinstance(found, Cap):
+        return f"the TRIP spends at most {found.limit} from {_names(file.budgets)[found.budget]}"
     if isinstance(found, TripStart):
         return f"the TRIP starts at {clock.moment(found.at)}"
     if isinstance(found, TripEnd):
@@ -758,7 +860,13 @@ def _record(file: File, clock: _Clock, record: str) -> str:
         who = "people need" if found.needed else "nobody needs"
         return f"{who} a right to take part in {name}"
     if isinstance(found, Booking):
-        return f"a BOOKING for {name} covers {_people(file, found.covers)}"
+        covers = f"a BOOKING for {name} covers {_people(file, found.covers)}"
+        if not file.caps:
+            return covers
+        if found.paid is None:
+            return f"{covers}; it states no payment"
+        people, pots = _names(file.persons, "and"), _names(file.budgets)
+        return f"{covers}; its payment: {_paid(found.paid, people, pots)}"
     if isinstance(found, Offer):
         each = " each" if found.places > 1 else ""
         price = "; nobody knows the price" if found.price is None else f", for {found.price}{each}"
@@ -769,6 +877,70 @@ def _record(file: File, clock: _Clock, record: str) -> str:
             closed += f", except from {_listed(found.offers)}"
         return f"the FILE lists every right to {name}: {closed}"
     return _cutoff(file, name, found)
+
+
+def _cap_in_words(file: File, row: CapRow) -> str:
+    """One cap of a plan that works: its limit, and what is charged to it."""
+    cap = next(each for each in file.caps.values() if each.id == row.cap)
+    places = -int(cap.limit.amount.as_tuple().exponent)
+    parts = [f"{_amount(row.paid, places)} paid"]
+    known = [(booking, units) for booking, units in row.might if units is not None]
+    if known:
+        most = _amount(sum(units for _, units in known), places)
+        names = _listed([booking for booking, _ in known])
+        parts.append(f"up to {most} more that {names} might have paid from it")
+    parts.append(f"{_amount(row.to_buy, places)} still to buy")
+    if row.if_needed:
+        more = _amount(row.if_needed, places)
+        parts.append(f"up to {more} more to buy, depending on which OPTIONs need a right")
+    # A BOOKING that might have charged the cap is counted in full, so more may be left.
+    parts.append(f"{'at least ' if known else ''}{_amount(row.left, places)} left")
+    pot = _names(file.budgets)[cap.budget]
+    return f"{cap.id}: at most {cap.limit} from {pot}: {'; '.join(parts)}"
+
+
+def _plan_in_words(file: File, plan: Plan) -> list[str]:
+    """One plan for a set of unknown FACTs: who buys what, and the sum for each cap."""
+    pots = _names(file.budgets)
+    buys: list[str] = []
+    for cover in plan.buys:
+        place = f"{_people(file, (cover.person,))} buys a place from {cover.by}"
+        if cover.price is None:
+            place += " at a price that the FILE has yet to state"
+        elif not cover.price.amount:
+            place += " at no cost"
+        else:
+            place += f" for {cover.price}"
+        if cover.budget is not None:
+            place += f" from {pots[cover.budget]}"
+        if file.needs_right(cover.option) is None:
+            place += ", if the OPTION needs a right"
+        buys.append(place)
+    nothing = "nobody buys a place from an OFFER of this FILE"
+    lines = [f"One plan that works then: {'; '.join(buys) or nothing}."]
+    for row in plan.caps:
+        cap = next(each for each in file.caps.values() if each.id == row.cap)
+        places = -int(cap.limit.amount.as_tuple().exponent)
+        terms = [f"{_amount(row.paid, places)} paid"] if row.paid else []
+        terms += [
+            f"up to {_amount(units, places)} that {booking} might have charged it"
+            for booking, units in row.might
+            if units is not None and booking not in row.asked
+        ]
+        if row.to_buy:
+            terms.append(f"{_amount(row.to_buy, places)} still to buy")
+        if row.if_needed:
+            terms.append(f"up to {_amount(row.if_needed, places)} more if OPTIONs need a right")
+        counted = "; ".join(terms) or "nothing so far"
+        left = f"{_amount(row.left, places)} {cap.limit.currency}"
+        open_ended = [booking for booking, units in row.might if units and booking not in row.asked]
+        names = _listed(open_ended, "or")
+        more = f", and more once the FILE says that {names} charged it less"
+        lines.append(
+            f"{cap.id}, on {pots[cap.budget]}: {counted}, of at most {cap.limit}."
+            f" That leaves {left} for whatever else is charged to it{more if open_ended else ''}."
+        )
+    return lines
 
 
 def _paid(paid: Payment, people: dict[str, str], pots: dict[str, str]) -> str:

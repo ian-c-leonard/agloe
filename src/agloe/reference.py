@@ -41,6 +41,7 @@ class Constraint(Enum):
     WITHIN = "Everything happens within the TRIP"
     RIGHT = "Each PERSON has the rights they need"
     PAID = "Each place is paid for"
+    CAP = "No cap is passed"
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,10 @@ class Broken:
     A must that is not met happens at no step. Then ``want`` names the WANT, and ``option`` and
     ``step`` are both None. A must-not that is broken names the WANT and the OPTION that
     SATISFIES it.
+
+    A cap that is passed happens at no step and names no PERSON. ``cap`` names the DECISION
+    where what the BOOKINGs charged passes it by itself. It is None where every way to pay
+    for the places of the ITINERARY passes some cap: no single cap is the one.
     """
 
     constraint: Constraint
@@ -83,6 +88,7 @@ class Broken:
     late: int | None = None
     step: int | None = None
     want: str | None = None
+    cap: str | None = None
 
 
 @dataclass(frozen=True)
@@ -127,6 +133,10 @@ class World:
     OPTION that needs a right: each takes one place of an OFFER. ``payable`` holds each OFFER
     and PERSON where the PERSON can pay for a place of it: the place costs nothing, or a
     BUDGET that lists the PERSON holds the currency of its price.
+
+    ``spent`` says, for each cap by its BUDGET and currency, the most that the BOOKINGs might
+    have charged to it in ten-thousandths. None: no upper bound. Each cap has its own sum, so
+    the sums of the worst case need not be true together.
     """
 
     terms: Mapping[str, Terms]
@@ -142,6 +152,9 @@ class World:
     rights: frozenset[tuple[str, str]] = frozenset()
     places: Mapping[str, int] = field(default_factory=dict[str, int])
     payable: frozenset[tuple[str, str]] = frozenset()
+    spent: Mapping[tuple[str, str], int | None] = field(
+        default_factory=dict[tuple[str, str], int | None]
+    )
 
 
 @dataclass(frozen=True)
@@ -210,6 +223,9 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
         for offer in file.offers(option.id):
             if offer.price is None and offer.id in to_pay:
                 out.append(Unknown("price", option.id, about=offer.id))
+        for booking in file.bookings(option.id):
+            if file.charge_is_open(booking):
+                out.append(Unknown("charged", option.id, about=booking.id))
         for want in file.wants:
             if file.says(option.id, want.id) is None:
                 if want.musts:
@@ -527,6 +543,31 @@ def _world(
             paid = price is not None and file.pays(person.id, price) is not None
             if free or paid or person.id in funded:
                 payable.add((offer.id, person.id))
+    # What the BOOKINGs might have charged to each cap. A payment that names its BUDGET is
+    # charged there. One that names none might have been charged to any BUDGET that holds its
+    # currency, so it counts against each cap in that currency. A BOOKING that states no
+    # payment has no upper bound. Where its unknown FACT turns out well, a BOOKING charged
+    # nothing to a BUDGET with a cap.
+    spent: dict[tuple[str, str], int | None] = {}
+    if file.caps:
+        stated = dict.fromkeys(file.caps, 0)
+        anywhere: dict[str, int] = {}
+        no_bound = False
+        for fact in file.facts:
+            if not isinstance(fact, Booking):
+                continue
+            charged_nothing = well(Unknown("charged", fact.option, about=fact.id))
+            if fact.paid is None:
+                no_bound = no_bound or not charged_nothing
+            elif fact.paid.budget is not None:
+                key = (fact.paid.budget, fact.paid.money.currency)
+                if key in stated:
+                    stated[key] += fact.paid.money.units
+            elif not charged_nothing:
+                currency = fact.paid.money.currency
+                anywhere[currency] = anywhere.get(currency, 0) + fact.paid.money.units
+        for key, known in stated.items():
+            spent[key] = None if no_bound else known + anywhere.get(key[1], 0)
     return World(
         terms,
         unlisted,
@@ -539,6 +580,7 @@ def _world(
         frozenset(rights),
         {option.id: file.places_on_offer(option.id) for option in file.options},
         frozenset(payable),
+        spent,
     )
 
 
@@ -636,7 +678,113 @@ def _rights(file: File, world: World, taking_part: Mapping[str, tuple[str, ...]]
             out.append(Broken(Constraint.RIGHT, option, left_out[free:]))
         if left_out[:free]:
             out.append(Broken(Constraint.PAID, option, left_out[:free]))
+    for key, cap in file.caps.items():
+        charged = world.spent.get(key, 0)
+        if charged is None or charged > cap.limit.units:
+            out.append(Broken(Constraint.CAP, None, (), cap=cap.id))
+    if file.caps and not out and way_to_pay(file, world, taking_part) is None:
+        out.append(Broken(Constraint.CAP, None, ()))
     return out
+
+
+def way_to_pay(
+    file: File, world: World, taking_part: Mapping[str, Sequence[str]]
+) -> dict[tuple[str, str], tuple[str, str | None]] | None:
+    """The way to pay for the places these OPTIONs need, by the fixed rule, or None.
+
+    ``taking_part`` gives the PERSONs in each OPTION, in the order of the steps. The result
+    gives, for each OPTION and PERSON who takes a place, the OFFER it is from and the BUDGET
+    that pays. The BUDGET is None for a place that costs nothing, and for a PERSON whom no
+    BUDGET of the FILE lists. None: there is no way to pay in this world.
+
+    With no cap in the FILE, each OPTION is by itself: ``placed`` shares out its places, and
+    the first BUDGET that can pay pays. With caps, one BUDGET can run short over several
+    OPTIONs, and a place that one PERSON leaves can be the only one another can pay for. So
+    the purchases are taken in order, and each tries its pairs of an OFFER and a BUDGET in
+    the FILE's order: the first that still fits, and that the purchases after it can follow.
+    A purchase with no pair left sends the one before it on to its next pair.
+    """
+    buyers: list[tuple[str, str]] = []
+    for option, persons in taking_part.items():
+        if option in world.needs_right:
+            lacking = [person for person in persons if (option, person) not in world.rights]
+            buyers += [(option, person) for person in _in_file_order_of_persons(file, lacking)]
+    if not file.caps:
+        chosen: dict[tuple[str, str], tuple[str, str | None]] = {}
+        groups: dict[str, list[str]] = {}
+        for option, person in buyers:
+            groups.setdefault(option, []).append(person)
+        for option, group in groups.items():
+            taken = placed(file, world, option, group)
+            if len(taken) < len(group):
+                return None
+            prices = {offer.id: offer.price for offer in file.offers(option)}
+            for person in group:
+                price = prices[taken[person]]
+                payer = None if price is None else file.pays(person, price)
+                chosen[option, person] = (taken[person], None if payer is None else payer.id)
+        return chosen
+    room: dict[tuple[str, str], int] = {}
+    for key, cap in file.caps.items():
+        charged = world.spent.get(key, 0)
+        if charged is None or charged > cap.limit.units:
+            return None
+        room[key] = cap.limit.units - charged
+    # Each pair a purchase can take: the OFFER, the BUDGET, and what it draws on which cap.
+    pairs: list[list[tuple[str, str | None, tuple[str, str] | None, int]]] = []
+    for option, person in buyers:
+        able: list[tuple[str, str | None, tuple[str, str] | None, int]] = []
+        for offer in file.offers(option):
+            if (offer.id, person) not in world.payable:
+                continue
+            price = offer.price
+            sources = (
+                () if price is None or not price.amount else file.payers(person, price.currency)
+            )
+            if price is None or not sources:
+                # It costs nothing, or money from outside the FILE pays: no cap counts it.
+                able.append((offer.id, None, None, 0))
+                continue
+            free_to_spend = False
+            for budget in sources:
+                key = (budget.id, price.currency)
+                if key in room:
+                    able.append((offer.id, budget.id, key, price.units))
+                elif not free_to_spend:
+                    # BUDGETs with no cap in this currency are alike: the first one pays.
+                    able.append((offer.id, budget.id, None, price.units))
+                    free_to_spend = True
+        pairs.append(able)
+    left = {offer.id: offer.places for option in taking_part for offer in file.offers(option)}
+    picked: list[int] = []
+    start = 0
+    while len(picked) < len(buyers):
+        able = pairs[len(picked)]
+        found = None
+        for number in range(start, len(able)):
+            offer, _, key, units = able[number]
+            if left[offer] and (key is None or room[key] >= units):
+                found = number
+                break
+        if found is None:
+            if not picked:
+                return None
+            start = picked.pop() + 1
+            offer, _, key, units = pairs[len(picked)][start - 1]
+            left[offer] += 1
+            if key is not None:
+                room[key] += units
+            continue
+        offer, _, key, units = able[found]
+        left[offer] -= 1
+        if key is not None:
+            room[key] -= units
+        picked.append(found)
+        start = 0
+    return {
+        buyer: (able[number][0], able[number][1])
+        for buyer, able, number in zip(buyers, pairs, picked, strict=True)
+    }
 
 
 def placed(file: File, world: World, option: str, persons: Sequence[str]) -> dict[str, str]:

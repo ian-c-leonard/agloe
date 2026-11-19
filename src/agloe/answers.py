@@ -14,6 +14,7 @@ from itertools import combinations
 
 from agloe.file import (
     Booking,
+    Cap,
     Complete,
     CompleteFor,
     CompleteRights,
@@ -40,8 +41,8 @@ from agloe.reference import (
     longest_case,
     no_better_than,
     one_way_each,
-    placed,
     unknowns,
+    way_to_pay,
     with_no_offer,
     with_these_at_best,
     with_this_long,
@@ -88,6 +89,41 @@ class Missing:
 
 
 @dataclass(frozen=True)
+class CapRow:
+    """What a report says about one cap, so that anybody can check it.
+
+    ``paid`` is what the BOOKINGs charged to it for sure. ``might`` holds each BOOKING that
+    might have charged it besides, with the amount where the FILE states one, and None where
+    the BOOKING states no payment. ``asked`` holds those among them whose charge a set of
+    unknown FACTs asks about. ``to_buy`` is what the plan buys from it, and ``if_needed`` the
+    most it buys besides, if OPTIONs turn out to need a right. ``left`` is what the cap still
+    allows after all of that, with each BOOKING in ``might`` counted in full unless the set
+    asks about it. Whatever else comes to be charged to the cap has to fit in it. The
+    amounts are whole ten-thousandths of the cap's currency.
+    """
+
+    cap: str
+    paid: int
+    might: tuple[tuple[str, int | None], ...]
+    asked: tuple[str, ...]
+    to_buy: int
+    if_needed: int
+    left: int
+
+
+@dataclass(frozen=True)
+class Plan:
+    """One plan that works where a set of unknown FACTs turns out well, in a FILE with a cap.
+
+    ``buys`` says who buys which place, at what price and from which BUDGET. ``caps`` gives
+    the sum that has to hold for each cap.
+    """
+
+    buys: tuple[Cover, ...]
+    caps: tuple[CapRow, ...]
+
+
+@dataclass(frozen=True)
 class Report:
     """The answer and its evidence.
 
@@ -96,6 +132,9 @@ class Report:
     PERSON their right to each OPTION that needs one or might. INFEASIBLE: FACTs and DECISIONs
     that conflict, and whether they conflict only ``given_budgets``: with the BUDGETs as the
     FILE lists them. UNDETERMINED: each smallest set of unknown FACTs that would be enough.
+
+    In a FILE with a cap, a FEASIBLE Report has a row for each cap in ``caps``, and an
+    UNDETERMINED one has a plan for each set of ``missing`` in ``plans``, in the same order.
     """
 
     answer: Answer
@@ -107,6 +146,8 @@ class Report:
     conflict: tuple[str, ...] = ()
     given_budgets: bool = False
     missing: tuple[tuple[Missing, ...], ...] = ()
+    caps: tuple[CapRow, ...] = ()
+    plans: tuple[Plan, ...] = ()
 
 
 type Shown = Callable[[File, World], Itinerary | None]
@@ -154,17 +195,23 @@ def check(
         used = {cover.by for cover in rights}
         relies_on = [fact.id for fact in file.facts if _relied_on(file, chosen, fact, used)]
         relies_on += [want.id for want in file.wants if want.musts or want.must_nots]
-        relies_on += [each.id for each in file.decisions if isinstance(each, Lock) or chosen]
+        # Every LOCK and every cap, and the times of the TRIP where the plan has anything.
+        relies_on += [each.id for each in file.decisions if isinstance(each, Lock | Cap) or chosen]
         at_worst: tuple[Broken, ...] = ()
         if not robust:
             # The steps keep the order the ITINERARY lists them in: that is the plan shown.
             at_worst = tuple(broken_as_listed(file, longest, in_world(longest, chosen)))
-        return Report(Answer.FEASIBLE, chosen, tuple(relies_on), robust, at_worst, rights)
+        caps = _cap_rows(file, rights, ())
+        return Report(
+            Answer.FEASIBLE, chosen, tuple(relies_on), robust, at_worst, rights, caps=caps
+        )
     enough = stuck(Remaining(file))
     if enough is not None:
         conflict, given_budgets = _conflict(file, stuck, enough)
         return Report(Answer.INFEASIBLE, conflict=conflict, given_budgets=given_budgets)
-    return Report(Answer.UNDETERMINED, missing=_missing(file, works, shown))
+    missing = _missing(file, works, shown)
+    plans = tuple(_plan(file, some, shown) for some in missing) if file.caps else ()
+    return Report(Answer.UNDETERMINED, missing=missing, plans=plans)
 
 
 def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> bool:
@@ -174,10 +221,14 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> 
     of travel: it takes no unlisted WAY. It relies on where a PERSON starts from where the
     PERSON is in it, or has to end the TRIP at a PLACE: their path begins there, or they stay
     there. It relies on the BOOKINGs and the OFFERs that give its PERSONs their rights:
-    ``used`` holds those. It relies on no FACT that the rights to an OPTION are COMPLETE.
+    ``used`` holds those. In a FILE with a cap it relies on every BOOKING: each says what it
+    charged, and that is how each cap is known to hold. It relies on no FACT that the rights
+    to an OPTION are COMPLETE.
     """
     if isinstance(fact, CompleteFor):
         return _settles(file, itinerary, fact)
+    if isinstance(fact, Booking) and file.caps:
+        return True
     if isinstance(fact, Booking | Offer):
         return fact.id in used
     if isinstance(fact, CompleteRights):
@@ -195,31 +246,27 @@ def _covers(file: File, world: World, itinerary: Itinerary) -> tuple[Cover, ...]
 
     It leaves out an OPTION that needs no right in this world. A PERSON whom a BOOKING covers
     has the first such BOOKING in the FILE. A PERSON with another right in this world is left
-    out: no record gives it. The other PERSONs who take part take places of the OPTION's
-    OFFERs that they can pay for, as ``placed`` shares them out, and each place is paid from
-    the first BUDGET in the FILE that can pay it. The plan works in this world, so there is a
-    place for each of them.
+    out: no record gives it. The other PERSONs who take part take places of the OPTIONs'
+    OFFERs, each paid from a BUDGET, as ``way_to_pay`` gives them for the whole TRIP. The plan
+    works in this world, so there is a way to pay.
     """
     order = {person.id: number for number, person in enumerate(file.persons)}
+    taking_part = {step.option: step.persons for step in itinerary if step.option is not None}
+    paying = way_to_pay(file, world, taking_part)
+    if paying is None:
+        raise AssertionError("a plan that works has no way to pay")
     covers: list[Cover] = []
     for step in itinerary:
         if step.option is None or step.option not in world.needs_right:
             continue
-        persons = sorted(step.persons, key=order.__getitem__)
-        without = [person for person in persons if (step.option, person) not in world.rights]
-        taken = placed(file, world, step.option, without)
         offers = {offer.id: offer for offer in file.offers(step.option)}
-        for person in persons:
+        for person in sorted(step.persons, key=order.__getitem__):
             booked = file.booking(step.option, person)
             if booked is not None:
                 covers.append(Cover(step.option, person, booked.id, False))
-                continue
-            if person not in taken:
-                continue
-            price = offers[taken[person]].price
-            payer = None if price is None else file.pays(person, price)
-            budget = None if payer is None else payer.id
-            covers.append(Cover(step.option, person, taken[person], True, price, budget))
+            elif (step.option, person) in paying:
+                offer, budget = paying[step.option, person]
+                covers.append(Cover(step.option, person, offer, True, offers[offer].price, budget))
     return tuple(covers)
 
 
@@ -252,7 +299,8 @@ def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[tuple[s
     once: then nobody knows who pays for anybody, and the best case has a BUDGET for each
     PERSON. The second value returned says whether the records rule out every ITINERARY only
     with the BUDGETs there. Only a place with a price above nothing needs a BUDGET, so the
-    test is made only where a record left is an OFFER with one.
+    test is made only where a record left is an OFFER with one. A conflict that holds a cap
+    needs no test: the cap is about its BUDGET.
     """
     kept = Remaining(file)
     skipped = False
@@ -270,6 +318,9 @@ def _conflict(file: File, stuck: Stuck, enough: frozenset[str]) -> tuple[tuple[s
         isinstance(fact, Offer) and fact.price is not None and fact.price.amount
         for fact in kept.file.facts
     )
+    if kept.file.caps:
+        # A cap names its BUDGET, so the conflict is about the BUDGETs as they are.
+        return tuple(_records(kept.file)), True
     with_no_budget = replace(kept, file=replace(kept.file, budgets=()))
     given_budgets = bool(priced and file.budgets) and stuck(with_no_budget) is None
     return tuple(_records(kept.file)), given_budgets
@@ -350,11 +401,7 @@ def _bought(file: File, enough: Sequence[Unknown], shown: Shown) -> list[tuple[C
     """
     if not any(unknown.what in ("price", "funding") for unknown in enough):
         return [() for _ in enough]
-    world = with_these_at_best(file, enough)
-    plan = shown(file, world)
-    if plan is None:
-        raise AssertionError("a set of unknown FACTs that is enough shows no ITINERARY")
-    places = [cover for cover in _covers(file, world, plan) if cover.to_buy]
+    places = _purchases(file, enough, shown)
     quoted = {unknown.about for unknown in enough if unknown.what == "price"}
     bought: list[tuple[Cover, ...]] = []
     for unknown in enough:
@@ -370,6 +417,80 @@ def _bought(file: File, enough: Sequence[Unknown], shown: Shown) -> list[tuple[C
         else:
             bought.append(())
     return bought
+
+
+def _purchases(
+    file: File, enough: Sequence[Unknown], shown: Shown, world: World | None = None
+) -> list[Cover]:
+    """Who buys which place in the ITINERARY shown where a set of unknown FACTs turns out well.
+
+    Every other unknown FACT turns out badly there. ``world`` is that world, where it is not
+    the one in which each FACT of the set turns out as well as it can.
+    """
+    world = world or with_these_at_best(file, enough)
+    plan = shown(file, world)
+    if plan is None:
+        raise AssertionError("a set of unknown FACTs that is enough shows no ITINERARY")
+    return [cover for cover in _covers(file, world, plan) if cover.to_buy]
+
+
+def _plan(file: File, enough: Sequence[Missing], shown: Shown) -> Plan:
+    """One plan that works where this set turns out well, with the sum for each cap.
+
+    A set of one length of time says the most that length can be, or that any length would
+    do. The plan is one that works at that length: a plan for no time at all could buy a
+    place that the PERSON then misses.
+    """
+    unknowns = [needed.unknown for needed in enough]
+    world = None
+    if len(enough) == 1 and unknowns[0].what in ("duration", "cutoff", "other ways"):
+        longest = enough[0].at_most
+        world = with_this_long(file, unknowns[0], _beyond(file) if longest is None else longest)
+    buys = _purchases(file, unknowns, shown, world)
+    asked = [unknown.about or "" for unknown in unknowns if unknown.what == "charged"]
+    return Plan(tuple(buys), _cap_rows(file, buys, asked))
+
+
+def _cap_rows(file: File, covers: Sequence[Cover], asked: Sequence[str]) -> tuple[CapRow, ...]:
+    """A row for each cap of the FILE, in the FILE's order, for a plan with these purchases.
+
+    A BOOKING that names the cap's BUDGET in its currency charged it for sure. One that states
+    no payment might have charged any cap, and one that states a payment with no BUDGET might
+    have charged any cap in its currency. ``asked`` holds the BOOKINGs whose charge the set
+    of the plan asks about: what they charged is not counted, and has to fit in what is left.
+    """
+    rows: list[CapRow] = []
+    bookings = [fact for fact in file.facts if isinstance(fact, Booking)]
+    for cap in file.caps.values():
+        currency = cap.limit.currency
+        paid = sum(
+            fact.paid.money.units
+            for fact in bookings
+            if fact.paid is not None
+            and fact.paid.budget == cap.budget
+            and fact.paid.money.currency == currency
+        )
+        might = tuple(
+            (fact.id, None if fact.paid is None else fact.paid.money.units)
+            for fact in bookings
+            if file.charge_is_open(fact)
+            and (fact.paid is None or fact.paid.money.currency == currency)
+        )
+        mine = [
+            cover
+            for cover in covers
+            if cover.to_buy
+            and cover.price is not None
+            and cover.budget == cap.budget
+            and cover.price.currency == currency
+        ]
+        sure = sum(c.price.units for c in mine if c.price and file.needs_right(c.option) is True)
+        most = sum(c.price.units for c in mine if c.price and file.needs_right(c.option) is None)
+        named = tuple(booking for booking, _ in might if booking in asked)
+        besides = sum(units or 0 for booking, units in might if booking not in named)
+        left = cap.limit.units - paid - besides - sure - most
+        rows.append(CapRow(cap.id, paid, might, named, sure, most, left))
+    return tuple(rows)
 
 
 def _with_enough_of_each(
@@ -409,6 +530,9 @@ def _asked_by_a_lock(file: File) -> tuple[frozenset[Unknown], list[tuple[frozens
     on OFFER: no set asks for another right to such an OPTION. Nothing else can stand in for
     either FACT.
 
+    In a FILE with a cap, every set also holds what each BOOKING with no stated payment
+    charged: at its worst that has no upper bound, and no cap can be shown to hold.
+
     Second, groups of FACTs with a number: every such set holds at least that many of the
     group. Where a FACT says the OPTION needs a right, each of those PERSONs needs one. The
     places on OFFER serve some of them, whoever they are, and each of the rest needs another
@@ -417,6 +541,9 @@ def _asked_by_a_lock(file: File) -> tuple[frozenset[Unknown], list[tuple[frozens
     asked: set[Unknown] = set()
     at_least: list[tuple[frozenset[Unknown], int]] = []
     locked: dict[str, set[str]] = {}
+    for fact in file.facts:
+        if isinstance(fact, Booking) and fact.paid is None and file.caps:
+            asked.add(Unknown("charged", fact.option, about=fact.id))
     for lock in file.locks:
         if file.start(lock.option) is None:
             asked.add(Unknown("start", lock.option))
@@ -432,27 +559,35 @@ def _asked_by_a_lock(file: File) -> tuple[frozenset[Unknown], list[tuple[frozens
     return frozenset(asked), at_least
 
 
+def _beyond(file: File) -> int:
+    """A length of time that no limit can be longer than, in seconds.
+
+    Only two fixed times can limit a length of time: it must fit between them. So a length
+    longer than the time between the earliest and the latest fixed time has no limit. The
+    times the TRIP starts and ends are fixed times too.
+    """
+    fixed = [fact.at for fact in file.facts if isinstance(fact, Start) and fact.at is not None]
+    fixed += [bound.at for bound in (file.trip_start(), file.trip_end()) if bound is not None]
+    for fact in file.facts:
+        if isinstance(fact, Complete):
+            fixed += [fact.earliest - 1, fact.latest + 1]
+    return max(fixed) - min(fixed) + 1 if fixed else 1
+
+
 def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
     """The most seconds this one unknown can be for the TRIP to work.
 
     None for an unknown that is not a length of time, and None when any length would do.
     """
     no_length = ("start", "satisfies", "does not satisfy", "another option")
-    if unknown.what in (*no_length, "needs no right", "another right", "price", "funding"):
+    about_rights = ("needs no right", "another right", "price", "funding", "charged")
+    if unknown.what in (*no_length, *about_rights):
         return None
 
     def enough(seconds: int) -> bool:
         return works(file, with_this_long(file, unknown, seconds))
 
-    # Only two fixed times can limit a length of time: it must fit between them. So a length
-    # longer than the time between the earliest and the latest fixed time has no limit. The
-    # times the TRIP starts and ends are fixed times too.
-    fixed = [fact.at for fact in file.facts if isinstance(fact, Start) and fact.at is not None]
-    fixed += [bound.at for bound in (file.trip_start(), file.trip_end()) if bound is not None]
-    for fact in file.facts:
-        if isinstance(fact, Complete):
-            fixed += [fact.earliest - 1, fact.latest + 1]
-    under, over = 0, max(fixed) - min(fixed) + 1 if fixed else 1
+    under, over = 0, _beyond(file)
     if enough(over):
         return None
     while over - under > 1:

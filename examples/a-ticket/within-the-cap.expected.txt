@@ -1,0 +1,40 @@
+FEASIBLE, with a WARNING: this trip works, but not everything is booked yet.
+
+Saturday 15 May 2027 (times in America/Chicago)
+  10:00 am to 11:30 am: Skydeck visit, Alex and Sam
+    ! Sam still has to buy a right to this, from skydeck-tickets, for 32.00 USD from the trip money.
+  10:30 am to 11:30 am: Gallery talk, Jo
+  11:30 am to 11:50 am: the walk between Willis Tower and Millennium Park, Alex and Sam
+  11:30 am to 11:35 am: the walk between the Art Institute and Millennium Park, Jo
+  12:15 pm to 1:15 pm: Lunch in the park, Alex, Sam and Jo
+
+WARNING: not everything is booked yet. A line marked "!" that names an OFFER says who still has to buy a right. Only a BOOKING secures one.
+
+The plan relies on these FACTs and DECISIONs:
+  skydeck-time: Skydeck visit starts at 10:00 am on Saturday 15 May 2027
+  skydeck-length: Skydeck visit takes 1 h 30 min
+  skydeck-needs-a-ticket: people need a right to take part in Skydeck visit
+  alex-skydeck-ticket: a BOOKING for Skydeck visit covers Alex; its payment: 32.00 USD, paid by Alex, from the trip money
+  skydeck-tickets: an OFFER has 2 places for Skydeck visit that can still be bought, for 32.00 USD each
+  talk-time: Gallery talk starts at 10:30 am on Saturday 15 May 2027
+  talk-length: Gallery talk takes 1 h
+  talk-is-walk-up: nobody needs a right to take part in Gallery talk
+  lunch-time: Lunch in the park starts at 12:15 pm on Saturday 15 May 2027
+  lunch-length: Lunch in the park takes 1 h
+  lunch-table: nobody has to be at Millennium Park before Lunch in the park starts
+  lunch-is-walk-up: nobody needs a right to take part in Lunch in the park
+  walk-from-tower-length: the walk between Willis Tower and Millennium Park takes 20 min
+  walk-from-museum-length: the walk between the Art Institute and Millennium Park takes 5 min
+  lock-skydeck: Alex and Sam take part in Skydeck visit
+  lock-gallery-talk: Jo takes part in Gallery talk
+  lock-lunch: Alex, Sam and Jo take part in Lunch in the park
+  trip-cap: the TRIP spends at most 200.00 USD from the trip money
+
+What the BOOKINGs state that they paid:
+  alex-skydeck-ticket: 32.00 USD, paid by Alex, from the trip money
+
+The money of this plan, by currency:
+  USD: 32.00 paid; 32.00 still to buy (skydeck-tickets)
+
+The caps:
+  trip-cap: at most 200.00 USD from the trip money: 32.00 paid; 32.00 still to buy; 136.00 left

@@ -68,9 +68,9 @@ A COMPLETE set that is empty means "we looked, and there is nothing". A FACT tha
 
 ### DECISION
 
-A dated choice by a PERSON: a LOCK, a PIN, a DISMISSAL, or the time at which the TRIP starts or ends, or the undoing of one. A DECISION is never edited; changing your mind is a new DECISION that names the one it undoes.
+A dated choice by a PERSON: a LOCK, a PIN, a DISMISSAL, the time at which the TRIP starts or ends, a cap on what the TRIP spends from a BUDGET in one currency, or the undoing of one. A DECISION is never edited; changing your mind is a new DECISION that names the one it undoes.
 
-*Uses:* → PERSON, → LOCK, → PIN, → DISMISSAL.
+*Uses:* → PERSON, → LOCK, → PIN, → DISMISSAL, → BUDGET.
 
 ---
 
@@ -349,7 +349,7 @@ A dated point at which something about the TRIP changes unless a DECISION comes 
 
 ### ROBUST
 
-An ITINERARY is ROBUST when its OPTIONs, PERSONs, WAYs and start times meet every CONSTRAINT however the unknown FACTs turn out, for every value of every CONTINGENT duration.
+An ITINERARY is ROBUST when it meets every CONSTRAINT however the unknown FACTs turn out, for every value of every CONTINGENT duration.
 
 *Uses:* ITINERARY, CONSTRAINT, CONTINGENT.
 
