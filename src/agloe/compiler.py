@@ -578,7 +578,8 @@ class _Search:
     ) -> tuple[cp_model.IntVar, _Taken] | None:
         """The choice that a PERSON goes from one OPTION to the next by WAYs, and by which route.
 
-        None when no route leads there, or when no PERSON who travels could be in time.
+        None when no route leads there, or when nobody knows how early a PERSON has to be
+        there.
         """
         options = self.file.options
         here, there = options[before].destination, options[after].origin

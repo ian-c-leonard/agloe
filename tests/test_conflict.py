@@ -19,10 +19,13 @@ from tests.stories import (
     must,
     satisfies,
     starts_at,
+    starts_from,
     stays,
+    takes,
     trip,
     trip_ends,
     trip_starts,
+    way,
 )
 
 
@@ -290,6 +293,29 @@ def test_one_check_asks_the_solver_once_about_one_model(
     found = compiler.check(file)
     assert found.answer is Answer.UNDETERMINED
     assert [aims for _, aims in solves if not aims] == [False]
+
+
+def test_an_answer_kept_for_one_model_is_read_with_the_routes_of_each_question() -> None:
+    """Sam starts at the depot and must end the TRIP at two PLACEs. A bus goes to one, a ferry
+    to the other.
+
+    Without either WANT the model has the same text: one WAY to where Sam has to end. So
+    the solver is asked once, and the plan for each question names its own WAY.
+    """
+    ways = [way("bus", "depot", "a"), way("ferry", "depot", "b")]
+    facts = [starts_from("sam", "depot"), takes("bus", "PT10M"), takes("ferry", "PT10M")]
+    facts += [starts_at("wait", 9), lasts("wait", "PT5M")]
+    wants = [ends_at("a", "sam", id="end-at-a"), ends_at("b", "sam", id="end-at-b")]
+    options = [stays("wait", "depot")]
+    file = trip(["sam"], ["depot", "a", "b"], options, facts, [lock("wait", "sam")], ways, wants)
+    found = compiler.check(file)
+    assert found.conflict == ("end-at-a", "end-at-b")
+    assert found == check(file)
+    plans = [
+        compiler.shown(left.file, reference.best_case_left(left)[0])
+        for left in (Remaining(file).without(want) for want in found.conflict)
+    ]
+    assert [[step.way for step in plan or () if step.way] for plan in plans] == [["ferry"], ["bus"]]
 
 
 def test_rides_that_two_persons_are_locked_into_are_asked_about_one_lock_at_a_time() -> None:
