@@ -20,9 +20,19 @@ type Length = str
 type Currency = str
 
 
+type Amount = str
+
+
 class Money(TypedDict):
-    amount: str
+    amount: Amount
     currency: Currency
+
+
+class Payment(TypedDict):
+    amount: Amount
+    currency: Currency
+    budget: NotRequired[Id]
+    by: NotRequired[Id]
 
 
 class Budget(TypedDict):
@@ -188,6 +198,7 @@ class NeedsRight(TypedDict):
 class Booking(TypedDict):
     option: Id
     covers: list[Id]
+    paid: NotRequired[Payment]
 
 
 class BookingFact(TypedDict):

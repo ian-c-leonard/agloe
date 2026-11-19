@@ -76,5 +76,32 @@
     "lock-gallery-talk",
     "lock-lunch"
   ],
-  "robust": true
+  "robust": true,
+  "money": {
+    "totals": [
+      {
+        "currency": "USD",
+        "paid": "64.00",
+        "to_pay": "0",
+        "to_pay_if_needed": "0"
+      }
+    ],
+    "paid": [
+      {
+        "booking": "alex-skydeck-ticket",
+        "amount": "32.00",
+        "currency": "USD",
+        "budget": null,
+        "by": "alex"
+      },
+      {
+        "booking": "sam-skydeck-ticket",
+        "amount": "32.00",
+        "currency": "USD",
+        "budget": null,
+        "by": "sam"
+      }
+    ],
+    "not_stated": []
+  }
 }

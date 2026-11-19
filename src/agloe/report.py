@@ -15,6 +15,7 @@ from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
+from decimal import Decimal
 from itertools import groupby
 
 from agloe.answers import Answer, Cover, Missing, Report
@@ -32,6 +33,7 @@ from agloe.file import (
     NeedsRight,
     Offer,
     Option,
+    Payment,
     Person,
     Place,
     Satisfies,
@@ -96,6 +98,30 @@ def as_json(file: File, report: Report) -> dict[str, object]:
                 }
                 for (option, offer, budget), covers in _to_buy(report).items()
             ]
+        money = _money(file, report)
+        if money is not None:
+            out["money"] = {
+                "totals": [
+                    {
+                        "currency": currency,
+                        "paid": str(sums.paid),
+                        "to_pay": str(sums.to_pay),
+                        "to_pay_if_needed": str(sums.if_needed),
+                    }
+                    for currency, sums in money.items()
+                ],
+                "paid": [
+                    {
+                        "booking": fact.id,
+                        **(_money_as_json(fact.paid.money) or {}),
+                        "budget": fact.paid.budget,
+                        "by": fact.paid.by,
+                    }
+                    for fact in file.facts
+                    if isinstance(fact, Booking) and fact.paid is not None
+                ],
+                "not_stated": _with_no_payment(file),
+            }
     if report.at_worst:
         out["at_worst"] = [_broken_as_json(file, report, found) for found in report.at_worst]
     if report.conflict:
@@ -120,6 +146,52 @@ def _turns_on_who_pays(report: Report) -> bool:
     """
     asked = {needed.unknown.what for enough in report.missing for needed in enough}
     return report.given_budgets or bool(asked & {"price", "funding"})
+
+
+@dataclass
+class _Sums:
+    """The money of one currency: what is paid, and what the plan shown still has to pay.
+
+    ``if_needed`` is what it has to pay only if an OPTION turns out to need a right. Each
+    amount comes with the ids of the BOOKINGs or the OFFERs behind it.
+    """
+
+    paid: Decimal = Decimal(0)
+    to_pay: Decimal = Decimal(0)
+    if_needed: Decimal = Decimal(0)
+    bookings: tuple[str, ...] = ()
+    offers: tuple[str, ...] = ()
+    offers_if_needed: tuple[str, ...] = ()
+
+
+def _money(file: File, report: Report) -> dict[str, _Sums] | None:
+    """What the TRIP has paid and what the plan shown still has to pay, for each currency.
+
+    Every BOOKING of the FILE that states a payment counts, used or not: the money is spent.
+    A payment or a price of nothing counts in no currency. None where there is nothing to
+    add up: no BOOKING states a payment above nothing, and the plan buys nothing at a price.
+    """
+    money: dict[str, _Sums] = {}
+    for fact in file.facts:
+        if isinstance(fact, Booking) and fact.paid is not None and fact.paid.money.amount:
+            sums = money.setdefault(fact.paid.money.currency, _Sums())
+            sums.paid += fact.paid.money.amount
+            sums.bookings = (*sums.bookings, fact.id)
+    for cover in report.rights:
+        if cover.to_buy and cover.price is not None and cover.price.amount:
+            sums = money.setdefault(cover.price.currency, _Sums())
+            if file.needs_right(cover.option) is None:
+                sums.if_needed += cover.price.amount
+                sums.offers_if_needed = tuple(dict.fromkeys((*sums.offers_if_needed, cover.by)))
+            else:
+                sums.to_pay += cover.price.amount
+                sums.offers = tuple(dict.fromkeys((*sums.offers, cover.by)))
+    return money or None
+
+
+def _with_no_payment(file: File) -> list[str]:
+    """Each BOOKING that states no payment, in the FILE's order."""
+    return [fact.id for fact in file.facts if isinstance(fact, Booking) and fact.paid is None]
 
 
 def _to_buy(report: Report) -> dict[tuple[str, str, str | None], list[Cover]]:
@@ -400,6 +472,23 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
             if isinstance(found, Booking) and set(credited) != set(found.covers):
                 used_for = f"; this plan uses it for {_people(file, credited)}"
             lines.append(f"  {record}: {_record(file, clock, record)}{used_for}")
+    money = _money(file, report)
+    if money is not None:
+        lines += ["", "What is paid, and what this plan still has to pay:"]
+        for currency, sums in money.items():
+            parts = [
+                f"{amount} {currency} {what} ({_listed(behind)})"
+                for amount, what, behind in (
+                    (sums.paid, "paid", sums.bookings),
+                    (sums.to_pay, "still to pay", sums.offers),
+                    (sums.if_needed, "to pay only if a right is needed", sums.offers_if_needed),
+                )
+                if behind
+            ]
+            lines.append(f"  {'; '.join(parts)}")
+        unstated = _with_no_payment(file)
+        if unstated:
+            lines.append(f"  No payment is stated for {_listed(unstated)}.")
     return lines
 
 
@@ -641,7 +730,8 @@ def _record(file: File, clock: _Clock, record: str) -> str:
         who = "people need" if found.needed else "nobody needs"
         return f"{who} a right to take part in {name}"
     if isinstance(found, Booking):
-        return f"a BOOKING for {name} covers {_people(file, found.covers)}"
+        covers = f"a BOOKING for {name} covers {_people(file, found.covers)}"
+        return covers if found.paid is None else f"{covers}; {_paid(file, found.paid)}"
     if isinstance(found, Offer):
         each = " each" if found.places > 1 else ""
         price = "; nobody knows the price" if found.price is None else f", for {found.price}{each}"
@@ -652,6 +742,15 @@ def _record(file: File, clock: _Clock, record: str) -> str:
             closed += f", except from {_listed(found.offers)}"
         return f"the FILE lists every right to {name}: {closed}"
     return _cutoff(file, name, found)
+
+
+def _paid(file: File, paid: Payment) -> str:
+    """What a BOOKING paid, in words: the amount, who paid and the BUDGET, where it states them."""
+    amount = str(paid.money) if paid.money.amount else "nothing"
+    said = f"{amount} was paid for it"
+    if paid.by is not None:
+        said = f"{_people(file, (paid.by,))} paid {amount} for it"
+    return said if paid.budget is None else f"{said} from {_names(file.budgets)[paid.budget]}"
 
 
 def _cutoff(file: File, name: str, found: Cutoff) -> str:
