@@ -178,11 +178,16 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
     and that it does not only where the WANT is a must-not for some PERSON. So only those are
     listed. Where a FACT says a WANT's set is COMPLETE, nothing about the WANT is unknown.
     A price and who pays can help only where somebody might have to pay for a place. So a
-    price is listed only for an OFFER that ``might_buy`` gives for some PERSON, and who pays
-    only for a PERSON for whom it gives an OFFER.
+    price is listed only for an OFFER that ``for_sale`` gives, and who pays only for a PERSON
+    with no BOOKING for the OPTION of one of those.
     """
-    buyers = [person.id for person in file.persons if might_buy(file, person.id)]
-    to_pay = {offer.id for person in buyers for offer in might_buy(file, person)}
+    sold = for_sale(file)
+    to_pay = {offer.id for offer in sold}
+    buyers = [
+        person.id
+        for person in file.persons
+        if any(file.booking(offer.option, person.id) is None for offer in sold)
+    ]
     musts = [
         want
         for want in file.wants
@@ -227,21 +232,23 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
     return tuple(out)
 
 
-def might_buy(file: File, person: str) -> list[Offer]:
-    """The OFFERs with a place that this PERSON might have to pay for, in the FILE's order.
+def for_sale(file: File) -> list[Offer]:
+    """The OFFERs with a place that somebody might have to pay for.
 
-    It leaves out an OFFER for an OPTION that a FACT says needs no right, and one for an
-    OPTION that a BOOKING covers the PERSON for: they buy no place of it. It leaves out an
-    OFFER whose price is nothing: nobody pays for a place of it.
+    Only a PERSON with no BOOKING for an OPTION takes a place of it. An OFFER is left out
+    where its price is nothing, where a FACT says its OPTION needs no right, and where the
+    OPTION has a place that costs nothing for each of those PERSONs: nobody has to pay then.
     """
-    return [
-        fact
-        for fact in file.facts
-        if isinstance(fact, Offer)
-        and file.needs_right(fact.option) is not False
-        and file.booking(fact.option, person) is None
-        and (fact.price is None or fact.price.amount)
-    ]
+    sold: list[Offer] = []
+    for option in file.options:
+        offers = file.offers(option.id)
+        free = sum(
+            each.places for each in offers if each.price is not None and not each.price.amount
+        )
+        buyers = sum(file.booking(option.id, person.id) is None for person in file.persons)
+        if file.needs_right(option.id) is not False and free < buyers:
+            sold += [each for each in offers if each.price is None or each.price.amount]
+    return sold
 
 
 def has_to_end_at(file: File, person: str) -> list[Want]:

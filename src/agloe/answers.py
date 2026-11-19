@@ -343,9 +343,10 @@ def _bought(file: File, enough: Sequence[Unknown], shown: Shown) -> list[tuple[C
 
     The places are those of the ITINERARY shown in the world where the set turns out well and
     every other unknown FACT badly. A price is about the places of its OFFER. That a BUDGET
-    can pay for a PERSON is about the places that PERSON takes and that cost more than
-    nothing, or that nobody knows the price of. Any other FACT has none, and a set that asks
-    nothing about money is not searched.
+    can pay for a PERSON is about the places that PERSON takes and has to pay for there: at
+    a price above nothing, or at a price that nobody knows and that the set does not ask
+    for. A price the set asks for turns out well, and that place goes with the price. Any
+    other FACT has none, and a set that asks nothing about money is not searched.
     """
     if not any(unknown.what in ("price", "funding") for unknown in enough):
         return [() for _ in enough]
@@ -354,12 +355,17 @@ def _bought(file: File, enough: Sequence[Unknown], shown: Shown) -> list[tuple[C
     if plan is None:
         raise AssertionError("a set of unknown FACTs that is enough shows no ITINERARY")
     places = [cover for cover in _covers(file, world, plan) if cover.to_buy]
+    quoted = {unknown.about for unknown in enough if unknown.what == "price"}
     bought: list[tuple[Cover, ...]] = []
     for unknown in enough:
         if unknown.what == "price":
             bought.append(tuple(cover for cover in places if cover.by == unknown.about))
         elif unknown.what == "funding":
-            to_pay = (cover for cover in places if cover.price is None or cover.price.amount)
+            to_pay = (
+                cover
+                for cover in places
+                if cover.by not in quoted and (cover.price is None or cover.price.amount)
+            )
             bought.append(tuple(cover for cover in to_pay if cover.person == unknown.person))
         else:
             bought.append(())

@@ -341,9 +341,10 @@ def _budgets(file: File, first: str = "") -> list[str]:
         return [f"{rule} This FILE names no BUDGET."]
     lines = [f"{rule} The BUDGETs of this FILE:"]
     for budget in file.budgets:
-        who = _people(file, budget.persons) or "nobody"
-        holds = _listed(budget.currencies) or "no currency"
-        lines.append(f"  {_names(file.budgets)[budget.id]}: for {who}; it holds {holds}")
+        who = _people(file, budget.persons)
+        whose = f"for {who}" if who else "it lists no PERSON"
+        holds = _listed(budget.currencies)
+        lines.append(f"  {_names(file.budgets)[budget.id]}: {whose}; it holds {holds}")
     return lines
 
 
@@ -549,7 +550,7 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
     if unknown.what == "funding":
         who = _people(file, (unknown.person or "",))
         places = [
-            f"one from {cover.by} at a price nobody knows"
+            f"one from {cover.by} at a price that the FILE has yet to state"
             if cover.price is None
             else f"one from {cover.by} for {cover.price}"
             for cover in needed.buys

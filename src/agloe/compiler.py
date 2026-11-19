@@ -313,7 +313,6 @@ class _Search:
         self.used = [model.new_bool_var(f"used {option.id}") for option in file.options]
         self.left_out: set[tuple[int, int]] = set()  # each PERSON and OPTION that is ruled out
         meets = self._hold_to_the_wants()
-        self._hold_to_the_rights()
         for index, option in enumerate(file.options):
             model.add_max_equality(self.used[index], [0, *(row[index] for row in self.takes)])
             for number, person in enumerate(file.persons):
@@ -339,6 +338,7 @@ class _Search:
                     switches = [each for each in asking if each is not None]
                     if len(switches) == len(asking):
                         model.add_bool_or([takes.negated(), *switches])
+        self._hold_to_the_rights()
 
     def _rule_out(self, number: int, index: int) -> None:
         """This PERSON takes no part in this OPTION, whatever else is chosen.
@@ -393,13 +393,14 @@ class _Search:
         They are the PERSONs with no right of their own to it. No place is taken twice.
         ``given`` holds the records that all have to be switched on for this to hold.
 
-        A PERSON who can pay for no place stays out, and an OFFER that none of them can pay
-        for is left out. Where each of the others can pay for a place of every other OFFER,
-        the places are alike, and it is enough to count them. Otherwise the model chooses an
-        OFFER for each PERSON.
+        A PERSON who is ruled out of the OPTION needs no place. A PERSON who can pay for no
+        place stays out, and an OFFER that none of them can pay for is left out. Where each of
+        the others can pay for a place of every other OFFER, the places are alike, and it is
+        enough to count them. Otherwise the model chooses an OFFER for each PERSON.
         """
         model, world, option = self.model, self.world, self.file.options[index]
         people = self.file.persons
+        without = [number for number in without if (number, index) not in self.left_out]
         able = {
             number: [
                 offer
