@@ -9,6 +9,9 @@
     { "id": "art-institute", "name": "the Art Institute" },
     { "id": "park", "name": "Millennium Park" }
   ],
+  "budgets": [
+    { "id": "trip-money", "name": "the trip money", "persons": ["alex", "sam"], "currencies": ["USD"] }
+  ],
   "options": [
     { "id": "skydeck", "name": "Skydeck visit", "place": "willis-tower" },
     { "id": "gallery-talk", "name": "Gallery talk", "place": "art-institute" },
@@ -24,7 +27,7 @@
     { "id": "skydeck-length", "option": "skydeck", "duration": "PT1H30M" },
     { "id": "skydeck-needs-a-ticket", "option": "skydeck", "needs_right": true },
     { "id": "alex-skydeck-ticket", "booking": { "option": "skydeck", "covers": ["alex"] } },
-    { "id": "skydeck-tickets", "offer": { "option": "skydeck", "places": 2 } },
+    { "id": "skydeck-tickets", "offer": { "option": "skydeck", "places": 2, "prices": [{ "amount": "32.00", "currency": "USD" }] } },
     { "id": "talk-time", "option": "gallery-talk", "starts_at": "2027-05-15T10:30:00-05:00[America/Chicago]" },
     { "id": "talk-length", "option": "gallery-talk", "duration": "PT1H" },
     { "id": "talk-is-walk-up", "option": "gallery-talk", "needs_right": false },

@@ -603,7 +603,7 @@ def test_the_search_for_missing_facts_skips_no_set() -> None:
     """The sets a report names are those a slow search of all sets finds, in the same order."""
     rng = Random(4040)
     compared = several = held = 0
-    for _ in range(140):
+    for _ in range(260):
         persons = ["alex", "sam"] if rng.random() < 0.5 else ["alex"]
         file = random_trip(
             rng, 0.15, persons, count=2, with_wants=0.5, must_nots=0.4, with_rights=0.3

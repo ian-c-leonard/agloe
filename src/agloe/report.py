@@ -17,9 +17,10 @@ from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from itertools import groupby
 
-from agloe.answers import Answer, Missing, Report
+from agloe.answers import Answer, Cover, Missing, Report
 from agloe.file import (
     Booking,
+    Budget,
     Complete,
     CompleteFor,
     CompleteRights,
@@ -27,6 +28,7 @@ from agloe.file import (
     Duration,
     File,
     Lock,
+    Money,
     NeedsRight,
     Offer,
     Option,
@@ -87,10 +89,12 @@ def as_json(file: File, report: Report) -> dict[str, object]:
                 {
                     "option": option,
                     "offer": offer,
-                    "persons": persons,
+                    "persons": [cover.person for cover in covers],
                     "only_if_needed": file.needs_right(option) is None,
+                    "price": _money_as_json(covers[0].price),
+                    "budget": budget,
                 }
-                for (option, offer), persons in _to_buy(report).items()
+                for (option, offer, budget), covers in _to_buy(report).items()
             ]
     if report.at_worst:
         out["at_worst"] = [_broken_as_json(file, report, found) for found in report.at_worst]
@@ -103,13 +107,17 @@ def as_json(file: File, report: Report) -> dict[str, object]:
     return out
 
 
-def _to_buy(report: Report) -> dict[tuple[str, str], list[str]]:
-    """The PERSONs who still have to buy a right, for each OPTION and each OFFER it is from."""
-    buyers: dict[tuple[str, str], list[str]] = {}
+def _to_buy(report: Report) -> dict[tuple[str, str, str | None], list[Cover]]:
+    """Who still has to buy a right, for each OPTION, each OFFER it is from and each BUDGET."""
+    buyers: dict[tuple[str, str, str | None], list[Cover]] = {}
     for cover in report.rights:
         if cover.to_buy:
-            buyers.setdefault((cover.option, cover.by), []).append(cover.person)
+            buyers.setdefault((cover.option, cover.by, cover.budget), []).append(cover)
     return buyers
+
+
+def _money_as_json(price: Money | None) -> dict[str, str] | None:
+    return None if price is None else {"amount": str(price.amount), "currency": price.currency}
 
 
 def _broken_as_json(file: File, report: Report, found: Broken) -> dict[str, object]:
@@ -140,6 +148,8 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
         out["want"] = unknown.want
     if unknown.person is not None:
         out["person"] = unknown.person
+    if unknown.about is not None:
+        out["offer"] = unknown.about
     out["at_most"] = None if needed.at_most is None else length_written(needed.at_most)
     return out
 
@@ -272,6 +282,8 @@ def as_text(file: File, report: Report) -> str:
                     f"{helps}, and only if they SATISFY nothing that is a must-not for a PERSON"
                     " who takes them."
                 )
+        if kinds & {"price", "funding"}:
+            lines += ["", *_budgets(file)]
         if "another option" in kinds:
             lines += [
                 "",
@@ -285,6 +297,18 @@ def as_text(file: File, report: Report) -> str:
             if most > 1:
                 lines[-1] += " One OPTION can be found for several PERSONs and several WANTs."
     return "\n".join(lines) + "\n"
+
+
+def _budgets(file: File) -> list[str]:
+    """The BUDGETs of a FILE in words: who may draw on each, and the currencies it holds."""
+    if not file.budgets:
+        return ["This FILE names no BUDGET, so nobody has said who pays for a place."]
+    lines = ["A place is paid from a BUDGET that lists the PERSON and holds the currency:"]
+    for budget in file.budgets:
+        who = _people(file, budget.persons) or "nobody"
+        holds = _listed(budget.currencies) or "no currency"
+        lines.append(f"  {_names(file.budgets)[budget.id]}: for {who}; it holds {holds}")
+    return lines
 
 
 def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
@@ -396,9 +420,16 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
         number = line_of[found.step] if found.step is not None else line_of_option[found.option]
         together.setdefault((number, found.constraint, found.late), []).extend(found.persons)
     marks: dict[int, list[str]] = {}
-    for (option, offer), buyers in _to_buy(report).items():
+    for (option, offer, budget), covers in _to_buy(report).items():
+        buyers = [cover.person for cover in covers]
         have = "has" if len(buyers) == 1 else "have"
         if_needed = "" if file.needs_right(option) else " if it needs one"
+        price = covers[0].price
+        if price is not None and budget is not None:
+            each = " each" if len(buyers) > 1 else ""
+            offer = f"{offer}, for {price}{each} from {_names(file.budgets)[budget]}"
+        elif price is not None:
+            offer = f"{offer}, at no cost"
         mark = f"{_people(file, tuple(buyers))} still {have} to buy a right to this{if_needed}"
         marks.setdefault(line_of_option[option], []).append(f"{mark}, from {offer}.")
     for (number, constraint, late), persons in together.items():
@@ -474,6 +505,10 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
         return f"{_name(file, unknown.option)} SATISFIES {_want(file, unknown.want)}"
     if unknown.what == "does not satisfy":
         return f"{_name(file, unknown.option)} does not SATISFY {_want(file, unknown.want)}"
+    if unknown.what == "price":
+        return f"a place from {unknown.about} has a price that each PERSON who takes one can pay"
+    if unknown.what == "funding":
+        return f"a BUDGET can pay for what {_people(file, (unknown.person or '',))} has to buy"
     if unknown.what == "other ways":
         places = _names(file.places)
         there = f"there are other WAYs from {places[unknown.origin or '']} to "
@@ -560,7 +595,9 @@ def _record(file: File, clock: _Clock, record: str) -> str:
     if isinstance(found, Booking):
         return f"a BOOKING for {name} covers {_people(file, found.covers)}"
     if isinstance(found, Offer):
-        return f"an OFFER has {_places(found.places)} for {name} that can still be bought"
+        each = " each" if found.places > 1 else ""
+        price = "; nobody knows the price" if found.price is None else f", for {found.price}{each}"
+        return f"an OFFER has {_places(found.places)} for {name} that can still be bought{price}"
     if isinstance(found, CompleteRights):
         closed = "nobody on the trip holds another or can get one"
         if found.offers:
@@ -583,7 +620,7 @@ def _starts_at(file: File, option: str | None) -> str:
 
 
 def _names(
-    records: Sequence[Person | Place | Option | Way | Want], joins: str | None = None
+    records: Sequence[Person | Place | Option | Way | Want | Budget], joins: str | None = None
 ) -> dict[str, str]:
     """The name to show for each record, so that no two records show the same.
 

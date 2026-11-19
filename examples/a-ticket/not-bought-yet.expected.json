@@ -84,7 +84,12 @@
       "persons": [
         "sam"
       ],
-      "only_if_needed": false
+      "only_if_needed": false,
+      "price": {
+        "amount": "32.00",
+        "currency": "USD"
+      },
+      "budget": "trip-money"
     }
   ]
 }

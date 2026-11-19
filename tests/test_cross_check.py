@@ -8,11 +8,12 @@ could have waited instead. These tests try the things the shortcuts skip.
 """
 
 from dataclasses import replace
+from decimal import Decimal
 from itertools import combinations, pairwise, permutations, product
 from random import Random
 
 from agloe.answers import Answer, check
-from agloe.file import Complete, Duration, File
+from agloe.file import Complete, Duration, File, Money, Offer
 from agloe.reference import (
     Itinerary,
     Step,
@@ -31,6 +32,7 @@ from tests.stories import (
     Document,
     any_time,
     booking,
+    budget,
     complete,
     cutoff,
     ends_at,
@@ -90,7 +92,9 @@ def random_trip(
     TRIP at some PLACE. ``with_rights`` is how often a FACT says that the FILE holds every right
     to an OPTION. When it is set, a FACT says that an OPTION needs a right, or that it needs
     none, or the FILE says nothing, and an OPTION has up to two BOOKINGs and up to two OFFERs.
-    When it is not, a FACT says that each OPTION needs none.
+    An OFFER costs ten dollars, five euros or nothing, or states no price. One BUDGET pays in
+    dollars for everybody, or for some, or in euros, or the FILE has none. When it is not set,
+    a FACT says that each OPTION needs no right.
     """
     count = count or rng.choice([2, 3])
     if persons is None:
@@ -98,6 +102,7 @@ def random_trip(
     options: list[Document] = []
     facts: list[Document] = []
     decisions: list[Document] = []
+    budgets: list[Document] | None = None
     free = 0
     for number in range(count):
         id = f"option-{number}"
@@ -183,10 +188,17 @@ def random_trip(
                 covered = rng.sample(persons, rng.randrange(1, len(persons) + 1))
                 facts.append(booking(id, *covered, id=f"{id}-booking-{number}"))
             offers = [f"{id}-offer-{number}" for number in range(rng.choice([0, 0, 0, 1, 1, 2]))]
-            facts += [offer(id, rng.choice([1, 1, 2]), id=name) for name in offers]
+            prices = ["10.00 USD", "10.00 USD", "10.00 USD", None, "5.00 EUR", "0 USD"]
+            facts += [
+                offer(id, rng.choice([1, 1, 2]), id=name, price=rng.choice(prices))
+                for name in offers
+            ]
             if rng.random() < with_rights:
                 facts.append(every_right(id, *offers))
-    return trip(persons, PLACES, options, facts, decisions, ways, wants, tickets=bool(with_rights))
+        some = rng.sample(persons, rng.randrange(1, len(persons) + 1))
+        in_euros = [budget("money", *persons, holds=["EUR"])]
+        budgets = rng.choice([None, None, None, [], [budget("money", *some)], in_euros])
+    return trip(persons, PLACES, options, facts, decisions, ways, wants, bool(with_rights), budgets)
 
 
 def at_the_start(rng: Random) -> Document:
@@ -494,8 +506,33 @@ def possible_world(rng: Random, file: File) -> World:
     # One possible world: what SATISFIES a WANT is the same for a must and for a must-not.
     delivered_by = frozenset(delivers)
     places = {option.id: file.places_on_offer(option.id) for option in file.options}
+    # An OFFER with no stated price quotes one amount for all its places. A PERSON whom no
+    # BUDGET lists has one that can pay, or has none.
+    quotes = [Money(Decimal(0), "USD"), Money(Decimal(5), "USD"), Money(Decimal(5), "EUR")]
+    quotes.append(Money(Decimal(5), "nowhere"))
+    funded = {person.id for person in file.persons if rng.random() < 0.5} - {
+        person.id for person in file.persons if file.listed(person.id)
+    }
+    payable: set[tuple[str, str]] = set()
+    for fact in file.facts:
+        if isinstance(fact, Offer):
+            quote = fact.price or rng.choice(quotes)
+            for person in file.persons:
+                can_pay = file.pays(person.id, quote) is not None or person.id in funded
+                if not quote.amount or can_pay:
+                    payable.add((fact.id, person.id))
     return World(
-        terms, unlisted, slow, takes, delivered_by, delivered_by, elsewhere, needs, rights, places
+        terms,
+        unlisted,
+        slow,
+        takes,
+        delivered_by,
+        delivered_by,
+        elsewhere,
+        needs,
+        rights,
+        places,
+        frozenset(payable),
     )
 
 

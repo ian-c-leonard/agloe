@@ -1,0 +1,21 @@
+{
+  "answer": "UNDETERMINED",
+  "missing": [
+    [
+      {
+        "what": "another right",
+        "option": "skydeck",
+        "person": "sam",
+        "at_most": null
+      }
+    ],
+    [
+      {
+        "what": "price",
+        "option": "skydeck",
+        "offer": "skydeck-tickets",
+        "at_most": null
+      }
+    ]
+  ]
+}

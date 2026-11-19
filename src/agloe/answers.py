@@ -20,6 +20,7 @@ from agloe.file import (
     Fact,
     File,
     Lock,
+    Money,
     Offer,
     Start,
     StartsFrom,
@@ -39,6 +40,7 @@ from agloe.reference import (
     longest_case,
     no_better_than,
     one_way_each,
+    placed,
     unknowns,
     with_no_offer,
     with_these_at_best,
@@ -66,13 +68,16 @@ class Cover:
     """What gives a PERSON their right to an OPTION in the plan shown.
 
     ``by`` is the id of a BOOKING, or of an OFFER from which the PERSON takes a place. A place
-    is ``to_buy``: nothing secures it until a BOOKING does.
+    is ``to_buy``: nothing secures it until a BOOKING does. It has a ``price``, and the
+    ``budget`` that pays it. A price of nothing has no BUDGET.
     """
 
     option: str
     person: str
     by: str
     to_buy: bool
+    price: Money | None = None
+    budget: str | None = None
 
 
 @dataclass(frozen=True)
@@ -136,7 +141,7 @@ def check(
             if found is not None:
                 chosen, robust = found, holds
                 break
-        rights = _covers(file, chosen)
+        rights = _covers(file, worst, chosen)
         used = {cover.by for cover in rights}
         relies_on = [fact.id for fact in file.facts if _relied_on(file, chosen, fact, used)]
         relies_on += [want.id for want in file.wants if want.musts or want.must_nots]
@@ -175,24 +180,33 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> 
     return fact.option in {step.option or step.way for step in itinerary}
 
 
-def _covers(file: File, itinerary: Itinerary) -> tuple[Cover, ...]:
+def _covers(file: File, worst: World, itinerary: Itinerary) -> tuple[Cover, ...]:
     """What gives each PERSON in a plan their right to each of its OPTIONs.
 
     It leaves out an OPTION that a FACT says needs no right. A PERSON whom a BOOKING covers
-    has the first such BOOKING in the FILE. The other PERSONs who take part, in the FILE's
-    order, take the places of the OPTION's OFFERs in the FILE's order. The plan works in the
-    worst case, which has no other right, so there is a place for each of them.
+    has the first such BOOKING in the FILE. The other PERSONs who take part take places of
+    the OPTION's OFFERs that they can pay for, as ``placed`` shares them out, and each place
+    is paid from the first BUDGET in the FILE that can pay it. The plan works in the worst
+    case, which has no other right, so there is a place for each of them.
     """
     order = {person.id: number for number, person in enumerate(file.persons)}
     covers: list[Cover] = []
     for step in itinerary:
         if step.option is None or file.needs_right(step.option) is False:
             continue
-        places = (offer.id for offer in file.offers(step.option) for _ in range(offer.places))
-        for person in sorted(step.persons, key=order.__getitem__):
+        persons = sorted(step.persons, key=order.__getitem__)
+        without = [person for person in persons if file.booking(step.option, person) is None]
+        taken = placed(file, worst, step.option, without)
+        offers = {offer.id: offer for offer in file.offers(step.option)}
+        for person in persons:
             booked = file.booking(step.option, person)
-            by = next(places) if booked is None else booked.id
-            covers.append(Cover(step.option, person, by, booked is None))
+            if booked is not None:
+                covers.append(Cover(step.option, person, booked.id, False))
+                continue
+            price = offers[taken[person]].price
+            payer = None if price is None else file.pays(person, price)
+            budget = None if payer is None else payer.id
+            covers.append(Cover(step.option, person, taken[person], True, price, budget))
     return tuple(covers)
 
 
@@ -361,7 +375,7 @@ def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
     None for an unknown that is not a length of time, and None when any length would do.
     """
     no_length = ("start", "satisfies", "does not satisfy", "another option")
-    if unknown.what in (*no_length, "needs no right", "another right"):
+    if unknown.what in (*no_length, "needs no right", "another right", "price", "funding"):
         return None
 
     def enough(seconds: int) -> bool:

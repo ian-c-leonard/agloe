@@ -8,6 +8,7 @@
   "properties": {
     "persons": { "type": "array", "items": { "$ref": "#/$defs/person" } },
     "places": { "type": "array", "items": { "$ref": "#/$defs/place" } },
+    "budgets": { "type": "array", "items": { "$ref": "#/$defs/budget" } },
     "options": {
       "type": "array",
       "items": { "oneOf": [{ "$ref": "#/$defs/option_at_a_place" }, { "$ref": "#/$defs/option_between_places" }] }
@@ -70,6 +71,45 @@
       "description": "A length of time in hours, minutes and seconds (ISO 8601), such as PT2H30M.",
       "type": "string",
       "pattern": "^PT(?=[0-9])([0-9]{1,9}H)?([0-9]{1,9}M)?([0-9]{1,9}S)?$"
+    },
+    "currency": {
+      "description": "The name of a currency: USD, AA-points. Amounts in different currencies are never added or compared.",
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9-]{0,19}$"
+    },
+    "money": {
+      "title": "Money",
+      "description": "An amount with its currency. The amount is a decimal number written as text: digits, and at most four more after a point. It has no sign, no exponent and no separator.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["amount", "currency"],
+      "properties": {
+        "amount": { "type": "string", "pattern": "^(0|[1-9][0-9]{0,11})(\\.[0-9]{1,4})?$" },
+        "currency": { "$ref": "#/$defs/currency" }
+      }
+    },
+    "budget": {
+      "title": "Budget",
+      "description": "A BUDGET: a named source of money. It can pay for a place that one of its PERSONs takes, at a price in a currency it holds.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "persons", "currencies"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "$ref": "#/$defs/name" },
+        "persons": {
+          "description": "The PERSONs who may draw on the BUDGET for what the TRIP still has to buy.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/id" }
+        },
+        "currencies": {
+          "description": "The currencies the BUDGET holds.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/currency" }
+        }
+      }
     },
     "person": {
       "title": "Person",
@@ -417,6 +457,13 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 999999999
+            },
+            "prices": {
+              "description": "What one place costs. The list has one price.",
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "items": { "$ref": "#/$defs/money" }
             }
           }
         }

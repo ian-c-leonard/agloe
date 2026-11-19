@@ -17,6 +17,21 @@ type Time = str
 type Length = str
 
 
+type Currency = str
+
+
+class Money(TypedDict):
+    amount: str
+    currency: Currency
+
+
+class Budget(TypedDict):
+    id: Id
+    name: Name
+    persons: list[Id]
+    currencies: list[Currency]
+
+
 class Person(TypedDict):
     id: Id
     name: Name
@@ -183,6 +198,7 @@ class BookingFact(TypedDict):
 class Offer(TypedDict):
     option: Id
     places: int
+    prices: NotRequired[list[Money]]
 
 
 class OfferFact(TypedDict):
@@ -225,6 +241,7 @@ class Lock(TypedDict):
 class File(TypedDict):
     persons: list[Person]
     places: list[Place]
+    budgets: NotRequired[list[Budget]]
     options: list[OptionAtAPlace | OptionBetweenPlaces]
     ways: list[WayOneWay | WayBothWays]
     wants: list[Want]
