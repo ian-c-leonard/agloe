@@ -28,6 +28,7 @@ from tests.stories import (
     booking,
     budget,
     cap,
+    complete,
     cutoff,
     every,
     every_right,
@@ -41,8 +42,11 @@ from tests.stories import (
     satisfies,
     seconds,
     starts_at,
+    starts_from,
     stays,
+    takes,
     trip,
+    way,
 )
 from tests.test_where_a_path_ends import checked, has_no_record_to_spare, ruled_out
 
@@ -956,3 +960,36 @@ def test_amounts_too_large_for_the_solver_go_to_the_reference_checker() -> None:
     found = compiler.check(file)
     assert found == answers.check(file)
     assert found.answer is Answer.FEASIBLE
+
+
+def test_bookings_that_pass_a_cap_are_found_before_any_route_is_built() -> None:
+    """Twenty-one PLACEs with COMPLETE travel at each, and one BOOKING that paid too much."""
+    places = ["home", "stop", *(f"p{number}" for number in range(21))]
+    facts = [starts_from("sam", "home"), needs_right("ride")]
+    facts.append(booking("ride", "sam", paid="2 USD", budget="money"))
+    for number, place in enumerate(places):
+        for whole in (complete(place, None), complete(None, place)):
+            facts.append({**whole, "id": f"{whole['id']}-{number}-{len(facts)}"})
+    options = [moves("ride", "stop", "home")]
+    file = trip(["sam"], places, options, facts, [cap("money", "1 USD")], tickets=True)
+    found = compiler.check(file)
+    assert found.answer is Answer.INFEASIBLE
+    assert found.conflict == ("ride-booking", "money-cap")
+
+
+@pytest.mark.parametrize("capped", [False, True])
+def test_a_trip_with_too_many_routes_goes_to_the_reference_checker(capped: bool) -> None:
+    """A ride that nobody needs starts thirty legs away, and two WAYs make each leg."""
+    places = [f"p{number}" for number in range(32)]
+    legs = [way(f"w{n}-{k}", f"p{n}", f"p{n + 1}") for n in range(30) for k in range(2)]
+    options = [stays("visit", "p0"), moves("ride", "p30", "p31")]
+    facts = [*at("visit", 9), needs_right("visit"), offer("visit", 1, price="1 USD")]
+    facts += [*at("ride", 20), needs_right("ride"), offer("ride", 1, price="1 USD")]
+    facts += [starts_from("sam", "p0"), *(takes(each["id"], "PT1M") for each in legs)]
+    decisions = [lock("visit", "sam"), *([cap("money", "2 USD")] if capped else [])]
+    file = trip(["sam"], places, options, facts, decisions, ways=legs, tickets=True)
+    with pytest.raises(compiler.DoesNotFit):
+        compiler.shown(file, worst_case(file))
+    found = compiler.check(file)
+    assert found == answers.check(file)
+    assert [step.option for step in found.itinerary] == ["visit"]

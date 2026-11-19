@@ -678,13 +678,21 @@ def _rights(file: File, world: World, taking_part: Mapping[str, tuple[str, ...]]
             out.append(Broken(Constraint.RIGHT, option, left_out[free:]))
         if left_out[:free]:
             out.append(Broken(Constraint.PAID, option, left_out[:free]))
-    for key, cap in file.caps.items():
-        charged = world.spent.get(key, 0)
-        if charged is None or charged > cap.limit.units:
-            out.append(Broken(Constraint.CAP, None, (), cap=cap.id))
+    out += [
+        Broken(Constraint.CAP, None, (), cap=cap) for cap in passed_by_the_bookings(file, world)
+    ]
     if file.caps and not out and way_to_pay(file, world, taking_part) is None:
         out.append(Broken(Constraint.CAP, None, ()))
     return out
+
+
+def passed_by_the_bookings(file: File, world: World) -> list[str]:
+    """Each cap that what the BOOKINGs charged passes in this world, or might, by itself."""
+    return [
+        cap.id
+        for key, cap in file.caps.items()
+        if (charged := world.spent.get(key, 0)) is None or charged > cap.limit.units
+    ]
 
 
 type Pair = tuple[str, str | None, tuple[str, str] | None, int]
@@ -1353,11 +1361,18 @@ def _orders(
 type Route = tuple[Leg, ...]
 
 
-def routes(file: File, world: World, here: str, there: str, last: bool = False) -> list[Route]:
+class TooManyRoutes(Exception):
+    """More routes join two PLACEs than the caller is ready to take."""
+
+
+def routes(
+    file: File, world: World, here: str, there: str, last: bool = False, at_most: int | None = None
+) -> list[Route]:
     """Every route from one PLACE to another by WAYs alone that is worth trying, shortest first.
 
-    ``last`` says that the PERSON does nothing after the route. Three kinds of route are left
-    out, because another route is never worse.
+    ``last`` says that the PERSON does nothing after the route. ``at_most`` is how many routes
+    the caller is ready to take: with more, this raises ``TooManyRoutes``. Three kinds of
+    route are left out, because another route is never worse.
 
     - A route that passes through a PLACE twice. A PERSON who came back to a PLACE could have
       waited there instead: every WAY they take after that starts at the same time either way,
@@ -1424,6 +1439,8 @@ def routes(file: File, world: World, here: str, there: str, last: bool = False) 
             continue
         if place == there:
             found.append(longer)
+            if at_most is not None and len(found) > at_most:
+                raise TooManyRoutes
         else:
             begun.append(((*passed, place), longer, onward(place)))
     return sorted(found, key=lambda route: (len(route), _legs_in_file_order(file, route)))
@@ -1432,8 +1449,8 @@ def routes(file: File, world: World, here: str, there: str, last: bool = False) 
 class Routes:
     """The routes between the PLACEs of one world, with each pair worked out once."""
 
-    def __init__(self, file: File, world: World) -> None:
-        self._file, self._world = file, world
+    def __init__(self, file: File, world: World, at_most: int | None = None) -> None:
+        self._file, self._world, self._at_most = file, world, at_most
         self._found: dict[tuple[str, str, bool], list[Route]] = {}
 
     def between(self, here: str, there: str, last: bool = False) -> list[Route]:
@@ -1442,7 +1459,9 @@ class Routes:
         ``last`` says that the PERSON does nothing after the route.
         """
         if (here, there, last) not in self._found:
-            self._found[here, there, last] = routes(self._file, self._world, here, there, last)
+            self._found[here, there, last] = routes(
+                self._file, self._world, here, there, last, self._at_most
+            )
         return self._found[here, there, last]
 
 

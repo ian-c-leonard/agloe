@@ -56,19 +56,28 @@ type _Reached = list[tuple[cp_model.IntVar, reference.Route, _Amount | None]]
 
 
 class DoesNotFit(Exception):
-    """The numbers of a TRIP's model do not fit in the 64 bits the solver counts with."""
+    """A TRIP does not fit the solver, and the reference checker gives its answer.
+
+    The numbers of its model do not fit in the 64 bits the solver counts with, or more routes
+    join two of its PLACEs than a model can choose between.
+    """
+
+
+_MOST_ROUTES = 10_000  # between two PLACEs, before the solver gives the TRIP up
 
 
 def check(file: File) -> Report:
     """The answer for this TRIP, with its evidence. The same Report as the reference checker's."""
     try:
         return answers.check(file, shown=shown, works=works, stuck=stuck)
-    except DoesNotFit:
+    except DoesNotFit, reference.TooManyRoutes:
         return answers.check(file)
 
 
 def shown(file: File, world: World) -> Itinerary | None:
     """The ITINERARY that "Which ITINERARY is shown" puts first in this world, or None."""
+    if reference.passed_by_the_bookings(file, world):
+        return None
     search = _Search(file, world)
     choice = search.first_in_file_order()
     return None if choice is None else _checked(file, world, choice, search.known)
@@ -76,6 +85,8 @@ def shown(file: File, world: World) -> Itinerary | None:
 
 def works(file: File, world: World) -> bool:
     """Whether any ITINERARY works in this world."""
+    if reference.passed_by_the_bookings(file, world):
+        return False
     choice = _Search(file, world).any()
     if choice is not None:
         _checked(file, world, choice)
@@ -97,6 +108,17 @@ def stuck(remaining: Remaining) -> frozenset[str] | None:
     """
     file = remaining.file
     world = reference.best_case(file)
+    for key, cap in file.caps.items():
+        # What the BOOKINGs state already passes this cap: no plan and no route is needed.
+        charging = [
+            fact
+            for fact in file.facts
+            if isinstance(fact, Booking)
+            and fact.paid is not None
+            and (fact.paid.budget, fact.paid.money.currency) == key
+        ]
+        if sum(fact.paid.money.units for fact in charging if fact.paid) > cap.limit.units:
+            return frozenset({cap.id, *(fact.id for fact in charging)})
     search = _Search(file, world, remaining)
     records = [record.id for record in (*file.facts, *file.wants, *file.decisions)]
     choice, needed = search.clash(records)
@@ -224,7 +246,7 @@ class _Search:
         # choice that takes it.
         self.routes: list[dict[tuple[int, int], _Taken]] = []
         self.legs: list[tuple[cp_model.IntVar, int]] = []  # a route taken, and how many WAYs it has
-        self.known = reference.Routes(file, world)
+        self.known = reference.Routes(file, world, _MOST_ROUTES)
         self._worth_trying: dict[tuple[str, str, bool], list[reference.Route]] = {}
         for number in range(len(file.persons)):
             self._lay_out_path(number)
@@ -454,7 +476,7 @@ class _Search:
         without = [number for number in without if (number, index) not in self.left_out]
         pairs = {
             number: reference.pairs_to_pay(self.file, world, option.id, people[number].id)
-            for number in without
+            for number in (without if self.file.caps else ())
         }
         if any(key is not None for able in pairs.values() for _, _, key, _ in able):
             # A cap counts some of these purchases, so the model chooses a BUDGET as well.
@@ -891,7 +913,10 @@ class _Search:
         a route matter, so the quickest of each length is enough.
         """
         if (here, there, last) not in self._worth_trying:
-            possible = self.known.between(here, there, last)
+            try:
+                possible = self.known.between(here, there, last)
+            except reference.TooManyRoutes:
+                raise DoesNotFit(f"too many routes join {here} and {there}") from None
             if not self.facts and not self.switch:
                 possible = _quickest(self.world, possible)
             self._worth_trying[here, there, last] = possible
