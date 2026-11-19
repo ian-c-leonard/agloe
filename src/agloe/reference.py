@@ -21,7 +21,7 @@ from enum import Enum
 from heapq import heapify, heappop, heappush
 from itertools import combinations, groupby, pairwise, permutations, product
 
-from agloe.file import Booking, Complete, File, Satisfies, StartsFrom, Want
+from agloe.file import Booking, Complete, File, Offer, Satisfies, StartsFrom, Want
 
 _MOST_TO_TAKE_OUT = 12  # ``needless`` tries every combination of things to take out
 
@@ -121,7 +121,8 @@ class World:
 
     ``needs_right`` holds each OPTION that a PERSON can take part in only with a right.
     ``rights`` holds each OPTION and PERSON where the PERSON has one: a BOOKING covers them, or
-    another right is found for them.
+    another right is found for them. ``places`` says how many more PERSONs can take part in an
+    OPTION that needs a right: each takes one place of an OFFER.
     """
 
     terms: Mapping[str, Terms]
@@ -135,6 +136,7 @@ class World:
     another_option: frozenset[tuple[str, str]] = frozenset()
     needs_right: frozenset[str] = frozenset()
     rights: frozenset[tuple[str, str]] = frozenset()
+    places: Mapping[str, int] = field(default_factory=dict[str, int])
 
 
 @dataclass(frozen=True)
@@ -239,7 +241,7 @@ class Remaining:
         """What is left with one more FACT, WANT or DECISION taken out."""
         found = [fact for fact in self.file.facts if fact.id == record]
         taken = {(fact.option, fact.want) for fact in found if isinstance(fact, Satisfies)}
-        opened = {fact.option for fact in found if isinstance(fact, Booking)}
+        opened = {fact.option for fact in found if isinstance(fact, Booking | Offer)}
         return Remaining(self.file.without(record), self.unsaid | taken, self.open_to_all | opened)
 
     def might_cover(self) -> frozenset[tuple[str, str]]:
@@ -290,6 +292,11 @@ def best_cases(remaining: Remaining) -> Iterator[World]:
         yield replace(
             best, satisfies=best.satisfies | does, might_satisfy=best.might_satisfy | does
         )
+
+
+def with_no_offer(world: World) -> World:
+    """The same world with every OFFER left out: what works here takes no place of one."""
+    return replace(world, places={})
 
 
 def worst_case(file: File) -> World:
@@ -469,6 +476,7 @@ def _world(
         another_option,
         frozenset(needs_right),
         frozenset(rights),
+        {option.id: file.places_on_offer(option.id) for option in file.options},
     )
 
 
@@ -550,8 +558,10 @@ def _rights(file: File, world: World, taking_part: Mapping[str, tuple[str, ...]]
     out: list[Broken] = []
     for option, persons in taking_part.items():
         without = [person for person in persons if (option, person) not in world.rights]
-        if option in world.needs_right and without:
-            who = _in_file_order_of_persons(file, without)
+        places = world.places.get(option, 0)
+        if option in world.needs_right and len(without) > places:
+            # The first of them, in the FILE's order, take the places of the OFFERs.
+            who = _in_file_order_of_persons(file, without)[places:]
             out.append(Broken(Constraint.RIGHT, option, who))
     return out
 

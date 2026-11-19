@@ -60,11 +60,11 @@ Describes a set that a FACT states the FILE holds in full: a set of OPTIONs and 
 
 - Everything that goes straight from one PLACE to another and starts within a stated time span. Nothing unlisted does. The FACT can name both PLACEs, one of them, or neither, and a PLACE it does not name stands for every PLACE.
 - Every OPTION that SATISFIES a stated WANT. Each one is in the FILE, with a FACT that it SATISFIES the WANT. Nothing else does.
-- Every right to a stated OPTION that anybody on the TRIP holds. The BOOKINGs in the FILE secure them all, and nobody on the TRIP can get another.
+- Every right to a stated OPTION that anybody on the TRIP holds or can get. The BOOKINGs in the FILE secure those that are held. Nobody on the TRIP can get another, except by a place of an OFFER that the FACT names.
 
 A COMPLETE set that is empty means "we looked, and there is nothing". A FACT that one set is COMPLETE says nothing about any other set. So a FACT about travel between two PLACEs says nothing about travel through a third PLACE as a whole: each leg of that travel is straight travel by itself, and only a FACT that covers the leg rules it out.
 
-*Uses:* FACT, FILE, → OPTION, → WAY, → PLACE, → WANT, → SATISFIES, → BOOKING.
+*Uses:* FACT, FILE, → OPTION, → WAY, → PLACE, → WANT, → SATISFIES, → BOOKING, → OFFER.
 
 ### DECISION
 

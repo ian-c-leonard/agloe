@@ -43,6 +43,7 @@ from tests.stories import (
     must,
     needs_no_right,
     needs_right,
+    offer,
     satisfies,
     seconds,
     starts_at,
@@ -88,8 +89,8 @@ def random_trip(
     is how often a FACT says where a PERSON starts from, and how often a PERSON has to end the
     TRIP at some PLACE. ``with_rights`` is how often a FACT says that the FILE holds every right
     to an OPTION. When it is set, a FACT says that an OPTION needs a right, or that it needs
-    none, or the FILE says nothing, and an OPTION has up to two BOOKINGs. When it is not, a
-    FACT says that each OPTION needs none.
+    none, or the FILE says nothing, and an OPTION has up to two BOOKINGs and up to two OFFERs.
+    When it is not, a FACT says that each OPTION needs none.
     """
     count = count or rng.choice([2, 3])
     if persons is None:
@@ -181,8 +182,10 @@ def random_trip(
             for number in range(rng.choice([0, 1, 1, 2])):
                 covered = rng.sample(persons, rng.randrange(1, len(persons) + 1))
                 facts.append(booking(id, *covered, id=f"{id}-booking-{number}"))
+            offers = [f"{id}-offer-{number}" for number in range(rng.choice([0, 0, 0, 1, 1, 2]))]
+            facts += [offer(id, rng.choice([1, 1, 2]), id=name) for name in offers]
             if rng.random() < with_rights:
-                facts.append(every_right(id))
+                facts.append(every_right(id, *offers))
     return trip(persons, PLACES, options, facts, decisions, ways, wants, tickets=bool(with_rights))
 
 
@@ -490,7 +493,10 @@ def possible_world(rng: Random, file: File) -> World:
     )
     # One possible world: what SATISFIES a WANT is the same for a must and for a must-not.
     delivered_by = frozenset(delivers)
-    return World(terms, unlisted, slow, takes, delivered_by, delivered_by, elsewhere, needs, rights)
+    places = {option.id: file.places_on_offer(option.id) for option in file.options}
+    return World(
+        terms, unlisted, slow, takes, delivered_by, delivered_by, elsewhere, needs, rights, places
+    )
 
 
 def any_choice(rng: Random, file: File, world: World) -> Itinerary:

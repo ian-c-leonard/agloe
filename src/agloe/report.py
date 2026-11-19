@@ -10,6 +10,7 @@ What a plan would break at the longest durations is printed under the line of th
 about. So the words never have to describe which step they mean.
 """
 
+import re
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -27,6 +28,7 @@ from agloe.file import (
     File,
     Lock,
     NeedsRight,
+    Offer,
     Option,
     Person,
     Place,
@@ -43,6 +45,7 @@ from agloe.file import (
 )
 from agloe.reference import Broken, Constraint, Itinerary, Step
 
+_WITH_AN_ID = re.compile(r" \([a-z0-9]+(-[a-z0-9]+)*\)$")  # how a name ends when its id is shown
 _DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 _MONTHS = [
     "January",
@@ -64,17 +67,31 @@ def as_json(file: File, report: Report) -> dict[str, object]:
     """The Report in the shape of the expected results beside the examples."""
     out: dict[str, object] = {"answer": report.answer.value}
     if report.answer is Answer.FEASIBLE:
+        rights: dict[str | None, dict[str, str]] = {}
+        for cover in report.rights:
+            rights.setdefault(cover.option, {})[cover.person] = cover.by
         out["itinerary"] = [
             {
                 ("way" if step.option is None else "option"): step.option or step.way,
                 "persons": list(step.persons),
                 "start": written(step.start, file.zone),
                 "end": None if step.end is None else written(step.end, file.zone),
+                **({"rights": rights[step.option]} if step.option in rights else {}),
             }
             for step in report.itinerary
         ]
         out["relies_on"] = list(report.relies_on)
         out["robust"] = report.robust
+        if _to_buy(report):
+            out["to_buy"] = [
+                {
+                    "option": option,
+                    "offer": offer,
+                    "persons": persons,
+                    "only_if_needed": file.needs_right(option) is None,
+                }
+                for (option, offer), persons in _to_buy(report).items()
+            ]
     if report.at_worst:
         out["at_worst"] = [_broken_as_json(file, report, found) for found in report.at_worst]
     if report.conflict:
@@ -84,6 +101,15 @@ def as_json(file: File, report: Report) -> dict[str, object]:
             [_missing_as_json(needed) for needed in enough] for enough in report.missing
         ]
     return out
+
+
+def _to_buy(report: Report) -> dict[tuple[str, str], list[str]]:
+    """The PERSONs who still have to buy a right, for each OPTION and each OFFER it is from."""
+    buyers: dict[tuple[str, str], list[str]] = {}
+    for cover in report.rights:
+        if cover.to_buy:
+            buyers.setdefault((cover.option, cover.by), []).append(cover.person)
+    return buyers
 
 
 def _broken_as_json(file: File, report: Report, found: Broken) -> dict[str, object]:
@@ -227,7 +253,9 @@ def as_text(file: File, report: Report) -> str:
             and file.rights_complete(unknown.option or "") is None
         }
         if might_be_booked:
-            names = [_name(file, each.id) for each in file.options if each.id in might_be_booked]
+            names = [
+                _name(file, each.id, "or") for each in file.options if each.id in might_be_booked
+            ]
             lines += [
                 "",
                 f"If {_listed(names, 'or')} does need a right, a BOOKING for each PERSON who"
@@ -260,11 +288,13 @@ def as_text(file: File, report: Report) -> str:
 
 
 def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
-    lines = [
-        "FEASIBLE: this trip works."
-        if report.robust
-        else "FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold."
-    ]
+    to_buy = _to_buy(report)
+    if not report.robust:
+        lines = ["FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold."]
+    elif to_buy:
+        lines = ["FEASIBLE, with a WARNING: this trip works, but not everything is booked yet."]
+    else:
+        lines = ["FEASIBLE: this trip works."]
     marks = _marks(file, report)
     day = None
     for number, (step, _) in enumerate(_lines(report.itinerary)):
@@ -283,7 +313,8 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
         lines += [
             "",
             "WARNING: no plan is sure to hold if the uncertain parts take their longest."
-            ' Each line marked "!" says what would go wrong at the step above it.',
+            f' Each line marked "!"{" that names no OFFER" if to_buy else ""} says what would'
+            " go wrong at the step above it.",
         ]
     elif any(isinstance(fact, Duration) and fact.contingent for fact in relied_on):
         lines += [
@@ -291,9 +322,23 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
             "This plan holds however long the uncertain parts take, within the ranges the FILE"
             " states.",
         ]
+    if to_buy:
+        lines += [
+            "",
+            "WARNING: not everything is booked yet."
+            ' A line marked "!" that names an OFFER says who still has to buy a right.'
+            " Only a BOOKING secures one.",
+        ]
     if report.relies_on:
         lines += ["", f"The plan relies on these {_kinds(file, report.relies_on)}:"]
-        lines += [f"  {record}: {_record(file, clock, record)}" for record in report.relies_on]
+        for record in report.relies_on:
+            # A BOOKING can cover more PERSONs than the plan credits to it.
+            found = next((fact for fact in file.facts if fact.id == record), None)
+            credited = tuple(cover.person for cover in report.rights if cover.by == record)
+            used_for = ""
+            if isinstance(found, Booking) and set(credited) != set(found.covers):
+                used_for = f"; this plan uses it for {_people(file, credited)}"
+            lines.append(f"  {record}: {_record(file, clock, record)}{used_for}")
     return lines
 
 
@@ -329,7 +374,10 @@ def _lines(itinerary: Itinerary) -> list[tuple[Step, list[int]]]:
 
 
 def _marks(file: File, report: Report) -> dict[int, list[str]]:
-    """What the plan would break at the longest durations, in words, for each line of the plan.
+    """The WARNINGs about a plan, in words, for each line of the plan.
+
+    First who still has to buy a right to an OPTION, and from which OFFER. Then what the plan
+    would break at the longest durations.
 
     A line is known by its number, counting from zero. PERSONs who share a line and are in the
     same trouble are named together. Longer durations break only CONSTRAINTs about time, and
@@ -348,6 +396,11 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
         number = line_of[found.step] if found.step is not None else line_of_option[found.option]
         together.setdefault((number, found.constraint, found.late), []).extend(found.persons)
     marks: dict[int, list[str]] = {}
+    for (option, offer), buyers in _to_buy(report).items():
+        have = "has" if len(buyers) == 1 else "have"
+        if_needed = "" if file.needs_right(option) else " if it needs one"
+        mark = f"{_people(file, tuple(buyers))} still {have} to buy a right to this{if_needed}"
+        marks.setdefault(line_of_option[option], []).append(f"{mark}, from {offer}.")
     for (number, constraint, late), persons in together.items():
         who = _people(file, tuple(persons))
         if constraint is Constraint.ARRIVAL and late is not None:
@@ -380,12 +433,15 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
         if unknown.what == "another option":
             for_whom.setdefault(unknown.want, []).append(unknown.person or "")
         elif unknown.what == "needs no right":
-            names = [_name(file, needed.unknown.option) for needed in group]
+            names = [_name(file, needed.unknown.option, "or") for needed in group]
             parts.append(f"nobody needs a right to take part in {_listed(names, 'or')}")
         elif unknown.what == "another right":
+            # A right that is found is one more than the places on OFFER, and the words say so.
+            places = file.places_on_offer(unknown.option or "")
+            more = "" if not places else f", in addition to the {_places(places)} on OFFER"
             each = "each of " if len(group) > 1 else ""
             who = _people(file, tuple(needed.unknown.person or "" for needed in group))
-            parts.append(f"a right to {_name(file, unknown.option)} is found for {each}{who}")
+            parts.append(f"a right to {_name(file, unknown.option)} is found for {each}{who}{more}")
         else:
             parts.append(_wanted(file, group[0], len(enough) == 1))
     for want, persons in for_whom.items():
@@ -393,6 +449,10 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
         each = "each of " if len(persons) > 1 else ""
         parts.append(f"another OPTION that SATISFIES {_want(file, want)} is found for {each}{who}")
     return " and ".join(parts)
+
+
+def _places(count: int) -> str:
+    return "1 place" if count == 1 else f"{count} places"
 
 
 def _named_with(needed: Missing) -> object:
@@ -469,7 +529,7 @@ def _record(file: File, clock: _Clock, record: str) -> str:
         return f"the TRIP ends at {clock.moment(found.at)}"
     if isinstance(found, CompleteFor):
         which = [
-            _name(file, fact.option)
+            _name(file, fact.option, "and")
             for fact in file.facts
             if isinstance(fact, Satisfies) and fact.want == found.want and fact.degree > 0
         ]
@@ -499,8 +559,12 @@ def _record(file: File, clock: _Clock, record: str) -> str:
         return f"{who} a right to take part in {name}"
     if isinstance(found, Booking):
         return f"a BOOKING for {name} covers {_people(file, found.covers)}"
+    if isinstance(found, Offer):
+        return f"an OFFER has {_places(found.places)} for {name} that can still be bought"
     if isinstance(found, CompleteRights):
         closed = "nobody on the trip holds another or can get one"
+        if found.offers:
+            closed += f", except from {_listed(found.offers)}"
         return f"the FILE lists every right to {name}: {closed}"
     return _cutoff(file, name, found)
 
@@ -518,25 +582,41 @@ def _starts_at(file: File, option: str | None) -> str:
     return _names(file.places)[origin]
 
 
-def _names(records: Sequence[Person | Place | Option | Way | Want]) -> dict[str, str]:
+def _names(
+    records: Sequence[Person | Place | Option | Way | Want], joins: str | None = None
+) -> dict[str, str]:
     """The name to show for each record, so that no two records show the same.
 
     A record whose name another record has shows its id too. If two would still show the same,
     every record shows its id: no two ids are the same.
+
+    A name is shown in quotes where it could be taken for something else: one with a comma
+    or a quote mark, one that ends like a name with its id, and one that holds the word
+    ``joins``, which joins the list the names are for. The quotes go on before the id.
     """
     shared = Counter(record.name for record in records)
     shown = {
-        record.id: record.name if shared[record.name] == 1 else f"{record.name} ({record.id})"
+        record.id: _quoted(record.name, joins)
+        if shared[record.name] == 1
+        else f"{_quoted(record.name, joins)} ({record.id})"
         for record in records
     }
     if len(set(shown.values())) < len(shown):
-        return {record.id: f"{record.name} ({record.id})" for record in records}
+        return {record.id: f"{_quoted(record.name, joins)} ({record.id})" for record in records}
     return shown
 
 
-def _name(file: File, id: str | None) -> str:
-    """The name of an OPTION or a WAY."""
-    return _names((*file.options, *file.ways)).get(id or "", "another WAY")
+def _quoted(name: str, joins: str | None) -> str:
+    """A name, in quotes where it could be taken for something else."""
+    splits = "," in name or (joins is not None and joins in name.casefold().split())
+    if splits or '"' in name or _WITH_AN_ID.search(name):
+        return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return name
+
+
+def _name(file: File, id: str | None, joins: str | None = None) -> str:
+    """The name of an OPTION or a WAY. ``joins`` is the word of the list it is for, if any."""
+    return _names((*file.options, *file.ways), joins).get(id or "", "another WAY")
 
 
 def _want(file: File, id: str | None) -> str:
@@ -546,7 +626,7 @@ def _want(file: File, id: str | None) -> str:
 
 def _people(file: File, persons: tuple[str, ...]) -> str:
     """Names joined as a sentence would: Alex, Sam and Jo."""
-    shown = _names(file.persons)
+    shown = _names(file.persons, "and")
     return _listed([shown[person.id] for person in file.persons if person.id in persons])
 
 

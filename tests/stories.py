@@ -150,9 +150,17 @@ def booking(option: str, *persons: str, id: str | None = None) -> Document:
     return {"id": id or f"{option}-booking", "booking": covers}
 
 
-def every_right(option: str) -> Document:
-    """A FACT that the rights to an OPTION are COMPLETE."""
-    return {"id": f"every-right-to-{option}", "complete": {"rights_to": option}}
+def offer(option: str, places: int, id: str | None = None) -> Document:
+    """An OFFER: this many PERSONs can still buy a right to an OPTION."""
+    return {"id": id or f"{option}-offer", "offer": {"option": option, "places": places}}
+
+
+def every_right(option: str, *offers: str) -> Document:
+    """A FACT that the rights to an OPTION are COMPLETE. It names the OFFERs that are still open."""
+    whole: Document = {"rights_to": option}
+    if offers:
+        whole["offers"] = list(offers)
+    return {"id": f"every-right-to-{option}", "complete": whole}
 
 
 def trip(

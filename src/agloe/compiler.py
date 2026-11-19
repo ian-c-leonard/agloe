@@ -32,6 +32,7 @@ from agloe.file import (
     Duration,
     File,
     NeedsRight,
+    Offer,
     Start,
     StartsFrom,
     Want,
@@ -354,16 +355,19 @@ class _Search:
         Where records can be switched off, the best case decides, and it has a right for a
         PERSON unless the FILE rules that out. That takes three kinds of FACT, all switched on:
         that the OPTION needs a right, that the rights to it are COMPLETE, and every BOOKING
-        for it. A BOOKING that is off, or was taken out before, might cover anybody. So a
-        PERSON whom some BOOKING for the OPTION covers is never kept out.
+        and OFFER for it. A BOOKING or an OFFER that is off, or was taken out before, might
+        have a right for anybody. So a PERSON whom some BOOKING for the OPTION covers is never
+        kept out, and the others are kept to the places on OFFER.
         """
-        model, file, world = self.model, self.file, self.world
+        file, world = self.file, self.world
+        people = list(enumerate(file.persons))
         if not self.switch:
             for index, option in enumerate(file.options):
-                for number, person in enumerate(file.persons):
-                    covered = (option.id, person.id) in world.rights
-                    if option.id in world.needs_right and not covered:
-                        self._rule_out(number, index)
+                if option.id in world.needs_right:
+                    without = [
+                        n for n, person in people if (option.id, person.id) not in world.rights
+                    ]
+                    self._share_out(index, without, world.places.get(option.id, 0))
             return
         needs = {fact.option: fact for fact in file.facts if isinstance(fact, NeedsRight)}
         for index, option in enumerate(file.options):
@@ -372,16 +376,32 @@ class _Search:
                 continue
             if option.id in self.open_to_all:
                 continue
-            bookings = [
+            listed = [
                 self.switch[fact.id]
                 for fact in file.facts
-                if isinstance(fact, Booking) and fact.option == option.id
+                if isinstance(fact, Booking | Offer) and fact.option == option.id
             ]
-            closed = [self.switch[needed.id], self.switch[whole.id], *bookings]
-            for number, person in enumerate(file.persons):
-                if file.booking(option.id, person.id) is None:
-                    takes = self.takes[number][index]
-                    model.add_bool_or([takes.negated(), *(each.negated() for each in closed)])
+            closed = [self.switch[needed.id], self.switch[whole.id], *listed]
+            without = [n for n, person in people if file.booking(option.id, person.id) is None]
+            self._share_out(index, without, file.places_on_offer(option.id), closed)
+
+    def _share_out(
+        self, index: int, without: Sequence[int], places: int, given: Sequence[cp_model.IntVar] = ()
+    ) -> None:
+        """No more of these PERSONs take part in an OPTION than it has places on OFFER.
+
+        They are the PERSONs with no right of their own to it. ``given`` holds the records that
+        all have to be switched on for the limit to hold.
+        """
+        if places >= len(without):
+            return
+        if not places and not given:
+            for number in without:
+                self._rule_out(number, index)
+            return
+        limit = self.model.add(sum(self.takes[number][index] for number in without) <= places)
+        if given:
+            _when(limit, *given)
 
     def _hold_to_the_wants(self) -> list[set[int]]:
         """Every must is met and every must-not is kept. Returns what could meet a must.

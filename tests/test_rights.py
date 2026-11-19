@@ -625,8 +625,10 @@ def test_the_search_for_missing_facts_skips_no_set() -> None:
 
         least = min(cost(some) for some in enough)
         assert asked(found) == [list(some) for some in enough if cost(some) == least]
-        in_every_set = answers._asked_by_a_lock(file)  # pyright: ignore[reportPrivateUsage]
+        in_every_set, at_least = answers._asked_by_a_lock(file)  # pyright: ignore[reportPrivateUsage]
         assert all(in_every_set.issubset(some) for some in enough)
+        for rights, number in at_least:
+            assert all(len(rights.intersection(some)) >= number for some in enough)
         held += bool(in_every_set)
         compared += 1
         several += len(found.missing[0]) > 2
@@ -679,7 +681,7 @@ def test_a_lock_says_which_unknown_facts_every_set_holds() -> None:
     nothing_said = trip(
         EVERYONE, ["dock"], [stays("tour", "dock")], [], [lock("tour", "alex", "sam")], tickets=True
     )
-    assert answers._asked_by_a_lock(nothing_said) == {Unknown("start", "tour"), free("tour")}  # pyright: ignore[reportPrivateUsage]
+    assert answers._asked_by_a_lock(nothing_said)[0] == {Unknown("start", "tour"), free("tour")}  # pyright: ignore[reportPrivateUsage]
     for_alex = [lasts("tour", "PT1H"), cutoff("tour", "PT0S"), booking("tour", "alex")]
     one_covered = trip(
         EVERYONE, ["dock"], [stays("tour", "dock")], for_alex, [lock("tour", "alex")], tickets=True
@@ -694,9 +696,11 @@ def test_a_lock_says_which_unknown_facts_every_set_holds() -> None:
         tickets=True,
     )
     assert asked(checked(both_locked)) == [[Unknown("start", "tour"), free("tour")]]
-    assert answers._asked_by_a_lock(both_locked) == {Unknown("start", "tour"), free("tour")}  # pyright: ignore[reportPrivateUsage]
-    assert answers._asked_by_a_lock(a_boat_tour(needs_right("tour"))) == frozenset()  # pyright: ignore[reportPrivateUsage]
-    assert answers._asked_by_a_lock(a_boat_tour(locked=())) == frozenset()  # pyright: ignore[reportPrivateUsage]
+    assert answers._asked_by_a_lock(both_locked)[0] == {Unknown("start", "tour"), free("tour")}  # pyright: ignore[reportPrivateUsage]
+    both_need_one = (frozenset({right("tour", "alex"), right("tour", "sam")}), 2)
+    with_a_need = answers._asked_by_a_lock(a_boat_tour(needs_right("tour")))  # pyright: ignore[reportPrivateUsage]
+    assert with_a_need == (frozenset(), [both_need_one])
+    assert answers._asked_by_a_lock(a_boat_tour(locked=())) == (frozenset(), [])  # pyright: ignore[reportPrivateUsage]
 
 
 def test_the_search_that_tries_every_choice_is_asked_about_no_world_it_is_slow_in() -> None:

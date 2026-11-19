@@ -24,7 +24,11 @@
         "sam"
       ],
       "start": "2027-05-15T14:00:00-05:00[America/Chicago]",
-      "end": "2027-05-15T15:00:00-05:00[America/Chicago]"
+      "end": "2027-05-15T15:00:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "museum-tickets",
+        "sam": "museum-tickets"
+      }
     },
     {
       "option": "blue-line",
@@ -42,7 +46,11 @@
         "sam"
       ],
       "start": "2027-05-15T17:00:00-05:00[America/Chicago]",
-      "end": "2027-05-15T19:30:00-05:00[America/Chicago]"
+      "end": "2027-05-15T19:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "flight-tickets",
+        "sam": "flight-tickets"
+      }
     }
   ],
   "relies_on": [
