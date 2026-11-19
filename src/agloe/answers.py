@@ -129,9 +129,10 @@ class Report:
 
     FEASIBLE: the ITINERARY shown, the FACTs, WANTs and DECISIONs it relies on, whether it is
     ROBUST, what it breaks when every CONTINGENT duration runs longest, and what gives each
-    PERSON their right to each OPTION that needs one or might. INFEASIBLE: FACTs and DECISIONs
-    that conflict, and whether they conflict only ``given_budgets``: with the BUDGETs as the
-    FILE lists them. UNDETERMINED: each smallest set of unknown FACTs that would be enough.
+    PERSON their right to each OPTION that needs one or might. INFEASIBLE: FACTs, WANTs and
+    DECISIONs that conflict, and whether they conflict only ``given_budgets``: with the BUDGETs
+    as the FILE lists them. UNDETERMINED: each smallest set of unknown FACTs that would be
+    enough.
 
     In a FILE with a cap, a FEASIBLE Report has a row for each cap in ``caps``, and an
     UNDETERMINED one has a plan for each set of ``missing`` in ``plans``, in the same order.

@@ -1,11 +1,14 @@
 """The search for a conflict: one yes-or-no question for each record, in the FILE's order."""
 
+import pytest
+
 from agloe import answers, compiler, reference
 from agloe.answers import Answer, check
 from agloe.file import File
 from agloe.reference import Remaining
 from tests.stories import (
     Document,
+    any_time,
     cap,
     ends_at,
     every,
@@ -92,7 +95,23 @@ def a_want_held_both_ways(count: int) -> File:
     return trip(["alex", "sam"], ["a", "b"], options, facts, [], wants=wants, tickets=True)
 
 
-def test_the_solver_answers_one_question_with_one_model_however_many_pairs_are_open() -> None:
+def solves_counted(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """A list that gains one entry each time the solver is asked."""
+    solves: list[int] = []
+    search = compiler._Search  # pyright: ignore[reportPrivateUsage]
+    solve = search._solve  # pyright: ignore[reportPrivateUsage]
+
+    def counted(self: object, relax: bool = True) -> object:
+        solves.append(1)
+        return solve(self, relax)  # pyright: ignore[reportArgumentType]
+
+    monkeypatch.setattr(search, "_solve", counted)
+    return solves
+
+
+def test_the_solver_answers_one_question_with_one_solve_however_many_pairs_are_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Eleven FACTs about the WANT go one after another, which leaves 2,048 best cases.
 
     The reference checker tries each of them. The solver chooses the best case with the plan.
@@ -102,24 +121,43 @@ def test_the_solver_answers_one_question_with_one_model_however_many_pairs_are_o
     assert check(small).conflict == ("end-at-a", "end-at-b")
 
     file = a_want_held_both_ways(11)
-    search = compiler._Search  # pyright: ignore[reportPrivateUsage]
-    built: list[int] = []
+    solves = solves_counted(monkeypatch)
+    each: list[int] = []
+    open_pairs: list[int] = []
 
-    class Counted(search):
-        def __init__(self, *given: object) -> None:
-            built.append(len(given))
-            super().__init__(*given)  # pyright: ignore[reportArgumentType]
+    def counted(left: Remaining) -> bool:
+        before = len(solves)
+        answer = compiler.can_work(left)
+        each.append(len(solves) - before)
+        open_pairs.append(len(reference.best_case_left(left)[1]))
+        return answer
 
-    counted, asked = counting(compiler.can_work)
-    compiler._Search = Counted  # pyright: ignore[reportPrivateUsage]
-    try:
-        found = check(file, compiler.shown, compiler.works, counted)
-    finally:
-        compiler._Search = search  # pyright: ignore[reportPrivateUsage]
+    found = by_the_solver(file, counted)
     assert found.conflict == ("end-at-a", "end-at-b")
-    assert max(len(reference.best_case_left(left)[1]) for left in asked) == 11
-    # One model for the plan in the worst case, and one for each question.
-    assert len(built) == len(asked) + 1
+    assert max(open_pairs) == 11
+    assert set(each) == {1}
+
+
+def test_a_fact_that_says_what_the_best_case_takes_anyway_costs_no_second_solve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sam is LOCKed into eight stays of a minute, and the TRIP lasts seven minutes.
+
+    Six FACTs say that a stay can start at any time. The best case takes that anyway, so the
+    model without each of them is the model with it, and the solver is not asked again.
+    """
+    names = [f"stay-{number}" for number in range(8)]
+    facts = [any_time(name) for name in names[:6]] + [lasts(name, "PT1M") for name in names]
+    decisions = [trip_starts(10), trip_ends(10, 7), *(lock(name, "sam") for name in names)]
+    options = [stays(name, "a") for name in names]
+    file = trip(["sam"], ["a"], options, facts, decisions, tickets=True)
+    solves = solves_counted(monkeypatch)
+    found = compiler.check(file)
+    assert found.answer is Answer.INFEASIBLE
+    assert not any(record.endswith("-time") for record in found.conflict)
+    # One solve for the plan in the worst case and one for the whole FILE. Then at most one
+    # for each record, less the six that leave the model as it was.
+    assert len(solves) <= 2 + records_of(file) - 6
 
 
 def test_the_reference_checker_never_asks_with_all_the_times_gone() -> None:

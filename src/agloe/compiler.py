@@ -19,6 +19,7 @@ search tries everything, so it is meant for small TRIPs.
 
 from collections.abc import Sequence
 from dataclasses import replace
+from hashlib import sha256
 from math import inf
 
 from ortools.sat.python import cp_model
@@ -42,6 +43,9 @@ type _Who = tuple[tuple[str, ...], ...]  # the PERSONs in each OPTION
 type _Orders = tuple[tuple[int, ...], ...]  # the OPTIONs each PERSON does, in order
 type _By = dict[tuple[int, int], reference.Route]  # the WAYs a PERSON takes after an OPTION
 type _Choice = tuple[_Who, _Orders, _By | None]
+# For each model the solver was asked about, by its digest: the plan and the open pairs that
+# held in it, or None where nothing works.
+type _Asked = dict[bytes, tuple[_Choice, frozenset[tuple[str, str]]] | None]
 type _Amount = cp_model.LinearExpr | int  # seconds: a plain number, or one the solver works out
 type _Taken = list[tuple[cp_model.IntVar, reference.Route]]  # routes, each with its choice
 # The same with the time each route arrives. None: nobody knows, and nothing follows it.
@@ -61,7 +65,8 @@ def check(file: File) -> Report:
     if file.caps:
         return answers.check(file)
     try:
-        return answers.check(file, shown, works, can_work)
+        asked: _Asked = {}
+        return answers.check(file, shown, works, lambda left: can_work(left, asked))
     except DoesNotFit:
         return answers.check(file)
 
@@ -81,7 +86,7 @@ def works(file: File, world: World) -> bool:
     return choice is not None
 
 
-def can_work(remaining: Remaining) -> bool:
+def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
     """Whether any ITINERARY works in some best case of what is left of a FILE.
 
     The best cases differ only in the pairs that are left open: whether an OPTION SATISFIES a
@@ -89,16 +94,28 @@ def can_work(remaining: Remaining) -> bool:
     for each pair, with the plan. So one question takes one model, however many pairs are
     open. The reference checker then checks the plan in the best case the solver chose.
 
+    ``asked`` holds what the solver answered for each model it was given before. A FACT that
+    is taken out often changes nothing in the model: it said what the best case takes anyway.
+    The same model has the same answer, so the solver is asked once. The plan is still
+    checked against what is left this time.
+
     Like ``shown`` and ``works``, this is for a FILE with no cap: ``check`` hands a FILE with
     a cap to the reference checker.
     """
     file = remaining.file
     world, open_pairs = reference.best_case_left(remaining)
     search = _Search(file, world, open_pairs)
-    choice = search.any()
-    if choice is None:
+    key = sha256(str(search.model.proto).encode()).digest()
+    if asked is None or key not in asked:
+        choice = search.any()
+        found = None if choice is None else (choice, search.turned_out)
+        if asked is None:
+            asked = {}
+        asked[key] = found
+    found = asked[key]
+    if found is None:
         return False
-    does = search.turned_out
+    choice, does = found
     chosen = replace(
         world, satisfies=world.satisfies | does, might_satisfy=world.might_satisfy | does
     )
@@ -121,8 +138,11 @@ def _checked(
     return itinerary
 
 
-def _solver() -> cp_model.CpSolver:
+def _solver(relax: bool = True) -> cp_model.CpSolver:
     """A solver set up to give the same result every time.
+
+    ``relax`` keeps its linear relaxation, which it needs to prove a best value in good
+    time. A question with nothing to make smaller is answered faster without it.
 
     Its simplification step is switched off. In OR-Tools 9.15 that step reported that nothing
     works for a model that had an answer. A wrong "nothing works" is the one mistake nothing
@@ -138,6 +158,8 @@ def _solver() -> cp_model.CpSolver:
     solver.parameters.cp_model_presolve = False
     solver.parameters.absolute_gap_limit = 0.0
     solver.parameters.relative_gap_limit = 0.0
+    if not relax:
+        solver.parameters.linearization_level = 0
     return solver
 
 
@@ -173,6 +195,9 @@ def _when(constraint: cp_model.Constraint, *conditions: cp_model.LiteralT) -> No
 
 class _Search:
     """One world as a CP-SAT model: who takes part in which OPTION, and in what order.
+
+    With open pairs, the model stands for each world that differs only in them, and the
+    solver chooses among those worlds too.
 
     Each PERSON's OPTIONs form a path. The path is a circuit through a starting point that stands
     for "before the first OPTION and after the last". Where the next OPTION starts somewhere
@@ -667,7 +692,7 @@ class _Search:
 
     def any(self) -> _Choice | None:
         """Some choice of PERSONs and orders that works, or None when none does."""
-        solver, status = self._solve()
+        solver, status = self._solve(relax=False)
         if status == cp_model.INFEASIBLE:
             return None
         self.turned_out = frozenset(
@@ -675,9 +700,9 @@ class _Search:
         )
         return self._found(solver, status)
 
-    def _solve(self) -> tuple[cp_model.CpSolver, object]:
+    def _solve(self, relax: bool = True) -> tuple[cp_model.CpSolver, object]:
         """The solver's answer for the model as it stands."""
-        solver = _solver()
+        solver = _solver(relax)
         status = solver.solve(self.model)
         if status == cp_model.MODEL_INVALID:
             why = self.model.validate()
