@@ -31,10 +31,13 @@ from tests.stories import (
     complete,
     cutoff,
     ends_at,
+    every,
     lasts,
     lasts_between,
     lock,
     moves,
+    must,
+    satisfies,
     seconds,
     starts_at,
     starts_from,
@@ -809,6 +812,40 @@ def test_the_tie_break_counts_exactly_with_many_options() -> None:
     assert report.answer is Answer.FEASIBLE
     assert report.robust is True
     assert [step.option for step in report.itinerary] == ["o0", last]
+
+
+@pytest.mark.parametrize("count", [57, 58, 59, 60])
+def test_the_tie_break_tells_apart_two_plans_that_differ_in_a_late_option(count: int) -> None:
+    """Two plans meet six musts with two more stays each, and the rule takes the earlier stay.
+
+    The first stay is LOCKed, and the musts are about the last four. With 57 stays the plans
+    weigh two to the power 56 plus 12, and two to the power 56 plus 9. Those two are the same
+    floating-point number.
+    """
+    first, second, third, fourth = (f"o{count - left}" for left in (4, 3, 2, 1))
+    sets = [
+        (first, third),
+        (second, fourth),
+        (second, third, fourth),
+        (second, third, fourth),
+        (first, second, third),
+        (first, fourth),
+    ]
+    facts: list[Document] = []
+    for index in range(count):
+        name = f"o{index}"
+        timed = starts_at(name, 9) if name in (first, fourth) else any_time(name)
+        facts += [timed, lasts(name, "PT0S")]
+    wants: list[Document] = []
+    for number, members in enumerate(sets):
+        wants.append(must(f"m{number}", "sam"))
+        facts.append(every(f"m{number}"))
+        facts += [satisfies(member, f"m{number}") for member in members]
+    options = [stays(f"o{index}", "a") for index in range(count)]
+    file = trip(["sam"], ["a"], options, facts, [lock("o0", "sam")], wants=wants)
+    report = compiler.check(file)
+    assert [step.option for step in report.itinerary] == ["o0", first, second]
+    assert report == answers.check(file)
 
 
 def test_a_choice_is_scheduled_only_if_it_meets_every_constraint() -> None:

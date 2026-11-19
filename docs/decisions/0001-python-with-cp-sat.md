@@ -29,7 +29,7 @@ Agloe is written in Python, and CP-SAT is the engine for both the COMPILER and t
 - Agloe is distributed through PyPI. Its command line and MCP tool run with one command; other languages reach it through the MCP tool or the command line rather than in a browser.
 - OR-Tools is a large native dependency, pinned to an exact version.
 - CP-SAT runs with its presolve step switched off. In OR-Tools 9.15 that step reported INFEASIBLE for a small model that has a solution. A wrong "nothing works" is the one solver mistake the reference checker's rules cannot catch, because they check only the ITINERARIES the solver finds.
-- A single-threaded CP-SAT run is deterministic, provided Agloe builds the model in a fixed order. That results match across machines is tested on Linux and macOS before it is relied on.
+- A single-threaded CP-SAT run gives the same result every time on one machine, provided Agloe builds the model in a fixed order. Its search differs between Linux and macOS: the same model takes a different number of steps on each, and where several answers are equally good it can return a different one. So a report rests only on what the solver has proved, which is the same everywhere: that nothing works, or the best value of an amount. Both of the solver's gap limits are zero, so it proves a best value exactly and never stops near one.
 
 ## Confirmation
 
