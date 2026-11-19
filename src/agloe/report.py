@@ -675,9 +675,10 @@ def _names(
     A record whose name another record has shows its id too. If two would still show the same,
     every record shows its id: no two ids are the same.
 
-    A name is shown in quotes where it could be taken for something else: one with a comma
-    or a quote mark, one that ends like a name with its id, and one that holds the word
-    ``joins``, which joins the list the names are for. The quotes go on before the id.
+    A name is shown in quotes where it could be taken for something else: one with a comma,
+    a colon, a semicolon or a quote mark, one that ends like a name with its id, and one that
+    holds the word ``joins``, which joins the list the names are for. The quotes go on
+    before the id.
     """
     shared = Counter(record.name for record in records)
     shown = {
@@ -693,7 +694,8 @@ def _names(
 
 def _quoted(name: str, joins: str | None) -> str:
     """A name, in quotes where it could be taken for something else."""
-    splits = "," in name or (joins is not None and joins in name.casefold().split())
+    marks = any(mark in name for mark in ",:;")  # what a report puts between its own parts
+    splits = marks or (joins is not None and joins in name.casefold().split())
     if splits or '"' in name or _WITH_AN_ID.search(name):
         return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
     return name

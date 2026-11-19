@@ -829,6 +829,9 @@ def test_nothing_about_money_is_unknown_where_nobody_has_to_pay() -> None:
     a_free_place = [*booked, offer("tour", 1, id="free", price="0 USD")]
     for_jo = trip(["sam", "jo"], ["dock"], options, a_free_place, [], tickets=True, budgets=[])
     assert unknowns(for_jo) == (right("tour", "jo"),)
+    only_free = [*timed, needs_right("tour"), offer("tour", 1, price="0 USD")]
+    for_both = trip(["sam", "jo"], ["dock"], options, only_free, [], tickets=True, budgets=[])
+    assert [unknown.what for unknown in unknowns(for_both)] == ["another right"] * 2
     too_few = [*timed, needs_right("tour"), unpriced, offer("tour", 1, id="free", price="0 USD")]
     for_two = trip(["sam", "jo"], ["dock"], options, too_few, [], tickets=True, budgets=[])
     assert [unknown.what for unknown in unknowns(for_two)] == [
@@ -889,6 +892,18 @@ def test_a_budget_that_lists_nobody_is_shown_as_that() -> None:
         "  pounds: for nobody; it holds GBP",
         "  euros: it lists no PERSON; it holds EUR",
     ]
+    # A name cannot copy the marks between the parts of a line either.
+    document["persons"] = [{"id": "p", "name": "Sam: it lists no PERSON"}]
+    document["budgets"] = [
+        {"id": "pounds", "name": "Tours", "persons": ["p"], "currencies": ["GBP"]},
+        {"id": "euros", "name": "Tours: for Sam", "persons": [], "currencies": ["EUR"]},
+    ]
+    assert in_words(load(document))[-2:] == [
+        '  Tours: for "Sam: it lists no PERSON"; it holds GBP',
+        '  "Tours: for Sam": it lists no PERSON; it holds EUR',
+    ]
+    document["persons"] = [{"id": "p", "name": "Sam; it holds EUR"}]
+    assert in_words(load(document))[-2] == '  Tours: for "Sam; it holds EUR"; it holds GBP'
 
 
 def test_a_budget_holds_at_least_one_currency_and_can_list_nobody() -> None:
