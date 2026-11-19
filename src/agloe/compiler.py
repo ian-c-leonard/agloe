@@ -65,7 +65,12 @@ def check(file: File) -> Report:
         return answers.check(file)
     try:
         asked: _Asked = {}
-        return answers.check(file, shown, works, lambda left: can_work(left, asked))
+        return answers.check(
+            file,
+            shown,
+            lambda left, world: works(left, world, asked),
+            lambda left: can_work(left, asked),
+        )
     except DoesNotFit:
         return answers.check(file)
 
@@ -77,9 +82,9 @@ def shown(file: File, world: World) -> Itinerary | None:
     return None if choice is None else _checked(file, world, choice, search.known)
 
 
-def works(file: File, world: World) -> bool:
-    """Whether any ITINERARY works in this world."""
-    choice = _Search(file, world).any()
+def works(file: File, world: World, asked: _Asked | None = None) -> bool:
+    """Whether any ITINERARY works in this world. ``asked`` is as for ``can_work``."""
+    choice = _plan(_Search(file, world), asked)
     if choice is not None:
         _checked(file, world, choice)
     return choice is not None
@@ -93,10 +98,10 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
     for each pair, with the plan. So one question takes one model, however many pairs are
     open. The reference checker then checks the plan in the best case the solver chose.
 
-    ``asked`` holds what the solver answered for each model it was given before. A FACT that
-    is taken out often changes nothing in the model: it said what the best case takes anyway.
-    The same model has the same answer, so the solver is asked once. The plan is read from
-    that answer for what is left this time, and checked against it.
+    ``asked`` holds what the solver answered for each model it was given before in the same
+    check. A FACT that is taken out often changes nothing in the model: it said what the best
+    case takes anyway. The same model has the same answer, so the solver is asked once. The
+    plan is read from that answer for what is left this time, and checked against it.
 
     Like ``shown`` and ``works``, this is for a FILE with no cap: ``check`` hands a FILE with
     a cap to the reference checker.
@@ -104,13 +109,7 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
     file = remaining.file
     world, open_pairs = reference.best_case_left(remaining)
     search = _Search(file, world, open_pairs)
-    key = sha256(str(search.model.proto).encode()).digest()
-    if asked is None:
-        asked = {}
-    if key not in asked:
-        asked[key] = search.ask()
-    # The answer is read through this search: the same model can stand for other routes.
-    choice = search.read(*asked[key])
+    choice = _plan(search, asked)
     if choice is None:
         return False
     does = search.turned_out
@@ -119,6 +118,21 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
     )
     _checked(file, chosen, choice)
     return True
+
+
+def _plan(search: _Search, asked: _Asked | None) -> _Choice | None:
+    """A choice that works in the model of this search, or None where none does.
+
+    Where ``asked`` already holds the solver's answer for a model with the same text, the
+    choice is read from that answer. It is read through this search: two FILEs can give
+    models with the same text and still take different WAYs between the same PLACEs.
+    """
+    if asked is None:
+        return search.any()
+    key = sha256(str(search.model.proto).encode()).digest()
+    if key not in asked:
+        asked[key] = search.ask()
+    return search.read(*asked[key])
 
 
 def _checked(
@@ -140,7 +154,9 @@ def _solver(relax: bool = True) -> cp_model.CpSolver:
     """A solver set up to give the same result every time.
 
     ``relax`` keeps its linear relaxation, which it needs to prove a best value in good
-    time. A question with nothing to make smaller is answered faster without it.
+    time. The plain questions, with nothing to make smaller, are asked without it. On the
+    trips measured that is as quick or quicker, once the model says outright that no two
+    OPTIONs of a PERSON overlap.
 
     Its simplification step is switched off. In OR-Tools 9.15 that step reported that nothing
     works for a model that had an answer. A wrong "nothing works" is the one mistake nothing
@@ -491,9 +507,32 @@ class _Search:
                 arcs.append((before, after, next_))
                 _when(model.add(self.turn[after] >= self.turn[before] + 1), next_)
         model.add_circuit(arcs)
+        self._keep_apart(number)
         self.nothing.append(nothing)
         self.follows.append(follows)
         self.routes.append(between)
+
+    def _keep_apart(self, number: int) -> None:
+        """No two OPTIONs that this PERSON takes part in overlap.
+
+        The path says so already: each OPTION on it starts no earlier than the one before it
+        ends. Said outright, the solver sees at once that two OPTIONs at the same hour cannot
+        both be taken, however many others lie between them on a path. An OPTION that takes
+        no time, or has no limit to how long it takes, is left to the path.
+        """
+        model, takes = self.model, self.takes[number]
+        person = self.file.persons[number]
+        spans: list[cp_model.IntervalVar] = []
+        for index, option in enumerate(self.file.options):
+            if (number, index) in self.left_out or self.endless[index] or not self.lasts[index]:
+                continue
+            name = f"{person.id} in {option.id}"
+            start, lasts = self.start[index], self.lasts[index]
+            spans.append(
+                model.new_optional_fixed_size_interval_var(start, lasts, takes[index], name)
+            )
+        if len(spans) > 1:
+            model.add_no_overlap(spans)
 
     def _goes_straight_on(
         self,

@@ -1,6 +1,7 @@
 """The search for a conflict: one yes-or-no question for each record, in the FILE's order."""
 
 import pytest
+from ortools.sat.python import cp_model
 
 from agloe import answers, compiler, reference
 from agloe.answers import Answer, check
@@ -96,16 +97,16 @@ def a_want_held_both_ways(count: int) -> File:
 
 
 def solves_counted(monkeypatch: pytest.MonkeyPatch) -> list[int]:
-    """A list that gains one entry each time the solver is asked."""
+    """A list that gains, each time the solver is given a model, how hard it had to search."""
     solves: list[int] = []
-    search = compiler._Search  # pyright: ignore[reportPrivateUsage]
-    solve = search._solve  # pyright: ignore[reportPrivateUsage]
+    solve = cp_model.CpSolver.solve
 
-    def counted(self: object, relax: bool = True) -> object:
-        solves.append(1)
-        return solve(self, relax)  # pyright: ignore[reportArgumentType]
+    def counted(self: cp_model.CpSolver, model: cp_model.CpModel) -> object:
+        status = solve(self, model)
+        solves.append(self.num_conflicts)
+        return status
 
-    monkeypatch.setattr(search, "_solve", counted)
+    monkeypatch.setattr(cp_model.CpSolver, "solve", counted)
     return solves
 
 
@@ -181,6 +182,33 @@ def test_the_reference_checker_never_asks_with_all_the_times_gone() -> None:
     times_gone = [sum(left.file.start(name) is None for name in names[:6]) for left in asked]
     assert max(times_gone) <= 1
     assert compiler.check(file) == found
+
+
+def test_two_talks_at_the_same_hour_are_seen_to_clash_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sam is LOCKed into twelve talks at one PLACE, and the last two both start at noon.
+
+    The other times go one by one, and each time the two talks at noon still clash. The
+    model says outright that no two OPTIONs of a PERSON overlap, so the solver sees that
+    with next to no search, however many talks could come between the two.
+    """
+    names = [f"talk-{number}" for number in range(12)]
+    facts: list[Document] = []
+    for number, name in enumerate(names[:10]):
+        facts += [starts_at(name, 8 + number // 2, 30 * (number % 2)), lasts(name, "PT25M")]
+    for name in names[10:]:
+        facts += [starts_at(name, 12), lasts(name, "PT25M")]
+    locks = [lock(name, "sam") for name in names]
+    file = trip(["sam"], ["center"], [stays(name, "center") for name in names], facts, locks)
+    solves = solves_counted(monkeypatch)
+    found = compiler.check(file)
+    late = ("talk-10", "talk-11")
+    assert found.conflict == (
+        *(f"{name}-{what}" for name in late for what in ("time", "length")),
+        *(f"lock-{name}" for name in late),
+    )
+    assert sum(solves) < 10_000
 
 
 def test_rides_that_two_persons_are_locked_into_are_asked_about_one_lock_at_a_time() -> None:
