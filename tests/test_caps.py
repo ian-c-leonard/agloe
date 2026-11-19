@@ -14,6 +14,7 @@ from agloe.file import Booking, Cap, File, FileError, Money, Offer, Payment
 from agloe.reference import (
     Broken,
     Constraint,
+    Remaining,
     Step,
     Unknown,
     broken,
@@ -27,17 +28,21 @@ from tests.stories import (
     budget,
     cap,
     cutoff,
+    every,
     every_right,
     lasts,
     lock,
+    must,
+    needs_no_right,
     needs_right,
     offer,
+    satisfies,
     seconds,
     starts_at,
     stays,
     trip,
 )
-from tests.test_where_a_path_ends import checked, has_no_record_to_spare
+from tests.test_where_a_path_ends import checked, has_no_record_to_spare, ruled_out
 
 EVERYONE = ["alex", "sam", "jo"]
 
@@ -348,6 +353,52 @@ def test_a_free_place_goes_to_the_person_who_can_pay_for_no_other() -> None:
     }
 
 
+def test_budgets_that_no_cap_limits_are_alike_to_the_search() -> None:
+    """Fourteen buyers and six BUDGETs with no cap. The last buyer can only take the free place."""
+    persons = [f"p{number}" for number in range(14)]
+    pots = [budget(f"b{number}", *persons) for number in range(6)]
+    pots.append(budget("capped", "p0"))
+    places = [
+        offer("tour", 1, id="free", price="0 USD"),
+        offer("tour", 14, id="paid", price="1 USD"),
+    ]
+    file = a_tour(
+        *places, locked=persons, budgets=pots, caps=[cap("capped", "0 USD")], persons=persons
+    )
+    worst = worst_case(file)
+    only_free = replace(worst, payable=worst.payable - {("paid", "p13")})
+    way = way_to_pay(file, only_free, {"tour": tuple(persons)})
+    assert way is not None
+    assert way["tour", "p13"] == ("free", None)
+    assert {way["tour", person] for person in persons[:-1]} == {("paid", "b0")}
+
+
+def test_what_a_report_asks_for_says_that_it_has_to_fit_the_caps() -> None:
+    """Sam is in a tour that might need a right. The trip money may spend nothing."""
+    options = [stays("tour", "dock")]
+    decisions = [lock("tour", "sam"), cap("money", "0 USD")]
+    might = trip(["sam"], ["dock"], options, at("tour", 10), decisions, tickets=True)
+    assert in_words(might)[-4] == (
+        "If tour does need a right, a BOOKING for each PERSON who takes part in it is enough"
+        " instead, if what those BOOKINGs paid fits the caps."
+    )
+    needs = trip(
+        ["sam"], ["dock"], options, [*at("tour", 10), needs_right("tour")], decisions, tickets=True
+    )
+    assert in_words(needs)[2] == (
+        "The trip works if a right to tour is found for sam, at a cost that fits the caps."
+    )
+    found = checked(a_tour(booking("tour", "alex"), locked=(), caps=[cap("trip-money", "1 USD")]))
+    as_json = report.as_json(
+        a_tour(booking("tour", "alex"), locked=(), caps=[cap("trip-money", "1 USD")]), found
+    )
+    missing = as_json["missing"]
+    assert isinstance(missing, list)
+    assert missing[0] == [
+        {"what": "charged", "option": "tour", "booking": "tour-booking", "at_most": None}
+    ]
+
+
 def test_a_purchase_can_pass_a_cap_only_where_nothing_else_gives_the_right() -> None:
     paid = booking("tour", "alex", paid="32.00 USD", budget="trip-money", by="alex")
     places = offer("tour", 2, price="32.00 USD")
@@ -457,6 +508,7 @@ def test_a_receipt_that_no_set_asks_about_is_still_in_the_sum() -> None:
                     "asked": ["unstated"],
                     "to_buy": "0",
                     "to_buy_at_most_if_needed": "0",
+                    "to_buy_at_a_price_not_stated": [],
                 }
             ],
         }
@@ -476,8 +528,52 @@ def test_two_files_that_ask_for_the_same_price_show_what_the_cap_has_left() -> N
         quoted = [offer("tour", 1, price="1 USD"), place[1]]
         told = a_tour(ticket, *quoted, budgets=pots, caps=[cap("a", "1 USD")])
         assert checked(told).answer is answer
-    assert reports[0][4] == "  a-cap, on a: nothing has to be at most 1 USD."
-    assert reports[1][4] == "  a-cap, on a: 1 paid has to be at most 1 USD."
+    quote = "the price of 1 place from tour-offer if a pays it"
+    assert reports[0][4] == f"  a-cap, on a: {quote} has to be at most 1 USD."
+    assert reports[1][4] == f"  a-cap, on a: 1 paid plus {quote} has to be at most 1 USD."
+
+
+def test_a_price_for_two_buyers_is_in_the_sum_twice() -> None:
+    """Sam and Jo draw on A, which may spend 1 USD. Two places have no stated price."""
+    pots = [budget("a", "sam", "jo")]
+    places = [offer("tour", 2, id="first", price=None), offer("tour", 1, id="spare", price="1 USD")]
+    whole = every_right("tour", "first", "spare")
+    file = a_tour(*places, whole, locked=("sam", "jo"), budgets=pots, caps=[cap("a", "1 USD")])
+    found = checked(file)
+    assert asked(file) == [[Unknown("price", "tour", about="first")]]
+    assert found.plans[0].caps == (CapRow("a-cap", 0, (), (), 0, 0, (("first", 2),)),)
+    assert in_words(file)[4] == (
+        "  a-cap, on a: the price of 2 places from first if a pays it has to be at most 1 USD."
+    )
+    for quote, answer in (("0.50 USD", Answer.FEASIBLE), ("0.51 USD", Answer.INFEASIBLE)):
+        stated = [offer("tour", 2, id="first", price=quote), places[1]]
+        told = a_tour(*stated, whole, locked=("sam", "jo"), budgets=pots, caps=[cap("a", "1 USD")])
+        assert checked(told).answer is answer
+
+
+def test_the_plan_for_a_length_of_time_works_at_the_limit_the_report_gives() -> None:
+    """Sam's visit starts at 9:00 am and nobody knows how long it takes. A show is a must.
+
+    One show is at 10:00 am and one at 11:00 am. A ticket costs 1 USD, and the cap is 1 USD.
+    The visit may take two hours, and then only the later show can be reached.
+    """
+    options = [stays("visit", "hall"), stays("early", "hall"), stays("late", "hall")]
+    facts = [starts_at("visit", 9), cutoff("visit", "PT0S"), needs_no_right("visit")]
+    facts += [*at("early", 10), *at("late", 11), needs_right("early"), needs_right("late")]
+    facts += [offer("early", 1, price="1 USD"), offer("late", 1, price="1 USD")]
+    facts += [every_right("early", "early-offer"), every_right("late", "late-offer")]
+    facts += [satisfies("early", "show"), satisfies("late", "show"), every("show")]
+    decisions = [lock("visit", "sam"), cap("money", "1 USD")]
+    file = trip(
+        ["sam"], ["hall"], options, facts, decisions, wants=[must("show", "sam")], tickets=True
+    )
+    found = checked(file)
+    assert [needed.at_most for needed in found.missing[0]] == [seconds(2) - seconds(0)]
+    assert [cover.by for cover in found.plans[0].buys] == ["late-offer"]
+    assert in_words(file)[2:4] == [
+        "The trip works if visit takes 2 h or less.",
+        "  One plan that works then: sam buys a place from late-offer for 1 USD from money.",
+    ]
 
 
 def test_a_price_and_a_payer_can_both_be_needed_beside_a_cap() -> None:
@@ -521,6 +617,30 @@ def test_removing_a_booking_forgets_whom_it_covers_and_what_it_charged() -> None
     assert found.answer is Answer.INFEASIBLE
     assert found.conflict == ("tour-booking", "a-cap")
     assert has_no_record_to_spare(file, found.conflict)
+    # Taken out of the whole FILE, the BOOKING might cover Sam and have charged nothing.
+    whole = Remaining(file)
+    assert ruled_out(whole) and not ruled_out(whole.without("tour-booking"))
+    # Forgetting only one of the two is not enough.
+    assert ruled_out(replace(whole, open_to_all=frozenset({"tour"})))
+    no_charge = replace(file, facts=tuple(f for f in file.facts if f.id != "tour-booking"))
+    assert ruled_out(Remaining(no_charge))
+
+
+def test_a_conflict_names_a_booking_that_states_no_payment_as_that() -> None:
+    """A may spend nothing. Alex has a BOOKING, and Sam's place costs 1 USD."""
+    pots = [budget("a", "alex", "sam")]
+    file = a_tour(
+        booking("tour", "alex"),
+        offer("tour", 1, price="1 USD"),
+        every_right("tour", "tour-offer"),
+        budgets=pots,
+        caps=[cap("a", "0 USD")],
+    )
+    found = checked(file)
+    assert found.answer is Answer.INFEASIBLE and "tour-booking" in found.conflict
+    as_json = report.as_json(file, found)
+    assert as_json["payments"] == [] and as_json["not_stated"] == ["tour-booking"]
+    assert "  tour-booking: a BOOKING for tour covers alex; it states no payment" in in_words(file)
 
 
 def test_removing_a_cap_lifts_that_limit_only() -> None:

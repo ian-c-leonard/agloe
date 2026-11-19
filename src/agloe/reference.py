@@ -745,9 +745,15 @@ def way_to_pay(
                 # It costs nothing, or money from outside the FILE pays: no cap counts it.
                 able.append((offer.id, None, None, 0))
                 continue
+            free_to_spend = False
             for budget in sources:
                 key = (budget.id, price.currency)
-                able.append((offer.id, budget.id, key if key in room else None, price.units))
+                if key in room:
+                    able.append((offer.id, budget.id, key, price.units))
+                elif not free_to_spend:
+                    # BUDGETs with no cap in this currency are alike: the first one pays.
+                    able.append((offer.id, budget.id, None, price.units))
+                    free_to_spend = True
         pairs.append(able)
     left = {offer.id: offer.places for option in taking_part for offer in file.offers(option)}
     picked: list[int] = []

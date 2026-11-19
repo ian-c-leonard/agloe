@@ -98,6 +98,10 @@ class CapRow:
     unknown FACTs asks about. ``to_buy`` is what the plan buys from it, and ``if_needed`` the
     most it buys besides, if OPTIONs turn out to need a right. The amounts are whole
     ten-thousandths of the cap's currency.
+
+    ``quoted`` holds each OFFER with no stated price that the plan takes places of, with how
+    many of them go to PERSONs who may draw on the cap's BUDGET. If the price turns out
+    above nothing in the cap's currency and this BUDGET pays, it counts that many times.
     """
 
     cap: str
@@ -106,6 +110,7 @@ class CapRow:
     asked: tuple[str, ...]
     to_buy: int
     if_needed: int
+    quoted: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -207,8 +212,8 @@ def check(
         conflict, given_budgets = _conflict(file, stuck, enough)
         return Report(Answer.INFEASIBLE, conflict=conflict, given_budgets=given_budgets)
     missing = _missing(file, works, shown)
-    plans = tuple(_plan(file, [needed.unknown for needed in some], shown) for some in missing)
-    return Report(Answer.UNDETERMINED, missing=missing, plans=plans if file.caps else ())
+    plans = tuple(_plan(file, some, shown) for some in missing) if file.caps else ()
+    return Report(Answer.UNDETERMINED, missing=missing, plans=plans)
 
 
 def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> bool:
@@ -416,24 +421,33 @@ def _bought(file: File, enough: Sequence[Unknown], shown: Shown) -> list[tuple[C
     return bought
 
 
-def _purchases(file: File, enough: Sequence[Unknown], shown: Shown) -> list[Cover]:
+def _purchases(
+    file: File, enough: Sequence[Unknown], shown: Shown, world: World | None = None
+) -> list[Cover]:
     """Who buys which place in the ITINERARY shown where a set of unknown FACTs turns out well.
 
-    Every other unknown FACT turns out badly there.
+    Every other unknown FACT turns out badly there. ``world`` is that world, where it is not
+    the one in which each FACT of the set turns out as well as it can.
     """
-    world = with_these_at_best(file, enough)
+    world = world or with_these_at_best(file, enough)
     plan = shown(file, world)
     if plan is None:
         raise AssertionError("a set of unknown FACTs that is enough shows no ITINERARY")
     return [cover for cover in _covers(file, world, plan) if cover.to_buy]
 
 
-def _plan(file: File, enough: Sequence[Unknown], shown: Shown) -> Plan:
-    """One plan that works where this set turns out well, with the sum for each cap."""
-    if not file.caps:
-        return Plan((), ())
-    buys = _purchases(file, enough, shown)
-    asked = [unknown.about or "" for unknown in enough if unknown.what == "charged"]
+def _plan(file: File, enough: Sequence[Missing], shown: Shown) -> Plan:
+    """One plan that works where this set turns out well, with the sum for each cap.
+
+    A set of one length of time comes with the most it can be. The plan is one that works at
+    that length: a plan for no time at all could buy a place that the PERSON then misses.
+    """
+    unknowns = [needed.unknown for needed in enough]
+    world = None
+    if len(enough) == 1 and enough[0].at_most is not None:
+        world = with_this_long(file, unknowns[0], enough[0].at_most)
+    buys = _purchases(file, unknowns, shown, world)
+    asked = [unknown.about or "" for unknown in unknowns if unknown.what == "charged"]
     return Plan(tuple(buys), _cap_rows(file, buys, asked))
 
 
@@ -472,7 +486,10 @@ def _cap_rows(file: File, covers: Sequence[Cover], asked: Sequence[str]) -> tupl
         sure = sum(c.price.units for c in mine if c.price and file.needs_right(c.option) is True)
         most = sum(c.price.units for c in mine if c.price and file.needs_right(c.option) is None)
         named = tuple(booking for booking, _ in might if booking in asked)
-        rows.append(CapRow(cap.id, paid, might, named, sure, most))
+        may_draw = next(each.persons for each in file.budgets if each.id == cap.budget)
+        unpriced = [c.by for c in covers if c.to_buy and c.price is None and c.person in may_draw]
+        quoted = tuple((offer, unpriced.count(offer)) for offer in dict.fromkeys(unpriced))
+        rows.append(CapRow(cap.id, paid, might, named, sure, most, quoted))
     return tuple(rows)
 
 

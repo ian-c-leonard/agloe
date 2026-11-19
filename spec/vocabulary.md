@@ -70,7 +70,7 @@ A COMPLETE set that is empty means "we looked, and there is nothing". A FACT tha
 
 A dated choice by a PERSON: a LOCK, a PIN, a DISMISSAL, the time at which the TRIP starts or ends, a cap on what the TRIP spends from a BUDGET in one currency, or the undoing of one. A DECISION is never edited; changing your mind is a new DECISION that names the one it undoes.
 
-*Uses:* → PERSON, → LOCK, → PIN, → DISMISSAL.
+*Uses:* → PERSON, → LOCK, → PIN, → DISMISSAL, → BUDGET.
 
 ---
 

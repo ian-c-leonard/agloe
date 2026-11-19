@@ -172,6 +172,7 @@ def as_json(file: File, report: Report) -> dict[str, object]:
             for fact in file.facts
             if isinstance(fact, Booking) and fact.paid is not None and fact.id in report.conflict
         ]
+        out["not_stated"] = [each for each in _with_no_payment(file) if each in report.conflict]
     if _turns_on_who_pays(report):
         out["budgets"] = [
             {"id": each.id, "persons": list(each.persons), "currencies": list(each.currencies)}
@@ -197,6 +198,9 @@ def _cap_as_json(file: File, row: CapRow) -> dict[str, object]:
         "asked": list(row.asked),
         "to_buy": _amount(row.to_buy, places),
         "to_buy_at_most_if_needed": _amount(row.if_needed, places),
+        "to_buy_at_a_price_not_stated": [
+            {"offer": offer, "places": count} for offer, count in row.quoted
+        ],
     }
 
 
@@ -329,7 +333,7 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
     if unknown.person is not None:
         out["person"] = unknown.person
     if unknown.about is not None:
-        out["offer"] = unknown.about
+        out["booking" if unknown.what == "charged" else "offer"] = unknown.about
     if needed.buys:
         out["buys"] = [
             {
@@ -466,6 +470,8 @@ def as_text(file: File, report: Report) -> str:
                 f"If {_listed(names, 'or')} does need a right, a BOOKING for each PERSON who"
                 " takes part in it is enough instead.",
             ]
+            if file.caps:
+                lines[-1] = lines[-1][:-1] + ", if what those BOOKINGs paid fits the caps."
         if "other ways" in kinds:
             helps = (
                 "Other WAYs help only if they can be taken when the plan needs them, with a"
@@ -564,7 +570,7 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
             found = next((fact for fact in file.facts if fact.id == record), None)
             credited = tuple(cover.person for cover in report.rights if cover.by == record)
             used_for = ""
-            if isinstance(found, Booking) and set(credited) != set(found.covers):
+            if isinstance(found, Booking) and credited and set(credited) != set(found.covers):
                 used_for = f"; this plan uses it for {_people(file, credited)}"
             lines.append(f"  {record}: {_record(file, clock, record)}{used_for}")
     money = _money(file, report)
@@ -701,6 +707,7 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
             # A right that is found is one more than the places on OFFER, and the words say so.
             places = file.places_on_offer(unknown.option or "")
             more = "" if not places else f", in addition to the {_places(places)} on OFFER"
+            more += ", at a cost that fits the caps" if file.caps else ""
             each = "each of " if len(group) > 1 else ""
             who = _people(file, tuple(needed.unknown.person or "" for needed in group))
             parts.append(f"a right to {_name(file, unknown.option)} is found for {each}{who}{more}")
@@ -756,7 +763,8 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
             else f"one from {cover.by} for {cover.price}"
             for cover in needed.buys
         ]
-        can_be_paid = f"can be paid from a BUDGET that lists {who}"
+        within = ", within its caps" if file.caps else ""
+        can_be_paid = f"can be paid from a BUDGET that lists {who}{within}"
         return f"each place that {who} has to buy {can_be_paid} ({', '.join(places)})"
     if unknown.what == "other ways":
         places = _names(file.places)
@@ -914,6 +922,10 @@ def _plan_in_words(file: File, plan: Plan) -> list[str]:
             terms.append(f"{_amount(row.to_buy, places)} still to buy")
         if row.if_needed:
             terms.append(f"up to {_amount(row.if_needed, places)} more if OPTIONs need a right")
+        terms += [
+            f"the price of {_places(count)} from {offer} if {pots[cap.budget]} pays it"
+            for offer, count in row.quoted
+        ]
         total = " plus ".join(terms) or "nothing"
         lines.append(f"{cap.id}, on {pots[cap.budget]}: {total} has to be at most {cap.limit}.")
     return lines
