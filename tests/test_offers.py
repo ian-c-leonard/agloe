@@ -10,7 +10,7 @@ from typing import cast
 import pytest
 
 from agloe import answers, compiler, report
-from agloe.answers import Answer, Cover, Missing
+from agloe.answers import Answer, Cover
 from agloe.file import CompleteRights, File, FileError, Offer, read
 from agloe.reference import (
     Broken,
@@ -128,7 +128,7 @@ def test_the_places_of_an_offer_read_the_same_however_the_number_is_written(tmp_
         assert read(path).places_on_offer("tour") == 100_000_000
     for written in ("1000000000", "1e9", "1000000000.0"):
         path.write_text(document.replace("12345", written))
-        with pytest.raises(FileError):
+        with pytest.raises(FileError, match="1000000000 is greater than the maximum of 999999999"):
             read(path)
 
 
@@ -388,39 +388,24 @@ def test_too_few_places_make_a_trip_infeasible_where_the_rights_are_complete() -
     )
 
 
-def test_one_sentence_stands_only_for_every_way_to_pick_the_persons() -> None:
-    """Two sets about two OPTIONs, or some of the ways to pick, stay as separate cases."""
-
-    def one_family(*each: Sequence[Unknown]) -> bool:
-        sets = [[Missing(unknown, None) for unknown in some] for some in each]
-        return report._any_of_them(sets) is not None  # pyright: ignore[reportPrivateUsage]
-
-    assert one_family([right("tour", "alex")], [right("tour", "sam")])
-    assert not one_family([right("tour", "alex")], [right("cruise", "sam")])
-    pairs = (
-        [right("tour", "alex"), right("tour", "sam")],
-        [right("tour", "jo"), right("tour", "pat")],
-    )
-    assert not one_family(*pairs)
-    assert not one_family([right("tour", "alex")])
-
-
-def test_what_the_sets_share_is_said_as_in_each_of_them() -> None:
+def test_each_case_says_everything_its_set_holds() -> None:
     """Alex and Sam are LOCKed into a tour at 10:00 am, and the TRIP ends at 11:00 am.
 
     Nobody knows how long the tour takes, and one place is on OFFER. Each set holds the length
     of the tour and a right for one of the two. The length has to fit, so stating it is not
-    enough, and the words say so.
+    enough, and the words of each case say so.
     """
     facts = [starts_at("tour", 10), cutoff("tour", "PT0S"), needs_right("tour"), offer("tour", 1)]
     decisions = [lock("tour", "alex", "sam"), trip_ends(11)]
     file = trip(EVERYONE, ["dock"], [stays("tour", "dock")], facts, decisions, tickets=True)
     length = Unknown("duration", "tour")
     assert asked(checked(file)) == [[length, right("tour", "alex")], [length, right("tour", "sam")]]
-    assert in_words(file)[-1] == (
-        "The trip works if tour is quick enough and a right to tour is found for one of alex and"
-        " sam, in addition to the 1 place on OFFER."
-    )
+    more = "in addition to the 1 place on OFFER"
+    assert in_words(file)[-3:] == [
+        "The trip works in any of these cases:",
+        f"  1. Tour is quick enough and a right to tour is found for alex, {more}.",
+        f"  2. Tour is quick enough and a right to tour is found for sam, {more}.",
+    ]
 
 
 def test_a_shortage_among_many_locked_persons_takes_few_searches(
@@ -428,13 +413,15 @@ def test_a_shortage_among_many_locked_persons_takes_few_searches(
 ) -> None:
     """Ten PERSONs are LOCKed in and one place is on OFFER. Nine of them need another right.
 
-    A set with fewer rights cannot be enough, so the search is not asked about one.
+    A set with fewer rights cannot be enough, so the search is not asked about one. Fourteen
+    more PERSONs have nothing to do, and nothing is known about the swim, which nobody has to
+    take. Their unknown FACTs make up no set either, and no set with them is even made.
     """
     people = [f"person-{number}" for number in range(10)]
+    idle = [f"idle-{number}" for number in range(14)]
     facts = [*at_ten("tour"), needs_right("tour"), offer("tour", 1)]
-    file = trip(
-        people, ["dock"], [stays("tour", "dock")], facts, [lock("tour", *people)], tickets=True
-    )
+    options = [stays("tour", "dock"), stays("swim", "dock")]
+    file = trip([*people, *idle], ["dock"], options, facts, [lock("tour", *people)], tickets=True)
     calls = 0
     solver = compiler.works
 
@@ -448,6 +435,23 @@ def test_a_shortage_among_many_locked_persons_takes_few_searches(
     assert len(found.missing) == 10
     assert all(len(enough) == 9 for enough in found.missing)
     assert calls < 20
+
+
+def test_only_the_sets_with_enough_of_each_group_are_made() -> None:
+    """The picks are those a search of every pick would keep, each made once."""
+    facts = [right("tour", f"person-{number}") for number in range(6)]
+    facts += [Unknown("start", "tour"), Unknown("cutoff", "tour")]
+    groups = [(frozenset(facts[:3]), 2), (frozenset(facts[3:5]), 1)]
+    for size in range(8):
+        made = list(answers._with_enough_of_each(facts, groups, size))  # pyright: ignore[reportPrivateUsage]
+        kept = [
+            pick
+            for pick in combinations(facts, size)
+            if all(len(group.intersection(pick)) >= number for group, number in groups)
+        ]
+        assert len(made) == len(kept)
+        assert {frozenset(pick) for pick in made} == {frozenset(pick) for pick in kept}
+    assert list(answers._with_enough_of_each(facts, [], 2)) == list(combinations(facts, 2))  # pyright: ignore[reportPrivateUsage]
 
 
 def test_a_booking_that_covers_more_persons_than_the_plan_needs_says_whom_it_is_used_for() -> None:
@@ -495,25 +499,26 @@ def test_another_right_is_asked_for_as_far_as_the_places_run_out() -> None:
     file = a_boat_tour(booking("tour", "alex"), offer("tour", 1), locked=EVERYONE)
     found = checked(file)
     assert asked(found) == [[right("tour", "sam")], [right("tour", "jo")]]
-    assert in_words(file)[-1] == (
-        "The trip works if a right to tour is found for one of sam and jo, in addition to the 1"
-        " place on OFFER."
-    )
+    assert in_words(file)[-2:] == [
+        "  1. A right to tour is found for sam, in addition to the 1 place on OFFER.",
+        "  2. A right to tour is found for jo, in addition to the 1 place on OFFER.",
+    ]
     assert len(cast("list[object]", report.as_json(file, found)["missing"])) == 2
 
 
-def test_the_words_say_how_many_of_a_group_need_a_right() -> None:
-    people = ["alex", "sam", "jo", "pat", "kim"]
-    facts = [starts_at("tour", 10), lasts("tour", "PT1H"), needs_right("tour"), offer("tour", 2)]
+def test_each_way_to_pick_the_persons_who_need_a_right_is_a_case() -> None:
+    people = ["alex", "sam", "jo", "pat"]
+    facts = [*at_ten("tour"), needs_right("tour"), offer("tour", 2)]
     file = trip(
         people, ["dock"], [stays("tour", "dock")], facts, [lock("tour", *people)], tickets=True
     )
-    sets = asked(checked(file))
-    assert len(sets) == 10
-    assert all(len(some) == 3 for some in sets)
-    assert in_words(file)[-1] == (
-        "The trip works if a right to tour is found for 3 of alex, sam, jo, pat and kim, in"
-        " addition to the 2 places on OFFER."
+    pairs = [[right("tour", one), right("tour", other)] for one, other in combinations(people, 2)]
+    assert asked(checked(file)) == pairs
+    words = in_words(file)
+    assert len(words) == 3 + len(pairs)
+    assert words[3] == (
+        "  1. A right to tour is found for each of alex and sam, in addition to the 2 places on"
+        " OFFER."
     )
 
 
@@ -621,19 +626,3 @@ def test_the_plan_shown_and_what_covers_whom_follow_the_rules_on_random_trips() 
             for listed in file.offers(each.option):
                 assert sum(cover.by == listed.id for cover in covers) <= listed.places
     assert steps_seen == {0, 1, 2, 3}
-
-
-def test_several_sets_that_differ_only_in_who_gets_a_right_are_every_way_to_pick_them() -> None:
-    """The one sentence a report prints for them says no more and no less than the sets."""
-    people = ["alex", "sam", "jo", "pat"]
-    facts = [*at_ten("tour"), needs_right("tour"), offer("tour", 1)]
-    file = trip(
-        people, ["dock"], [stays("tour", "dock")], facts, [lock("tour", *people)], tickets=True
-    )
-    found = checked(file)
-    expected = [[right("tour", person) for person in three] for three in combinations(people, 3)]
-    assert asked(found) == expected
-    assert in_words(file)[-1] == (
-        "The trip works if a right to tour is found for 3 of alex, sam, jo and pat, in addition"
-        " to the 1 place on OFFER."
-    )

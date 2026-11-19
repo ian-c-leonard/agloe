@@ -7,7 +7,7 @@ reference checker's, which tries everything. The COMPILER passes its solver sear
 the answers and the evidence are worked out here in either case.
 """
 
-from collections.abc import Callable, Set
+from collections.abc import Callable, Iterable, Iterator, Sequence, Set
 from dataclasses import dataclass
 from enum import Enum
 from itertools import combinations
@@ -272,12 +272,14 @@ def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
             some for some in combinations(to_find, count) if works(file, no_better_than(file, some))
         ]
         for size in range(fewest, len(facts) + 1 if hopeful else 0):
-            # Adding the same FACTs to each set keeps the sets in the order of their FACTs.
-            sets = (
-                sorted((*in_every_set, *more), key=place.__getitem__)
-                for more in combinations(others, size - len(in_every_set))
-                if all(len(rights.intersection(more)) >= number for rights, number in at_least)
+            picked = _with_enough_of_each(others, at_least, size - len(in_every_set))
+            sets: Iterable[list[Unknown]] = (
+                sorted((*in_every_set, *more), key=place.__getitem__) for more in picked
             )
+            if at_least:
+                # They were picked group by group. A report lists them in the order of their
+                # FACTs, as if every set had been tried.
+                sets = sorted(sets, key=lambda stated: [place[fact] for fact in stated])
             enough = [
                 (*stated, *some)
                 for stated in sets
@@ -291,6 +293,26 @@ def _missing(file: File, works: Works) -> tuple[tuple[Missing, ...], ...]:
                     for some in enough
                 )
     raise AssertionError("the best case works, so some unknown FACTs make it work")
+
+
+def _with_enough_of_each(
+    facts: Sequence[Unknown], at_least: Sequence[tuple[frozenset[Unknown], int]], size: int
+) -> Iterator[tuple[Unknown, ...]]:
+    """Every way to pick so many FACTs with at least a stated number from each group.
+
+    No group shares a FACT with another. Only the picks that qualify are made, so a FILE with
+    many FACTs outside the groups costs nothing for the sizes that the groups rule out.
+    """
+    if not at_least:
+        yield from combinations(facts, size)
+        return
+    (group, number), rest = at_least[0], at_least[1:]
+    inside = [fact for fact in facts if fact in group]
+    outside = [fact for fact in facts if fact not in group]
+    for count in range(number, min(len(inside), size) + 1):
+        for first in combinations(inside, count):
+            for more in _with_enough_of_each(outside, rest, size - count):
+                yield (*first, *more)
 
 
 def _asked_by_a_lock(file: File) -> tuple[frozenset[Unknown], list[tuple[frozenset[Unknown], int]]]:
