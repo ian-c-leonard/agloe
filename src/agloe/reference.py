@@ -1232,7 +1232,7 @@ def needless(file: File, world: World, itinerary: Itinerary) -> list[tuple[str |
     return []
 
 
-def itineraries(file: File, world: World) -> list[Itinerary]:
+def itineraries(file: File, world: World, known: Routes | None = None) -> list[Itinerary]:
     """The ITINERARIES that work in this world with PERSONs taking part the fewest times.
 
     It tries every choice of who takes part in which OPTION and in what order. Where a PERSON's
@@ -1246,10 +1246,12 @@ def itineraries(file: File, world: World) -> list[Itinerary]:
     ITINERARY is shown". That rule covers the plans a report shows, which take no unlisted WAY.
     In a world with unlisted WAYs the order and the times are still the same every time, and no
     more is promised.
+
+    ``known`` can hold the routes of this world that are already worked out.
     """
     best: list[tuple[_Shown, Itinerary]] = []
     fewest: int | None = None
-    known = Routes(file, world)
+    known = known or Routes(file, world)
     for who in _who_takes_part(file, world):
         if fewest is not None and sum(len(persons) for persons in who) > fewest:
             break
@@ -1346,10 +1348,12 @@ def _orders(
 type Route = tuple[Leg, ...]
 
 
-def routes(file: File, world: World, here: str, there: str, last: bool = False) -> list[Route]:
+def routes(
+    file: File, world: World, here: str, there: str, last: bool = False, thin: bool = True
+) -> list[Route]:
     """Every route from one PLACE to another by WAYs alone that is worth trying, shortest first.
 
-    ``last`` says that the PERSON does nothing after the route. Three kinds of route are left
+    ``last`` says that the PERSON does nothing after the route. Four kinds of route are left
     out, because another route is never worse.
 
     - A route that passes through a PLACE twice. A PERSON who came back to a PLACE could have
@@ -1362,16 +1366,29 @@ def routes(file: File, world: World, here: str, there: str, last: bool = False) 
       they would have taken the other, and arrives no later. For this the one WAY must exist in
       this world, and every COMPLETE FACT about its two PLACEs must also be about the two PLACEs
       of the other: then the one is ruled out only at times when the other is too.
+    - With ``thin``, a route that takes a listed WAY where a WAY listed before it goes between
+      the same two PLACEs and takes no longer when both run shortest, and no longer when both
+      run longest. Those are the two cases a route is checked in. The same route with that
+      other WAY has as many WAYs, arrives no later in either case, and comes first by the
+      rule for the WAYs listed first. This is right only where each WAY takes as long as this
+      world says. A search that can switch a FACT off asks for every route.
 
     A WAY SATISFIES no WANT. So which WAYs a PERSON takes never changes which musts are met.
+
+    The search does not walk into a PLACE from which no WAY of this world leads on to the
+    destination: no route goes that way.
     """
     places = [place.id for place in file.places]
     complete = [fact for fact in file.facts if isinstance(fact, Complete)]
-    about = {
-        (origin, destination): {fact.id for fact in complete if fact.covers(origin, destination)}
-        for origin in places
-        for destination in places
-    }
+    about: dict[tuple[str, str], frozenset[str]] = {}
+
+    def cover(origin: str, destination: str) -> frozenset[str]:
+        """The COMPLETE FACTs about travel between these two PLACEs, looked up once."""
+        if (origin, destination) not in about:
+            about[origin, destination] = frozenset(
+                fact.id for fact in complete if fact.covers(origin, destination)
+            )
+        return about[origin, destination]
 
     def joined(origin: str, destination: str) -> bool:
         return world.unlisted is None or (origin, destination) in world.unlisted
@@ -1379,29 +1396,61 @@ def routes(file: File, world: World, here: str, there: str, last: bool = False) 
     def stands_in(origin: str, destination: str, stretch: Route) -> bool:
         """Whether one unlisted WAY between these PLACEs is never worse than this stretch."""
         return joined(origin, destination) and any(
-            way is None and about[origin, destination] <= about[start, end]
+            way is None and cover(origin, destination) <= cover(start, end)
             for way, start, end in stretch
         )
 
-    def onward(place: str) -> Iterator[tuple[str | None, str]]:
-        for way in file.ways:
-            if way.origin == place:
-                ahead = way.destination
-            elif way.both_ways and way.destination == place:
-                ahead = way.origin
-            else:
+    # Each PLACE with the WAYs a route can leave it by, in the FILE's order, and where each
+    # one leads. A WAY with no limit to how long it takes can only be the last leg of a
+    # PERSON's last route.
+    leaving: dict[str, list[tuple[str, str]]] = {}
+    for way in file.ways:
+        ends = [(way.origin, way.destination)]
+        ends += [(way.destination, way.origin)] if way.both_ways else []
+        for origin, destination in ends:
+            if world.takes[way.id][1] is not None or (last and destination == there):
+                leaving.setdefault(origin, []).append((way.id, destination))
+
+    # The PLACEs from which some WAYs of this world lead to the destination. Where an unlisted
+    # WAY joins any two PLACEs, that is every PLACE.
+    leads_there: set[str] | None = None
+    if world.unlisted is not None:
+        arriving: dict[str, list[str]] = {}
+        for origin, exits in leaving.items():
+            for _, destination in exits:
+                arriving.setdefault(destination, []).append(origin)
+        for origin, destination in world.unlisted:
+            arriving.setdefault(destination, []).append(origin)
+        leads_there, reached = {there}, [there]
+        while reached:
+            for origin in arriving.get(reached.pop(), ()):
+                if origin not in leads_there:
+                    leads_there.add(origin)
+                    reached.append(origin)
+
+    def onward(passed: tuple[str, ...]) -> Iterator[tuple[str | None, str]]:
+        """Each WAY to try next from the last PLACE passed, and the PLACE it leads to."""
+        place = passed[-1]
+        taken: dict[str, list[tuple[int, int]]] = {}
+        for way, ahead in leaving.get(place, ()):
+            if ahead in passed or (leads_there is not None and ahead not in leads_there):
                 continue
-            if world.takes[way.id][1] is not None or (last and ahead == there):
-                yield way.id, ahead
+            shortest, longest = world.takes[way]
+            if thin and longest is not None:
+                quicker = taken.setdefault(ahead, [])
+                if any(least <= shortest and most <= longest for least, most in quicker):
+                    continue
+                quicker.append((shortest, longest))
+            yield way, ahead
         for other in places:
-            if other != place and joined(place, other):
+            if other not in passed and joined(place, other):
                 yield None, other
 
     found: list[Route] = []
     # The PLACEs passed so far, the WAYs taken, and what is still to try from there. A list, and
     # no call inside a call: a route through very many PLACEs needs no deep stack.
     begun: list[tuple[tuple[str, ...], Route, Iterator[tuple[str | None, str]]]] = [
-        ((here,), (), onward(here))
+        ((here,), (), onward((here,)))
     ]
     while begun:
         passed, legs, ahead = begun[-1]
@@ -1410,7 +1459,7 @@ def routes(file: File, world: World, here: str, there: str, last: bool = False) 
             begun.pop()
             continue
         way, place = step
-        if place in passed:
+        if leads_there is not None and place not in leads_there:
             continue
         longer = (*legs, (way, passed[-1], place))
         if any(stands_in(passed[first], place, longer[first:]) for first in range(len(legs))):
@@ -1418,15 +1467,19 @@ def routes(file: File, world: World, here: str, there: str, last: bool = False) 
         if place == there:
             found.append(longer)
         else:
-            begun.append(((*passed, place), longer, onward(place)))
+            begun.append(((*passed, place), longer, onward((*passed, place))))
     return sorted(found, key=lambda route: (len(route), _legs_in_file_order(file, route)))
 
 
 class Routes:
     """The routes between the PLACEs of one world, with each pair worked out once."""
 
-    def __init__(self, file: File, world: World) -> None:
-        self._file, self._world = file, world
+    def __init__(self, file: File, world: World, thin: bool = True) -> None:
+        """``thin`` leaves out a route with a WAY that an earlier WAY is never slower than.
+
+        That is right where each WAY takes as long as this world says.
+        """
+        self._file, self._world, self._thin = file, world, thin
         self._found: dict[tuple[str, str, bool], list[Route]] = {}
 
     def between(self, here: str, there: str, last: bool = False) -> list[Route]:
@@ -1435,7 +1488,9 @@ class Routes:
         ``last`` says that the PERSON does nothing after the route.
         """
         if (here, there, last) not in self._found:
-            self._found[here, there, last] = routes(self._file, self._world, here, there, last)
+            self._found[here, there, last] = routes(
+                self._file, self._world, here, there, last, self._thin
+            )
         return self._found[here, there, last]
 
 
