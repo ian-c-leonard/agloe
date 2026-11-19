@@ -8,8 +8,9 @@ rules as the reference checker applies them have agreed.
 Only the search is different. The three answers, ROBUST and the evidence are worked out by
 ``answers.check``, with this module's search in place of the reference checker's.
 
-For INFEASIBLE, the solver also names the FACTs and DECISIONs its proof used. The reference
-checker then looks for the conflict among those alone.
+For INFEASIBLE, the search for the conflict asks whether anything can still work once records
+are taken out. The solver answers each such question with one model. Where taking FACTs out
+leaves it open whether an OPTION SATISFIES a WANT, the solver chooses that too.
 
 The solver counts in 64-bit numbers. A TRIP with very long durations and very many routes can
 need more than that. The reference checker's own search then answers for the whole TRIP. That
@@ -17,6 +18,7 @@ search tries everything, so it is meant for small TRIPs.
 """
 
 from collections.abc import Sequence
+from dataclasses import replace
 from math import inf
 
 from ortools.sat.python import cp_model
@@ -29,7 +31,7 @@ from agloe.file import (
     StartsFrom,
     Want,
 )
-from agloe.reference import Itinerary, World
+from agloe.reference import Itinerary, Remaining, World
 
 _MOST_AT_ONCE = 60  # yes-or-no choices ranked in one solve: their weights must fit in 64 bits
 _FURTHEST = 2**62  # a time further than this from the first fixed time does not fit in 64 bits
@@ -59,7 +61,7 @@ def check(file: File) -> Report:
     if file.caps:
         return answers.check(file)
     try:
-        return answers.check(file, shown=shown, works=works)
+        return answers.check(file, shown, works, can_work, in_blocks=True)
     except DoesNotFit:
         return answers.check(file)
 
@@ -77,6 +79,28 @@ def works(file: File, world: World) -> bool:
     if choice is not None:
         _checked(file, world, choice)
     return choice is not None
+
+
+def can_work(remaining: Remaining) -> bool:
+    """Whether any ITINERARY works in some best case of what is left of a FILE.
+
+    The best cases differ only in the pairs that are left open: whether an OPTION SATISFIES a
+    WANT that is a must for one PERSON and a must-not for another. The solver chooses that
+    for each pair, with the plan. So one question takes one model, however many pairs are
+    open. The reference checker then checks the plan in the best case the solver chose.
+    """
+    file = remaining.file
+    world, open_pairs = reference.best_case_left(remaining)
+    search = _Search(file, world, open_pairs)
+    choice = search.any()
+    if choice is None:
+        return False
+    does = search.turned_out
+    chosen = replace(
+        world, satisfies=world.satisfies | does, might_satisfy=world.might_satisfy | does
+    )
+    _checked(file, chosen, choice)
+    return True
 
 
 def _checked(
@@ -154,10 +178,21 @@ class _Search:
     reference checker.
     """
 
-    def __init__(self, file: File, world: World) -> None:
-        """Build the model of this world."""
+    def __init__(
+        self, file: File, world: World, open_pairs: Sequence[tuple[str, str]] = ()
+    ) -> None:
+        """Build the model of this world.
+
+        ``open_pairs`` are left to the solver: each an OPTION and a WANT, and whether the
+        OPTION SATISFIES the WANT. The world must say that they do not.
+        """
         self.file, self.world = file, world
         self.model = cp_model.CpModel()
+        # The choice for each open pair, and the pairs that held in the last answer.
+        self.does = {
+            pair: self.model.new_bool_var(f"{pair[0]} satisfies {pair[1]}") for pair in open_pairs
+        }
+        self.turned_out: frozenset[tuple[str, str]] = frozenset()
         self._read_the_world()
         self._count_time()
         self._choose_who_takes_part()
@@ -318,7 +353,9 @@ class _Search:
     def _hold_to_the_wants(self) -> list[set[int]]:
         """Every must is met and every must-not is kept. Returns what could meet a must.
 
-        That is, for each PERSON, the OPTIONs that could meet a must of theirs.
+        That is, for each PERSON, the OPTIONs that could meet a must of theirs. An OPTION of
+        an open pair meets a must only where the solver chooses that it SATISFIES the WANT,
+        and then no PERSON for whom the WANT is a must-not takes part in it.
         """
         model, file, world = self.model, self.file, self.world
         meets: list[set[int]] = [set() for _ in file.persons]
@@ -333,11 +370,26 @@ class _Search:
                 for index, option in enumerate(file.options)
                 if (option.id, want.id) in world.satisfies
             ]
+            open_here = [
+                (index, self.does[option.id, want.id])
+                for index, option in enumerate(file.options)
+                if (option.id, want.id) in self.does
+            ]
             for number, person in enumerate(file.persons):
+                takes = self.takes[number]
+                if person.id in want.must_nots:
+                    for index, does in open_here:
+                        model.add_bool_or([takes[index].negated(), does.negated()])
                 elsewhere = (want.id, person.id) in world.another_option
                 if person.id in want.musts and not elsewhere:
-                    meets[number].update(would)
-                    model.add_bool_or([self.takes[number][index] for index in would])
+                    meets[number].update([*would, *(index for index, _ in open_here)])
+                    met: list[cp_model.IntVar] = [takes[index] for index in would]
+                    for index, does in open_here:
+                        here = model.new_bool_var(f"{person.id} gets {want.id} by {index}")
+                        model.add_implication(here, takes[index])
+                        model.add_implication(here, does)
+                        met.append(here)
+                    model.add_bool_or(met)
         return meets
 
     def _delivered(self) -> list[Want]:
@@ -579,7 +631,7 @@ class _Search:
         return asked
 
     def _keep_within_the_trip(
-        self, begins: _Amount, lasts: _Amount | None, happens: cp_model.IntVar
+        self, begins: _Amount, lasts: int | None, happens: cp_model.IntVar
     ) -> None:
         """What happens starts no earlier than the TRIP starts and ends no later than it ends.
 
@@ -615,6 +667,9 @@ class _Search:
         solver, status = self._solve()
         if status == cp_model.INFEASIBLE:
             return None
+        self.turned_out = frozenset(
+            pair for pair, does in self.does.items() if solver.boolean_value(does)
+        )
         return self._found(solver, status)
 
     def _solve(self) -> tuple[cp_model.CpSolver, object]:

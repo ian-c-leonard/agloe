@@ -1,27 +1,31 @@
-"""The search for a conflict: yes-or-no questions, a block of records at a time."""
+"""The search for a conflict: yes-or-no questions, one record or a block of records at a time."""
 
 from random import Random
 
-from agloe import compiler
+from agloe import answers, compiler, reference
 from agloe.answers import Answer, check
 from agloe.file import File
-from agloe.reference import Remaining, World
-from tests.stories import Document, ends_at, lasts, lock, starts_at, stays, trip
+from agloe.reference import Remaining
+from tests.stories import (
+    Document,
+    cap,
+    ends_at,
+    every,
+    lasts,
+    lock,
+    must,
+    satisfies,
+    starts_at,
+    stays,
+    trip,
+    trip_ends,
+    trip_starts,
+)
 from tests.test_cross_check import random_trip
-from tests.test_where_a_path_ends import ruled_out
 
 
-def one_record_at_a_time(file: File) -> tuple[str, ...]:
-    """The records left once each one that the TRIP stays INFEASIBLE without is taken out."""
-    kept = Remaining(file)
-    stays: list[str] = []
-    for record in (*file.facts, *file.wants, *file.decisions):
-        smaller = kept.without(record.id)
-        if ruled_out(smaller):
-            kept = smaller
-        else:
-            stays.append(record.id)
-    return tuple(stays)
+def records_of(file: File) -> int:
+    return len(file.facts) + len(file.wants) + len(file.decisions)
 
 
 def a_random_trip(seed: int) -> File:
@@ -39,7 +43,7 @@ def a_random_trip(seed: int) -> File:
     return random_trip(rng, 0.2, ["alex", "sam"], with_rights=0.9, with_wants=0.5, whole_sets=0.5)
 
 
-def test_a_block_at_a_time_names_the_conflict_that_one_record_at_a_time_names() -> None:
+def test_a_block_at_a_time_gives_the_report_that_one_record_at_a_time_gives() -> None:
     """On random trips that cannot work, the two ways to take records out leave the same set."""
     seen = 0
     for seed in range(500):
@@ -47,7 +51,7 @@ def test_a_block_at_a_time_names_the_conflict_that_one_record_at_a_time_names() 
         found = check(file)
         if found.answer is Answer.INFEASIBLE:
             seen += 1
-            assert found.conflict == one_record_at_a_time(file), seed
+            assert check(file, in_blocks=True) == found, seed
     assert seen > 40
 
 
@@ -58,17 +62,29 @@ def test_where_three_wants_clash_two_by_two_the_first_one_goes() -> None:
     """
     wants = [ends_at(place, "sam", id=f"end-at-{place}") for place in ("a", "b", "c")]
     file = trip(["sam"], ["a", "b", "c"], [], [], [], wants=wants)
-    found = check(file)
-    assert found.answer is Answer.INFEASIBLE
-    assert found.conflict == ("end-at-b", "end-at-c")
-    assert found.conflict == one_record_at_a_time(file)
+    for in_blocks in (False, True):
+        found = check(file, in_blocks=in_blocks)
+        assert found.answer is Answer.INFEASIBLE
+        assert found.conflict == ("end-at-b", "end-at-c")
+    assert compiler.check(file) == check(file)
+
+
+def counting(can_work: answers.CanWork) -> tuple[answers.CanWork, list[Remaining]]:
+    """The same question, with a list of what it was asked about."""
+    asked: list[Remaining] = []
+
+    def counted(remaining: Remaining) -> bool:
+        asked.append(remaining)
+        return can_work(remaining)
+
+    return counted, asked
 
 
 def test_a_few_records_that_conflict_among_many_take_few_questions() -> None:
     """Sam is LOCKed into a call and a nap that overlap. Thirty other stays are in nobody's way.
 
-    The FILE has 98 records, and five of them conflict. The solver answers the questions:
-    the reference checker would try every choice of the thirty stays for each one.
+    The FILE has 98 records, and five of them conflict. The solver answers the questions.
+    With the reference checker's search this test does not end in six minutes.
     """
     names = ["call", "nap", *(f"stay-{number}" for number in range(30))]
     facts: list[Document] = [starts_at("call", 9), lasts("call", "PT1H")]
@@ -77,15 +93,64 @@ def test_a_few_records_that_conflict_among_many_take_few_questions() -> None:
         facts += [starts_at(f"stay-{number}", 12 + number % 8), lasts(f"stay-{number}", "PT30M")]
     locks = [lock("call", "sam"), lock("nap", "sam")]
     file = trip(["sam"], ["hotel"], [stays(name, "hotel") for name in names], facts, locks)
-    records = len(file.facts) + len(file.wants) + len(file.decisions)
-    assert records == 98
-    asked = 0
-
-    def counted(left: File, world: World) -> bool:
-        nonlocal asked
-        asked += 1
-        return compiler.works(left, world)
-
-    found = check(file, compiler.shown, counted)
+    assert records_of(file) == 98
+    counted, asked = counting(compiler.can_work)
+    found = check(file, compiler.shown, compiler.works, counted, in_blocks=True)
     assert found.conflict == ("call-time", "call-length", "nap-time", "lock-call", "lock-nap")
-    assert asked < records / 2
+    assert len(asked) < 98 / 2
+    assert found == compiler.check(file)
+
+
+def a_want_held_both_ways(count: int) -> File:
+    """Some stays SATISFY a WANT that Alex must have and Sam must not, and the set is COMPLETE.
+
+    Sam must also end the TRIP at two PLACEs, and those two WANTs are the whole conflict. A
+    FACT about a stay that is taken out leaves it open whether the stay SATISFIES the WANT.
+    """
+    names = [f"stay-{number}" for number in range(count)]
+    facts = [satisfies(name, "spice") for name in names]
+    facts.append(every("spice"))
+    wants = [must("spice", "alex", never=["sam"])]
+    wants += [ends_at("a", "sam", id="end-at-a"), ends_at("b", "sam", id="end-at-b")]
+    options = [stays(name, "a") for name in names]
+    return trip(["alex", "sam"], ["a", "b"], options, facts, [], wants=wants, tickets=True)
+
+
+def test_the_solver_answers_one_question_with_one_model_however_many_pairs_are_open() -> None:
+    """Eleven FACTs about the WANT can go at once, which leaves 2,048 best cases.
+
+    The reference checker tries each of them. The solver chooses the best case with the plan.
+    """
+    small = a_want_held_both_ways(4)
+    assert compiler.check(small) == check(small)
+    assert check(small).conflict == ("end-at-a", "end-at-b")
+
+    file = a_want_held_both_ways(11)
+    counted, asked = counting(compiler.can_work)
+    found = check(file, compiler.shown, compiler.works, counted, in_blocks=True)
+    assert found.conflict == ("end-at-a", "end-at-b")
+    assert max(len(reference.best_case_left(left)[1]) for left in asked) == 11
+    assert len(asked) < 20
+
+
+def test_the_reference_checker_takes_one_record_at_a_time() -> None:
+    """Sam is LOCKed into seven stays that do not fit the TRIP, and a cap is on his BUDGET.
+
+    Without the times of the stays, each order of the seven is a plan to try. The reference
+    checker asks about one record at a time, so it never asks with all the times gone.
+    """
+    names = [f"stay-{number}" for number in range(7)]
+    facts: list[Document] = [
+        starts_at(name, 10, 1 + 2 * number) for number, name in enumerate(names[:6])
+    ]
+    facts.append(lasts("stay-6", "PT3M"))
+    decisions = [trip_starts(10), trip_ends(10, 12), *(lock(name, "sam") for name in names)]
+    decisions.append(cap("money", "0 USD"))
+    file = trip(["sam"], ["a"], [stays(name, "a") for name in names], facts, decisions)
+    counted, asked = counting(reference.can_work)
+    found = check(file, can_work=counted)
+    assert found.answer is Answer.INFEASIBLE
+    assert len(asked) == records_of(file) + 1
+    gone = [records_of(file) - records_of(left.file) for left in asked]
+    assert max(gone) <= records_of(file) - len(found.conflict) + 1
+    assert compiler.check(file) == found

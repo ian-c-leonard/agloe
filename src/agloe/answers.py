@@ -2,9 +2,9 @@
 
 ``check`` follows the sections "The three answers", "ROBUST" and "Evidence" of spec/rules.md.
 It asks a search three things: which ITINERARY is shown in a world, whether anything works in a
-world, and which FACTs and DECISIONs rule out every ITINERARY. By default the search is the
-reference checker's, which tries everything. The COMPILER passes its solver search instead, and
-the answers and the evidence are worked out here in either case.
+world, and whether anything can work once records are taken out of the FILE. By default the
+search is the reference checker's, which tries everything. The COMPILER passes its solver
+search instead, and the answers and the evidence are worked out here in either case.
 """
 
 from collections.abc import Callable, Iterable, Iterator, Sequence, Set
@@ -33,8 +33,8 @@ from agloe.reference import (
     Unknown,
     World,
     any_works,
-    best_cases,
     broken_as_listed,
+    can_work,
     first_shown,
     has_to_end_at,
     in_world,
@@ -152,15 +152,26 @@ class Report:
 
 type Shown = Callable[[File, World], Itinerary | None]
 type Works = Callable[[File, World], bool]
+type CanWork = Callable[[Remaining], bool]
 
 
-def check(file: File, shown: Shown = first_shown, works: Works = any_works) -> Report:
+def check(
+    file: File,
+    shown: Shown = first_shown,
+    works: Works = any_works,
+    can_work: CanWork = can_work,
+    in_blocks: bool = False,
+) -> Report:
     """The answer for this TRIP, with its evidence.
 
-    ``shown`` and ``works`` are how ITINERARIES are found. By default the reference checker tries
-    every choice. A solver can stand in for that search. The answers and the evidence are worked
-    out here in either case, from what the search says: the ITINERARY that the rule puts first
-    in a world, and whether any ITINERARY works in a world.
+    ``shown``, ``works`` and ``can_work`` are how ITINERARIES are found. By default the
+    reference checker tries every choice. A solver can stand in for that search. The answers
+    and the evidence are worked out here in either case, from what the search says: the
+    ITINERARY that the rule puts first in a world, whether any ITINERARY works in a world,
+    and whether any works in some best case of what is left of a FILE.
+
+    ``in_blocks`` lets the search for a conflict take many records out at once. That suits a
+    search whose question costs about the same whatever is left, as the solver's does.
     """
     worst = worst_case(file)
     plain = shown(file, worst)
@@ -191,7 +202,7 @@ def check(file: File, shown: Shown = first_shown, works: Works = any_works) -> R
         return Report(
             Answer.FEASIBLE, chosen, tuple(relies_on), robust, at_worst, rights, caps=caps
         )
-    found = _conflict(file, works)
+    found = _conflict(file, can_work, in_blocks)
     if found is not None:
         conflict, given_budgets = found
         return Report(Answer.INFEASIBLE, conflict=conflict, given_budgets=given_budgets)
@@ -271,24 +282,34 @@ def _settles(file: File, itinerary: Itinerary, whole: CompleteFor) -> bool:
     )
 
 
-def _conflict(file: File, works: Works) -> tuple[tuple[str, ...], bool] | None:
+def _conflict(
+    file: File, can_work: CanWork, in_blocks: bool
+) -> tuple[tuple[str, ...], bool] | None:
     """FACTs, WANTs and DECISIONs that make the TRIP INFEASIBLE by themselves, or None.
 
     None says that an ITINERARY works in the best case, so the TRIP is not INFEASIBLE.
     Otherwise no record can be removed from the set returned.
 
-    The search asks one question again and again: with these records taken out, does anything
-    work in a best case of what is left? A FACT that is taken out is unknown, and a best case
-    gives every unknown its most helpful value. So one more record never lets an ITINERARY
-    work in the best case that did not work without it.
+    The search asks one question again and again: with these records taken out, can anything
+    work in some best case of what is left? A FACT that is taken out is unknown, and a best
+    case gives every unknown its most helpful value. So where something can work, something
+    still can once one more record is out. It need not be the same ITINERARY, nor the same
+    best case.
 
-    The records are tried in the FILE's order, a block at a time. A block goes where the TRIP
-    stays INFEASIBLE without all of it. A block that cannot go is cut in two: its first half
-    is tried, and then its second half, against what is left by then. A block of one record
-    that cannot go stays. Where a whole block can go, each of its records could have gone one
-    after another, since what is left then still holds everything that is left without the
-    block. So the set that stays is the one that taking the records out one by one leaves,
-    and a FILE where a few records conflict needs few questions.
+    The records are tried in the FILE's order. A record goes where the TRIP stays INFEASIBLE
+    without it. That is the whole search where ``in_blocks`` is off, and one question is asked
+    for each record. It is how the reference checker searches: its question gets costly as
+    FACTs go, since a start that nobody knows is free in the best case and it tries every
+    order.
+
+    With ``in_blocks``, the first block holds every record. A block goes where the TRIP stays
+    INFEASIBLE without all of it. A block that cannot go is cut in two: its first half is
+    tried, and then its second half, against what is left by then. A block of one record that
+    cannot go stays. Where a whole block can go, each of its records could have gone one
+    after another: what is left then still holds everything that is left without the block,
+    so nothing can work there either. So the set that stays is the one that taking the
+    records out one by one leaves, and where few records conflict among many, few blocks are
+    tried.
 
     The BUDGETs stay as the FILE lists them throughout. The last test takes them all out at
     once: then nobody knows who pays for anybody, and the best case has a BUDGET for each
@@ -297,9 +318,6 @@ def _conflict(file: File, works: Works) -> tuple[tuple[str, ...], bool] | None:
     test is made only where a record left is an OFFER with one. A conflict that holds a cap
     needs no test: the cap is about its BUDGET.
     """
-
-    def ruled_out(given: Remaining) -> bool:
-        return not any(works(given.file, world) for world in best_cases(given))
 
     def take_out(
         kept: Remaining, block: Sequence[str], stays: bool = False
@@ -312,7 +330,7 @@ def _conflict(file: File, works: Works) -> tuple[tuple[str, ...], bool] | None:
             smaller = kept
             for record in block:
                 smaller = smaller.without(record)
-            if ruled_out(smaller):
+            if not can_work(smaller):
                 return smaller, True
         if len(block) == 1:
             return kept, False
@@ -322,11 +340,13 @@ def _conflict(file: File, works: Works) -> tuple[tuple[str, ...], bool] | None:
         kept, _ = take_out(kept, block[half:], stays=went)
         return kept, False
 
-    whole = Remaining(file)
-    if not ruled_out(whole):
+    kept = Remaining(file)
+    if can_work(kept):
         return None
     records = _records(file)
-    kept = take_out(whole, records)[0] if records else whole
+    blocks = [records] if in_blocks and records else [[record] for record in records]
+    for block in blocks:
+        kept, _ = take_out(kept, block)
     priced = any(
         isinstance(fact, Offer) and fact.price is not None and fact.price.amount
         for fact in kept.file.facts
@@ -335,7 +355,7 @@ def _conflict(file: File, works: Works) -> tuple[tuple[str, ...], bool] | None:
         # A cap names its BUDGET, so the conflict is about the BUDGETs as they are.
         return tuple(_records(kept.file)), True
     with_no_budget = replace(kept, file=replace(kept.file, budgets=()))
-    given_budgets = bool(priced and file.budgets) and not ruled_out(with_no_budget)
+    given_budgets = bool(priced and file.budgets) and can_work(with_no_budget)
     return tuple(_records(kept.file)), given_budgets
 
 

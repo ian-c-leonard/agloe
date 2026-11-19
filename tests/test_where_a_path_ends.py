@@ -407,7 +407,7 @@ def ruled_out(remaining: Remaining) -> bool:
 
 def the_solver_rules_out(remaining: Remaining) -> bool:
     """The same question, put to the solver."""
-    return not any(compiler.works(remaining.file, world) for world in best_cases(remaining))
+    return not compiler.can_work(remaining)
 
 
 def has_no_record_to_spare(file: File, conflict: Sequence[str]) -> bool:
