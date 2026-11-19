@@ -151,10 +151,17 @@ def _solver() -> cp_model.CpSolver:
     Its simplification step is switched off. In OR-Tools 9.15 that step reported that nothing
     works for a model that had an answer. A wrong "nothing works" is the one mistake nothing
     else here would catch, since a choice the solver finds is always checked by the rules.
+
+    It calls a value the best only once it has proved that. By default it also stops when
+    its bounds, held as floating-point numbers, come within a ten-thousandth of each other.
+    Two whole numbers above two to the power 53 can be one floating-point number, and the
+    tie break weighs up to sixty choices in one whole number. So both gap limits are zero.
     """
     solver = cp_model.CpSolver()
     solver.parameters.num_workers = 1
     solver.parameters.cp_model_presolve = False
+    solver.parameters.absolute_gap_limit = 0.0
+    solver.parameters.relative_gap_limit = 0.0
     return solver
 
 
