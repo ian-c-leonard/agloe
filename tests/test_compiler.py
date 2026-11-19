@@ -78,15 +78,15 @@ def test_the_compiler_gives_the_reference_checkers_report(path: Path) -> None:
     if file.caps:
         assert compiler.check(file) == answers.check(file)
         return
-    found = answers.check(file, compiler.shown, compiler.works)
+    found = answers.check(file, compiler.shown, compiler.works, compiler.can_work)
     assert found == answers.check(file)
 
 
 def test_a_very_long_way_among_many_routes_changes_no_answer() -> None:
     """Sam goes through ten PLACES. Three WAYs join each to the next: 19,683 routes in all.
 
-    One WAY takes 999,999,999 hours. The TRIP has no time for any route, so only other WAYs
-    from the first PLACE to the last could help.
+    One WAY takes 999,999,999 hours. The TRIP has no time for any route as the FILE states
+    them. One unknown FACT is enough by itself: other WAYs from the first PLACE to the last.
     """
     places = [f"p{number}" for number in range(10)]
     ways = [way(f"w{n}-{k}", f"p{n}", f"p{n + 1}") for n in range(9) for k in range(3)]
@@ -139,7 +139,7 @@ def test_a_file_with_no_start_and_no_end_leaves_no_room_for_travel_at_the_ends()
     locks = [lock(each["id"], "sam") for each in locked]
     long = way("long", "p28", "p29")
     file = trip(["sam"], places, [*locked, *far], facts, locks, ways=[*ways, long])
-    found = answers.check(file, compiler.shown, compiler.works)
+    found = answers.check(file, compiler.shown, compiler.works, compiler.can_work)
     assert found.answer is Answer.FEASIBLE
     assert len(found.itinerary) == 21
 

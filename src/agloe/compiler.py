@@ -61,7 +61,7 @@ def check(file: File) -> Report:
     if file.caps:
         return answers.check(file)
     try:
-        return answers.check(file, shown, works, can_work, in_blocks=True)
+        return answers.check(file, shown, works, can_work)
     except DoesNotFit:
         return answers.check(file)
 
@@ -88,6 +88,9 @@ def can_work(remaining: Remaining) -> bool:
     WANT that is a must for one PERSON and a must-not for another. The solver chooses that
     for each pair, with the plan. So one question takes one model, however many pairs are
     open. The reference checker then checks the plan in the best case the solver chose.
+
+    Like ``shown`` and ``works``, this is for a FILE with no cap: ``check`` hands a FILE with
+    a cap to the reference checker.
     """
     file = remaining.file
     world, open_pairs = reference.best_case_left(remaining)

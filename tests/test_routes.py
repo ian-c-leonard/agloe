@@ -5,7 +5,16 @@ from random import Random
 from agloe import answers, compiler
 from agloe.answers import Answer
 from agloe.file import File
-from agloe.reference import Itinerary, Routes, World, itineraries, routes, worst_case
+from agloe.reference import (
+    Itinerary,
+    Remaining,
+    Routes,
+    World,
+    best_cases,
+    itineraries,
+    routes,
+    worst_case,
+)
 from tests.stories import (
     Document,
     complete,
@@ -141,6 +150,10 @@ def with_every_route_works(file: File, world: World) -> bool:
     return bool(itineraries(file, world, Routes(file, world, thin=False)))
 
 
+def with_every_route_can_work(remaining: Remaining) -> bool:
+    return any(with_every_route_works(remaining.file, world) for world in best_cases(remaining))
+
+
 def test_leaving_those_ways_out_changes_no_report() -> None:
     """The reference checker with every route, the reference checker as it is, and the solver."""
     rng = Random(5656)
@@ -149,7 +162,8 @@ def test_leaving_those_ways_out_changes_no_report() -> None:
     for _ in range(300):
         file = with_parallel_ways(rng)
         found = answers.check(file)
-        assert found == answers.check(file, with_every_route_shown, with_every_route_works)
+        every_route = (with_every_route_shown, with_every_route_works, with_every_route_can_work)
+        assert found == answers.check(file, *every_route)
         assert found == compiler.check(file)
         seen.add(found.answer)
         worst = worst_case(file)

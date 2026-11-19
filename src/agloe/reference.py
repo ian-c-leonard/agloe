@@ -1389,7 +1389,7 @@ def routes(
       run longest. Those are the two cases a route is checked in. The same route with that
       other WAY has as many WAYs, arrives no later in either case, and comes first by the
       rule for the WAYs listed first. This is right only where each WAY takes as long as this
-      world says. A search that can switch a FACT off asks for every route.
+      world says.
 
     A WAY SATISFIES no WANT. So which WAYs a PERSON takes never changes which musts are met.
 
