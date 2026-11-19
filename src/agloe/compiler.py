@@ -59,12 +59,16 @@ class DoesNotFit(Exception):
     """A TRIP does not fit the solver, and the reference checker gives its answer.
 
     The numbers of its model do not fit in the 64 bits the solver counts with. Or the TRIP has
-    a cap, and listing the routes between two of its PLACEs takes too long: the reference
-    checker lists only the routes a plan needs, and it is the one that answers then.
+    a cap and its model grows large: listing the routes between two of its PLACEs takes many
+    steps, or the model comes to hold many choices. The reference checker builds no model and
+    lists only the routes a plan needs, and it is the one that answers then.
     """
 
 
-_MOST_STEPS = 200_000  # to list the routes between two PLACEs of a TRIP with a cap
+# A TRIP with a cap is given up by the solver past these, and a TRIP with no cap never is.
+_MOST_STEPS = 200_000  # to list the routes between two PLACEs
+_FEWER_STEPS = 10_000  # the same, in the search for a conflict, which gets every route
+_MOST_CHOICES = 200_000  # in the model: its variables, and the ways to pay for one OPTION
 
 
 def check(file: File) -> Report:
@@ -97,11 +101,11 @@ def works(file: File, world: World) -> bool:
 def stuck(remaining: Remaining) -> frozenset[str] | None:
     """FACTs, WANTs and DECISIONs that rule out every ITINERARY by themselves, or None.
 
-    The question is asked in the best case of what is left of a FILE. The set returned is small:
-    no record can be taken out of it. It need not be the conflict the report names, which is
-    found in the FILE's order. This search goes the other way, from the last record to the
-    first. That takes the DECISIONs out before the FACTs, and with fewer LOCKs to honor each
-    proof is quick.
+    The question is asked in the best case of what is left of a FILE. The set returned is
+    enough to rule out every ITINERARY, and it can hold a record that it does not need. It
+    need not be the conflict the report names, which is found in the FILE's order. This search
+    goes the other way, from the last record to the first. That takes the DECISIONs out before
+    the FACTs, and with fewer LOCKs to honor each proof is quick.
 
     Where something works, the solver has chosen a plan and a possible world for it: which
     OPTIONs SATISFY which WANTs, where nobody knows. The reference checker then checks that
@@ -248,7 +252,7 @@ class _Search:
         self.routes: list[dict[tuple[int, int], _Taken]] = []
         self.legs: list[tuple[cp_model.IntVar, int]] = []  # a route taken, and how many WAYs it has
         # A FACT that can be switched off can change how long a WAY takes.
-        most = _MOST_STEPS if file.caps else None
+        most = (_FEWER_STEPS if self.switch else _MOST_STEPS) if file.caps else None
         self.known = reference.Routes(file, world, thin=not self.switch, at_most=most)
         self._worth_trying: dict[tuple[str, str, bool], list[reference.Route]] = {}
         for number in range(len(file.persons)):
@@ -365,6 +369,12 @@ class _Search:
                         model.add_bool_or([takes.negated(), *switches])
         self._hold_to_the_rights()
 
+    def _fits(self) -> None:
+        """Give up a TRIP with a cap once its model holds too many choices."""
+        held: int = len(self.model.proto.variables)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        if self.file.caps and held > _MOST_CHOICES:
+            raise DoesNotFit("the model of this TRIP with a cap has grown too large")
+
     def _rule_out(self, number: int, index: int) -> None:
         """This PERSON takes no part in this OPTION, whatever else is chosen.
 
@@ -477,6 +487,9 @@ class _Search:
         model, world, option = self.model, self.world, self.file.options[index]
         people = self.file.persons
         without = [number for number in without if (number, index) not in self.left_out]
+        ways_to_pay = len(without) * len(self.file.offers(option.id)) * len(self.file.budgets)
+        if self.file.caps and ways_to_pay > _MOST_CHOICES:
+            raise DoesNotFit(f"{option.id} has too many ways to pay for a TRIP with a cap")
         pairs = {
             number: reference.pairs_to_pay(self.file, world, option.id, people[number].id)
             for number in (without if self.file.caps else ())
@@ -500,6 +513,7 @@ class _Search:
                 has_a_place = model.add(sum(picks) >= takes)
                 if given:
                     _when(has_a_place, *given)
+            self._fits()
             for offer in self.file.offers(option.id):
                 if len(filled.get(offer.id, ())) > offer.places:
                     model.add(sum(filled[offer.id]) <= offer.places)
@@ -802,6 +816,7 @@ class _Search:
         when the last WAY ends, or None where it has no limit: then nobody knows.
         """
         model = self.model
+        self._fits()
         for place, (way, origin, destination) in enumerate(route):
             moment = model.new_int_var(self.earliest, self.latest, f"{chosen.name} leg {place}")
             if free is not None:
