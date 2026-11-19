@@ -43,9 +43,8 @@ type _Who = tuple[tuple[str, ...], ...]  # the PERSONs in each OPTION
 type _Orders = tuple[tuple[int, ...], ...]  # the OPTIONs each PERSON does, in order
 type _By = dict[tuple[int, int], reference.Route]  # the WAYs a PERSON takes after an OPTION
 type _Choice = tuple[_Who, _Orders, _By | None]
-# For each model the solver was asked about, by its digest: the plan and the open pairs that
-# held in it, or None where nothing works.
-type _Asked = dict[bytes, tuple[_Choice, frozenset[tuple[str, str]]] | None]
+# What the solver answered for each model it was asked about, by the digest of the model.
+type _Asked = dict[bytes, tuple[cp_model.CpSolver, object]]
 type _Amount = cp_model.LinearExpr | int  # seconds: a plain number, or one the solver works out
 type _Taken = list[tuple[cp_model.IntVar, reference.Route]]  # routes, each with its choice
 # The same with the time each route arrives. None: nobody knows, and nothing follows it.
@@ -96,8 +95,8 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
 
     ``asked`` holds what the solver answered for each model it was given before. A FACT that
     is taken out often changes nothing in the model: it said what the best case takes anyway.
-    The same model has the same answer, so the solver is asked once. The plan is still
-    checked against what is left this time.
+    The same model has the same answer, so the solver is asked once. The plan is read from
+    that answer for what is left this time, and checked against it.
 
     Like ``shown`` and ``works``, this is for a FILE with no cap: ``check`` hands a FILE with
     a cap to the reference checker.
@@ -106,16 +105,15 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
     world, open_pairs = reference.best_case_left(remaining)
     search = _Search(file, world, open_pairs)
     key = sha256(str(search.model.proto).encode()).digest()
-    if asked is None or key not in asked:
-        choice = search.any()
-        found = None if choice is None else (choice, search.turned_out)
-        if asked is None:
-            asked = {}
-        asked[key] = found
-    found = asked[key]
-    if found is None:
+    if asked is None:
+        asked = {}
+    if key not in asked:
+        asked[key] = search.ask()
+    # The answer is read through this search: the same model can stand for other routes.
+    choice = search.read(*asked[key])
+    if choice is None:
         return False
-    choice, does = found
+    does = search.turned_out
     chosen = replace(
         world, satisfies=world.satisfies | does, might_satisfy=world.might_satisfy | does
     )
@@ -692,7 +690,17 @@ class _Search:
 
     def any(self) -> _Choice | None:
         """Some choice of PERSONs and orders that works, or None when none does."""
-        solver, status = self._solve(relax=False)
+        return self.read(*self.ask())
+
+    def ask(self) -> tuple[cp_model.CpSolver, object]:
+        """The solver's answer to the plain question: does anything work?"""
+        return self._solve(relax=False)
+
+    def read(self, solver: cp_model.CpSolver, status: object) -> _Choice | None:
+        """The choice in an answer to the plain question, or None where nothing works.
+
+        The answer can be one that the solver gave for another model with the same text.
+        """
         if status == cp_model.INFEASIBLE:
             return None
         self.turned_out = frozenset(
