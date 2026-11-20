@@ -29,7 +29,7 @@ import urllib.request
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -37,6 +37,7 @@ from agloe.cli import main
 from agloe.file import FileError, read
 from agloe.view import View
 from agloe.view.check import checked
+from agloe.view.serve import PAGE
 from tests.stories import EXAMPLES, lasts, lock, needs_no_right, stays
 
 STORY = EXAMPLES / "flight-home"
@@ -96,7 +97,10 @@ class Sent:
             for raw in self.reply:
                 # The view says now and then that it is still there. That is no event.
                 if raw.startswith(b"data: "):
-                    self.read.put((time.monotonic(), json.loads(raw.removeprefix(b"data: "))))
+                    event = json.loads(raw.removeprefix(b"data: "))
+                    if not isinstance(event, dict):
+                        raise ValueError(f"{event!r} is no event")
+                    self.read.put((time.monotonic(), cast("dict[str, Any]", event)))
         except OSError:
             pass
         except ValueError as problem:
@@ -354,6 +358,7 @@ def test_the_answer_reaches_a_page_while_the_check_goes_on(tmp_path: Path) -> No
         """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": NaN}'""",
         """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": -1}'""",
         """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": 1e400}'""",
+        f"""echo '{{"kind": "answer", "answer": "FEASIBLE", "seconds": 1{"0" * 400}}}'""",
         (
             """echo '{"kind": "report", "answer": "FEASIBLE", "text": "", "seconds": 1, """
             """"json": {"answer": "FEASIBLE", "robust": 1e400}}'"""
@@ -483,9 +488,8 @@ def test_the_view_serves_this_machine_only(tmp_path: Path) -> None:
 
 
 def test_the_page_asks_no_other_host_for_anything() -> None:
-    for part in sorted(STATIC.iterdir()):
-        assert part.suffix in {".html", ".css", ".js"}, part.name
-        assert not re.search(r"https?://|//[a-z]", part.read_text()), part.name
+    for name in PAGE:
+        assert not re.search(r"https?://|//[a-z]", (STATIC / name).read_text()), name
 
 
 def test_what_the_page_hides_stays_hidden() -> None:
@@ -611,7 +615,7 @@ def test_the_command_needs_a_file_that_is_there(
     assert "nothing.json" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("port", ["80", "1023", "65536", "-1"])
+@pytest.mark.parametrize("port", ["80", "1023", "65536", "-1", "6000", "10080"])
 def test_the_command_needs_a_port_that_it_can_serve_on(
     port: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

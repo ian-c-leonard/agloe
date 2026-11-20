@@ -34,6 +34,7 @@ PAGE = ("index.html", "view.css", "view.js", "state.js")  # the page and its fil
 KINDS = {".html": "text/html", ".css": "text/css", ".js": "text/javascript"}
 LOOK = 0.1  # seconds between two looks at the FILE, and at whether the view is closed
 QUIET = 15.0  # seconds after which a page with nothing new is told that the view is still there
+LONGEST = 1e9  # seconds: no check takes this long, and a page can still write the number
 ANSWERS = {"FEASIBLE", "INFEASIBLE", "UNDETERMINED"}
 # What a check can say, and what each of its events must hold. A check ends with one of ENDS.
 SHAPES: dict[str, dict[str, type | tuple[type, ...]]] = {
@@ -90,7 +91,7 @@ def _said(line: bytes) -> Event:
     if "answer" in event and event["answer"] not in ANSWERS:
         raise ValueError("a check printed an answer that is none of the three")
     seconds = event.get("seconds")
-    if isinstance(seconds, int | float) and not 0 <= seconds < float("inf"):
+    if isinstance(seconds, int | float) and not 0 <= seconds < LONGEST:
         raise ValueError("a check printed a length of time that is none")
     if "json" in event and cast("Event", event["json"]).get("answer") != event["answer"]:
         raise ValueError("a check printed a report with another answer than its own")

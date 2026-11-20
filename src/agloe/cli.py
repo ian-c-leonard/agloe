@@ -102,6 +102,14 @@ def main(arguments: Sequence[str] | None = None) -> int:
     return 0 if answer is Answer.FEASIBLE else 1
 
 
+# The ports from 1024 up that browsers refuse to open a page on: the bad ports of the Fetch
+# Standard. A free port that the system picks is never one of them.
+_REFUSED_BY_BROWSERS = frozenset(
+    {1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566}
+    | {6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080}
+)
+
+
 def _view(path: Path, port: int, in_a_browser: bool) -> int:
     """Serve the view of one FILE on this machine until the command is stopped."""
     if not path.is_file():
@@ -109,6 +117,12 @@ def _view(path: Path, port: int, in_a_browser: bool) -> int:
         return 2
     if port != 0 and not 1024 <= port <= 65535:
         print(f"{port} is no port for the view: give one from 1024 to 65535", file=sys.stderr)
+        return 2
+    if port in _REFUSED_BY_BROWSERS:
+        print(
+            f"browsers refuse to open a page on port {port}: give another, or leave --port out",
+            file=sys.stderr,
+        )
         return 2
     # The view needs sockets and processes, so it is loaded only where it is asked for.
     from agloe.view import View
