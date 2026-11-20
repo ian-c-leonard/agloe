@@ -5,10 +5,12 @@
 //   node website_gestures.mjs draw < [{ name, file, report }]
 //     reads each FILE with its report as the page does, and prints the FILEs that a further
 //     change would write
+//   node website_gestures.mjs said < [{ name, report }]
+//     prints the lines of each report that the page puts under the day
 //
 // A change that the page's code cannot make, or a report that it cannot read, ends this with an error.
 import { readFileSync } from "node:fs";
-import { answerOf, change, gesture, holds, scene, text } from "../pages/trip-file.js";
+import { answerOf, change, gesture, holds, said, scene, text } from "../pages/trip-file.js";
 
 const given = JSON.parse(readFileSync(0, "utf8"));
 const copy = (value) => structuredClone(value);
@@ -51,7 +53,13 @@ if (process.argv[2] === "files") {
   change.add(odd, given.additions.coffee);
   gesture(odd, "move", scene(odd, null).items.find((item) => item.id === "coffee"), -170);
   made.push({ name: "cannot-work: the ways are not all listed, and coffee is at 1:30 pm", file: odd });
+  // A trip whose report offers several cases, any one of which is enough.
+  const either = copy(given.stories["depends-on-the-cab"]);
+  change.remove(either, given.additions.complete);
+  made.push({ name: "depends-on-the-cab: the ways are not all listed", file: either });
   console.log(JSON.stringify(made));
+} else if (process.argv[2] === "said") {
+  console.log(JSON.stringify(given.map(({ name, report }) => ({ name, said: said(report) }))));
 } else {
   const made = [];
   for (const { name, file, report } of given) {

@@ -267,11 +267,11 @@ def test_each_change_a_reader_can_make_writes_a_file_in_the_format() -> None:
         load(trip["file"])
 
 
-def test_the_page_can_read_the_report_on_a_changed_trip() -> None:
-    """The reference checker reports on changed trips, and the page's code reads each report.
+@cache
+def reported_trips() -> list[dict[str, Any]]:
+    """The trips with one change, each with the reference checker's report on it.
 
-    Only the trips with one change are checked, because the reference checker is slow on a busy
-    day. Each further change that the page would then write must be in the format too.
+    Only these are checked, because the reference checker is slow on a busy day.
     """
     once = [trip for trip in changed_trips() if " with " not in trip["name"]]
     assert len(once) > 40
@@ -282,8 +282,45 @@ def test_the_page_can_read_the_report_on_a_changed_trip() -> None:
             "text": reports_in.as_text(file, found),
             "json": reports_in.as_json(file, found),
         }
-    for further in page_code("draw", once):
+    return once
+
+
+def test_the_page_can_read_the_report_on_a_changed_trip() -> None:
+    """Each further change that the page would write from a report must be in the format too."""
+    for further in page_code("draw", reported_trips()):
         load(further["file"])
+
+
+def test_the_lines_under_the_day_leave_nothing_out() -> None:
+    """Under the day the page puts the answer and every line that says what the answer turns on.
+
+    An UNDETERMINED report says what the FILE would have to say: one condition, or several
+    cases. The page shows that whole paragraph. A report with a WARNING marks each step that may
+    go wrong: the page shows each such step with what would go wrong at it.
+    """
+    trips = reported_trips()
+    shown = page_code("said", [{"name": trip["name"], "report": trip["report"]} for trip in trips])
+    several = 0
+    for trip, under in zip(trips, shown, strict=True):
+        name = trip["name"]
+        lines = trip["report"]["text"].split("\n")
+        said = [line["words"] for line in under["said"]]
+        assert said[0] == lines[0], name
+        answer = trip["report"]["json"]["answer"]
+        if answer == "UNDETERMINED":
+            # The paragraph after the answer: from the first line with words to the next empty one.
+            rest = lines[2:]
+            paragraph = rest[: rest.index("")] if "" in rest else rest
+            assert said[1:] == [line.strip() for line in paragraph], name
+            several += len(paragraph) > 1
+        elif trip["report"]["json"].get("robust") is False:
+            for at, line in enumerate(lines):
+                if line.strip().startswith("!"):
+                    step = next(before for before in reversed(lines[:at]) if "!" not in before[:6])
+                    assert said.index(step.strip()) < said.index(line.strip()), name
+        else:
+            assert len(said) == 1, name
+    assert several, "no report offered several cases"
 
 
 def test_every_link_leads_somewhere() -> None:

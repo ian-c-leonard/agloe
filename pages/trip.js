@@ -8,7 +8,7 @@
 // After a change, the page shows no answer at all until the checker has answered on the new FILE.
 //
 // trip-file.js holds everything that reads or changes a FILE. This file puts it on the page.
-import { FIRST, LAST, STEP, answerOf, bare, change, clock, gesture, holds, scene, span, text } from "./trip-file.js";
+import { FIRST, LAST, STEP, answerOf, bare, change, clock, gesture, holds, said, scene, span, text } from "./trip-file.js";
 
 const SVG = "http://www.w3.org/2000/svg";
 const LOADING_LIMIT = 45000; // how long the checker may take to load, in milliseconds
@@ -198,11 +198,10 @@ function start() {
     if (changed && which !== scrolledTo) target.scrollTop = Math.max(0, changed.getBoundingClientRect().top - target.getBoundingClientRect().top + target.scrollTop - 70);
     scrolledTo = which;
     if (own) {
-      // The answer, and under it the line of the report that says what the answer turns on.
-      const lines = now.report ? now.report.text.split("\n") : [];
-      const next = answer === "risky" ? lines.find((each) => each.trim().startsWith("!")) : answer === "feasible" || answer === "infeasible" ? "" : lines.slice(1).find((each) => each.trim());
+      // The answer, and under it every line of the report that says what the answer turns on.
+      const lines = now.report ? said(now.report, answer) : [];
       answerLive.className = `answer live ${now.report ? answer : "pending"}`;
-      answerLive.replaceChildren(...[lines[0], (next || "").trim()].filter(Boolean).map((each) => Object.assign(document.createElement("p"), { textContent: each })));
+      answerLive.replaceChildren(...lines.map((line) => Object.assign(document.createElement("p"), { textContent: line.words, className: line.inset ? "inset" : "" })));
       reportText.textContent = report ? report.text : "";
       reportLive.className = `report live ${report ? answer : ""}`;
     }

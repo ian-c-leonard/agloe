@@ -64,6 +64,36 @@ export function answerOf(report) {
 }
 
 /**
+ * The lines of a report that go under the day: the answer, and every line that says what the
+ * answer turns on. Each is a whole line of the report. `inset` marks a line that hangs from the
+ * line above it: one case of several, or what would go wrong at a step.
+ *
+ * - UNDETERMINED: what the FILE would have to say. That is one condition, or every case of several.
+ * - FEASIBLE with a WARNING: each step that may go wrong, and what would go wrong at it.
+ * - Words of the page's own, where the checker gave no answer: all of them.
+ */
+export function said(report, answer = answerOf(report)) {
+  const lines = report.text.split("\n");
+  const under = [];
+  if (answer === "risky") {
+    lines.forEach((line, at) => {
+      if (!line.trim().startsWith("!")) return;
+      // A line marked "!" is about the step above it, so the step is shown with it.
+      const step = lines.slice(0, at).reverse().find((before) => before.trim() && !before.trim().startsWith("!"));
+      if (step && !under.includes(step)) under.push(step);
+      under.push(line);
+    });
+  } else if (answer !== "feasible" && answer !== "infeasible") {
+    // The paragraph after the answer: it runs to the next empty line.
+    const from = lines.findIndex((line, at) => at > 0 && line.trim());
+    const rest = from < 0 ? [] : lines.slice(from);
+    const end = rest.findIndex((line) => !line.trim());
+    under.push(...(end < 0 ? rest : rest.slice(0, end)));
+  }
+  return [lines[0], ...under].map((line) => ({ words: line.trim(), inset: /^\s+(\d+\.|!)/.test(line) }));
+}
+
+/**
  * What the day shows, read from a FILE and, where there is one, the report on that FILE.
  * Every number is in minutes.
  *

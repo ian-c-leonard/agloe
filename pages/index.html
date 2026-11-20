@@ -246,6 +246,8 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .answer p:first-child { padding-left: 20px; position: relative; }
 .answer p:first-child::before { content: ""; position: absolute; left: 0; top: 0.3em; width: 11px; height: 11px; border-radius: 50%; background: var(--dot); }
 .answer p + p { padding-left: 20px; color: var(--ink2); font-weight: 400; }
+/* A line that hangs from the one above it: one case of several, or what would go wrong at a step. */
+.answer p.inset { padding-left: 36px; }
 .answer.feasible { --dot: var(--ink); color: var(--ink); }
 .answer.infeasible { --dot: var(--stop); color: var(--stop); }
 .answer.undetermined { --dot: var(--brass); color: var(--brass-ink); }
@@ -424,7 +426,7 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
           <div class="answer feasible" data-version="works"><p data-lines-from="examples/flight-home/works.expected.txt">FEASIBLE: this trip works.</p></div>
           <div class="answer infeasible" data-version="cannot-work"><p data-lines-from="examples/flight-home/cannot-work.expected.txt">INFEASIBLE: this trip cannot work.</p></div>
           <div class="answer undetermined" data-version="depends-on-the-cab"><p data-lines-from="examples/flight-home/depends-on-the-cab.expected.txt">UNDETERMINED: the FILE does not say enough to tell.</p><p data-lines-from="examples/flight-home/depends-on-the-cab.expected.txt">The trip works if Cab to O'Hare takes 45 min or less.</p></div>
-          <div class="answer risky" data-version="works-but-risky"><p data-lines-from="examples/flight-home/works-but-risky.expected.txt">FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold.</p><p data-lines-from="examples/flight-home/works-but-risky.expected.txt">! Alex and Sam would be 5 min too late for this.</p></div>
+          <div class="answer risky" data-version="works-but-risky"><p data-lines-from="examples/flight-home/works-but-risky.expected.txt">FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold.</p><p data-lines-from="examples/flight-home/works-but-risky.expected.txt">5:00 pm to 7:30 pm: Flight home, Alex and Sam</p><p class="inset" data-lines-from="examples/flight-home/works-but-risky.expected.txt">! Alex and Sam would be 5 min too late for this.</p></div>
           <div class="answer live" id="answer-live"><p></p></div>
         </div>
         <div class="tools" id="tools" hidden>
