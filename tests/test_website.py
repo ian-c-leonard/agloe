@@ -11,17 +11,28 @@ FILE, and it carries each version of the story whole: its FILE, and the report t
 expects, in words and as data. When a reader changes the trip, the page runs the reference
 checker in the reader's browser, through ``pages/checker.py``. That program must give the
 examples their expected reports where the solver is missing, as it is in a browser.
+
+``pages/trip-file.js`` is the page's own code for reading and changing a FILE. Node runs it here,
+through ``website_gestures.mjs``: each change a reader can make must write a FILE that the format
+accepts, and the page must be able to read the report on it.
 """
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
+from functools import cache
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+from agloe import answers
+from agloe import report as reports_in
+from agloe.file import load
 
 ROOT = Path(__file__).parent.parent
 PAGES = ROOT / "pages"
@@ -221,6 +232,58 @@ def test_each_thing_a_reader_can_add_gives_a_report() -> None:
     for names, report in zip(tried, reports, strict=True):
         assert "refused" not in report, (names, report)
         assert report["answer"] in {"FEASIBLE", "INFEASIBLE", "UNDETERMINED"}, names
+
+
+def page_code(mode: str, given: object) -> list[dict[str, Any]]:
+    """What the page's own code for changing a FILE makes of this, run by Node."""
+    node = shutil.which("node")
+    if node is None:
+        if os.environ.get("CI"):
+            pytest.fail("the tests of the home page need Node")
+        pytest.skip("needs Node")
+    ran = subprocess.run(
+        [node, str(Path(__file__).parent / "website_gestures.mjs"), mode],
+        input=json.dumps(given),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert ran.returncode == 0, ran.stderr
+    return json.loads(ran.stdout)
+
+
+@cache
+def changed_trips() -> list[dict[str, Any]]:
+    """Each version of the story after each change a reader can make to it: a name and a FILE."""
+    stories = {name: json.loads((ROOT / STORY / f"{name}.json").read_text()) for name in offered()}
+    additions = json.loads((PAGES / "trip" / "additions.json").read_text())
+    return page_code("files", {"stories": stories, "additions": additions})
+
+
+def test_each_change_a_reader_can_make_writes_a_file_in_the_format() -> None:
+    changed = changed_trips()
+    assert len(changed) > 100
+    for trip in changed:
+        load(trip["file"])
+
+
+def test_the_page_can_read_the_report_on_a_changed_trip() -> None:
+    """The reference checker reports on changed trips, and the page's code reads each report.
+
+    Only the trips with one change are checked, because the reference checker is slow on a busy
+    day. Each further change that the page would then write must be in the format too.
+    """
+    once = [trip for trip in changed_trips() if " with " not in trip["name"]]
+    assert len(once) > 40
+    for trip in once:
+        file = load(trip["file"])
+        found = answers.check(file)
+        trip["report"] = {
+            "text": reports_in.as_text(file, found),
+            "json": reports_in.as_json(file, found),
+        }
+    for further in page_code("draw", once):
+        load(further["file"])
 
 
 def test_every_link_leads_somewhere() -> None:

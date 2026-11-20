@@ -5,211 +5,16 @@
 // carries, shown with the report the example expects. When the reader moves, stretches or adds
 // something, the FILE changes, and the reference checker of this repository checks the new FILE
 // in the reader's browser (see checker-worker.js). Nothing here decides whether a trip works.
+// After a change, the page shows no answer at all until the checker has answered on the new FILE.
+//
+// trip-file.js holds everything that reads or changes a FILE. This file puts it on the page.
+import { FIRST, LAST, STEP, answerOf, bare, change, clock, gesture, holds, scene, span, text } from "./trip-file.js";
 
 const SVG = "http://www.w3.org/2000/svg";
-const FIRST = 12 * 60 + 30; // the day as drawn runs from 12:30 pm
-const LAST = 18 * 60; // to 6:00 pm
-const STEP = 5; // things move in steps of five minutes
+const LOADING_LIMIT = 45000; // how long the checker may take to load, in milliseconds
+const CHECK_LIMIT = 30000; // how long one check may take
 const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-
 const trip = document.getElementById("trip");
-
-// ---------------------------------------------------------------- times as the FILE writes them
-
-/** Minutes after midnight in a time such as 2027-05-15T14:00:00-05:00[America/Chicago]. */
-function minutesOf(stamp) {
-  const [, hours, minutes] = stamp.match(/T(\d\d):(\d\d)/);
-  return Number(hours) * 60 + Number(minutes);
-}
-
-/** The same day and zone as `like`, at this many minutes after midnight. */
-function stampAt(like, minutes) {
-  const two = (number) => String(number).padStart(2, "0");
-  return like.replace(/T\d\d:\d\d/, `T${two(Math.floor(minutes / 60))}:${two(minutes % 60)}`);
-}
-
-/** Minutes in a length such as PT1H20M. */
-function lengthOf(written) {
-  const [, hours, minutes] = written.match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:0S)?$/);
-  return Number(hours || 0) * 60 + Number(minutes || 0);
-}
-
-/** A length of this many minutes, as the FILE writes it. */
-function written(minutes) {
-  if (minutes === 0) return "PT0S";
-  const hours = Math.floor(minutes / 60);
-  return `PT${hours ? hours + "H" : ""}${minutes % 60 ? (minutes % 60) + "M" : ""}`;
-}
-
-/** 870 as "2:30 pm". */
-function clock(minutes) {
-  const hour = Math.floor(minutes / 60);
-  return `${((hour + 11) % 12) + 1}:${String(minutes % 60).padStart(2, "0")} ${hour < 12 ? "am" : "pm"}`;
-}
-
-/** 80 as "1 h 20 min". */
-function span(minutes) {
-  const hours = Math.floor(minutes / 60);
-  return [hours ? `${hours} h` : "", minutes % 60 ? `${minutes % 60} min` : ""].filter(Boolean).join(" ") || "0 min";
-}
-
-const snap = (minutes) => Math.round(minutes / STEP) * STEP;
-const within = (low, value, high) => Math.min(high, Math.max(low, value));
-
-// ---------------------------------------------------------------- reading and changing a FILE
-
-const factOf = (file, option, key) => file.facts.find((fact) => fact.option === option && key in fact);
-
-/**
- * What the day shows, read from a FILE and, where there is one, the report on it.
- * Every number is in minutes. Nothing here judges the trip: what clashes, what is missing and
- * what the plan is all come from the report.
- */
-function scene(file, report) {
-  const found = report && report.json ? report.json : {};
-  const clash = new Set(found.conflict || []);
-  const clashes = (...facts) => facts.some((fact) => fact && clash.has(fact.id));
-  const lock = (option) => file.decisions.find((decision) => decision.lock === option);
-  const planned = new Map((found.itinerary || []).filter((step) => step.option).map((step) => [step.option, step]));
-  const items = [];
-  const events = [];
-  for (const option of file.options) {
-    const time = factOf(file, option.id, "starts_at");
-    const length = factOf(file, option.id, "duration");
-    const range = factOf(file, option.id, "contingent_duration");
-    const cutoff = factOf(file, option.id, "arrive_before_start");
-    if (option.place) {
-      const event = {
-        kind: "event", id: option.id, name: option.name, place: option.place,
-        start: minutesOf(time.starts_at), length: lengthOf(length.duration),
-        clash: clashes(time, length, lock(option.id)),
-      };
-      events.push(event);
-      items.push(event);
-    } else if (time) {
-      items.push({
-        kind: "departure", id: option.id, name: option.name, place: option.from,
-        start: minutesOf(time.starts_at), cutoff: cutoff ? lengthOf(cutoff.arrive_before_start) : null,
-        clash: clashes(time, lock(option.id)), clashCutoff: clashes(cutoff),
-      });
-    } else {
-      items.push({
-        kind: "ride", id: option.id, name: option.name, from: option.from, to: option.to,
-        length: length ? lengthOf(length.duration) : range ? lengthOf(range.contingent_duration.shortest) : null,
-        longest: range ? lengthOf(range.contingent_duration.longest) : null,
-        clash: clashes(length, range),
-      });
-    }
-  }
-  // The time by which people must be at each PLACE: the earliest cutoff of what leaves from it.
-  const deadline = {};
-  for (const item of items) {
-    if (item.kind !== "departure" || item.cutoff === null) continue;
-    deadline[item.place] = Math.min(deadline[item.place] ?? Infinity, item.start - item.cutoff);
-  }
-  const missing = (found.missing || []).flat();
-  for (const ride of items.filter((item) => item.kind === "ride")) {
-    // A ride that can start at any time is drawn where the plan puts it. Without a plan it is
-    // drawn leaving when the last thing at its PLACE ends.
-    const step = planned.get(ride.id);
-    const before = events.filter((event) => event.place === ride.from).map((event) => event.start + event.length);
-    ride.leaves = step ? minutesOf(step.start) : before.length ? Math.max(...before) : FIRST + 30;
-    ride.taken = !found.itinerary || Boolean(step);
-    const asked = missing.find((need) => need.what === "duration" && need.option === ride.id);
-    ride.atMost = asked ? lengthOf(asked.at_most) : null;
-    ride.by = deadline[ride.to] ?? null;
-    // Lateness is marked only where the report says so. The report on a trip that cannot work
-    // names the length of the ride and the cutoff among the records that clash. The report on a
-    // trip that may not hold says how late people would be at worst.
-    ride.late = null;
-    const next = items.find((item) => item.kind === "departure" && item.place === ride.to && item.cutoff !== null);
-    if (next && ride.length !== null) {
-      const by = next.start - next.cutoff;
-      const lands = ride.leaves + ride.length;
-      const slow = (found.at_worst || []).find((worst) => worst.option === next.id && worst.late);
-      if (ride.clash && next.clashCutoff && lands > by) ride.late = { from: by, minutes: lands - by, sure: true };
-      else if (slow && step && ride.longest !== null) ride.late = { from: by, minutes: lengthOf(slow.late), sure: false };
-    }
-  }
-  const other = missing.find((need) => need.what === "other ways");
-  if (other) {
-    const before = events.filter((event) => event.place === other.from).map((event) => event.start + event.length);
-    const leaves = before.length ? Math.max(...before) : FIRST + 30;
-    items.push({ kind: "ghost", id: "another-way", from: other.from, to: other.to, leaves, atMost: lengthOf(other.at_most) });
-  }
-  // A lane for each PLACE where something on the day happens, leaves or lands.
-  const places = file.places.filter((place) => items.some((item) => [item.place, item.from, item.to].includes(place.id)));
-  return {
-    items, places,
-    complete: file.facts.some((fact) => fact.complete),
-    completeClash: file.facts.some((fact) => fact.complete && clash.has(fact.id)),
-  };
-}
-
-/** The changes a reader can make. Each one edits records of the FILE and nothing else. */
-const change = {
-  move(file, option, start) {
-    const time = factOf(file, option, "starts_at");
-    time.starts_at = stampAt(time.starts_at, start);
-  },
-  stretch(file, option, length) {
-    factOf(file, option, "duration").duration = written(length);
-  },
-  /** How long a ride takes: one length, or a shortest and a longest when it may run late. */
-  ride(file, option, length, longest) {
-    const at = file.facts.findIndex((fact) => fact.option === option && ("duration" in fact || "contingent_duration" in fact));
-    const id = at < 0 ? `${option}-length` : file.facts[at].id;
-    const fact = longest > length
-      ? { id, option, contingent_duration: { shortest: written(length), longest: written(longest) } }
-      : { id, option, duration: written(length) };
-    if (at < 0) file.facts.push(fact);
-    else file.facts[at] = fact;
-  },
-  cutoff(file, option, before) {
-    factOf(file, option, "arrive_before_start").arrive_before_start = written(before);
-  },
-  add(file, piece) {
-    for (const list of ["places", "options", "ways", "wants", "facts", "decisions"]) {
-      for (const record of piece[list] || []) file[list].push(structuredClone(record));
-    }
-  },
-  remove(file, piece) {
-    const options = new Set((piece.options || []).map((option) => option.id));
-    for (const list of ["places", "options", "ways", "wants", "decisions"]) {
-      const ids = new Set((piece[list] || []).map((record) => record.id));
-      file[list] = file[list].filter((record) => !ids.has(record.id));
-    }
-    const facts = new Set((piece.facts || []).map((fact) => fact.id));
-    file.facts = file.facts.filter((fact) => !facts.has(fact.id) && !options.has(fact.option));
-  },
-};
-
-const holds = (file, piece) =>
-  (piece.options || []).every((option) => file.options.some((other) => other.id === option.id)) &&
-  (piece.options ? true : (piece.facts || []).every((fact) => file.facts.some((other) => other.id === fact.id)));
-
-// ---------------------------------------------------------------- the FILE in words
-
-/** A record on one line, spaced as the examples space theirs. */
-function line(value) {
-  if (Array.isArray(value)) return `[${value.map(line).join(", ")}]`;
-  if (value && typeof value === "object") {
-    return `{ ${Object.entries(value).map(([key, inner]) => `${JSON.stringify(key)}: ${line(inner)}`).join(", ")} }`;
-  }
-  return JSON.stringify(value);
-}
-
-/** The whole FILE as text, one record to a line. */
-function text(file) {
-  const lists = Object.entries(file).map(([key, records]) =>
-    records.length
-      ? `  ${JSON.stringify(key)}: [\n${records.map((record) => `    ${line(record)}`).join(",\n")}\n  ]`
-      : `  ${JSON.stringify(key)}: []`,
-  );
-  return `{\n${lists.join(",\n")}\n}\n`;
-}
-
-// ---------------------------------------------------------------- the page
 
 function start() {
   const stories = {};
@@ -233,119 +38,149 @@ function start() {
   const reportText = trip.querySelector("#report-text");
   const reportNote = trip.querySelector("#report-note");
   const answerLive = trip.querySelector("#answer-live");
+  const answers = trip.querySelector(".answers-now");
   const playing = trip.querySelector("#playing");
 
   let pieces = {}; // what a reader can add, from trip/additions.json
-  // What the page shows: a FILE, and the last report. `fresh` says the report is on this very FILE.
-  // Marks on the day and on the FILE come only from a fresh report.
-  let now = { version: versions[0], file: structuredClone(stories[versions[0]].file), report: stories[versions[0]].report, fresh: true };
-  let drawn = null; // the scene on the page, for moving smoothly to the next one
+  // What the page shows: a FILE and the report on that very FILE. The report is missing from the
+  // moment the reader changes the FILE until the checker answers. A report with a `kind` is the
+  // page's own words: the checker stopped, or could not load.
+  let now = { version: versions[0], file: structuredClone(stories[versions[0]].file), report: stories[versions[0]].report };
+  let drawn = null; // what the day last showed, for moving smoothly to the next thing
   let scrolledTo = ""; // the changed line that the FILE last scrolled to
-  let moving = 0;
+  let moving = 0; // counts the drawings, so that a movement in progress gives way to a newer drawing
 
   // ------------------------------------------------------------ the checker
 
-  const checker = { worker: null, ready: false, running: null, waiting: null, serial: 0, broken: "", slow: 0 };
+  const checker = { worker: null, ready: false, woke: 0, asked: 0, running: null, waiting: null, serial: 0, broken: false, timer: 0 };
 
   function wake() {
     if (checker.worker || checker.broken) return;
     try {
       checker.worker = new Worker(new URL("checker-worker.js", import.meta.url), { type: "module" });
-    } catch (problem) {
-      checker.broken = String(problem);
-      return;
+    } catch {
+      return give_up();
     }
+    checker.woke = performance.now();
     checker.worker.onmessage = ({ data }) => {
       if (data.ready) {
         checker.ready = true;
       } else if (checker.running && data.id === checker.running.id) {
-        const asked = checker.running;
         checker.running = null;
-        if (checker.waiting === null && now.version === null) settle(asked, data);
+        // The answer counts only if the FILE it is about is still the FILE on the page.
+        if (checker.waiting === null && now.version === null) settle(data);
       } else if (data.failed && data.id === undefined) {
-        checker.broken = data.failed;
+        return give_up();
       }
       pump();
     };
-    checker.worker.onerror = (event) => {
-      checker.broken = event.message || "the checker could not start";
-      note();
-    };
+    checker.worker.onerror = give_up;
   }
 
-  /** Send the newest FILE when the checker is free. A check that runs long gives way to a newer FILE. */
+  /** Stop the worker. The next FILE gets a new one. */
+  function rest() {
+    if (checker.worker) checker.worker.terminate();
+    Object.assign(checker, { worker: null, ready: false, running: null });
+  }
+
+  /** The checker cannot run in this browser. Say so, in the page's own words. */
+  function give_up() {
+    rest();
+    Object.assign(checker, { broken: true, waiting: null });
+    sorry();
+  }
+
+  function sorry() {
+    say("No answer.\nThe reference checker could not load in this browser. The four versions of the story still show their reports.");
+  }
+
+  /** Put the page's own words where an answer would go. They never look like an answer. */
+  function say(words) {
+    if (now.version !== null) return;
+    now.report = { kind: "stopped", text: words, json: {} };
+    show();
+  }
+
+  /**
+   * Send the newest FILE when the checker is free. A check that runs long gives way to a newer
+   * FILE. Loading and checking each have a limit, so the page never waits for ever.
+   */
   function pump() {
+    clearTimeout(checker.timer);
     if (checker.broken) return note();
     wake();
-    if (checker.running && checker.waiting !== null && performance.now() - checker.running.started > 1500) {
-      checker.worker.terminate();
-      Object.assign(checker, { worker: null, ready: false, running: null });
+    if (checker.broken) return;
+    const time = performance.now();
+    if (!checker.ready && time - checker.woke > LOADING_LIMIT) return give_up();
+    if (checker.running && time - checker.running.started > CHECK_LIMIT) {
+      rest();
+      if (checker.waiting === null) {
+        say(`No answer.\nThe reference checker was stopped after ${CHECK_LIMIT / 1000} s. It tries every order, and this day is too busy for it in a browser. Take something away and it checks again.`);
+      }
+      wake();
+    } else if (checker.running && checker.waiting !== null && time - checker.running.started > 1500) {
+      rest();
       wake();
     }
     if (checker.ready && !checker.running && checker.waiting !== null) {
-      checker.running = { id: ++checker.serial, started: performance.now() };
+      checker.running = { id: ++checker.serial, started: time };
       checker.worker.postMessage({ id: checker.running.id, file: checker.waiting });
       checker.waiting = null;
     }
-    clearTimeout(checker.slow);
-    if (checker.running || checker.waiting !== null) checker.slow = setTimeout(pump, 400);
+    if (checker.running || checker.waiting !== null) checker.timer = setTimeout(pump, 250);
     note();
   }
 
   function ask() {
+    if (checker.broken) return sorry();
+    if (!checker.running && checker.waiting === null) checker.asked = performance.now();
     checker.waiting = JSON.stringify(now.file);
     pump();
   }
 
-  function settle(asked, data) {
-    if (data.refused || data.failed) {
-      now.report = { text: data.refused ? `This FILE does not follow the format:\n  ${data.refused.join("\n  ")}` : `The checker stopped: ${data.failed}`, json: {} };
-    } else {
-      now.report = { text: data.text, json: data.json, seconds: data.seconds };
-    }
-    now.fresh = true;
+  function settle(data) {
+    if (data.refused) now.report = { kind: "refused", text: `This FILE does not follow the format.\n${data.refused.join(" ")}`, json: {} };
+    else if (data.failed) now.report = { kind: "stopped", text: `No answer.\nThe reference checker stopped: ${data.failed}`, json: {} };
+    else now.report = { text: data.text, json: data.json, seconds: data.seconds };
     show();
   }
 
-  /** The line under the report that says where the answer came from. */
+  /** The line over the report that says where the answer came from, or that it is on its way. */
   function note() {
     if (now.version !== null) return;
-    const waiting = checker.running || checker.waiting !== null;
-    const long = checker.running && performance.now() - checker.running.started > 1200;
-    trip.classList.toggle("checking", Boolean(waiting));
+    const waiting = !checker.broken && Boolean(checker.running || checker.waiting !== null);
+    const since = waiting ? performance.now() - checker.asked : 0;
+    trip.classList.toggle("checking", waiting);
+    trip.classList.toggle("slow", waiting && since > 250);
     reportNote.textContent = checker.broken
-      ? "The checker could not load here. The four versions above still show their reports."
-      : !checker.ready
-        ? "Loading the reference checker. It is the real one, so it takes a moment the first time."
-        : long
-          ? `Still checking after ${Math.round((performance.now() - checker.running.started) / 1000)} s. The reference checker tries every order, so a busy day takes it long. Change anything and it starts afresh.`
-          : waiting
-            ? "Checking."
-            : now.fresh && now.report.seconds !== undefined
-              ? `Checked in your browser by the reference checker, in ${Math.max(1, Math.round(now.report.seconds * 1000))} ms.`
-              : "";
+      ? "The reference checker could not load here."
+      : waiting
+        ? !checker.ready
+          ? "Loading the reference checker. It is the real one, so it takes a moment the first time."
+          : since > 1200
+            ? `Still checking after ${Math.round(since / 1000)} s. The reference checker tries every order, so a busy day takes it long. Change anything and it starts afresh.`
+            : since > 250
+              ? "Checking."
+              : ""
+        : now.report && now.report.seconds !== undefined
+          ? `Checked in your browser by the reference checker, in ${Math.max(1, Math.round(now.report.seconds * 1000))} ms.`
+          : "";
   }
 
   // ------------------------------------------------------------ showing a FILE and its report
 
-  function answerOf(report) {
-    const first = report.text.split("\n")[0];
-    if (first.startsWith("FEASIBLE, with a WARNING")) return "risky";
-    if (first.startsWith("FEASIBLE")) return "feasible";
-    if (first.startsWith("INFEASIBLE")) return "infeasible";
-    if (first.startsWith("UNDETERMINED")) return "undetermined";
-    return "refused";
-  }
+  /** The report on the FILE that the page shows, if the checker has given one. */
+  const reported = () => (now.report && !now.report.kind ? now.report : null);
 
   /** Put the current FILE, its report and the day on the page. */
   function show(smooth = false) {
     const own = now.version === null;
+    const report = reported();
+    const answer = now.report ? now.report.kind || answerOf(now.report) : "waiting";
     trip.classList.toggle("own", own);
-    const fresh = now.fresh ? now.report : null;
-    trip.dataset.answer = fresh ? answerOf(fresh) : "waiting";
-    const found = fresh && fresh.json ? fresh.json : {};
-    const marked = new Set([...(found.conflict || [])]);
+    trip.dataset.answer = answer;
     // The FILE, with the lines that differ from the first version marked, and the lines that clash.
+    const clash = new Set(report ? report.json.conflict || [] : []);
     const words = own ? text(now.file) : stories[now.version].words;
     const target = own ? fileLive : trip.querySelector(`pre.file-text[data-version="${now.version}"]`);
     target.replaceChildren(
@@ -353,7 +188,7 @@ function start() {
         const row = document.createElement("span");
         row.textContent = each;
         const id = (each.match(/"id": "([^"]+)"/) || [])[1];
-        if (id && marked.has(id)) row.className = "clash";
+        if (id && clash.has(id)) row.className = "clash";
         else if (!firstLines.has(bare(each))) row.className = "new";
         return row;
       }),
@@ -362,15 +197,14 @@ function start() {
     const which = changed ? changed.textContent.slice(0, 40) + target.id : "";
     if (changed && which !== scrolledTo) target.scrollTop = Math.max(0, changed.getBoundingClientRect().top - target.getBoundingClientRect().top + target.scrollTop - 70);
     scrolledTo = which;
-    if (own && now.report) {
-      const lines = now.report.text.split("\n");
-      const answer = answerOf(now.report);
-      // Under the answer goes the line of the report that says what it turns on.
-      const next = answer === "undetermined" ? lines.slice(1).find((each) => each.trim()) : answer === "risky" ? lines.find((each) => each.trim().startsWith("!")) : "";
-      answerLive.className = `answer live ${answer}`;
+    if (own) {
+      // The answer, and under it the line of the report that says what the answer turns on.
+      const lines = now.report ? now.report.text.split("\n") : [];
+      const next = answer === "risky" ? lines.find((each) => each.trim().startsWith("!")) : answer === "feasible" || answer === "infeasible" ? "" : lines.slice(1).find((each) => each.trim());
+      answerLive.className = `answer live ${now.report ? answer : "pending"}`;
       answerLive.replaceChildren(...[lines[0], (next || "").trim()].filter(Boolean).map((each) => Object.assign(document.createElement("p"), { textContent: each })));
-      reportText.textContent = now.report.text;
-      reportLive.className = `report live ${answer}`;
+      reportText.textContent = report ? report.text : "";
+      reportLive.className = `report live ${report ? answer : ""}`;
     }
     note();
     for (const button of tools.querySelectorAll("[data-add]")) {
@@ -379,31 +213,35 @@ function start() {
     }
     const complete = tools.querySelector("#complete");
     if (complete && pieces.complete) complete.checked = holds(now.file, pieces.complete);
-    const next = scene(now.file, fresh);
+    const next = scene(now.file, report);
     if (smooth && drawn && !still) glide(drawn, next);
     else draw(next);
   }
 
-  /** Move the day from one scene to the next over a short time. */
+  /** Move the day from what it shows to the next thing over a short time. */
   function glide(from, to) {
     const began = performance.now();
     const run = ++moving;
     const old = new Map(from.items.map((item) => [item.id, item]));
     const frame = (time) => {
-      if (run !== moving) return;
+      if (run !== moving) return; // a newer drawing has taken over
       const part = Math.min(1, (time - began) / 650);
       const eased = 1 - (1 - part) ** 3;
       const between = to.items.map((item) => {
         const was = old.get(item.id);
         if (!was || was.kind !== item.kind) return { ...item, faint: eased };
         const mixed = { ...item };
-        for (const key of ["start", "length", "longest", "leaves", "cutoff"]) {
+        for (const key of ["start", "length", "longest", "leaves", "cutoff", "shown"]) {
           if (typeof item[key] === "number" && typeof was[key] === "number") mixed[key] = was[key] + (item[key] - was[key]) * eased;
         }
         return mixed;
       });
-      draw({ ...to, items: between }, part < 1);
-      if (part < 1) requestAnimationFrame(frame);
+      if (part < 1) {
+        draw({ ...to, items: between, late: [] }, true);
+        requestAnimationFrame(frame);
+      } else {
+        draw(to);
+      }
     };
     requestAnimationFrame(frame);
   }
@@ -421,8 +259,10 @@ function start() {
     return element;
   }
 
+  /** Draw the day. `passing` marks one step of a movement; any other drawing ends a movement in progress. */
   function draw(view, passing = false) {
-    if (!passing) drawn = view;
+    drawn = view;
+    if (!passing) moving += 1;
     const wide = day.clientWidth;
     const tall = wide < 620; // on a narrow screen time runs down the page
     const lanes = view.places.map((place) => place.id);
@@ -488,7 +328,7 @@ function start() {
         const title = make("text", { class: "block-name", x: shape.x + 10, y: shape.y + (tall ? 20 : laneSize / 2 - 8) });
         title.textContent = item.name;
         const times = make("text", { class: "block-time", x: shape.x + 10, y: shape.y + (tall ? 36 : laneSize / 2 + 8) });
-        // A short block has room for the start alone.
+        // A short block has room for the start alone. On a phone the hours at the side say am or pm.
         times.textContent = tall
           ? shape.height > 40 ? `${clock(item.start).replace(/ [ap]m$/, "")} to ${clock(item.start + item.length).replace(/ [ap]m$/, "")}` : ""
           : shape.width > 128 ? `${clock(item.start)} to ${clock(item.start + item.length)}` : clock(item.start);
@@ -522,9 +362,8 @@ function start() {
           const mark = make("g", { class: `cutoff${item.clashCutoff ? " clash" : ""}`, opacity: faint, tabindex: 0, role: "slider", "data-act": "cutoff", "data-id": item.id,
             "aria-label": `People must be at the place ${span(item.cutoff)} before ${item.name} leaves, by ${clock(when)}. Arrow keys move it.`, "aria-valuetext": clock(when), "aria-valuenow": when, "aria-valuemin": FIRST, "aria-valuemax": LAST });
           mark.append(make("line", { class: "cutoff-line", x1, y1, x2, y2 }));
-          const [rx, ry] = point(when, lane + laneSize);
-          mark.append(make("circle", { class: "cutoff-ring", cx: rx, cy: ry, r: 8 }));
-          mark.append(make("circle", { class: "cutoff-hit", cx: rx, cy: ry, r: 16 }));
+          mark.append(make("circle", { class: "cutoff-ring", cx: x2, cy: y2, r: 8 }));
+          mark.append(make("circle", { class: "cutoff-hit", cx: x2, cy: y2, r: 16 }));
           const label = make("text", { class: "cutoff-name", x: tall ? x2 - 14 : x1 + 9, y: tall ? y2 + 15 : y1 + 12, "text-anchor": tall ? "end" : "start" });
           label.textContent = `Be there by ${clock(when)}`;
           mark.append(label);
@@ -536,10 +375,9 @@ function start() {
         const fromEdge = laneAt(item.from) + (down ? laneSize - 4 : 4);
         const toEdge = laneAt(item.to) + (down ? 4 : laneSize - 4);
         const ghost = item.kind === "ghost";
-        const known = item.length !== null && !ghost;
-        const takes = known ? item.length : item.atMost ?? (item.by !== null && item.by !== undefined ? Math.max(15, item.by - item.leaves) : 45);
+        const known = !ghost && item.length !== null;
         const [x1, y1] = point(item.leaves, fromEdge);
-        const [x2, y2] = point(item.leaves + takes, toEdge);
+        const [x2, y2] = point(item.leaves + item.shown, toEdge);
         const group = make("g", { class: `ride${known ? "" : " unknown"}${ghost ? " ghost" : ""}${item.clash ? " clash" : ""}${item.taken === false ? " idle" : ""}`, opacity: faint });
         if (known && item.longest !== null && item.longest > item.length) {
           const [x3, y3] = point(item.leaves + item.longest, toEdge);
@@ -550,11 +388,14 @@ function start() {
         const [mx, my] = [(x1 + x2) / 2, (y1 + y2) / 2];
         const nth = (roads[`${item.from} ${item.to}`] = (roads[`${item.from} ${item.to}`] ?? -1) + 1);
         const label = make("text", { class: "road-name", x: mx, y: my, dy: tall ? nth * 15 : nth % 2 ? 22 : -11, dx: tall ? 12 : 0, "text-anchor": tall ? "start" : "middle", transform: tall ? null : `rotate(${angle} ${mx} ${my})` });
-        label.textContent = ghost
-          ? `Another way? ${span(item.atMost)} or less`
-          : known
-            ? `${item.name.replace(/ to .*/, "")} · ${item.longest ? `${span(item.length)} to ${span(item.longest)}` : span(item.length)}`
-            : `${item.name.replace(/ to .*/, "")} · ${item.atMost ? `? works if ${span(item.atMost)} or less` : "nobody knows how long"}`;
+        // An unknown length is marked "?". Where the report asks for a length, the road shows that length.
+        const asked = item.atMost !== null && item.atMost !== undefined ? ` ${span(item.atMost)} or less` : "";
+        const name = ghost ? "Another way" : item.name.replace(/ to .*/, "");
+        label.textContent = known
+          ? `${name} · ${item.longest ? `${span(item.length)} to ${span(item.longest)}` : span(item.length)}`
+          : ghost
+            ? `${name}?${asked}`
+            : `${name} · ?${asked || " nobody knows how long"}`;
         group.append(label);
         under.append(group);
         if (!ghost) {
@@ -568,11 +409,11 @@ function start() {
             over.append(make("circle", { class: `late-end${late > item.length ? " set" : ""}`, hint: "Pull to say how late it may run", cx: tall ? lx : lx + (late > item.length ? 0 : 20), cy: tall ? ly + (late > item.length ? 0 : 20) : ly, r: 6, "data-act": "late", "data-id": item.id }));
           }
         }
-        // Where the report says people are too late, the lateness is marked along the lane.
-        if (item.late) {
-          under.append(make("rect", { class: item.late.sure ? "too-late" : "late-at-worst", ...box(item.late.from, toEdge - (down ? 9 : 0), item.late.minutes, 9), rx: 2 }));
-        }
       }
+    }
+    // How late people would be at worst, where the report says so: marked along the edge of the lane.
+    for (const late of view.late || []) {
+      under.append(make("rect", { class: "late-at-worst", ...box(late.from, laneAt(late.place) - 5, late.minutes, 9), rx: 2 }));
     }
     day.classList.toggle("tall", tall);
     // The day is drawn afresh each time, so whatever had the keyboard's focus is given it back.
@@ -584,35 +425,25 @@ function start() {
 
   // ------------------------------------------------------------ changing the day
 
-  /** The reader has changed the trip: it is their own version now, and the checker checks it. */
+  /**
+   * The reader changes the trip. It is their own version from then on. The old answer goes at
+   * once, and the checker checks the new FILE. A change that changes nothing is left alone.
+   */
   function mine(edit) {
+    const file = structuredClone(now.file);
+    if (edit(file) === false || JSON.stringify(file) === JSON.stringify(now.file)) return;
     if (now.version !== null) {
-      now = { version: null, file: structuredClone(now.file), report: now.report, fresh: false };
       stop();
       for (const story of Object.values(stories)) story.input.checked = false;
     }
-    edit(now.file);
-    now.fresh = false;
+    now = { version: null, file, report: null };
     show();
     ask();
   }
 
+  /** The thing on the day with this id, as the day shows it now. */
   function itemOf(id) {
-    return scene(now.file, now.fresh ? now.report : null).items.find((item) => item.id === id);
-  }
-
-  /** Apply one gesture: `by` is how far it has gone, in minutes. `from` is the item as it was. */
-  function gesture(act, from, by) {
-    mine((file) => {
-      if (act === "move") change.move(file, from.id, within(FIRST, snap(from.start + by), LAST - (from.length || 15)));
-      if (act === "stretch") change.stretch(file, from.id, within(15, snap(from.length + by), 240));
-      if (act === "cutoff") change.cutoff(file, from.id, within(0, snap(from.cutoff - by), 180));
-      if (act === "ride") {
-        const length = within(10, snap((from.length ?? from.atMost ?? 45) + by), 240);
-        change.ride(file, from.id, length, from.longest ? Math.max(length, from.longest + (length - (from.length ?? length))) : length);
-      }
-      if (act === "late") change.ride(file, from.id, from.length, within(from.length, snap((from.longest ?? from.length) + by), from.length + 120));
-    });
+    return scene(now.file, reported()).items.find((item) => item.id === id);
   }
 
   let held = null;
@@ -630,9 +461,10 @@ function start() {
     if (!held) return;
     const length = held.tall ? Math.round((LAST - FIRST) * 1.75) : day.clientWidth - 14;
     const by = ((held.tall ? event.clientY - held.y : event.clientX - held.x) / length) * (LAST - FIRST);
-    if (snap(by) !== held.last) {
-      held.last = snap(by);
-      gesture(held.act, held.from, by);
+    const steps = Math.round(by / STEP);
+    if (steps !== held.steps) {
+      held.steps = steps;
+      mine((file) => gesture(file, held.act, held.from, by));
     }
   });
   const release = () => {
@@ -649,8 +481,10 @@ function start() {
     if (!target || !way) return;
     event.preventDefault();
     const from = itemOf(target.dataset.id);
-    const act = target.dataset.act;
-    gesture(event.shiftKey ? (act === "move" && from.kind === "event" ? "stretch" : act === "ride" ? "late" : act) : act, from, way);
+    if (!from) return;
+    // With shift, the arrow keys stretch a block, and say how late a ride may run.
+    const act = !event.shiftKey ? target.dataset.act : from.kind === "event" ? "stretch" : from.kind === "ride" ? "late" : target.dataset.act;
+    mine((file) => gesture(file, act, from, way));
   });
 
   tools.addEventListener("click", (event) => {
@@ -666,12 +500,13 @@ function start() {
   // ------------------------------------------------------------ the story that plays by itself
 
   const PACE = 5600; // how long each version of the story stays, in milliseconds
-  const answers = trip.querySelector(".answers-now");
   // The story waits while the pointer is over the day, and while the day is out of sight.
   const story = { timer: 0, spent: 0, near: false, seen: true };
   function tell(version, smooth = true) {
     stories[version].input.checked = true;
-    now = { version, file: structuredClone(stories[version].file), report: stories[version].report, fresh: true };
+    checker.waiting = null; // a FILE that waits to be checked is the reader's, and the reader has left it
+    trip.classList.remove("checking", "slow");
+    now = { version, file: structuredClone(stories[version].file), report: stories[version].report };
     show(smooth);
   }
   function stop() {
@@ -725,14 +560,9 @@ function start() {
     .catch(() => {});
 
   trip.classList.add("alive");
-  new ResizeObserver(() => draw(scene(now.file, now.fresh ? now.report : null))).observe(day);
+  new ResizeObserver(() => draw(scene(now.file, reported()))).observe(day);
   show();
   if (!still) play();
-}
-
-/** A line of the FILE without its indent or its closing comma, for comparing two FILEs. */
-function bare(each) {
-  return each.trim().replace(/,$/, "");
 }
 
 if (trip) start();

@@ -9,6 +9,7 @@ on:
     paths:
       - pages/**
       - src/**
+      - pyproject.toml
       - uv.lock
       - tools/build_site_checker.py
       - .github/workflows/pages.yml
