@@ -410,6 +410,16 @@ def test_a_way_that_opens_after_ten_is_there_for_noon_and_not_for_ten() -> None:
     assert report.answer is Answer.UNDETERMINED
     ((needed,),) = report.missing
     assert (needed.unknown.what, needed.at_most) == ("other ways", 2 * 3600 - 1)
+    # In a world with such a way, the answer for each pair is the same whichever is asked first.
+    world = replace(best_case(file), unlisted=frozenset({("hotel", "dock")}))
+    for first, then in (
+        (("morning", "back"), ("morning", "noon")),
+        (("morning", "noon"), ("morning", "back")),
+    ):
+        no_time = NoTimeBetween(file, world)
+        ids = [option.id for option in file.options]
+        said = {pair: no_time.apart(*(ids.index(id) for id in pair)) for pair in (first, then)}
+        assert said == {("morning", "back"): True, ("morning", "noon"): False}
 
 
 def lunch_and_two_boats(stops: int) -> File:
