@@ -318,7 +318,7 @@ function start() {
       : !checker.ready
         ? "Loading the reference checker. It is the real one, so it takes a moment the first time."
         : long
-          ? "Still checking. The reference checker tries every order, so a busier day takes it longer."
+          ? `Still checking after ${Math.round((performance.now() - checker.running.started) / 1000)} s. The reference checker tries every order, so a busy day takes it long. Change anything and it starts afresh.`
           : waiting
             ? "Checking."
             : now.fresh && now.report.seconds !== undefined
