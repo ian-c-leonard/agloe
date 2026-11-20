@@ -20,7 +20,7 @@ The COMPILER must decide whether any ITINERARY meets every CONSTRAINT, give the 
 Agloe is written in Python, and CP-SAT is the engine for both the COMPILER and the OPTIMIZER.
 
 - Whichever engine runs, Agloe's own code translates the FILE into the model, produces the three answers, and builds the explanations. CP-SAT replaces only the search, which is the part most worth taking from an established tool.
-- Explanations do not depend on the solver's own conflict reports, which vary with its settings. The solver's report only narrows the search. The conflict named is found by a deletion filter: Agloe removes the FILE's records one at a time, in the FILE's order, and keeps each one the conflict needs. So the same FILE always gives the same explanation.
+- Explanations do not use the solver's own conflict reports, which vary with its settings and between machines. The conflict named is found by a deletion filter: Agloe takes the FILE's records out in the FILE's order, asks each time whether anything still works, and keeps each record the conflict needs. So the same FILE always gives the same explanation.
 - A small brute-force checker for tiny trips cross-checks CP-SAT's answers in tests.
 
 ## Consequences

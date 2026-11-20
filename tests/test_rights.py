@@ -52,7 +52,12 @@ from tests.test_cross_check import (
     random_trip,
     works_on_the_grid,
 )
-from tests.test_where_a_path_ends import checked, has_no_record_to_spare, ruled_out
+from tests.test_where_a_path_ends import (
+    checked,
+    has_no_record_to_spare,
+    ruled_out,
+    the_solver_rules_out,
+)
 
 EVERYONE = ["alex", "sam", "jo"]
 TIMES = ("tour-time", "tour-length", "tour-cutoff")
@@ -381,13 +386,7 @@ def test_a_booking_that_is_taken_out_might_cover_anybody() -> None:
     assert left.open_to_all == {"tour"}
     assert left.might_cover() == {("tour", person) for person in EVERYONE}
     assert ruled_out(Remaining(file)) and not ruled_out(left)
-    assert compiler.stuck(left) is None
-    assert compiler.stuck(Remaining(file)) == {
-        "tour-needs-right",
-        "tour-booking",
-        "every-right-to-tour",
-        "lock-tour",
-    }
+    assert the_solver_rules_out(Remaining(file)) and not the_solver_rules_out(left)
 
 
 def test_complete_rights_do_not_settle_an_option_that_might_need_none() -> None:
@@ -662,10 +661,10 @@ def test_a_file_that_says_nothing_about_rights_gets_its_report_at_once(
         calls += 1
         return answers.any_works(file, world)
 
-    def counted_solver(file: File, world: World) -> bool:
+    def counted_solver(file: File, world: World, asked: object = None) -> bool:
         nonlocal calls
         calls += 1
-        return solver(file, world)
+        return solver(file, world, asked)  # pyright: ignore[reportArgumentType]
 
     found = answers.check(file, works=counted)
     assert asked(found) == [[free(name) for name in names]]
@@ -707,9 +706,9 @@ def test_the_search_that_tries_every_choice_is_asked_about_no_world_it_is_slow_i
     """Five optional stays with no stated start, and five PERSONs. Alex needs two of the stays.
 
     A world where four of the stays can start has a million choices of who takes part, and the
-    search that tries every choice goes through them all to find that none works. So the
-    search for missing FACTs asks only about the best case, the upper bound, and the sets it
-    tries.
+    search that tries every choice goes through them all to find that none works. So after
+    the one question about the best case, the search for missing FACTs asks only about the
+    upper bound and the sets it tries.
     """
     people = ["alex", "sam", "jo", "pat", "kim"]
     names = [f"stay-{number}" for number in range(5)]
@@ -727,5 +726,5 @@ def test_the_search_that_tries_every_choice_is_asked_about_no_world_it_is_slow_i
     found = answers.check(file, works=recorded)
     assert asked(found) == [[Unknown("start", "stay-0"), Unknown("start", "stay-1")]]
     can_start = [sum(terms.free_start for terms in world.terms.values()) for world in asked_about]
-    assert sorted(count for count in can_start if count > 2) == [5, 5]
+    assert sorted(count for count in can_start if count > 2) == [5]
     assert compiler.check(file) == found

@@ -13,7 +13,6 @@ from agloe import answers, compiler, reference
 from agloe.answers import Answer, Missing
 from agloe.file import File, load, read
 from agloe.reference import (
-    Remaining,
     Unknown,
     World,
     best_case,
@@ -79,23 +78,21 @@ def test_the_compiler_gives_the_reference_checkers_report(path: Path) -> None:
     if file.caps:
         assert compiler.check(file) == answers.check(file)
         return
-    found = answers.check(file, compiler.shown, compiler.works, compiler.stuck)
+    found = answers.check(file, compiler.shown, compiler.works, compiler.can_work)
     assert found == answers.check(file)
 
 
-def test_a_trip_too_big_for_the_solver_gets_the_reference_checkers_answer() -> None:
+def test_a_very_long_way_among_many_routes_changes_no_answer() -> None:
     """Sam goes through ten PLACES. Three WAYs join each to the next: 19,683 routes in all.
 
-    One WAY takes 999,999,999 hours. Where every FACT can be switched off, each route has its
-    own times in the model, and together they are more than the solver can count.
+    One WAY takes 999,999,999 hours. The TRIP has no time for any route as the FILE states
+    them. One unknown FACT is enough by itself: other WAYs from the first PLACE to the last.
     """
     places = [f"p{number}" for number in range(10)]
     ways = [way(f"w{n}-{k}", f"p{n}", f"p{n + 1}") for n in range(9) for k in range(3)]
     facts = [starts_from("sam", "p0"), takes("w0-0", "PT999999999H")]
     now = [trip_starts(9), trip_ends(9)]
     file = trip(["sam"], places, [], facts, now, ways=ways, wants=[ends_at("p9", "sam")])
-    with pytest.raises(compiler.DoesNotFit):
-        compiler.stuck(Remaining(file))
     found = compiler.check(file)
     assert found == answers.check(file)
     assert found.missing == ((Missing(Unknown("other ways", origin="p0", destination="p9"), 0),),)
@@ -142,7 +139,7 @@ def test_a_file_with_no_start_and_no_end_leaves_no_room_for_travel_at_the_ends()
     locks = [lock(each["id"], "sam") for each in locked]
     long = way("long", "p28", "p29")
     file = trip(["sam"], places, [*locked, *far], facts, locks, ways=[*ways, long])
-    found = answers.check(file, compiler.shown, compiler.works, compiler.stuck)
+    found = answers.check(file, compiler.shown, compiler.works, compiler.can_work)
     assert found.answer is Answer.FEASIBLE
     assert len(found.itinerary) == 21
 
@@ -637,7 +634,7 @@ def test_the_conflict_named_is_the_one_found_in_the_files_order() -> None:
 
     Alex cannot make the flight, as in the story. Going through the records in the FILE's order
     takes Sam's out first, since Alex's still clash without them. So the conflict named is
-    Alex's. The solver's own search may find either one: that depends on its proof.
+    Alex's.
     """
     document = json.loads((EXAMPLES / "flight-home" / "cannot-work.json").read_text())
     document["options"] = [stays("call", "home"), stays("nap", "home"), *document["options"]]
@@ -661,9 +658,7 @@ def test_the_conflict_named_is_the_one_found_in_the_files_order() -> None:
         "lock-visit",
         "lock-flight",
     )
-    of_sam = {"call-time", "call-length", "nap-time", "lock-call", "lock-nap"}
     assert report.conflict == of_alex
-    assert compiler.stuck(Remaining(file)) in (frozenset(of_alex), frozenset(of_sam))
 
 
 def test_two_conflicts_at_once_give_the_reference_checkers_report() -> None:
@@ -683,9 +678,6 @@ def test_two_conflicts_at_once_give_the_reference_checkers_report() -> None:
     report = compiler.check(file)
     assert report == answers.check(file)
     assert report.conflict == ("swim-time", "swim-length", "lunch-time", "lock-swim", "lock-lunch")
-    assert compiler.stuck(Remaining(file)) == frozenset(
-        {"call-time", "call-length", "nap-time", "lock-call", "lock-nap"}
-    )
 
 
 def a_day_on_foot(*more: dict[str, object], flight_at: int = 17) -> File:

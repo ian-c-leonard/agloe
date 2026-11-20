@@ -405,6 +405,11 @@ def ruled_out(remaining: Remaining) -> bool:
     return not any(any_works(remaining.file, world) for world in best_cases(remaining))
 
 
+def the_solver_rules_out(remaining: Remaining) -> bool:
+    """The same question, put to the solver."""
+    return not compiler.can_work(remaining)
+
+
 def has_no_record_to_spare(file: File, conflict: Sequence[str]) -> bool:
     """Whether these records rule out every plan by themselves, and no fewer of them do."""
     left = Remaining(file)

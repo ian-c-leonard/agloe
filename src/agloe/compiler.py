@@ -8,8 +8,9 @@ rules as the reference checker applies them have agreed.
 Only the search is different. The three answers, ROBUST and the evidence are worked out by
 ``answers.check``, with this module's search in place of the reference checker's.
 
-For INFEASIBLE, the solver also names the FACTs and DECISIONs its proof used. The reference
-checker then looks for the conflict among those alone.
+For INFEASIBLE, the search for the conflict asks whether anything can still work once records
+are taken out. The solver answers each such question with one model. Where taking FACTs out
+leaves it open whether an OPTION SATISFIES a WANT, the solver chooses that too.
 
 The solver counts in 64-bit numbers. A TRIP with very long durations and very many routes can
 need more than that. The reference checker's own search then answers for the whole TRIP. That
@@ -18,7 +19,7 @@ search tries everything, so it is meant for small TRIPs.
 
 from collections.abc import Sequence
 from dataclasses import replace
-from itertools import combinations
+from hashlib import sha256
 from math import inf
 
 from ortools.sat.python import cp_model
@@ -26,14 +27,8 @@ from ortools.sat.python import cp_model
 from agloe import answers, reference
 from agloe.answers import Report
 from agloe.file import (
-    Booking,
     Complete,
-    Cutoff,
-    Duration,
     File,
-    NeedsRight,
-    Offer,
-    Start,
     StartsFrom,
     Want,
 )
@@ -48,8 +43,9 @@ type _Who = tuple[tuple[str, ...], ...]  # the PERSONs in each OPTION
 type _Orders = tuple[tuple[int, ...], ...]  # the OPTIONs each PERSON does, in order
 type _By = dict[tuple[int, int], reference.Route]  # the WAYs a PERSON takes after an OPTION
 type _Choice = tuple[_Who, _Orders, _By | None]
+# What the solver answered for each model it was asked about, by the digest of the model.
+type _Asked = dict[bytes, tuple[cp_model.CpSolver, object]]
 type _Amount = cp_model.LinearExpr | int  # seconds: a plain number, or one the solver works out
-type _End = tuple[str, list[cp_model.IntVar]]  # a PLACE, and the records that make it hold
 type _Taken = list[tuple[cp_model.IntVar, reference.Route]]  # routes, each with its choice
 # The same with the time each route arrives. None: nobody knows, and nothing follows it.
 type _Reached = list[tuple[cp_model.IntVar, reference.Route, _Amount | None]]
@@ -68,7 +64,13 @@ def check(file: File) -> Report:
     if file.caps:
         return answers.check(file)
     try:
-        return answers.check(file, shown=shown, works=works, stuck=stuck)
+        asked: _Asked = {}
+        return answers.check(
+            file,
+            shown,
+            lambda left, world: works(left, world, asked),
+            lambda left: can_work(left, asked),
+        )
     except DoesNotFit:
         return answers.check(file)
 
@@ -80,54 +82,57 @@ def shown(file: File, world: World) -> Itinerary | None:
     return None if choice is None else _checked(file, world, choice, search.known)
 
 
-def works(file: File, world: World) -> bool:
-    """Whether any ITINERARY works in this world."""
-    choice = _Search(file, world).any()
+def works(file: File, world: World, asked: _Asked | None = None) -> bool:
+    """Whether any ITINERARY works in this world. ``asked`` is as for ``can_work``."""
+    choice = _plan(_Search(file, world, plain=True), asked)
     if choice is not None:
         _checked(file, world, choice)
     return choice is not None
 
 
-def stuck(remaining: Remaining) -> frozenset[str] | None:
-    """FACTs, WANTs and DECISIONs that rule out every ITINERARY by themselves, or None.
+def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
+    """Whether any ITINERARY works in some best case of what is left of a FILE.
 
-    The question is asked in the best case of what is left of a FILE. The set returned is small:
-    no record can be taken out of it. It need not be the conflict the report names, which is
-    found in the FILE's order. This search goes the other way, from the last record to the
-    first. That takes the DECISIONs out before the FACTs, and with fewer LOCKs to honor each
-    proof is quick.
+    The best cases differ only in the pairs that are left open: whether an OPTION SATISFIES a
+    WANT that is a must for one PERSON and a must-not for another. The solver chooses that
+    for each pair, with the plan. So one question takes one model, however many pairs are
+    open. The reference checker then checks the plan in the best case the solver chose.
 
-    Where something works, the solver has chosen a plan and a possible world for it: which
-    OPTIONs SATISFY which WANTs, where nobody knows. The reference checker then checks that
-    plan in that world.
+    ``asked`` holds what the solver answered for each model it was given before in the same
+    check. A FACT that is taken out often changes nothing in the model: it said what the best
+    case takes anyway. The same model has the same answer, so the solver is asked once. The
+    plan is read from that answer for what is left this time, and checked against it.
+
+    Like ``shown`` and ``works``, this is for a FILE with no cap: ``check`` hands a FILE with
+    a cap to the reference checker.
     """
     file = remaining.file
-    world = reference.best_case(file)
-    search = _Search(file, world, remaining)
-    records = [record.id for record in (*file.facts, *file.wants, *file.decisions)]
-    choice, needed = search.clash(records)
-    if choice is not None:
-        does = search.turned_out
-        rights = world.rights | remaining.might_cover()
-        chosen = replace(world, satisfies=does, might_satisfy=does, rights=rights)
-        _checked(file, chosen, choice)
-        return None
-    while True:  # ask again with only the records the proof used, until it uses them all
-        choice, fewer = search.clash([record for record in records if record in needed])
-        if choice is not None:
-            raise AssertionError("records the solver's proof used do not rule out every choice")
-        if fewer == needed:
-            break
-        needed = fewer
-    kept = [record for record in records if record in needed]
-    for record in reversed(list(kept)):
-        if record in needed:
-            choice, fewer = search.clash([other for other in kept if other != record])
-            if choice is not None:
-                continue
-            needed = fewer
-        kept.remove(record)
-    return frozenset(kept)
+    world, open_pairs = reference.best_case_left(remaining)
+    search = _Search(file, world, open_pairs, plain=True)
+    choice = _plan(search, asked)
+    if choice is None:
+        return False
+    does = search.turned_out
+    chosen = replace(
+        world, satisfies=world.satisfies | does, might_satisfy=world.might_satisfy | does
+    )
+    _checked(file, chosen, choice)
+    return True
+
+
+def _plan(search: _Search, asked: _Asked | None) -> _Choice | None:
+    """A choice that works in the model of this search, or None where none does.
+
+    Where ``asked`` already holds the solver's answer for a model with the same text, the
+    choice is read from that answer. It is read through this search: two FILEs can give
+    models with the same text and still take different WAYs between the same PLACEs.
+    """
+    if asked is None:
+        return search.any()
+    key = sha256(str(search.model.proto).encode()).digest()
+    if key not in asked:
+        asked[key] = search.ask()
+    return search.read(*asked[key])
 
 
 def _checked(
@@ -145,8 +150,13 @@ def _checked(
     return itinerary
 
 
-def _solver() -> cp_model.CpSolver:
+def _solver(relax: bool = True) -> cp_model.CpSolver:
     """A solver set up to give the same result every time.
+
+    ``relax`` keeps its linear relaxation, which it needs to prove a best value in good
+    time. The plain questions, with nothing to make smaller, are asked without it. On the
+    trips measured that is as quick or quicker, with a model that says outright that no two
+    OPTIONs of a PERSON overlap.
 
     Its simplification step is switched off. In OR-Tools 9.15 that step reported that nothing
     works for a model that had an answer. A wrong "nothing works" is the one mistake nothing
@@ -162,6 +172,8 @@ def _solver() -> cp_model.CpSolver:
     solver.parameters.cp_model_presolve = False
     solver.parameters.absolute_gap_limit = 0.0
     solver.parameters.relative_gap_limit = 0.0
+    if not relax:
+        solver.parameters.linearization_level = 0
     return solver
 
 
@@ -198,6 +210,9 @@ def _when(constraint: cp_model.Constraint, *conditions: cp_model.LiteralT) -> No
 class _Search:
     """One world as a CP-SAT model: who takes part in which OPTION, and in what order.
 
+    With open pairs, the model stands for each world that differs only in them, and the
+    solver chooses among those worlds too.
+
     Each PERSON's OPTIONs form a path. The path is a circuit through a starting point that stands
     for "before the first OPTION and after the last". Where the next OPTION starts somewhere
     else, WAYs take the PERSON there, by one of the routes the world has. Start times
@@ -205,26 +220,27 @@ class _Search:
     reference checker.
     """
 
-    def __init__(self, file: File, world: World, remaining: Remaining | None = None) -> None:
-        """Build the model. With ``remaining``, each record applies only if switched on.
+    def __init__(
+        self,
+        file: File,
+        world: World,
+        open_pairs: Sequence[tuple[str, str]] = (),
+        plain: bool = False,
+    ) -> None:
+        """Build the model of this world.
 
-        That is for the search for a conflict. ``remaining`` is what is left of the FILE, and
-        the world must be its best case. A FACT that is switched off is unknown, and turns out
-        as in the best case. So does what a FACT stated that was taken out before: whether an
-        OPTION SATISFIES a WANT, and whom a BOOKING covers.
+        ``open_pairs`` are left to the solver: each an OPTION and a WANT, and whether the
+        OPTION SATISFIES the WANT. The world must say that they do not. ``plain`` says that
+        the model is for the plain question whether anything works, with nothing to make
+        smaller.
         """
-        self.file, self.world = file, world
-        self.unsaid = frozenset[tuple[str, str]]() if remaining is None else remaining.unsaid
-        self.open_to_all = frozenset[str]() if remaining is None else remaining.open_to_all
-        # Whether each OPTION SATISFIES each WANT, where the solver chooses the world too, and
-        # how that turned out in the last answer it gave.
-        self.does: dict[tuple[str, str], cp_model.IntVar] = {}
-        self.turned_out: frozenset[tuple[str, str]] = frozenset()
+        self.file, self.world, self.plain = file, world, plain
         self.model = cp_model.CpModel()
-        self.switch: dict[str, cp_model.IntVar] = {}
-        if remaining is not None:
-            for record in (*file.facts, *file.wants, *file.decisions):
-                self.switch[record.id] = self.model.new_bool_var(f"given {record.id}")
+        # The choice for each open pair, and the pairs that held in the last answer.
+        self.does = {
+            pair: self.model.new_bool_var(f"{pair[0]} satisfies {pair[1]}") for pair in open_pairs
+        }
+        self.turned_out: frozenset[tuple[str, str]] = frozenset()
         self._read_the_world()
         self._count_time()
         self._choose_who_takes_part()
@@ -237,46 +253,27 @@ class _Search:
         # choice that takes it.
         self.routes: list[dict[tuple[int, int], _Taken]] = []
         self.legs: list[tuple[cp_model.IntVar, int]] = []  # a route taken, and how many WAYs it has
-        # A FACT that can be switched off can change how long a WAY takes.
-        self.known = reference.Routes(file, world, thin=not self.switch)
+        self.known = reference.Routes(file, world)
         self._worth_trying: dict[tuple[str, str, bool], list[reference.Route]] = {}
         for number in range(len(file.persons)):
             self._lay_out_path(number)
 
     def _read_the_world(self) -> None:
-        """What the world says about each OPTION and WAY.
-
-        How long each one takes and how early a PERSON must arrive are plain numbers, or numbers
-        that count only when their FACT is switched on.
-        """
+        """What the world says about each OPTION and WAY."""
         file, world = self.file, self.world
         self.terms = [world.terms[option.id] for option in file.options]
         self.usable = [each.fixed_start is not None or each.free_start for each in self.terms]
         self.endless = [each.longest is None for each in self.terms]
         self.moves = [option.origin != option.destination for option in file.options]
-
-        def switch_of(record: Start | Duration | Cutoff | None) -> cp_model.IntVar | None:
-            return None if record is None else self.switch.get(record.id)
-
-        self.lasts: list[_Amount] = []
-        self.margins: list[_Amount | None] = []
-        for option, each in zip(file.options, self.terms, strict=True):
-            given = switch_of(file.duration(option.id))
-            self.lasts.append(each.shortest if given is None else each.shortest * given)
-            given = switch_of(file.cutoff(option.id))
-            margin = each.margin if given is None or not each.margin else each.margin * given
-            self.margins.append(margin)
-        self.when_fixed = [switch_of(file.start(option.id)) for option in file.options]
+        self.lasts = [each.shortest for each in self.terms]
+        self.margins = [each.margin for each in self.terms]
         # How long each WAY takes. None: there is no limit, and nobody knows when it ends.
-        self.way_lasts: dict[str | None, _Amount | None] = {None: world.unlisted_takes}
+        self.way_lasts: dict[str | None, int | None] = {None: world.unlisted_takes}
         for way in file.ways:
-            given = switch_of(file.duration(way.id))
             shortest, longest = world.takes[way.id]
-            lasts = shortest if given is None else shortest * given
-            self.way_lasts[way.id] = None if longest is None else lasts
+            self.way_lasts[way.id] = None if longest is None else shortest
         unlisted = world.unlisted is None or bool(world.unlisted)
         self.facts = [fact for fact in file.facts if isinstance(fact, Complete)] if unlisted else []
-        self.given = [self.switch.get(fact.id) for fact in self.facts]
 
     def _count_time(self) -> None:
         """When each OPTION starts, and its turn among OPTIONs that share an instant.
@@ -301,19 +298,12 @@ class _Search:
         if self.latest + room >= _FURTHEST:
             raise DoesNotFit("the times this TRIP can reach are too far apart")
 
-        known = [
-            each.fixed_start if given is None else None
-            for each, given in zip(terms, self.when_fixed, strict=True)
-        ]
         self.start = [
             model.new_int_var(self.earliest, self.latest, f"start {option.id}")
-            if moment is None
-            else model.new_constant(moment - self.zero)
-            for option, moment in zip(options, known, strict=True)
+            if each.fixed_start is None
+            else model.new_constant(each.fixed_start - self.zero)
+            for option, each in zip(options, terms, strict=True)
         ]
-        for index, (each, given) in enumerate(zip(terms, self.when_fixed, strict=True)):
-            if given is not None and each.fixed_start is not None:
-                _when(model.add(self.start[index] == each.fixed_start - self.zero), given)
         last = max(len(options) - 1, 0)
         self.turn = [model.new_int_var(0, last, f"turn {option.id}") for option in options]
 
@@ -331,81 +321,41 @@ class _Search:
             model.add_max_equality(self.used[index], [0, *(row[index] for row in self.takes)])
             for number, person in enumerate(file.persons):
                 takes = self.takes[number][index]
-                asking = [
-                    self.switch.get(lock.id)
-                    for lock in file.locks
-                    if lock.option == option.id and person.id in lock.persons
-                ]
-                for given in asking:
-                    if given is None:
-                        model.add(takes == 1)
-                    else:
-                        _when(model.add(takes == 1), given)
+                asked = any(
+                    lock.option == option.id and person.id in lock.persons for lock in file.locks
+                )
+                if asked:
+                    model.add(takes == 1)
                 # A PERSON gains nothing by staying somewhere unless a LOCK asks them to, or
                 # the stay could meet a must of theirs. Without the stay they are in the same
                 # PLACE at the same times, and every CONSTRAINT is as easy to meet or easier.
                 # So the model leaves such stays out.
                 wanted = index in meets[number]
-                if not self.usable[index] or (not self.moves[index] and not asking and not wanted):
+                if not self.usable[index] or (not self.moves[index] and not asked and not wanted):
                     self._rule_out(number, index)
-                elif not self.moves[index] and not wanted:
-                    switches = [each for each in asking if each is not None]
-                    if len(switches) == len(asking):
-                        model.add_bool_or([takes.negated(), *switches])
         self._hold_to_the_rights()
 
     def _rule_out(self, number: int, index: int) -> None:
         """This PERSON takes no part in this OPTION, whatever else is chosen.
 
-        So no travel is built for them to it or from it. An OPTION that is only ruled out while
-        some record is switched on does not come here.
+        So no travel is built for them to it or from it.
         """
         self.model.add(self.takes[number][index] == 0)
         self.left_out.add((number, index))
 
     def _hold_to_the_rights(self) -> None:
-        """Nobody takes part without a right in an OPTION that needs one.
-
-        Where records can be switched off, the best case decides, and it has a right for a
-        PERSON unless the FILE rules that out. That takes three kinds of FACT, all switched on:
-        that the OPTION needs a right, that the rights to it are COMPLETE, and every BOOKING
-        and OFFER for it. A BOOKING or an OFFER that is off, or was taken out before, might
-        have a right for anybody. So a PERSON whom some BOOKING for the OPTION covers is never
-        kept out, and the others are kept to the places on OFFER.
-        """
+        """Nobody takes part without a right in an OPTION that needs one."""
         file, world = self.file, self.world
         people = list(enumerate(file.persons))
-        if not self.switch:
-            for index, option in enumerate(file.options):
-                if option.id in world.needs_right:
-                    without = [
-                        n for n, person in people if (option.id, person.id) not in world.rights
-                    ]
-                    self._share_out(index, without)
-            return
-        needs = {fact.option: fact for fact in file.facts if isinstance(fact, NeedsRight)}
         for index, option in enumerate(file.options):
-            needed, whole = needs.get(option.id), file.rights_complete(option.id)
-            if needed is None or not needed.needed or whole is None:
-                continue
-            if option.id in self.open_to_all:
-                continue
-            listed = [
-                self.switch[fact.id]
-                for fact in file.facts
-                if isinstance(fact, Booking | Offer) and fact.option == option.id
-            ]
-            closed = [self.switch[needed.id], self.switch[whole.id], *listed]
-            without = [n for n, person in people if file.booking(option.id, person.id) is None]
-            self._share_out(index, without, closed)
+            if option.id in world.needs_right:
+                without = [n for n, person in people if (option.id, person.id) not in world.rights]
+                self._share_out(index, without)
 
-    def _share_out(
-        self, index: int, without: Sequence[int], given: Sequence[cp_model.IntVar] = ()
-    ) -> None:
+    def _share_out(self, index: int, without: Sequence[int]) -> None:
         """Each of these PERSONs who takes part in an OPTION takes a place they can pay for.
 
         They are the PERSONs with no right of their own to it. No place is taken twice.
-        ``given`` holds the records that all have to be switched on for this to hold.
 
         A PERSON who is ruled out of the OPTION needs no place. A PERSON who can pay for no
         place stays out, and an OFFER that none of them can pay for is left out. Where each of
@@ -424,9 +374,7 @@ class _Search:
             for number in without
         }
         for number in without:
-            if not able[number] and given:
-                _when(model.add(self.takes[number][index] == 0), *given)
-            elif not able[number]:
+            if not able[number]:
                 self._rule_out(number, index)
         buyers = [number for number in without if able[number]]
         wanted = {offer.id for number in buyers for offer in able[number]}
@@ -434,9 +382,7 @@ class _Search:
         places = sum(offer.places for offer in offers)
         if all(len(able[number]) == len(offers) for number in buyers):
             if places < len(buyers):
-                limit = model.add(sum(self.takes[number][index] for number in buyers) <= places)
-                if given:
-                    _when(limit, *given)
+                model.add(sum(self.takes[number][index] for number in buyers) <= places)
             return
         taken: dict[str, list[cp_model.IntVar]] = {offer.id: [] for offer in offers}
         for number in buyers:
@@ -447,9 +393,7 @@ class _Search:
             ]
             for offer, pick in zip(able[number], picks, strict=True):
                 taken[offer.id].append(pick)
-            has_a_place = model.add(sum(picks) >= takes)
-            if given:
-                _when(has_a_place, *given)
+            model.add(sum(picks) >= takes)
         for offer in offers:
             if len(taken[offer.id]) > offer.places:
                 model.add(sum(taken[offer.id]) <= offer.places)
@@ -457,10 +401,10 @@ class _Search:
     def _hold_to_the_wants(self) -> list[set[int]]:
         """Every must is met and every must-not is kept. Returns what could meet a must.
 
-        That is, for each PERSON, the OPTIONs that could meet a must of theirs.
+        That is, for each PERSON, the OPTIONs that could meet a must of theirs. An OPTION of
+        an open pair meets a must only where the solver chooses that it SATISFIES the WANT,
+        and then no PERSON for whom the WANT is a must-not takes part in it.
         """
-        if self.switch:
-            return self._hold_to_the_wants_with_switches()
         model, file, world = self.model, self.file, self.world
         meets: list[set[int]] = [set() for _ in file.persons]
         for want in self._delivered():
@@ -474,62 +418,31 @@ class _Search:
                 for index, option in enumerate(file.options)
                 if (option.id, want.id) in world.satisfies
             ]
+            open_here = [
+                (index, self.does[option.id, want.id])
+                for index, option in enumerate(file.options)
+                if (option.id, want.id) in self.does
+            ]
             for number, person in enumerate(file.persons):
+                takes = self.takes[number]
+                if person.id in want.must_nots:
+                    for index, does in open_here:
+                        model.add_bool_or([takes[index].negated(), does.negated()])
                 elsewhere = (want.id, person.id) in world.another_option
                 if person.id in want.musts and not elsewhere:
-                    meets[number].update(would)
-                    model.add_bool_or([self.takes[number][index] for index in would])
+                    meets[number].update([*would, *(index for index, _ in open_here)])
+                    met: list[cp_model.IntVar] = [takes[index] for index in would]
+                    for index, does in open_here:
+                        here = model.new_bool_var(f"{person.id} gets {want.id} by {index}")
+                        model.add_implication(here, takes[index])
+                        model.add_implication(here, does)
+                        met.append(here)
+                    model.add_bool_or(met)
         return meets
 
     def _delivered(self) -> list[Want]:
         """The WANTs about something an OPTION can deliver. The path settles the others."""
         return [want for want in self.file.wants if want.ends_at is None]
-
-    def _hold_to_the_wants_with_switches(self) -> list[set[int]]:
-        """The same where each FACT and WANT applies only if switched on, in the best case.
-
-        A FACT that is switched off is unknown. So whether an OPTION SATISFIES a WANT is the
-        solver's to choose here: it picks the possible world as well as the plan. A FACT about
-        the two settles it while that FACT is switched on. So does a FACT that the WANT's set is
-        COMPLETE, for an OPTION that never had a FACT about the WANT: it does not SATISFY it.
-
-        A must needs an OPTION of the FILE only while a FACT says that the WANT's set is
-        COMPLETE. Otherwise another OPTION meets it.
-        """
-        model, file = self.model, self.file
-        meets: list[set[int]] = [set() for _ in file.persons]
-        for want in self._delivered():
-            asked = self.switch[want.id]
-            whole = file.complete_for(want.id)
-            closed = None if whole is None else self.switch[whole.id]
-            does: list[cp_model.IntVar] = []
-            for option in file.options:
-                satisfies = model.new_bool_var(f"{option.id} satisfies {want.id}")
-                does.append(satisfies)
-                self.does[option.id, want.id] = satisfies
-                stated = file.satisfies(option.id, want.id)
-                if stated is not None:
-                    turns_out = 1 if stated.degree > 0 else 0
-                    _when(model.add(satisfies == turns_out), self.switch[stated.id])
-                elif closed is not None and (option.id, want.id) not in self.unsaid:
-                    _when(model.add(satisfies == 0), closed)
-            for number, person in enumerate(file.persons):
-                takes = self.takes[number]
-                if person.id in want.must_nots:
-                    for index, satisfies in enumerate(does):
-                        model.add_bool_or(
-                            [asked.negated(), takes[index].negated(), satisfies.negated()]
-                        )
-                if person.id in want.musts and closed is not None:
-                    meets[number].update(range(len(file.options)))
-                    met: list[cp_model.IntVar] = []
-                    for index, satisfies in enumerate(does):
-                        here = model.new_bool_var(f"{person.id} gets {want.id} by {index}")
-                        model.add_implication(here, takes[index])
-                        model.add_implication(here, satisfies)
-                        met.append(here)
-                    model.add_bool_or([asked.negated(), closed.negated(), *met])
-        return meets
 
     def _lay_out_path(self, number: int) -> None:
         """One PERSON's path: a circuit through the OPTIONs they do.
@@ -573,15 +486,13 @@ class _Search:
             for there in asked:
                 if done is not None:
                     between[index, ends] += self._ends_there(last, there, option.destination, done)
-                elif option.destination != there[0]:
+                elif option.destination != there:
                     # Nobody knows when the OPTION ends, so the PERSON never leaves it.
-                    self._never(last, there[1])
+                    model.add(last == 0)
         if start is not None:
             # A PERSON who takes part in nothing stays where they start from, or travels on.
             between[ends, ends] = [
-                taken
-                for there in asked
-                for taken in self._ends_there(nothing, there, start[0], given=start[1])
+                taken for there in asked for taken in self._ends_there(nothing, there, start)
             ]
 
         for before, earlier in enumerate(options):
@@ -602,9 +513,39 @@ class _Search:
                 arcs.append((before, after, next_))
                 _when(model.add(self.turn[after] >= self.turn[before] + 1), next_)
         model.add_circuit(arcs)
+        if self.plain:
+            self._keep_apart(number)
         self.nothing.append(nothing)
         self.follows.append(follows)
         self.routes.append(between)
+
+    def _keep_apart(self, number: int) -> None:
+        """No two OPTIONs that this PERSON takes part in overlap.
+
+        The path says so already: each OPTION on it starts no earlier than the one before it
+        ends. Said outright, the solver sees at once that two talks that take time cannot both
+        be taken at the same hour, however many others lie between them on a path. An OPTION
+        that takes no time can be at the start or at the end of another one and never inside
+        it, by the path and by the solver's own rule for intervals. An OPTION with no limit to
+        how long it takes is left to the path.
+
+        This is only in the model of a plain question. It helps the solver prove that nothing
+        works. Where the solver looks for a best value, it made the search longer on trips
+        with many OPTIONs that overlap.
+        """
+        model, takes = self.model, self.takes[number]
+        person = self.file.persons[number]
+        spans: list[cp_model.IntervalVar] = []
+        for index, option in enumerate(self.file.options):
+            if (number, index) in self.left_out or self.endless[index]:
+                continue
+            name = f"{person.id} in {option.id}"
+            start, lasts = self.start[index], self.lasts[index]
+            spans.append(
+                model.new_optional_fixed_size_interval_var(start, lasts, takes[index], name)
+            )
+        if len(spans) > 1:
+            model.add_no_overlap(spans)
 
     def _goes_straight_on(
         self,
@@ -623,7 +564,7 @@ class _Search:
             _when(model.add(arrived[after] >= arrived[before]), next_)
         if margin is None:
             model.add_implication(next_, moved[before].negated())
-        elif not (isinstance(margin, int) and margin == 0):
+        elif margin:
             _when(model.add(self.start[after] >= arrived[before] + margin), next_, moved[before])
         return next_
 
@@ -637,7 +578,8 @@ class _Search:
     ) -> tuple[cp_model.IntVar, _Taken] | None:
         """The choice that a PERSON goes from one OPTION to the next by WAYs, and by which route.
 
-        None when no route leads there, or when no PERSON who travels could be in time.
+        None when no route leads there, or when nobody knows how early a PERSON has to be
+        there.
         """
         options = self.file.options
         here, there = options[before].destination, options[after].origin
@@ -645,12 +587,12 @@ class _Search:
             return None
         next_ = self.model.new_bool_var(name)
         free = self.start[before] + self.lasts[before]
-        reached = self._travels(next_, (), here, there, free)
+        reached = self._travels(next_, here, there, free)
         return next_, self._arrives_for(after, reached, moved, arrived)
 
     def _sets_out(
         self,
-        start: _End | None,
+        start: str | None,
         first: cp_model.IntVar,
         index: int,
         moved: Sequence[cp_model.IntVar],
@@ -658,32 +600,29 @@ class _Search:
     ) -> _Taken:
         """The routes from where a PERSON's path begins to the OPTION they do first."""
         origin = self.file.options[index].origin
-        if start is None or start[0] == origin:
+        if start is None or start == origin:
             return []
-        here, given = start
         if self.margins[index] is None:
-            self._never(first, given)  # no PERSON who travels there is known to be in time
+            self.model.add(first == 0)  # no PERSON who travels there is known to be in time
             return []
-        reached = self._travels(first, given, here, origin, None)
+        reached = self._travels(first, start, origin, None)
         return self._arrives_for(index, reached, moved, arrived)
 
     def _ends_there(
         self,
         taken: cp_model.IntVar,
-        end: _End,
+        there: str,
         here: str,
         free: _Amount | None = None,
-        given: Sequence[cp_model.IntVar] = (),
     ) -> _Taken:
         """The routes from where a PERSON is to where their path has to end.
 
-        They take one while ``taken`` holds, with everything in ``given`` and the records that
-        ask for that end. The PERSON can leave after ``free``, or at any time where it is None.
+        They take one while ``taken`` holds. The PERSON can leave after ``free``, or at any
+        time where it is None.
         """
-        there, asked = end
         if here == there:
             return []
-        reached = self._travels(taken, [*given, *asked], here, there, free, last=True)
+        reached = self._travels(taken, here, there, free, last=True)
         return [(chosen, route) for chosen, route, _ in reached]
 
     def _arrives_for(
@@ -728,7 +667,6 @@ class _Search:
     def _travels(
         self,
         taken: cp_model.IntVar,
-        given: Sequence[cp_model.IntVar],
         here: str,
         there: str,
         free: _Amount | None,
@@ -736,144 +674,96 @@ class _Search:
     ) -> _Reached:
         """Travel by WAYs from one PLACE to another.
 
-        While ``taken`` and everything in ``given`` hold, the PERSON takes exactly one route
-        from ``here`` to ``there``, after ``free``. Otherwise they take none. Where no route
-        leads there, the two cannot hold together. ``last`` says that the PERSON does nothing
-        after it. Returns each route with the choice that takes it and the time it arrives.
+        While ``taken`` holds, the PERSON takes exactly one route from ``here`` to ``there``,
+        after ``free``. Otherwise they take none. Where no route leads there, ``taken`` cannot
+        hold. ``last`` says that the PERSON does nothing after it. Returns each route with the
+        choice that takes it and the time it arrives.
         """
         model = self.model
-        needed = self._both(taken, given)
         possible = self._routes(here, there, last)
-        via = [needed]
+        via = [taken]
         if len(possible) != 1:
             names = [f"{taken.name} by route {place}" for place in range(len(possible))]
             via = [model.new_bool_var(name) for name in names]
-            model.add(sum(via) == needed)
+            model.add(sum(via) == taken)
         return [
             (chosen, route, self._takes_the_ways(route, chosen, free))
             for route, chosen in zip(possible, via, strict=True)
         ]
 
-    def _both(self, taken: cp_model.IntVar, given: Sequence[cp_model.IntVar]) -> cp_model.IntVar:
-        """A choice that holds exactly when ``taken`` and everything in ``given`` hold."""
-        if not given:
-            return taken
-        needed = self.model.new_bool_var(f"{taken.name}, as given")
-        self.model.add_min_equality(needed, [taken, *given])
-        return needed
-
-    def _never(self, taken: cp_model.IntVar, given: Sequence[cp_model.IntVar]) -> None:
-        """``taken`` and everything in ``given`` cannot hold together."""
-        self.model.add_bool_or([each.negated() for each in (taken, *given)])
-
-    def _given(self, record: str) -> list[cp_model.IntVar]:
-        """The switch of a record, where records can be switched off. Else nothing."""
-        return [self.switch[record]] if record in self.switch else []
-
-    def _begins_at(self, person: str) -> _End | None:
+    def _begins_at(self, person: str) -> str | None:
         """Where a PERSON's path begins, where a FACT says so. None: wherever it suits."""
         stated = self.file.starts_from(person)
-        return None if stated is None else (stated.place, self._given(stated.id))
+        return None if stated is None else stated.place
 
-    def _has_to_end_at(self, person: str) -> list[_End]:
-        """Each PLACE where a PERSON's path has to end, with the records that ask for it.
+    def _has_to_end_at(self, person: str) -> list[str]:
+        """Each PLACE where a PERSON's path has to end.
 
-        A WANT can ask its holders to end the TRIP at a PLACE. It asks while it is given, and a
-        PLACE is asked for while any WANT that names it is. No path ends at two PLACEs. A PERSON
-        who does nothing, with no FACT about where they start from, is where they have to end.
+        A WANT can ask its holders to end the TRIP at a PLACE. No path ends at two PLACEs, so
+        nothing works where two WANTs name different ones for a PERSON. A PERSON who does
+        nothing, with no FACT about where they start from, is where they have to end.
         """
-        model = self.model
-        naming: dict[str, list[cp_model.IntVar]] = {}
-        for want in reference.has_to_end_at(self.file, person):
-            naming.setdefault(want.ends_at or "", []).extend(self._given(want.id))
-        asked: list[_End] = []
-        for place, given in naming.items():
-            if len(given) > 1:
-                given = [model.new_bool_var(f"{person} has to end at {place}")]
-                model.add_max_equality(given[0], naming[place])
-            asked.append((place, given))
-        for (_, one), (_, other) in combinations(asked, 2):
-            model.add_bool_or([each.negated() for each in (*one, *other)])
+        wants = reference.has_to_end_at(self.file, person)
+        asked = list(dict.fromkeys(want.ends_at or "" for want in wants))
+        if len(asked) > 1:
+            self.model.add_bool_or([])
         return asked
 
     def _keep_within_the_trip(
-        self, begins: _Amount, lasts: _Amount | None, happens: cp_model.IntVar
+        self, begins: _Amount, lasts: int | None, happens: cp_model.IntVar
     ) -> None:
         """What happens starts no earlier than the TRIP starts and ends no later than it ends.
 
         ``lasts`` is None for something with no limit to how long it takes. That is never over
-        in time, so it cannot happen where the TRIP has an end. Each limit applies only while
-        its DECISION is given.
+        in time, so it cannot happen where the TRIP has an end.
         """
         model, file = self.model, self.file
         opens, closes = file.trip_start(), file.trip_end()
         if opens is not None:
-            given = self.switch.get(opens.id)
-            when = [happens] if given is None else [happens, given]
-            _when(model.add(begins >= opens.at - self.zero), *when)
+            _when(model.add(begins >= opens.at - self.zero), happens)
         if closes is not None:
-            given = self.switch.get(closes.id)
-            when = [happens] if given is None else [happens, given]
             if lasts is None:
-                model.add_bool_or([each.negated() for each in when])
+                model.add_bool_or([happens.negated()])
             else:
-                _when(model.add(begins + lasts <= closes.at - self.zero), *when)
+                _when(model.add(begins + lasts <= closes.at - self.zero), happens)
 
     def _routes(self, here: str, there: str, last: bool = False) -> list[reference.Route]:
         """The routes from one PLACE to another worth choosing between, worked out once.
 
         ``last`` says that the PERSON does nothing after the route. Where no COMPLETE FACT can
-        rule a WAY out and no FACT can be switched off, only the time and the number of WAYs of
-        a route matter, so the quickest of each length is enough.
+        rule a WAY out, only the time and the number of WAYs of a route matter, so the quickest
+        of each length is enough.
         """
         if (here, there, last) not in self._worth_trying:
             possible = self.known.between(here, there, last)
-            if not self.facts and not self.switch:
+            if not self.facts:
                 possible = _quickest(self.world, possible)
             self._worth_trying[here, there, last] = possible
         return self._worth_trying[here, there, last]
 
-    def clash(self, given: Sequence[str]) -> tuple[_Choice | None, frozenset[str]]:
-        """A choice that works with only these FACTs and DECISIONs, or the ones that rule one out.
-
-        Every other record is switched off. The records returned are those of ``given`` that the
-        solver's proof needed. They rule out every choice by themselves: a record that is
-        switched on never makes a TRIP easier. There may be fewer that would do.
-        """
-        names = {switch.index: record for record, switch in self.switch.items()}
-        self.model.add_assumptions(
-            [
-                switch if record in given else switch.negated()
-                for record, switch in self.switch.items()
-            ]
-        )
-        solver, status = self._solve()
-        self.model.clear_assumptions()
-        if status != cp_model.INFEASIBLE:
-            choice = self._found(solver, status)
-            self.turned_out = frozenset(
-                pair for pair, satisfies in self.does.items() if solver.boolean_value(satisfies)
-            )
-            return choice, frozenset()
-        needed = frozenset(
-            names[index]
-            for index in solver.sufficient_assumptions_for_infeasibility()
-            if index in names
-        )
-        if not needed:
-            raise AssertionError("the solver ruled out every choice without using any record")
-        return None, needed
-
     def any(self) -> _Choice | None:
         """Some choice of PERSONs and orders that works, or None when none does."""
-        solver, status = self._solve()
+        return self.read(*self.ask())
+
+    def ask(self) -> tuple[cp_model.CpSolver, object]:
+        """The solver's answer to the plain question: does anything work?"""
+        return self._solve(relax=False)
+
+    def read(self, solver: cp_model.CpSolver, status: object) -> _Choice | None:
+        """The choice in an answer to the plain question, or None where nothing works.
+
+        The answer can be one that the solver gave for another model with the same text.
+        """
         if status == cp_model.INFEASIBLE:
             return None
+        self.turned_out = frozenset(
+            pair for pair, does in self.does.items() if solver.boolean_value(does)
+        )
         return self._found(solver, status)
 
-    def _solve(self) -> tuple[cp_model.CpSolver, object]:
+    def _solve(self, relax: bool = True) -> tuple[cp_model.CpSolver, object]:
         """The solver's answer for the model as it stands."""
-        solver = _solver()
+        solver = _solver(relax)
         status = solver.solve(self.model)
         if status == cp_model.MODEL_INVALID:
             why = self.model.validate()
@@ -965,17 +855,15 @@ class _Search:
     ) -> None:
         """An unlisted WAY taken under ``when`` starts outside the span of each COMPLETE FACT.
 
-        Only the FACTs about travel straight between these two PLACEs count, and only those that
-        are given.
+        Only the FACTs about travel straight between these two PLACEs count.
         """
         model = self.model
-        for fact, given in zip(self.facts, self.given, strict=True):
+        for fact in self.facts:
             if not fact.covers(origin, destination):
                 continue
-            applies = [when] if given is None else [when, given]
             sooner = model.new_bool_var(f"{moment.name} starts before the span of {fact.id}")
-            _when(model.add(moment <= fact.earliest - 1 - self.zero), *applies, sooner)
-            _when(model.add(moment >= fact.latest + 1 - self.zero), *applies, sooner.negated())
+            _when(model.add(moment <= fact.earliest - 1 - self.zero), when, sooner)
+            _when(model.add(moment >= fact.latest + 1 - self.zero), when, sooner.negated())
 
     def _settle(self, choices: Sequence[cp_model.IntVar]) -> None:
         """Fix these yes-or-no choices: "yes" wherever it can be, the earlier choices first."""

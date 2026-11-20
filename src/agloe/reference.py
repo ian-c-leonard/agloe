@@ -322,33 +322,51 @@ class Remaining:
         ]
 
 
-def best_cases(remaining: Remaining) -> Iterator[World]:
-    """Each best case of what is left of a FILE, one at a time. A FILE as it is read has one.
+def best_case_left(remaining: Remaining) -> tuple[World, list[tuple[str, str]]]:
+    """The best case of what is left of a FILE, and the pairs that it leaves open.
 
-    In that one, an OPTION with no FACT about a WANT does not SATISFY it. That is as good as it
-    gets: another OPTION meets every must on a WANT whose set is not COMPLETE, and a COMPLETE
-    set leaves nothing unknown.
+    An OPTION with no FACT about a WANT does not SATISFY it there. That is as good as it gets:
+    another OPTION meets every must on a WANT whose set is not COMPLETE, and a COMPLETE set
+    leaves nothing unknown.
 
     An OPTION and a WANT that are reopened are different: nobody knows, and no other OPTION can
     stand in. Where the WANT is a must for some PERSON and a must-not for nobody, the best case
     is that the OPTION SATISFIES it. Where it is only a must-not, the best case is that it does
-    not. Where it is both, a must may need what a must-not fears, so each way it could turn out
-    is a best case of its own. Only those are tried both ways.
+    not. Where it is both, a must may need what a must-not fears, so the pair is left open: it
+    can turn out either way. The world returned says that an open pair does not SATISFY, and
+    the pairs come with it, each an OPTION and a WANT.
     """
     file = remaining.file
     best = best_case(file)
-    best = replace(best, rights=best.rights | remaining.might_cover())
     wants = {want.id: want for want in file.wants}
-    helps = {pair for pair in remaining.reopened() if not wants[pair[1]].must_nots}
-    helps = {pair for pair in helps if wants[pair[1]].musts}
-    either = [
-        pair for pair in remaining.reopened() if wants[pair[1]].musts and wants[pair[1]].must_nots
-    ]
+    reopened = [pair for pair in remaining.reopened() if wants[pair[1]].musts]
+    helps = {pair for pair in reopened if not wants[pair[1]].must_nots}
+    either = [pair for pair in reopened if wants[pair[1]].must_nots]
+    world = replace(
+        best,
+        rights=best.rights | remaining.might_cover(),
+        satisfies=best.satisfies | helps,
+        might_satisfy=best.might_satisfy | helps,
+    )
+    return world, either
+
+
+def best_cases(remaining: Remaining) -> Iterator[World]:
+    """Each best case of what is left of a FILE, one at a time. A FILE as it is read has one.
+
+    There is one for each way the open pairs of ``best_case_left`` could turn out.
+    """
+    best, either = best_case_left(remaining)
     for chosen in product([False, True], repeat=len(either)):
-        does = helps | {pair for pair, yes in zip(either, chosen, strict=True) if yes}
+        does = {pair for pair, yes in zip(either, chosen, strict=True) if yes}
         yield replace(
             best, satisfies=best.satisfies | does, might_satisfy=best.might_satisfy | does
         )
+
+
+def can_work(remaining: Remaining) -> bool:
+    """Whether any ITINERARY works in some best case of what is left of a FILE."""
+    return any(any_works(remaining.file, world) for world in best_cases(remaining))
 
 
 def with_no_offer(world: World) -> World:
@@ -1371,7 +1389,7 @@ def routes(
       run longest. Those are the two cases a route is checked in. The same route with that
       other WAY has as many WAYs, arrives no later in either case, and comes first by the
       rule for the WAYs listed first. This is right only where each WAY takes as long as this
-      world says. A search that can switch a FACT off asks for every route.
+      world says.
 
     A WAY SATISFIES no WANT. So which WAYs a PERSON takes never changes which musts are met.
 

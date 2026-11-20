@@ -51,7 +51,12 @@ from tests.stories import (
 )
 from tests.test_cross_check import random_trip, works_on_the_grid
 from tests.test_rights import every_world_of_rights
-from tests.test_where_a_path_ends import checked, has_no_record_to_spare, ruled_out
+from tests.test_where_a_path_ends import (
+    checked,
+    has_no_record_to_spare,
+    ruled_out,
+    the_solver_rules_out,
+)
 
 EVERYONE = ["alex", "sam", "jo"]
 TIMES = ("tour-time", "tour-length", "tour-cutoff")
@@ -456,10 +461,10 @@ def test_a_shortage_among_many_locked_persons_takes_few_searches(
     calls = 0
     solver = compiler.works
 
-    def counted(file: File, world: World) -> bool:
+    def counted(file: File, world: World, asked: object = None) -> bool:
         nonlocal calls
         calls += 1
-        return solver(file, world)
+        return solver(file, world, asked)  # pyright: ignore[reportArgumentType]
 
     monkeypatch.setattr(compiler, "works", counted)
     found = compiler.check(file)
@@ -611,7 +616,7 @@ def test_an_offer_that_is_taken_out_might_have_a_place_for_everybody() -> None:
     left = Remaining(file).without("tour-offer")
     assert left.open_to_all == {"tour"}
     assert ruled_out(Remaining(file)) and not ruled_out(left)
-    assert compiler.stuck(left) is None
+    assert the_solver_rules_out(Remaining(file)) and not the_solver_rules_out(left)
 
 
 def test_another_right_is_asked_for_as_far_as_the_places_run_out() -> None:
