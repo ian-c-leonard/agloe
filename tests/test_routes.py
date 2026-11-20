@@ -1,8 +1,13 @@
 """The routes between two PLACEs: which are worth trying, and what the search skips."""
 
+from collections.abc import Sequence
+from itertools import pairwise, product
 from random import Random
+from typing import Any
 
-from agloe import answers, compiler
+import pytest
+
+from agloe import answers, compiler, reference
 from agloe.answers import Answer
 from agloe.file import File
 from agloe.reference import (
@@ -10,17 +15,21 @@ from agloe.reference import (
     Remaining,
     Routes,
     World,
+    best_case,
     best_cases,
     itineraries,
+    longest_case,
     routes,
     worst_case,
 )
+from agloe.reference import _fits as fits  # pyright: ignore[reportPrivateUsage]
 from tests.stories import (
     Document,
     complete,
     cutoff,
     lasts,
     lock,
+    moves,
     starts_at,
     starts_from,
     stays,
@@ -293,3 +302,103 @@ def test_a_way_that_no_route_can_take_leads_nowhere() -> None:
     places = [*chain, "hall"]
     file = trip(["sam"], places, options, [*timed, *facts], locked, ways=ways)
     assert names(routes(file, worst_case(file), "museum", "hall")) == [["direct"]]
+
+
+# ------------------------------- Routes that do not fit between two fixed times ----------------
+
+
+def a_group_for_a_train(count: int, minutes: Sequence[int]) -> File:
+    """A group has breakfast until 08:30 and is LOCKed onto the train at 09:00.
+
+    Each transfer from the hotel to the station is a WAY, in the order given.
+    """
+    people = [f"person-{number}" for number in range(count)]
+    options = [stays("breakfast", "hotel"), moves("train", "station", "city")]
+    facts = [starts_at("breakfast", 8), lasts("breakfast", "PT30M")]
+    facts += [starts_at("train", 9), lasts("train", "PT1H"), cutoff("train", "PT0S")]
+    ways = [way(f"transfer-{number}", "hotel", "station") for number in range(len(minutes))]
+    facts += [takes(each["id"], f"PT{length}M") for each, length in zip(ways, minutes, strict=True)]
+    locks = [lock("breakfast", *people), lock("train", *people)]
+    return trip(people, ["hotel", "station", "city"], options, facts, locks, ways=ways)
+
+
+def test_a_transfer_too_slow_for_the_train_is_tried_for_nobody(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Eight travelers, and only the last of five transfers takes them there in half an hour.
+
+    Each of the other four is too slow whoever takes it. So the search does not try them for
+    one traveler after another: that would be five to the power of eight choices.
+    """
+    file = a_group_for_a_train(8, [36, 35, 34, 33, 20])
+    tried = 0
+    timings = reference._timings  # pyright: ignore[reportPrivateUsage]
+
+    def counted(*given: Any, **named: Any) -> Any:
+        nonlocal tried
+        tried += 1
+        return timings(*given, **named)
+
+    monkeypatch.setattr(reference, "_timings", counted)
+    found = compiler.check(file)
+    assert found.answer is Answer.FEASIBLE
+    assert {step.way for step in found.itinerary if step.way} == {"transfer-4"}
+    assert tried < 20
+    small = a_group_for_a_train(2, [36, 20])
+    assert compiler.check(small) == answers.check(small)
+
+
+def test_a_route_that_does_not_fit_is_in_no_plan() -> None:
+    """Each route that is left out is refused by the timing too, whatever else is chosen."""
+    rng = Random(7070)
+    refused = 0
+    for _ in range(300):
+        file = with_parallel_ways(rng)
+        for world in (worst_case(file), best_case(file), longest_case(file)):
+            known = Routes(file, world)
+            count = len(file.options)
+            who = tuple(("sam",) for _ in range(count))
+            order = tuple(range(count))
+            stops = [(option.origin, option.destination) for option in file.options]
+            hops = [
+                (spot, known.between(here, there))
+                for spot, ((_, here), (there, _)) in enumerate(pairwise(stops))
+                if here != there
+            ]
+            if not all(found for _, found in hops):
+                continue
+            for spot, found in hops:
+                before = world.terms[file.options[spot].id]
+                after = world.terms[file.options[spot + 1].id]
+                for route in found:
+                    if fits(world, before, after, route):
+                        continue
+                    for others in product(*(each for other, each in hops if other != spot)):
+                        rest = iter(others)
+                        by = {
+                            (0, other): route if other == spot else next(rest) for other, _ in hops
+                        }
+                        assert reference.scheduled(file, world, who, (order,), by) is None
+                        refused += 1
+    assert refused > 100
+
+
+def test_leaving_out_routes_that_do_not_fit_changes_no_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reference checker and the solver give the report of a search that tries every route."""
+    rng = Random(8080)
+    files = [with_parallel_ways(rng) for _ in range(300)]
+    found = [(answers.check(file), compiler.check(file)) for file in files]
+
+    def every_route_fits(*_: object) -> bool:
+        return True
+
+    monkeypatch.setattr(reference, "_fits", every_route_fits)
+    seen: set[Answer] = set()
+    for file, (slow, fast) in zip(files, found, strict=True):
+        every_route = answers.check(file)
+        assert slow == every_route
+        assert fast == every_route
+        seen.add(every_route.answer)
+    assert seen == set(Answer)

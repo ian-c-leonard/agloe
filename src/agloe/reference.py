@@ -1541,6 +1541,11 @@ def _schedules(
     Where a PERSON's next OPTION starts somewhere else, WAYs must take them there. The routes
     are tried with the fewest WAYs first, then in the order of "Which ITINERARY is shown": PERSON
     by PERSON, the WAYs listed first. Then each way the timing can fall is tried.
+
+    A route between two OPTIONs that both start at fixed times is left out where it takes
+    longer than the time between them: see ``_fits``. No ITINERARY with that order takes it,
+    whatever the other PERSONs do. So the routes that are left come in the same order, and the
+    first ITINERARY that works is the same one.
     """
     # Which PERSON, after which of their OPTIONs, the routes. Before their first OPTION is -1.
     needed: list[tuple[int, int, list[Route]]] = []
@@ -1562,6 +1567,10 @@ def _schedules(
         for spot, here, there, last in hops:
             if here != there:
                 possible = known.between(here, there, last)
+                if 0 <= spot < len(order) - 1:
+                    before = world.terms[file.options[order[spot]].id]
+                    after = world.terms[file.options[order[spot + 1]].id]
+                    possible = [route for route in possible if _fits(world, before, after, route)]
                 if not possible:
                     return
                 needed.append((number, spot, possible))
@@ -1579,6 +1588,32 @@ def _schedules(
             for (number, position, _), route in zip(needed, chosen, strict=True)
         }
         yield from _timings(file, world, who, orders, hops)
+
+
+def _fits(world: World, before: Terms, after: Terms, route: Route) -> bool:
+    """Whether a PERSON could take this route between two OPTIONs, as far as their times say.
+
+    False only where both OPTIONs start at fixed times and the route takes longer than the
+    time between them. The PERSON leaves when the first OPTION ends, takes each WAY for as
+    long as this world says, and has to be there the access cutoff of the second OPTION
+    before it starts. Waiting on the way, and a span that rules an unlisted WAY out, only make
+    the route take longer. Where a time is not fixed, or has no limit, the timing decides.
+    """
+    if before.fixed_start is None or after.fixed_start is None:
+        return True
+    if before.longest is None or after.margin is None:
+        return True
+    takes = 0
+    for way, _, _ in route:
+        if way is None:
+            takes += world.unlisted_takes
+            continue
+        shortest, longest = world.takes[way]
+        if longest is None:
+            return True
+        takes += shortest
+    leaves = before.fixed_start + before.shortest
+    return leaves + takes + after.margin <= after.fixed_start
 
 
 def _fewest_first[T: Sized](choices: Sequence[Sequence[T]]) -> Iterator[tuple[T, ...]]:
