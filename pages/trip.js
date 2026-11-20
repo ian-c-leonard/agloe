@@ -118,6 +118,18 @@ function scene(file, report) {
     const asked = missing.find((need) => need.what === "duration" && need.option === ride.id);
     ride.atMost = asked ? lengthOf(asked.at_most) : null;
     ride.by = deadline[ride.to] ?? null;
+    // Lateness is marked only where the report says so. The report on a trip that cannot work
+    // names the length of the ride and the cutoff among the records that clash. The report on a
+    // trip that may not hold says how late people would be at worst.
+    ride.late = null;
+    const next = items.find((item) => item.kind === "departure" && item.place === ride.to && item.cutoff !== null);
+    if (next && ride.length !== null) {
+      const by = next.start - next.cutoff;
+      const lands = ride.leaves + ride.length;
+      const slow = (found.at_worst || []).find((worst) => worst.option === next.id && worst.late);
+      if (ride.clash && next.clashCutoff && lands > by) ride.late = { from: by, minutes: lands - by, sure: true };
+      else if (slow && step && ride.longest !== null) ride.late = { from: by, minutes: lengthOf(slow.late), sure: false };
+    }
   }
   const other = missing.find((need) => need.what === "other ways");
   if (other) {
@@ -125,14 +137,12 @@ function scene(file, report) {
     const leaves = before.length ? Math.max(...before) : FIRST + 30;
     items.push({ kind: "ghost", id: "another-way", from: other.from, to: other.to, leaves, atMost: lengthOf(other.at_most) });
   }
-  const worst = (found.at_worst || []).find((late) => late.late);
   // A lane for each PLACE where something on the day happens, leaves or lands.
   const places = file.places.filter((place) => items.some((item) => [item.place, item.from, item.to].includes(place.id)));
   return {
-    items, places, deadline,
+    items, places,
     complete: file.facts.some((fact) => fact.complete),
     completeClash: file.facts.some((fact) => fact.complete && clash.has(fact.id)),
-    lateAtWorst: worst ? { option: worst.option, minutes: lengthOf(worst.late) } : null,
   };
 }
 
@@ -226,7 +236,9 @@ function start() {
   const playing = trip.querySelector("#playing");
 
   let pieces = {}; // what a reader can add, from trip/additions.json
-  let now = { version: versions[0], file: structuredClone(stories[versions[0]].file), report: stories[versions[0]].report };
+  // What the page shows: a FILE, and the last report. `fresh` says the report is on this very FILE.
+  // Marks on the day and on the FILE come only from a fresh report.
+  let now = { version: versions[0], file: structuredClone(stories[versions[0]].file), report: stories[versions[0]].report, fresh: true };
   let drawn = null; // the scene on the page, for moving smoothly to the next one
   let scrolledTo = ""; // the changed line that the FILE last scrolled to
   let moving = 0;
@@ -291,6 +303,7 @@ function start() {
     } else {
       now.report = { text: data.text, json: data.json, seconds: data.seconds };
     }
+    now.fresh = true;
     show();
   }
 
@@ -308,7 +321,7 @@ function start() {
           ? "Still checking. The reference checker tries every order, so a busier day takes it longer."
           : waiting
             ? "Checking."
-            : now.report && now.report.seconds !== undefined
+            : now.fresh && now.report.seconds !== undefined
               ? `Checked in your browser by the reference checker, in ${Math.max(1, Math.round(now.report.seconds * 1000))} ms.`
               : "";
   }
@@ -328,8 +341,9 @@ function start() {
   function show(smooth = false) {
     const own = now.version === null;
     trip.classList.toggle("own", own);
-    trip.dataset.answer = now.report ? answerOf(now.report) : "waiting";
-    const found = now.report && now.report.json ? now.report.json : {};
+    const fresh = now.fresh ? now.report : null;
+    trip.dataset.answer = fresh ? answerOf(fresh) : "waiting";
+    const found = fresh && fresh.json ? fresh.json : {};
     const marked = new Set([...(found.conflict || [])]);
     // The FILE, with the lines that differ from the first version marked, and the lines that clash.
     const words = own ? text(now.file) : stories[now.version].words;
@@ -365,7 +379,7 @@ function start() {
     }
     const complete = tools.querySelector("#complete");
     if (complete && pieces.complete) complete.checked = holds(now.file, pieces.complete);
-    const next = scene(now.file, now.report);
+    const next = scene(now.file, fresh);
     if (smooth && drawn && !still) glide(drawn, next);
     else draw(next);
   }
@@ -554,13 +568,9 @@ function start() {
             over.append(make("circle", { class: `late-end${late > item.length ? " set" : ""}`, hint: "Pull to say how late it may run", cx: tall ? lx : lx + (late > item.length ? 0 : 20), cy: tall ? ly + (late > item.length ? 0 : 20) : ly, r: 6, "data-act": "late", "data-id": item.id }));
           }
         }
-        // Where the ride lands after the time people must be there, the lateness is marked.
-        if (known && item.by !== null && item.by !== undefined && item.taken !== false) {
-          const lands = item.leaves + (item.longest ?? item.length);
-          if (lands > item.by) {
-            const late = box(item.by, toEdge - (down ? 9 : 0), lands - item.by, 9);
-            under.append(make("rect", { class: item.leaves + item.length > item.by ? "too-late" : "late-at-worst", ...late, rx: 2 }));
-          }
+        // Where the report says people are too late, the lateness is marked along the lane.
+        if (item.late) {
+          under.append(make("rect", { class: item.late.sure ? "too-late" : "late-at-worst", ...box(item.late.from, toEdge - (down ? 9 : 0), item.late.minutes, 9), rx: 2 }));
         }
       }
     }
@@ -577,18 +587,18 @@ function start() {
   /** The reader has changed the trip: it is their own version now, and the checker checks it. */
   function mine(edit) {
     if (now.version !== null) {
-      now = { version: null, file: structuredClone(now.file), report: now.report };
+      now = { version: null, file: structuredClone(now.file), report: now.report, fresh: false };
       stop();
       for (const story of Object.values(stories)) story.input.checked = false;
     }
     edit(now.file);
-    now.report = now.report ? { ...now.report, seconds: undefined } : null;
+    now.fresh = false;
     show();
     ask();
   }
 
   function itemOf(id) {
-    return scene(now.file, now.report).items.find((item) => item.id === id);
+    return scene(now.file, now.fresh ? now.report : null).items.find((item) => item.id === id);
   }
 
   /** Apply one gesture: `by` is how far it has gone, in minutes. `from` is the item as it was. */
@@ -661,7 +671,7 @@ function start() {
   const story = { timer: 0, spent: 0, near: false, seen: true };
   function tell(version, smooth = true) {
     stories[version].input.checked = true;
-    now = { version, file: structuredClone(stories[version].file), report: stories[version].report };
+    now = { version, file: structuredClone(stories[version].file), report: stories[version].report, fresh: true };
     show(smooth);
   }
   function stop() {
@@ -715,7 +725,7 @@ function start() {
     .catch(() => {});
 
   trip.classList.add("alive");
-  new ResizeObserver(() => draw(scene(now.file, now.report))).observe(day);
+  new ResizeObserver(() => draw(scene(now.file, now.fresh ? now.report : null))).observe(day);
   show();
   if (!still) play();
 }
