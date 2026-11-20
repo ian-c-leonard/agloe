@@ -22,7 +22,6 @@ from agloe.reference import (
     routes,
     worst_case,
 )
-from agloe.reference import _fits as fits  # pyright: ignore[reportPrivateUsage]
 from tests.stories import (
     Document,
     complete,
@@ -352,6 +351,14 @@ def test_a_transfer_too_slow_for_the_train_is_tried_for_nobody(
     assert compiler.check(small) == answers.check(small)
 
 
+def fits(world: World, before: reference.Terms, after: reference.Terms, route: Any) -> bool:
+    """Whether the search keeps this route between two OPTIONs."""
+    leaves = reference._over(before)  # pyright: ignore[reportPrivateUsage]
+    there_by = reference._open_until(after)  # pyright: ignore[reportPrivateUsage]
+    takes = reference._length(world, route)  # pyright: ignore[reportPrivateUsage]
+    return reference._in_time(leaves, there_by, takes)  # pyright: ignore[reportPrivateUsage]
+
+
 def test_a_route_that_does_not_fit_is_in_no_plan() -> None:
     """Each route that is left out is refused by the timing too, whatever else is chosen.
 
@@ -403,7 +410,7 @@ def test_leaving_out_routes_that_do_not_fit_changes_no_report(
     def every_route_fits(*_: object) -> bool:
         return True
 
-    monkeypatch.setattr(reference, "_fits", every_route_fits)
+    monkeypatch.setattr(reference, "_in_time", every_route_fits)
     seen: set[Answer] = set()
     for file, (slow, fast) in zip(files, found, strict=True):
         every_route = answers.check(file)
@@ -471,18 +478,22 @@ def test_leaving_out_routes_with_no_time_at_the_ends_changes_no_report(
     files = [
         random_trip(rng, 0.3, with_ways=0.9, with_ends=0.7, with_times=0.7) for _ in range(250)
     ]
-    cut = 0
-    in_time = reference._in_time  # pyright: ignore[reportPrivateUsage]
+    # How many routes each kind of end leaves out: to a first OPTION, after a last one, and
+    # for a PERSON who takes part in none.
+    cut = {"first": 0, "last": 0, "none": 0}
+    at_an_end = Routes.at_an_end
 
-    def counted(*given: Any) -> bool:
-        nonlocal cut
-        fits = in_time(*given)
-        cut += not fits
-        return fits
+    def counted(
+        self: Routes, here: str, there: str, first: int | None, then: int | None
+    ) -> list[reference.Route]:
+        left = at_an_end(self, here, there, first, then)
+        kind = "first" if then is not None else "last" if first is not None else "none"
+        cut[kind] += len(self.between(here, there, then is None)) - len(left)
+        return left
 
-    monkeypatch.setattr(reference, "_in_time", counted)
+    monkeypatch.setattr(Routes, "at_an_end", counted)
     found = [(answers.check(file), compiler.check(file)) for file in files]
-    assert cut > 50
+    assert all(count > 5 for count in cut.values()), cut
 
     def every_route_is_in_time(*_: object) -> bool:
         return True
