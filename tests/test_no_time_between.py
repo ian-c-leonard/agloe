@@ -14,6 +14,7 @@ from agloe.file import Complete, File, Lock
 from agloe.reference import NoTimeBetween, Remaining, World, best_case, longest_case, worst_case
 from tests.stories import (
     Document,
+    any_time,
     at,
     complete,
     cutoff,
@@ -30,6 +31,8 @@ from tests.stories import (
     takes,
     takes_between,
     trip,
+    trip_ends,
+    trip_starts,
     way,
     way_between,
 )
@@ -45,7 +48,7 @@ def a_day_of_stops(rng: Random) -> File:
     Some stops are rides. Some WAYs can run long, and some have no stated length. Half the
     time a FACT says the FILE lists every way, for the whole day or for part of it, between
     all PLACEs or from one of them. Sam is LOCKed into some stops, and must have a view that
-    one or two stops give.
+    one or two stops give. Sometimes a DECISION says when the TRIP starts, or when it ends.
     """
     options: list[Document] = []
     facts: list[Document] = []
@@ -102,6 +105,10 @@ def a_day_of_stops(rng: Random) -> File:
             facts.append(every("a-view"))
     people = ["sam", "jo"] if rng.random() < 0.25 else ["sam"]
     locked = [lock(option["id"], "sam") for option in options if rng.random() < 0.4]
+    if rng.random() < 0.4:
+        locked.append(trip_starts(rng.choice([8, 9])))
+    if rng.random() < 0.4:
+        locked.append(trip_ends(rng.choice([13, 15, 18])))
     return trip(people, PLACES, options, facts, locked, ways=ways, wants=wants)
 
 
@@ -117,7 +124,7 @@ def with_other_ways(rng: Random, file: File, world: World) -> World:
     """The same world, with unlisted WAYs between some PLACEs of this FILE, at some length."""
     places = [place.id for place in file.places]
     pairs = [(here, there) for here in places for there in places if here != there]
-    joined = frozenset(pair for pair in pairs if rng.random() < 0.3)
+    joined = frozenset(pair for pair in pairs if rng.random() < 0.15)
     return replace(world, unlisted=joined, unlisted_takes=rng.choice([0, 300, 900, 3600]))
 
 
@@ -223,6 +230,10 @@ def nothing(*given: object, **named: object) -> None:
     return None
 
 
+def as_it_is(file: File, world: World) -> World:
+    return world
+
+
 def apart(file: File, world: World, one: str, other: str) -> bool:
     ids = [option.id for option in file.options]
     return NoTimeBetween(file, world).apart(ids.index(one), ids.index(other))
@@ -316,6 +327,7 @@ def test_the_looks_change_no_report(monkeypatch: pytest.MonkeyPatch) -> None:
         assert with_them[number] == answers.check(trips[number])
     monkeypatch.setattr(compiler, "_has_to_take_two_apart", never)
     monkeypatch.setattr(compiler._Search, "_take_one_of_two_apart", nothing)  # pyright: ignore[reportPrivateUsage]
+    monkeypatch.setattr(compiler, "_with_the_ways_that_can_start", as_it_is)
     assert [compiler.check(file) for file in trips] == with_them
 
 
@@ -486,3 +498,124 @@ def test_the_model_rules_out_what_is_apart_from_what_a_person_has_to_take(
     monkeypatch.setattr(compiler._Search, "_take_one_of_two_apart", nothing)  # pyright: ignore[reportPrivateUsage]
     assert not compiler.can_work(Remaining(file))
     assert searched(solves) > 1000
+
+
+def two_stops_with_no_listed_way(
+    span: tuple[str, str],
+    starts: str | None = "08:00:00",
+    ends: str | None = "13:00:00",
+    about: tuple[str | None, str | None] = (None, None),
+) -> File:
+    """Sam is LOCKed at the hotel at 9:00 and into a stop at the dock at no stated time.
+
+    The FILE lists no WAY. A FACT says it lists every way that leaves within ``span``,
+    between the PLACEs in ``about``. DECISIONs say when the TRIP starts and ends, unless one
+    is None. So Sam needs a way that nobody has listed, at a time the FACT leaves open.
+    """
+
+    def moment(clock: str) -> str:
+        return at(9).replace("09:00:00", clock)
+
+    closed = complete(*about)
+    closed["complete"]["leaving"] = {"earliest": moment(span[0]), "latest": moment(span[1])}
+    decisions = [lock("morning", "sam"), lock("later", "sam")]
+    if starts is not None:
+        decisions.append({"id": "trip-start", "trip_starts_at": moment(starts)})
+    if ends is not None:
+        decisions.append({"id": "trip-end", "trip_ends_at": moment(ends)})
+    return trip(
+        ["sam"],
+        ["hotel", "dock", "pier"],
+        [stays("morning", "hotel"), stays("later", "dock")],
+        [
+            starts_at("morning", 9),
+            lasts("morning", "PT0S"),
+            cutoff("morning", "PT0S"),
+            any_time("later"),
+            lasts("later", "PT0S"),
+            cutoff("later", "PT0S"),
+            closed,
+        ],
+        decisions,
+    )
+
+
+WHOLE_TRIP = ("08:00:00", "13:00:00")
+
+
+@pytest.mark.parametrize(
+    ("file", "leaves_none", "answer"),
+    [
+        (two_stops_with_no_listed_way(WHOLE_TRIP), True, Answer.INFEASIBLE),
+        (two_stops_with_no_listed_way(("00:00:00", "23:59:00")), True, Answer.INFEASIBLE),
+        (two_stops_with_no_listed_way(("08:00:01", "13:00:00")), False, Answer.UNDETERMINED),
+        (two_stops_with_no_listed_way(("08:00:00", "12:59:59")), False, Answer.UNDETERMINED),
+        (two_stops_with_no_listed_way(WHOLE_TRIP, starts=None), False, Answer.UNDETERMINED),
+        (two_stops_with_no_listed_way(WHOLE_TRIP, ends=None), False, Answer.UNDETERMINED),
+        (
+            two_stops_with_no_listed_way(WHOLE_TRIP, about=("pier", None)),
+            False,
+            Answer.UNDETERMINED,
+        ),
+        (
+            two_stops_with_no_listed_way(WHOLE_TRIP, about=(None, "pier")),
+            False,
+            Answer.UNDETERMINED,
+        ),
+    ],
+    ids=[
+        "the span is the whole TRIP",
+        "the span is the whole day",
+        "the span starts a second after the TRIP",
+        "the span ends a second before the TRIP",
+        "the TRIP has no start",
+        "the TRIP has no end",
+        "the FACT is about the ways from the pier",
+        "the FACT is about the ways to the pier",
+    ],
+)
+def test_no_unlisted_way_is_tried_where_none_can_start(
+    file: File, leaves_none: bool, answer: Answer
+) -> None:
+    """A FACT about all travel for the whole TRIP leaves no time for an unlisted WAY.
+
+    Then the solver is given a world with none. A second of the TRIP outside the span, a
+    TRIP with no start or no end, or a FACT about some PLACEs only, and the world stays as
+    it is: a way that nobody has listed could still help.
+    """
+    best = best_case(file)
+    narrowed = compiler._with_the_ways_that_can_start(file, best)  # pyright: ignore[reportPrivateUsage]
+    assert best.unlisted is None
+    assert narrowed == (replace(best, unlisted=frozenset()) if leaves_none else best)
+    report = compiler.check(file)
+    assert report == answers.check(file)
+    assert report.answer is answer
+
+
+def test_the_model_has_no_route_that_nobody_can_take(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lunch and a boat, with the times of the TRIP stated: each model is of a world with no
+    unlisted WAY, and it is smaller for that.
+    """
+    day = [trip_starts(8), trip_ends(20)]
+    file = lunch_and_a_boat(others=3)
+    file = replace(file, decisions=(*file.decisions, *trip([], [], [], [], day).decisions))
+    seen: list[tuple[frozenset[tuple[str, str]] | None, int]] = []
+    search = compiler._Search.__init__  # pyright: ignore[reportPrivateUsage]
+
+    def noted(self: compiler._Search, *given: object, **named: object) -> None:  # pyright: ignore[reportPrivateUsage]
+        search(self, *given, **named)  # type: ignore[arg-type]
+        size = len(self.model.proto.variables)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        seen.append((self.world.unlisted, size))
+
+    monkeypatch.setattr(compiler._Search, "__init__", noted)  # pyright: ignore[reportPrivateUsage]
+    report = compiler.check(file)
+    with_none = list(seen)
+    seen.clear()
+    monkeypatch.setattr(compiler, "_with_the_ways_that_can_start", as_it_is)
+    assert compiler.check(file) == report
+    assert report.answer is Answer.INFEASIBLE
+    # The records go one by one. While the two times of the TRIP and the FACT are all still in,
+    # the world has no unlisted WAY.
+    assert frozenset() in {unlisted for unlisted, _ in with_none}
+    assert frozenset() not in {unlisted for unlisted, _ in seen}
+    assert sum(size for _, size in with_none) < sum(size for _, size in seen)
