@@ -7,6 +7,9 @@
 //     change would write
 //   node website_gestures.mjs said < [{ name, report }]
 //     prints the lines of each report that the page puts under the day
+//   node website_gestures.mjs scene < [{ name, file, report }]
+//     prints what the day shows from each report: the other ways it asks about, and how late
+//     people would be at worst
 //
 // A change that the page's code cannot make, or a report that it cannot read, ends this with an error.
 import { readFileSync } from "node:fs";
@@ -57,9 +60,19 @@ if (process.argv[2] === "files") {
   const either = copy(given.stories["depends-on-the-cab"]);
   change.remove(either, given.additions.complete);
   made.push({ name: "depends-on-the-cab: the ways are not all listed", file: either });
+  // A trip where the flight comes first: people land somewhere else, and the visit is after that.
+  const back = copy(given.stories.works);
+  gesture(back, "move", scene(back, null).items.find((item) => item.id === "flight"), -400);
+  gesture(back, "move", scene(back, null).items.find((item) => item.id === "museum-visit"), 120);
+  made.push({ name: "works: the flight leaves at 1:15 pm, and the visit starts at 4:00 pm", file: back });
   console.log(JSON.stringify(made));
 } else if (process.argv[2] === "said") {
   console.log(JSON.stringify(given.map(({ name, report }) => ({ name, said: said(report) }))));
+} else if (process.argv[2] === "scene") {
+  console.log(JSON.stringify(given.map(({ name, file, report }) => {
+    const view = scene(file, report);
+    return { name, ways: view.items.filter((item) => item.kind === "ghost"), late: view.late };
+  })));
 } else {
   const made = [];
   for (const { name, file, report } of given) {

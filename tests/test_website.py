@@ -33,6 +33,7 @@ import pytest
 from agloe import answers
 from agloe import report as reports_in
 from agloe.file import load
+from agloe.reference import Constraint
 
 ROOT = Path(__file__).parent.parent
 PAGES = ROOT / "pages"
@@ -295,8 +296,9 @@ def test_the_lines_under_the_day_leave_nothing_out() -> None:
     """Under the day the page puts the answer and every line that says what the answer turns on.
 
     An UNDETERMINED report says what the FILE would have to say: one condition, or several
-    cases. The page shows that whole paragraph. A report with a WARNING marks each step that may
-    go wrong: the page shows each such step with what would go wrong at it.
+    cases, and then what else has to be true for that to help. The page shows all of it. A report
+    with a WARNING marks each step that may go wrong: the page shows each such step with what
+    would go wrong at it.
     """
     trips = reported_trips()
     shown = page_code("said", [{"name": trip["name"], "report": trip["report"]} for trip in trips])
@@ -308,11 +310,8 @@ def test_the_lines_under_the_day_leave_nothing_out() -> None:
         assert said[0] == lines[0], name
         answer = trip["report"]["json"]["answer"]
         if answer == "UNDETERMINED":
-            # The paragraph after the answer: from the first line with words to the next empty one.
-            rest = lines[2:]
-            paragraph = rest[: rest.index("")] if "" in rest else rest
-            assert said[1:] == [line.strip() for line in paragraph], name
-            several += len(paragraph) > 1
+            assert said[1:] == [line.strip() for line in lines[1:] if line.strip()], name
+            several += "The trip works in any of these cases:" in said
         elif trip["report"]["json"].get("robust") is False:
             for at, line in enumerate(lines):
                 if line.strip().startswith("!"):
@@ -321,6 +320,42 @@ def test_the_lines_under_the_day_leave_nothing_out() -> None:
         else:
             assert len(said) == 1, name
     assert several, "no report offered several cases"
+
+
+def test_the_day_shows_what_the_report_says() -> None:
+    """The day draws each other way that a report asks about, and how late people would be.
+
+    Too late to arrive is counted from the time to be there. Still busy when something starts is
+    counted from its start. The page tells the two apart by the name of the rule in the report.
+    """
+    trips = reported_trips()
+    shown = {each["name"]: each for each in page_code("scene", trips)}
+    rules = {Constraint.ARRIVAL.value, Constraint.PLACE.value}
+    for trip in trips:
+        found = trip["report"]["json"]
+        day = shown[trip["name"]]
+        asked = {
+            (need["from"], need["to"])
+            for enough in found.get("missing", [])
+            for need in enough
+            if need["what"] == "other ways" and need.get("from") and need.get("to")
+        }
+        assert {(way["from"], way["to"]) for way in day["ways"]} == asked, trip["name"]
+        late = [worst for worst in found.get("at_worst", []) if worst.get("late")]
+        assert all(worst["constraint"] in rules for worst in late), trip["name"]
+        assert len(day["late"]) == len(late), trip["name"]
+    # The train may take three hours, so it may land at 6:00 pm. People must be there by 4:15 pm,
+    # and the flight leaves at 5:00 pm.
+    bars = sorted(
+        (bar["from"], bar["minutes"]) for bar in shown["works: late blue-line by 400"]["late"]
+    )
+    assert bars == [(16 * 60 + 15, 105), (17 * 60, 60)]
+    # Coffee at O'Hare comes before the visit, so the report asks about ways there and back.
+    there_and_back = shown["cannot-work: the ways are not all listed, and coffee is at 1:30 pm"]
+    assert len(there_and_back["ways"]) == 2
+    # The flight lands at 3:45 pm. Another way back to the visit is drawn from then, to its start.
+    back = shown["works: the flight leaves at 1:15 pm, and the visit starts at 4:00 pm"]["ways"]
+    assert [(way["leaves"], way["shown"]) for way in back] == [(15 * 60 + 45, 15)]
 
 
 def test_every_link_leads_somewhere() -> None:
