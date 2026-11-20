@@ -42,7 +42,8 @@ _TOO_MANY_VALUES = "The sum of all variable domains do not fit on an int64_t"
 type _Who = tuple[tuple[str, ...], ...]  # the PERSONs in each OPTION
 type _Orders = tuple[tuple[int, ...], ...]  # the OPTIONs each PERSON does, in order
 type _By = dict[tuple[int, int], reference.Route]  # the WAYs a PERSON takes after an OPTION
-# When a PERSON starts each WAY of those routes, by the place of the WAY in its route.
+# When a PERSON starts an unlisted WAY of those routes that a COMPLETE FACT could rule out, by
+# the place of the WAY in its route.
 type _Falls = dict[tuple[int, int, int], int]
 type _Choice = tuple[_Who, _Orders, _By | None, _Falls | None]
 # What the solver answered for each model it was asked about, by the digest of the model.
@@ -258,8 +259,9 @@ class _Search:
         # choice that takes it.
         self.routes: list[dict[tuple[int, int], _Taken]] = []
         self.legs: list[tuple[cp_model.IntVar, int]] = []  # a route taken, and how many WAYs it has
-        # When each WAY of a route starts, for the choice that takes the route.
-        self.moments: dict[tuple[int, reference.Route], list[cp_model.IntVar]] = {}
+        # When an unlisted WAY of a route starts, where a COMPLETE FACT could rule it out: for
+        # the choice that takes the route, the route and the place of the WAY in it.
+        self.moments: dict[tuple[int, reference.Route, int], cp_model.IntVar] = {}
         self.known = reference.Routes(file, world)
         self._worth_trying: dict[tuple[str, str, bool], list[reference.Route]] = {}
         for number in range(len(file.persons)):
@@ -659,14 +661,15 @@ class _Search:
         when the last WAY ends, or None where it has no limit: then nobody knows.
         """
         model = self.model
-        moments = self.moments.setdefault((chosen.index, route), [])
         for place, (way, origin, destination) in enumerate(route):
             moment = model.new_int_var(self.earliest, self.latest, f"{chosen.name} leg {place}")
-            moments.append(moment)
             if free is not None:
                 _when(model.add(moment >= free), chosen)
             if way is None:
                 self._outside_every_span(moment, origin, destination, chosen)
+                if self.plain and self.facts:
+                    # The check of the plan asks which side of each span this WAY is on.
+                    self.moments[chosen.index, route, place] = moment
             lasts = self.way_lasts[way]
             self._keep_within_the_trip(moment, lasts, chosen)
             free = None if lasts is None else moment + lasts
@@ -791,12 +794,14 @@ class _Search:
         falls: _Falls = {}
 
         def takes(number: int, position: int, routes: _Taken) -> None:
-            """Note the route this PERSON takes after an OPTION, and when each WAY starts."""
+            """Note the route this PERSON takes after an OPTION, and when its WAYs start."""
             for chosen, route in routes:
                 if solver.boolean_value(chosen):
                     by[number, position] = route
-                    for place, moment in enumerate(self.moments[chosen.index, route]):
-                        falls[number, position, place] = solver.value(moment) + self.zero
+                    for place in range(len(route)):
+                        moment = self.moments.get((chosen.index, route, place))
+                        if moment is not None:
+                            falls[number, position, place] = solver.value(moment) + self.zero
 
         for number, follows in enumerate(self.follows):
             order: list[int] = []
