@@ -642,13 +642,22 @@ def length(text: str) -> int:
 
 def read(path: Path) -> File:
     """Read a FILE from disk. Raises FileError if it is not JSON or does not follow the format."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except ValueError as problem:
+        raise FileError([f"not readable as JSON: {problem}"]) from problem
+    return parse(text)
+
+
+def parse(text: str) -> File:
+    """Read a FILE from its text. Raises FileError as ``read`` does for the same text."""
 
     def no_constants(name: str) -> object:
         raise ValueError(f"{name} is not a JSON value")
 
     try:
         written: object = json.loads(
-            path.read_text(encoding="utf-8"),
+            text,
             object_pairs_hook=_Pairs,
             parse_constant=no_constants,
             parse_float=_exactly,

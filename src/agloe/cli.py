@@ -117,12 +117,12 @@ def _view(path: Path, port: int, in_a_browser: bool) -> int:
     except OSError as problem:
         print(f"the view cannot be served on port {port}: {problem.strerror}", file=sys.stderr)
         return 2
-    print(f"The view of {path} is at {view.address}", flush=True)
-    if in_a_browser:
-        webbrowser.open(view.address)
-    # However the command is stopped, the check that is running is ended with it.
+    # However the command is stopped, and whenever, the check that is running is ended with it.
     signal.signal(signal.SIGTERM, _stopped)
     try:
+        print(f"The view of {path} is at {view.address}", flush=True)
+        if in_a_browser:
+            webbrowser.open(view.address)
         view.serve()
     except KeyboardInterrupt:
         pass

@@ -12,7 +12,9 @@ FILE changes is ended.
 
 import contextlib
 import json
+import os
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -27,9 +29,17 @@ if TYPE_CHECKING:
     from agloe.view.check import Event
 
 KINDS = {".html": "text/html", ".css": "text/css", ".js": "text/javascript"}
-LOOK = 0.1  # seconds between two looks at the FILE
+LOOK = 0.1  # seconds between two looks at the FILE, and at whether the view is closed
 QUIET = 15.0  # seconds after which a page with nothing new is told that the view is still there
-ENDS = {"report", "refused", "unwritable"}  # the events that a check can end with
+ANSWERS = {"FEASIBLE", "INFEASIBLE", "UNDETERMINED"}
+# What a check can say, and what each of its events must hold. A check ends with one of ENDS.
+SHAPES: dict[str, dict[str, type | tuple[type, ...]]] = {
+    "answer": {"answer": str, "seconds": (int, float)},
+    "report": {"answer": str, "json": dict, "text": str, "seconds": (int, float)},
+    "refused": {"problems": list},
+    "unwritable": {},
+}
+ENDS = {"report", "refused", "unwritable"}
 # The page loads nothing from any other host, sends nothing to one, and sits in no other page.
 POLICY = "default-src 'self'; frame-ancestors 'none'"
 
@@ -44,6 +54,27 @@ def _static() -> dict[str, tuple[str, bytes]]:
     return parts
 
 
+def _said(line: bytes) -> Event:
+    """One line that a check printed, as the event it is. Raises ValueError where it is none."""
+    said: object = json.loads(line.decode())
+    if not isinstance(said, dict):
+        raise ValueError("a check printed something that is no event")
+    event = cast("Event", said)
+    kind = event.get("kind")
+    shape = SHAPES.get(kind) if isinstance(kind, str) else None
+    if shape is None or set(event) != {"kind", *shape}:
+        raise ValueError("a check printed something that is no event")
+    if not all(isinstance(event[name], kinds) for name, kinds in shape.items()):
+        raise ValueError("a check printed an event that does not hold what it must")
+    if "answer" in event and event["answer"] not in ANSWERS:
+        raise ValueError("a check printed an answer that is none of the three")
+    if "problems" in event and not all(
+        isinstance(problem, str) for problem in cast("list[object]", event["problems"])
+    ):
+        raise ValueError("a check printed a problem that is no text")
+    return event
+
+
 class View:
     """The view of one FILE. ``serve`` runs it until ``close``. ``address`` is where the page is.
 
@@ -55,6 +86,7 @@ class View:
         self.python = python
         self._server = _Server(("127.0.0.1", port), _Asked)
         self._server.view = self
+        self._server.timeout = LOOK
         self._port = int(self._server.server_address[1])
         self.address = f"http://127.0.0.1:{self._port}/"
         self.static = _static()
@@ -71,23 +103,28 @@ class View:
         return {f"127.0.0.1:{self._port}", f"localhost:{self._port}"}
 
     def serve(self) -> None:
-        """Serve the page and watch the FILE, until ``close`` or until the command is stopped."""
+        """Serve the page and watch the FILE, until ``close`` or until the command is stopped.
+
+        However it ends, it ends the check that is running, lets every page go, and gives the
+        port back, before it returns.
+        """
         self._serving = True
         watching = threading.Thread(target=self._watch, daemon=True)
-        watching.start()
         try:
-            self._server.serve_forever(poll_interval=LOOK)
+            watching.start()
+            # One request at a time is taken up, so that the view sees soon that it is closed.
+            while not self.closed:
+                self._server.handle_request()
         finally:
             self._stop()
             self._server.server_close()
-            watching.join()
+            if watching.is_alive():
+                watching.join()
 
     def close(self) -> None:
-        """End the check that is running, let every page go, and stop serving."""
+        """Stop the view. ``serve`` returns soon after, from whichever thread it runs in."""
         self._stop()
-        if self._serving:
-            self._server.shutdown()
-        else:
+        if not self._serving:
             self._server.server_close()
 
     def _stop(self) -> None:
@@ -120,11 +157,24 @@ class View:
             return self.revision, sent + len(fresh), fresh
 
     def _look(self) -> bytes | str:
-        """The content of the FILE now, or the reason why it cannot be read."""
+        """The content of the FILE now, or the reason why it cannot be read.
+
+        Only a regular file is read. Whatever else has the FILE's name is opened without
+        waiting for it, so a pipe with nobody writing to it cannot hold the view up.
+        """
         try:
-            return self.path.read_bytes()
+            opened = os.open(self.path, os.O_RDONLY | os.O_NONBLOCK)
         except OSError as problem:
             return problem.strerror or str(problem)
+        try:
+            if not stat.S_ISREG(os.fstat(opened).st_mode):
+                return "It is not a regular file"
+            with open(opened, "rb", closefd=False) as file:
+                return file.read()
+        except OSError as problem:
+            return problem.strerror or str(problem)
+        finally:
+            os.close(opened)
 
     def _watch(self) -> None:
         """Check the FILE now, and again each time its content is another than at the last look.
@@ -142,9 +192,9 @@ class View:
                     seen = now
                     self.revision += 1
                     self._end_the_check()
-                    self.events = [self._event("file", name=self.path.name)]
+                    self.events = [self._about("file", name=self.path.name)]
                     if isinstance(now, str):
-                        self.events.append(self._event("unreadable", problem=now))
+                        self.events.append(self._about("unreadable", problem=now))
                     else:
                         check = threading.Thread(target=self._run, args=(self.revision, now))
                         check.daemon = True
@@ -152,7 +202,8 @@ class View:
                     self.changed.notify_all()
                 self.changed.wait(LOOK)
 
-    def _event(self, kind: str, **said: object) -> Event:
+    def _about(self, kind: str, **said: object) -> Event:
+        """An event about the state of the FILE that is the current one."""
         return {"kind": kind, "revision": self.revision, **said}
 
     def _run(self, revision: int, content: bytes) -> None:
@@ -172,7 +223,7 @@ class View:
                     stdout=subprocess.PIPE,
                 )
             except OSError:
-                self.events.append(self._event("stopped"))
+                self.events.append(self._about("stopped"))
                 self.changed.notify_all()
                 return
             self._check = check
@@ -183,19 +234,13 @@ class View:
             check.stdin.write(content)
             check.stdin.close()
             for line in check.stdout:
-                said: object = json.loads(line.decode())
-                if not isinstance(said, dict):
-                    raise ValueError("a check printed something that is no event")
-                event = cast("Event", said)
-                kind = event.get("kind")
-                if not isinstance(kind, str):
-                    raise ValueError("a check printed something that is no event")
+                event = _said(line)
                 with self.changed:
                     if revision != self.revision or self.closed:
                         return
                     self.events.append({**event, "revision": revision})
                     self.changed.notify_all()
-                    ended = kind in ENDS
+                    ended = event["kind"] in ENDS
         except OSError, ValueError:
             # The check was ended while it wrote, or it printed something that is no event.
             ended = False
@@ -205,7 +250,7 @@ class View:
             check.wait()
             with self.changed:
                 if revision == self.revision and not self.closed and not ended:
-                    self.events.append(self._event("stopped"))
+                    self.events.append(self._about("stopped"))
                     self.changed.notify_all()
 
     def _end_the_check(self) -> None:
@@ -228,7 +273,12 @@ class _Asked(BaseHTTPRequestHandler):
         super().setup()
         view = self.server.view
         with view.changed:
-            view.pages.add(self.connection)
+            if view.closed:
+                # The view closed while this connection was on its way in. It is let go at once.
+                with contextlib.suppress(OSError):
+                    self.connection.shutdown(socket.SHUT_RDWR)
+            else:
+                view.pages.add(self.connection)
 
     def finish(self) -> None:
         view = self.server.view
@@ -289,7 +339,8 @@ class _Asked(BaseHTTPRequestHandler):
                     return
                 revision, sent, fresh = news
                 for event in fresh:
-                    self.wfile.write(f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode())
+                    # Plain ASCII, so that whatever the FILE's name holds can be sent.
+                    self.wfile.write(f"data: {json.dumps(event)}\n\n".encode("ascii"))
                 if not fresh:
                     self.wfile.write(b": the view is still here\n\n")
                 self.wfile.flush()

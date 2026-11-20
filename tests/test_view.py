@@ -79,8 +79,9 @@ def serving(path: Path, python: str = sys.executable) -> Generator[View]:
 class Sent:
     """What the view sends a page, read one event at a time, each within a time limit."""
 
-    def __init__(self, view: View) -> None:
-        self.reply = urllib.request.urlopen(f"{view.address}events", timeout=30)
+    def __init__(self, view: View | str) -> None:
+        address = view if isinstance(view, str) else view.address
+        self.reply = urllib.request.urlopen(f"{address}events", timeout=30)
 
     def next(self, within: float = 60) -> dict[str, Any]:
         late = time.monotonic() + within
@@ -282,7 +283,18 @@ def test_the_answer_reaches_a_page_while_the_check_goes_on(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize(
-    "does", ["exit 3", "echo this is no event", "echo '[1, 2]'", "printf '\\377\\376\\n'", None]
+    "does",
+    [
+        "exit 3",
+        "echo this is no event",
+        "echo '[1, 2]'",
+        "printf '\\377\\376\\n'",
+        """echo '{"kind": "report"}'""",
+        """echo '{"kind": "answer", "answer": "PERHAPS", "seconds": 1}'""",
+        """echo '{"kind": "refused", "problems": [1]}'""",
+        """echo '{"kind": "file", "name": "another.json"}'""",
+        None,
+    ],
 )
 def test_a_check_that_ends_without_a_report_has_stopped(does: str | None, tmp_path: Path) -> None:
     """The page is told, so it never waits for a report that will not come.
@@ -300,6 +312,43 @@ def test_a_check_that_ends_without_a_report_has_stopped(does: str | None, tmp_pa
     ]
 
 
+def test_a_pipe_in_the_place_of_the_file_cannot_hold_the_view_up(tmp_path: Path) -> None:
+    """Only a regular file is read. A pipe with nobody writing to it would never give its end."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    with serving(path) as view:
+        sent = Sent(view)
+        sent.until("report")
+        path.unlink()
+        os.mkfifo(path)
+        pipe = sent.until("unreadable")[-2:]
+    assert kinds(pipe) == ["file", "unreadable"]
+    assert pipe[-1]["problem"] == "It is not a regular file"
+
+
+def test_a_file_with_a_name_that_is_no_text_is_checked_like_any_other(tmp_path: Path) -> None:
+    """A name on disk is bytes. The page is still sent every event."""
+    path = tmp_path / os.fsdecode(b"trip-\xff.json")
+    try:
+        shutil.copy(STORY / "works.json", path)
+    except OSError:
+        pytest.skip("this file system takes no such name")
+    with serving(path) as view:
+        sent = Sent(view).until("report")
+    assert kinds(sent) == ["file", "answer", "report"]
+    assert sent[0]["name"] == path.name
+
+
+def test_a_view_that_is_closed_before_it_serves_does_not_serve(tmp_path: Path) -> None:
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    view = View(path)
+    view.close()
+    view.serve()
+    with pytest.raises(OSError):
+        asked(view, "/")
+
+
 def test_the_view_stops_while_a_page_listens(tmp_path: Path) -> None:
     path = tmp_path / "trip.json"
     shutil.copy(STORY / "works.json", path)
@@ -309,6 +358,9 @@ def test_the_view_stops_while_a_page_listens(tmp_path: Path) -> None:
     # The view has stopped, and it has let the page go: the page reads the end of the last
     # event, and then the end of what the view sends.
     assert sent.reply.read().strip() == b""
+    # And nothing answers at the address any more.
+    with pytest.raises(OSError):
+        asked(view, "/")
 
 
 def test_the_view_serves_its_page_and_nothing_else(tmp_path: Path) -> None:
@@ -376,13 +428,17 @@ def test_what_the_page_hides_stays_hidden() -> None:
     assert "[hidden] { display: none !important; }" in (STATIC / "view.css").read_text()
 
 
-def command(path: Path) -> tuple[subprocess.Popen[str], str]:
-    """The command as a process of its own, and the address of the view that it prints."""
+def command(path: Path, python: str | None = None) -> tuple[subprocess.Popen[str], str]:
+    """The command as a process of its own, and the address of the view that it prints.
+
+    With ``python``, the command takes that program for the Python that runs its checks.
+    """
+    stand_in = f"sys.executable = {python!r}; " if python else ""
     started = subprocess.Popen(
         [
             sys.executable,
             "-c",
-            "import sys; from agloe.cli import main; sys.exit(main())",
+            f"import sys; {stand_in}from agloe.cli import main; sys.exit(main())",
             "view",
             str(path),
             "--no-browser",
@@ -409,14 +465,7 @@ def test_the_command_serves_the_view_until_it_is_stopped(
     try:
         with urllib.request.urlopen(address, timeout=20) as reply:
             assert reply.status == 200
-        seen: list[str] = []
-        with urllib.request.urlopen(f"{address}events", timeout=30) as reply:
-            for raw in reply:
-                if raw.startswith(b"data: "):
-                    seen.append(json.loads(raw.removeprefix(b"data: "))["kind"])
-                if seen[-1:] == ["report"]:
-                    break
-        assert seen == ["file", "answer", "report"]
+        assert kinds(Sent(address).until("report")) == ["file", "answer", "report"]
         started.send_signal(stop)
         assert started.wait(timeout=20) == 0
     finally:
@@ -425,6 +474,28 @@ def test_the_command_serves_the_view_until_it_is_stopped(
     # The check ran in a process of its own, and neither process had anything to complain of.
     assert started.stderr is not None
     assert started.stderr.read() == ""
+
+
+@pytest.mark.parametrize("stop", [signal.SIGINT, signal.SIGTERM], ids=["Ctrl-C", "ended"])
+def test_stopping_the_command_ends_the_check_that_is_running(
+    stop: signal.Signals, tmp_path: Path
+) -> None:
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    says = '{"kind": "answer", "answer": "FEASIBLE", "seconds": 0.1}'
+    # The stand-in notes which process it is, gives an answer, and then never ends by itself.
+    held = stand_in(tmp_path, f"echo $$ > \"$0.$$\"\nprintf '%s\\n' '{says}'\nexec sleep 600")
+    started, address = command(path, python=held)
+    try:
+        assert kinds(Sent(address).until("answer", within=20)) == ["file", "answer"]
+        (check,) = [int(noted.suffix[1:]) for noted in tmp_path.glob("python.*")]
+        assert running(check)
+        started.send_signal(stop)
+        assert started.wait(timeout=20) == 0
+        assert gone(check), "the check is still running after the command has ended"
+    finally:
+        started.kill()
+        started.wait(timeout=20)
 
 
 def test_the_command_needs_a_file_that_is_there(
