@@ -1325,7 +1325,8 @@ def scheduled(
 
     ``falls`` goes with ``by``. It says when a PERSON starts each WAY of those routes: for the
     PERSON, the position of the OPTION and the place of the WAY in the route. Then an unlisted
-    WAY is tried only in the opening between spans that holds its time, and no other.
+    WAY is tried only in the opening between spans that holds its time, and no other. Within
+    that opening the start times follow the usual rule, so they need not be the times given.
     """
     if by is not None:
         return next(_timings(file, world, who, orders, by, falls), None)
@@ -1637,21 +1638,20 @@ def _timings(
     falls, then before the first span that rules it out, then after each one.
 
     ``falls`` says when each WAY is started in a plan that is known to work. Then each such
-    unlisted WAY is tried only in the opening that holds its time. A plan that works with a
-    WAY in an opening works with every start as early as that opening allows.
+    unlisted WAY is tried only in the opening that holds its time. The opening leaves fixed
+    starts, limits and gaps, and the plan's own times meet them all. So the usual rule for
+    start times has an answer within that opening.
     """
     listed = len(file.options)
     legs: list[tuple[str, Leg]] = []  # each WAY taken: who takes it, and which one
-    taken: list[tuple[int, int, int]] = []  # the PERSON, the position and the place of each
     lines: list[list[int]] = []  # what each PERSON does in order, the WAYs they take included
     for number, (person, order) in enumerate(zip(file.persons, orders, strict=True)):
         line: list[int] = []
         for position in range(-1, len(order)):
             if position >= 0:
                 line.append(order[position])
-            for place, leg in enumerate(hops.get((number, position), ())):
+            for leg in hops.get((number, position), ()):
                 legs.append((person.id, leg))
-                taken.append((number, position, place))
                 line.append(listed + len(legs) - 1)
         lines.append(line)
 
@@ -1727,10 +1727,16 @@ def _timings(
     # An opening is one more limit on when the WAY starts. It fixes no start either.
     openings: list[list[int | None]] = [[None, *range(len(spans) + 1)] for _, spans in ruled_out]
     if falls is not None:
-        # The opening that holds the stated time: after each span that ends before it.
+        # When each of the WAYs starts in the plan that is known to work, in the order of
+        # ``legs``. The opening that holds that time comes after each span that ends before it.
+        known = [
+            falls[number, position, place]
+            for number, order in enumerate(orders)
+            for position in range(-1, len(order))
+            for place in range(len(hops.get((number, position), ())))
+        ]
         openings = [
-            [sum(latest < falls[taken[node - listed]] for _, latest in spans)]
-            for node, spans in ruled_out
+            [sum(latest < known[node - listed] for _, latest in spans)] for node, spans in ruled_out
         ]
     for choice in product(*openings):
         earliest, latest = dict(not_before), dict(no_later)

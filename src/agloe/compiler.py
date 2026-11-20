@@ -145,7 +145,8 @@ def _checked(
     For the ITINERARY shown, the reference checker picks the WAYs itself, in the order of the
     rules page, from the routes already worked out. Otherwise it checks the WAYs the solver
     picked. Where a COMPLETE FACT rules an unlisted WAY out for a span, it takes that WAY
-    before or after the span as the solver did, and tries no other timing.
+    before or after the span as the solver did, and tries no other side. The times are its
+    own, by the usual rule.
     """
     who, orders, by, falls = choice
     itinerary = reference.scheduled(file, world, who, orders, by, known, falls)

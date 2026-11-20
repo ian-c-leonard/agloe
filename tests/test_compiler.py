@@ -859,7 +859,7 @@ def test_a_plan_from_the_solver_is_checked_with_the_timing_the_solver_chose(
     """Nine PERSONs each take an unlisted WAY that a COMPLETE FACT rules out for an hour.
 
     Each WAY could be tried as it falls, before the span and after it: 19,683 timings for the
-    nine. The solver's plan takes each one after the span, and only that timing is checked.
+    nine. The solver's plan takes each one after the span, and only that side is checked.
     """
     file = stranded(9)
     tried = 0
@@ -878,7 +878,7 @@ def test_a_plan_from_the_solver_is_checked_with_the_timing_the_solver_chose(
 
 
 def test_a_way_is_tried_only_in_the_opening_that_holds_its_time() -> None:
-    """Sam goes from a to b by an unlisted WAY, which no span rules out after 13:00."""
+    """One PERSON goes from a to b by an unlisted WAY, which no span rules out after 13:00."""
     file = stranded(1)
     world = best_case(file)
     who: tuple[tuple[str, ...], ...] = ()
