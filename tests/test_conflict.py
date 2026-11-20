@@ -389,6 +389,31 @@ def test_two_locked_options_at_once_rule_out_every_plan() -> None:
     assert seen > 100
 
 
+def test_two_talks_at_noon_are_ruled_out_with_no_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sam is LOCKed into two talks of half an hour that both start at noon."""
+    facts: list[Document] = []
+    for name in ("first", "second"):
+        facts += [starts_at(name, 12), lasts(name, "PT30M")]
+    options = [stays("first", "hall"), stays("second", "hall")]
+    locks = [lock("first", "sam"), lock("second", "sam")]
+    file = trip(["sam"], ["hall"], options, facts, locks)
+    built = 0
+    search = compiler._Search  # pyright: ignore[reportPrivateUsage]
+    build = search.__init__
+
+    def counted(self: object, *given: Any, **named: Any) -> None:
+        nonlocal built
+        built += 1
+        build(self, *given, **named)  # pyright: ignore[reportArgumentType]
+
+    monkeypatch.setattr(search, "__init__", counted)
+    world = reference.worst_case(file)
+    assert compiler.shown(file, world) is None
+    assert not compiler.works(file, world)
+    assert not compiler.can_work(Remaining(file))
+    assert built == 0
+
+
 def test_two_locks_for_one_option_are_one_option() -> None:
     """Sam is LOCKed into lunch twice, once alone and once with Alex. One lunch honors both."""
     facts = [starts_at("lunch", 12), lasts("lunch", "PT30M")]
