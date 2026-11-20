@@ -68,6 +68,40 @@ _MONTHS = [
 ]
 
 
+# What an answer says when it comes ahead of its Report. FEASIBLE promises no more than every
+# FEASIBLE Report says: the WARNINGs are known only once the plan to show is chosen. INFEASIBLE
+# leaves open whether the conflict turns on the BUDGETs, as the Report does until its last test.
+_AHEAD = {
+    Answer.FEASIBLE: [
+        "FEASIBLE: this trip can work.",
+        "",
+        "The check is still choosing the plan to show. The report will say whether that plan"
+        " is sure to hold, and what is still to buy.",
+    ],
+    Answer.INFEASIBLE: [
+        "INFEASIBLE: this trip cannot work.",
+        "",
+        "The check is still working out which FACTs, WANTs and DECISIONs rule out every plan,"
+        " and whether they do so only with the BUDGETs of this FILE.",
+    ],
+    Answer.UNDETERMINED: [
+        "UNDETERMINED: the FILE does not say enough to tell.",
+        "",
+        "The check is still working out which missing FACTs would be enough.",
+    ],
+}
+
+
+def answer_as_text(answer: Answer) -> str:
+    """An answer given ahead of its Report, in plain words, ending with a line break."""
+    return "\n".join(_AHEAD[answer]) + "\n"
+
+
+def answer_as_json(answer: Answer) -> dict[str, object]:
+    """An answer given ahead of its Report: the answer, and that the Report is unfinished."""
+    return {"answer": answer.value, "unfinished": True}
+
+
 def as_json(file: File, report: Report) -> dict[str, object]:
     """The Report in the shape of the expected results beside the examples."""
     out: dict[str, object] = {"answer": report.answer.value}

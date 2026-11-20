@@ -27,6 +27,8 @@ uv run agloe check examples/flight-home/works.json
 uv run agloe check examples/a-must/cannot-work.json
 ```
 
+With `--answer-first`, the command prints the answer as soon as it is proved, and the report when the check is done.
+
 The releases:
 
 - **0.1, the COMPILER:** says whether a trip is FEASIBLE, INFEASIBLE or UNDETERMINED, and explains every finding with its evidence.

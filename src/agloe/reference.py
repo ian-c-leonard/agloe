@@ -1267,6 +1267,17 @@ def itineraries(file: File, world: World, known: Routes | None = None) -> list[I
 
     ``known`` can hold the routes of this world that are already worked out.
     """
+    return _that_work(file, world, known, one_is_enough=False)
+
+
+def _that_work(
+    file: File, world: World, known: Routes | None, one_is_enough: bool
+) -> list[Itinerary]:
+    """The ITINERARIES of ``itineraries``, or with ``one_is_enough`` the first one that is found.
+
+    The first one found works, like every one that ``scheduled`` returns. It need not be one in
+    which PERSONs take part the fewest times, nor the one a report shows.
+    """
     best: list[tuple[_Shown, Itinerary]] = []
     fewest: int | None = None
     known = known or Routes(file, world)
@@ -1286,6 +1297,8 @@ def itineraries(file: File, world: World, known: Routes | None = None) -> list[I
             found = scheduled(file, world, who, orders, known=known)
             if found is None:
                 continue
+            if one_is_enough:
+                return [found]
             taking_part = sum(len(step.persons) for step in found)
             if fewest is None or taking_part < fewest:
                 best, fewest = [], taking_part
@@ -2123,5 +2136,5 @@ def first_shown(file: File, world: World) -> Itinerary | None:
 
 
 def any_works(file: File, world: World) -> bool:
-    """Whether any ITINERARY works in this world."""
-    return bool(itineraries(file, world))
+    """Whether any ITINERARY works in this world. The search stops at the first that does."""
+    return bool(_that_work(file, world, None, one_is_enough=True))
