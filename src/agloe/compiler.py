@@ -42,7 +42,9 @@ _TOO_MANY_VALUES = "The sum of all variable domains do not fit on an int64_t"
 type _Who = tuple[tuple[str, ...], ...]  # the PERSONs in each OPTION
 type _Orders = tuple[tuple[int, ...], ...]  # the OPTIONs each PERSON does, in order
 type _By = dict[tuple[int, int], reference.Route]  # the WAYs a PERSON takes after an OPTION
-type _Choice = tuple[_Who, _Orders, _By | None]
+# When a PERSON starts each WAY of those routes, by the place of the WAY in its route.
+type _Falls = dict[tuple[int, int, int], int]
+type _Choice = tuple[_Who, _Orders, _By | None, _Falls | None]
 # What the solver answered for each model it was asked about, by the digest of the model.
 type _Asked = dict[bytes, tuple[cp_model.CpSolver, object]]
 type _Amount = cp_model.LinearExpr | int  # seconds: a plain number, or one the solver works out
@@ -142,9 +144,11 @@ def _checked(
 
     For the ITINERARY shown, the reference checker picks the WAYs itself, in the order of the
     rules page, from the routes already worked out. Otherwise it checks the WAYs the solver
-    picked.
+    picked. Where a COMPLETE FACT rules an unlisted WAY out for a span, it takes that WAY
+    before or after the span as the solver did, and tries no other timing.
     """
-    itinerary = reference.scheduled(file, world, *choice, known)
+    who, orders, by, falls = choice
+    itinerary = reference.scheduled(file, world, who, orders, by, known, falls)
     if itinerary is None:
         raise AssertionError("the solver chose PERSONs and orders that the rules refuse")
     return itinerary
@@ -253,6 +257,8 @@ class _Search:
         # choice that takes it.
         self.routes: list[dict[tuple[int, int], _Taken]] = []
         self.legs: list[tuple[cp_model.IntVar, int]] = []  # a route taken, and how many WAYs it has
+        # When each WAY of a route starts, for the choice that takes the route.
+        self.moments: dict[tuple[int, reference.Route], list[cp_model.IntVar]] = {}
         self.known = reference.Routes(file, world)
         self._worth_trying: dict[tuple[str, str, bool], list[reference.Route]] = {}
         for number in range(len(file.persons)):
@@ -652,8 +658,10 @@ class _Search:
         when the last WAY ends, or None where it has no limit: then nobody knows.
         """
         model = self.model
+        moments = self.moments.setdefault((chosen.index, route), [])
         for place, (way, origin, destination) in enumerate(route):
             moment = model.new_int_var(self.earliest, self.latest, f"{chosen.name} leg {place}")
+            moments.append(moment)
             if free is not None:
                 _when(model.add(moment >= free), chosen)
             if way is None:
@@ -779,6 +787,16 @@ class _Search:
         count = len(self.file.options)
         orders: list[tuple[int, ...]] = []
         by: _By = {}
+        falls: _Falls = {}
+
+        def takes(number: int, position: int, routes: _Taken) -> None:
+            """Note the route this PERSON takes after an OPTION, and when each WAY starts."""
+            for chosen, route in routes:
+                if solver.boolean_value(chosen):
+                    by[number, position] = route
+                    for place, moment in enumerate(self.moments[chosen.index, route]):
+                        falls[number, position, place] = solver.value(moment) + self.zero
+
         for number, follows in enumerate(self.follows):
             order: list[int] = []
             here = count
@@ -790,16 +808,13 @@ class _Search:
                 ]
                 if not ahead:
                     break
-                for chosen, route in self.routes[number].get((here, ahead[0]), ()):
-                    if solver.boolean_value(chosen):
-                        by[number, len(order) - 1] = route
+                takes(number, len(order) - 1, self.routes[number].get((here, ahead[0]), []))
                 order.append(ahead[0])
                 here = ahead[0]
-            for chosen, route in self.routes[number].get((here, count), ()):
-                if solver.boolean_value(chosen):
-                    by[number, len(order) - 1] = route  # the route after the last OPTION
+            # The route after the last OPTION.
+            takes(number, len(order) - 1, self.routes[number].get((here, count), []))
             orders.append(tuple(order))
-        return self._who(orders), tuple(orders), by
+        return self._who(orders), tuple(orders), by, falls
 
     def first_in_file_order(self) -> _Choice | None:
         """The choice of PERSONs and orders that "Which ITINERARY is shown" puts first."""
@@ -837,7 +852,7 @@ class _Search:
                 order.append(found)
                 here = found
             orders.append(tuple(order))
-        return self._who(orders), tuple(orders), None
+        return self._who(orders), tuple(orders), None, None
 
     def _who(self, orders: Sequence[tuple[int, ...]]) -> tuple[tuple[str, ...], ...]:
         """The PERSONs in each OPTION, given the OPTIONs each PERSON does."""

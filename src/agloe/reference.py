@@ -1305,6 +1305,7 @@ def scheduled(
     orders: tuple[tuple[int, ...], ...],
     by: Mapping[tuple[int, int], Route] | None = None,
     known: Routes | None = None,
+    falls: Mapping[tuple[int, int, int], int] | None = None,
 ) -> Itinerary | None:
     """The ITINERARY for one choice of PERSONs and orders, or None when it breaks a CONSTRAINT.
 
@@ -1321,9 +1322,13 @@ def scheduled(
     position is -1 for the route before their first OPTION, and for the one route of a PERSON
     who takes part in no OPTION. Without it,
     ``known`` can hold the routes of this world that are already worked out.
+
+    ``falls`` goes with ``by``. It says when a PERSON starts each WAY of those routes: for the
+    PERSON, the position of the OPTION and the place of the WAY in the route. Then an unlisted
+    WAY is tried only in the opening between spans that holds its time, and no other.
     """
     if by is not None:
-        return next(_timings(file, world, who, orders, by), None)
+        return next(_timings(file, world, who, orders, by, falls), None)
     return next(_schedules(file, world, who, orders, known or Routes(file, world)), None)
 
 
@@ -1623,23 +1628,30 @@ def _timings(
     who: tuple[tuple[str, ...], ...],
     orders: tuple[tuple[int, ...], ...],
     hops: Mapping[tuple[int, int], Route],
+    falls: Mapping[tuple[int, int, int], int] | None = None,
 ) -> Iterator[Itinerary]:
     """The ITINERARIES for one choice of PERSONs, orders and routes, one for each timing.
 
     Start times are as early as the CONSTRAINTs allow. A COMPLETE FACT rules out an unlisted WAY
     only within its span. So each unlisted WAY between the PLACEs of such a FACT is tried as it
     falls, then before the first span that rules it out, then after each one.
+
+    ``falls`` says when each WAY is started in a plan that is known to work. Then each such
+    unlisted WAY is tried only in the opening that holds its time. A plan that works with a
+    WAY in an opening works with every start as early as that opening allows.
     """
     listed = len(file.options)
     legs: list[tuple[str, Leg]] = []  # each WAY taken: who takes it, and which one
+    taken: list[tuple[int, int, int]] = []  # the PERSON, the position and the place of each
     lines: list[list[int]] = []  # what each PERSON does in order, the WAYs they take included
     for number, (person, order) in enumerate(zip(file.persons, orders, strict=True)):
         line: list[int] = []
         for position in range(-1, len(order)):
             if position >= 0:
                 line.append(order[position])
-            for leg in hops.get((number, position), ()):
+            for place, leg in enumerate(hops.get((number, position), ())):
                 legs.append((person.id, leg))
+                taken.append((number, position, place))
                 line.append(listed + len(legs) - 1)
         lines.append(line)
 
@@ -1713,7 +1725,13 @@ def _timings(
     ]
     # Each such WAY as it falls, then in each opening: before the first span, after each one.
     # An opening is one more limit on when the WAY starts. It fixes no start either.
-    openings = [[None, *range(len(spans) + 1)] for _, spans in ruled_out]
+    openings: list[list[int | None]] = [[None, *range(len(spans) + 1)] for _, spans in ruled_out]
+    if falls is not None:
+        # The opening that holds the stated time: after each span that ends before it.
+        openings = [
+            [sum(latest < falls[taken[node - listed]] for _, latest in spans)]
+            for node, spans in ruled_out
+        ]
     for choice in product(*openings):
         earliest, latest = dict(not_before), dict(no_later)
         for (node, spans), opening in zip(ruled_out, choice, strict=True):
