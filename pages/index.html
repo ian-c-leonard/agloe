@@ -5,8 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agloe: a standard format for trips, and a compiler that checks them</title>
 <meta name="description" content="Agloe is a standard format for trips, a compiler that checks them, and an optimizer that finds the best version. Open source.">
-<meta name="theme-color" content="#111417">
-<link rel="icon" href="favicon.svg">
+<meta name="theme-color" content="#FAF2E3">
+<link rel="icon" href="favicon.ico" sizes="48x48">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="favicon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="canonical" href="https://agloe.ai/">
 <link rel="preload" href="fonts/bookmania-regular-italic-subset.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
@@ -15,10 +18,10 @@
 <meta property="og:title" content="Agloe: a standard format for trips, and a compiler that checks them">
 <meta property="og:description" content="Agloe is a standard format for trips, a compiler that checks them, and an optimizer that finds the best version. Open source.">
 <meta property="og:url" content="https://agloe.ai/">
-<meta property="og:image" content="https://agloe.ai/img/social-preview.png">
+<meta property="og:image" content="https://agloe.ai/img/social-preview.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="The name Agloe, the line itineraries that compile, and the address agloe.ai">
+<meta property="og:image:alt" content="The Agloe icon and name, the line Itineraries that compile, and the home page in a browser window">
 <meta name="twitter:card" content="summary_large_image">
 <style>
 @font-face { font-family: "Bookmania"; src: url("fonts/bookmania-regular-italic-subset.woff2") format("woff2"); font-weight: 400; font-style: italic; font-display: swap; }
@@ -26,13 +29,17 @@
 @font-face { font-family: "IBM Plex Mono"; src: url("fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
 @font-face { font-family: "IBM Plex Mono"; src: url("fonts/ibm-plex-mono-latin-500-normal.woff2") format("woff2"); font-weight: 500; font-display: swap; }
 
-/* The "transit" palette of the brand kit: ground, ink, one accent, and brass used sparingly.
-   Colour marks trouble: the accent for what cannot work, brass for what nobody knows yet. */
+/* The materials of the icon: cream paper with its fibres, a soft black ink, vermilion for roads,
+   olive for woods and brass for rims. Vermilion marks what cannot work, brass what nobody knows yet.
+   The deeper vermilion is for words and fine lines, which the bright one is too pale for. */
 :root {
-  --ground: #FBFBF6; --surface: #FFFFFF; --tile: #F1F1EC;
-  --ink: #111417; --ink2: #50545A; --muted: #6C7074; --line: #D9D9D3; --travel: #5B6169;
-  --accent: #C7491F; --brass: #9A8330; --brass-ink: #6E5D1C; --stop: #C7491F;
-  --night: #111417; --night-ink: #EDEDE7; --night-dim: #979B9E; --night-accent: #F0875B; --night-brass: #CDBB6A; --night-stop: #F0875B;
+  --ground: #FAF2E3; --surface: #FDF8EE; --tile: #FCF7EC;
+  --ink: #1C1A17; --ink2: #4B463E; --muted: #766F62; --line: #DDCFB3; --travel: #B8431A;
+  --accent: #B8431A; --vermilion: #D5501E; --under: #A2380F; --olive: #5F6238; --rim: #C2A455; --rim-deep: #8A6D22;
+  --brass: #9A8330; --brass-ink: #6E5D1C; --stop: #B8431A;
+  --night: #18191B; --night-ink: #EBE1CD; --night-dim: #9C968A; --night-accent: #F0875B; --night-brass: #D6C173; --night-stop: #F0875B;
+  --paper: url("img/paper.webp"); --board: url("img/board.webp"); --grain: 512px;
+  --pressed: 0 1px 0 rgba(255, 253, 246, 0.6);
   --display: "Bookmania", "Bookman Old Style", "URW Bookman", Georgia, serif;
   --text: "Inter", system-ui, "Helvetica Neue", Arial, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -40,8 +47,8 @@
   color-scheme: light;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--ground); color: var(--ink); font: 1.0625rem/1.62 var(--text); }
-h1, h2, h3 { font-family: var(--display); font-style: italic; font-weight: 400; margin: 0; text-wrap: balance; }
+body { margin: 0; background: var(--ground) var(--paper) 0 0 / var(--grain); color: var(--ink); font: 1.0625rem/1.62 var(--text); }
+h1, h2, h3 { font-family: var(--display); font-style: italic; font-weight: 400; margin: 0; text-wrap: balance; text-shadow: var(--pressed); }
 h1 { font-size: clamp(2.7rem, 5.4vw, 4.1rem); line-height: 1.04; letter-spacing: -0.012em; }
 h2 { font-size: clamp(2rem, 3.7vw, 2.9rem); line-height: 1.08; letter-spacing: -0.008em; }
 h3 { font-size: 1.5rem; line-height: 1.2; }
@@ -54,34 +61,46 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .skip:focus { top: 12px; }
 .wrap { max-width: 1120px; margin-inline: auto; padding-inline: 24px; }
 .band { padding-block: clamp(60px, 8vw, 104px); }
-.tint { background: var(--tile); }
+/* A deeper sheet: the paper of the icon itself. */
+.tint { background: var(--tile) var(--paper) 0 0 / var(--grain); background-blend-mode: multiply; box-shadow: inset 0 1px 0 var(--line), inset 0 -1px 0 var(--line); }
 .stack { display: grid; gap: 18px; align-content: start; }
 .lead { font-size: 1.2rem; line-height: 1.55; color: var(--ink2); max-width: 34em; }
 .small { font-size: 0.93rem; color: var(--muted); }
 .label { font: 500 0.72rem/1.4 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
+/* Each label starts with the town of the icon: a ring of twelve dots. */
+.label::before { content: ""; display: inline-block; width: 1.05em; height: 1.05em; margin-right: 0.75em; vertical-align: -0.16em; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23B8431A'%3E%3Ccircle cx='21.00' cy='12.00' r='1.75'/%3E%3Ccircle cx='19.79' cy='16.50' r='1.75'/%3E%3Ccircle cx='16.50' cy='19.79' r='1.75'/%3E%3Ccircle cx='12.00' cy='21.00' r='1.75'/%3E%3Ccircle cx='7.50' cy='19.79' r='1.75'/%3E%3Ccircle cx='4.21' cy='16.50' r='1.75'/%3E%3Ccircle cx='3.00' cy='12.00' r='1.75'/%3E%3Ccircle cx='4.21' cy='7.50' r='1.75'/%3E%3Ccircle cx='7.50' cy='4.21' r='1.75'/%3E%3Ccircle cx='12.00' cy='3.00' r='1.75'/%3E%3Ccircle cx='16.50' cy='4.21' r='1.75'/%3E%3Ccircle cx='19.79' cy='7.50' r='1.75'/%3E%3C/svg%3E") center / contain no-repeat; }
 .split { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: clamp(32px, 5vw, 64px); align-items: center; }
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: 3px; box-shadow: 0 26px 54px -30px rgba(17, 20, 23, 0.32); }
+/* A sheet, built like the icon's tile: a brass rim, a vermilion layer beneath, and a soft shadow on the table. */
+.card { background: linear-gradient(rgba(255, 253, 247, 0.62), rgba(255, 253, 247, 0.62)), var(--ground) var(--paper) 0 0 / var(--grain); border: 1px solid var(--rim); border-radius: 14px;
+  box-shadow: 0 5px 0 -1px var(--under), 0 6px 0 -1px var(--rim-deep), 0 34px 54px -30px rgba(59, 42, 20, 0.5); }
 
 /* Header */
-.top { border-bottom: 1px solid var(--line); }
+.top { border-bottom: 1px solid var(--line); box-shadow: 0 1px 0 rgba(255, 253, 246, 0.7); }
 .top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; padding-block: 16px; }
 .brand { display: flex; align-items: center; gap: 13px; text-decoration: none; }
 .brand:hover { color: inherit; }
-.brand .mark { width: 38px; height: 38px; flex: none; }
+.brand .mark { width: 44px; height: 44px; flex: none; }
 .brand .word { height: 34px; width: auto; display: block; overflow: visible; }
 .links { display: flex; gap: 6px 26px; flex-wrap: wrap; font-size: 0.98rem; }
 .links a { text-decoration: none; }
 .links a:hover { color: var(--accent); }
 
 /* Opening */
-.hero { padding-block: clamp(44px, 6vw, 84px) clamp(52px, 7vw, 92px); }
+.hero { padding-block: clamp(44px, 6vw, 84px) clamp(52px, 7vw, 92px); position: relative; overflow: hidden; }
+.hero .wrap { position: relative; }
+.contours { position: absolute; pointer-events: none; fill: none; stroke: var(--rim); stroke-width: 1.3; stroke-linecap: round; opacity: 0.55; }
+.contours.northwest { left: 0; top: 0; width: min(54vw, 700px); }
+.contours.southeast { right: 0; bottom: 0; width: min(62vw, 820px); }
+.contours path { vector-effect: non-scaling-stroke; }
 .hero .split { grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr); }
 .hero-text { display: grid; gap: 22px; }
 .actions { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 4px; }
-.button { display: inline-block; padding: 13px 22px; border: 1px solid var(--ink); border-radius: 2px; background: var(--ink); color: var(--ground); font-weight: 600; font-size: 1rem; text-decoration: none; }
-.button:hover { background: var(--accent); border-color: var(--accent); color: var(--ground); }
-.button.quiet { background: transparent; color: var(--ink); }
-.button.quiet:hover { background: var(--tile); border-color: var(--ink); color: var(--ink); }
+/* A button is a block of ink pressed into the sheet. */
+.button { display: inline-block; padding: 13px 22px; border: 1px solid var(--ink); border-radius: 9px; background: var(--ink); color: var(--surface); font-weight: 600; font-size: 1rem; text-decoration: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 2px 0 rgba(28, 26, 23, 0.28), 0 3px 0 rgba(255, 253, 246, 0.7); }
+.button:hover { background: var(--accent); border-color: var(--under); color: var(--surface); }
+.button.quiet { background: rgba(255, 253, 247, 0.55); color: var(--ink); border-color: var(--rim-deep); box-shadow: 0 2px 0 rgba(138, 109, 34, 0.3), 0 3px 0 rgba(255, 253, 246, 0.7); }
+.button.quiet:hover { background: var(--surface); border-color: var(--ink); color: var(--ink); }
 
 /* The trip, drawn as a day. Each bar is placed by FACTs of the FILE for the chosen version:
    a time of day is in minutes after midnight, and a length of time is in minutes. */
@@ -99,19 +118,20 @@ main:has(input[value="works-but-risky"]:checked) { --visit-time: 840; --visit-le
 .day .hour { position: absolute; top: 0; bottom: 24px; left: calc((var(--at) - var(--t0)) / var(--span) * 100%); border-left: 1px solid var(--line); }
 .day .hour span { position: absolute; bottom: -24px; left: 0; transform: translateX(-50%); font: 0.68rem/1 var(--mono); letter-spacing: 0.06em; color: var(--muted); white-space: nowrap; }
 .bar { position: absolute; height: 30px; left: calc((var(--from) - var(--t0)) / var(--span) * 100%); width: calc(var(--len) / var(--span) * 100%);
-  display: flex; align-items: center; padding-inline: 9px; overflow: hidden; white-space: nowrap; border-radius: 2px;
-  font: 500 0.7rem/1 var(--mono); letter-spacing: 0.04em; color: var(--ground);
+  display: flex; align-items: center; padding-inline: 9px; overflow: hidden; white-space: nowrap; border-radius: 5px;
+  font: 500 0.7rem/1 var(--mono); letter-spacing: 0.04em; color: var(--surface);
+  box-shadow: inset 0 1px 1.5px rgba(20, 10, 2, 0.45), 0 1px 0 rgba(255, 253, 246, 0.75);
   transition: left 0.75s var(--ease), width 0.75s var(--ease), opacity 0.4s ease; }
 .bar.visit { --from: var(--visit-time); --len: var(--visit-length); top: 10px; background: var(--ink); }
 .bar.train { --from: var(--leave); --len: var(--train-length); top: 52px; background: var(--travel); }
 .bar.slow { --from: var(--arrive); --len: calc(var(--train-length-longest) - var(--train-length)); top: 52px; padding: 0;
-  background: repeating-linear-gradient(135deg, var(--brass) 0 4px, transparent 4px 8px); border: 1px solid var(--brass); border-left: 0; border-radius: 0 2px 2px 0; }
+  background: repeating-linear-gradient(135deg, var(--brass) 0 4px, transparent 4px 8px); border: 1px solid var(--brass); border-left: 0; border-radius: 0 5px 5px 0; box-shadow: none; }
 .bar.late { --from: var(--close); top: 52px; padding: 0; width: max(0%, calc((var(--arrive) - var(--close)) / var(--span) * 100%));
-  background: repeating-linear-gradient(135deg, var(--stop) 0 4px, #F1C9BA 4px 8px); border-radius: 0 2px 2px 0; }
-.bar.cab { --from: var(--leave); --len: calc(var(--close) - var(--leave)); top: 94px; opacity: 0; background: transparent; color: var(--brass);
-  border: 1.5px dashed var(--brass); }
-.bar.flight { --from: var(--flight-time); --len: calc(var(--t0) + var(--span) - var(--flight-time)); top: 94px; background: var(--ink);
-  border-radius: 2px 0 0 2px; -webkit-mask-image: linear-gradient(90deg, #000 55%, transparent); mask-image: linear-gradient(90deg, #000 55%, transparent); }
+  background: repeating-linear-gradient(135deg, var(--stop) 0 4px, #F1C9BA 4px 8px); border-radius: 0 5px 5px 0; }
+.bar.cab { --from: var(--leave); --len: calc(var(--close) - var(--leave)); top: 94px; opacity: 0; background: transparent; color: var(--brass-ink);
+  border: 1.5px dashed var(--brass); box-shadow: none; }
+.bar.flight { --from: var(--flight-time); --len: calc(var(--t0) + var(--span) - var(--flight-time)); top: 94px; background: var(--travel);
+  border-radius: 5px 0 0 5px; -webkit-mask-image: linear-gradient(90deg, #000 55%, transparent); mask-image: linear-gradient(90deg, #000 55%, transparent); }
 .close { position: absolute; top: 40px; bottom: 24px; left: calc((var(--close) - var(--t0)) / var(--span) * 100%); border-left: 1.5px dashed var(--ink);
   transition: left 0.75s var(--ease); }
 .close span { position: absolute; top: -30px; left: 0; transform: translateX(-50%); font: 0.68rem/1.25 var(--mono); letter-spacing: 0.04em; color: var(--ink2); white-space: nowrap; text-align: center; }
@@ -135,7 +155,7 @@ main:has(input[value="depends-on-the-cab"]:checked) .day { height: 218px; }
 
 .versions { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 6px; }
 .versions legend { padding: 0; margin-bottom: 10px; }
-.versions label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 11px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 2px; font-size: 0.93rem; line-height: 1.4; cursor: pointer; background: var(--ground); }
+.versions label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 11px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 0.93rem; line-height: 1.4; cursor: pointer; background: rgba(250, 242, 227, 0.55); }
 .versions label:hover { border-color: var(--muted); }
 .versions input { width: 1em; height: 1em; margin: 0.2em 0 0; accent-color: var(--accent); }
 .versions label:has(input:checked) { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); background: var(--surface); }
@@ -143,12 +163,14 @@ main:has(input[value="depends-on-the-cab"]:checked) .day { height: 218px; }
 .versions input:focus-visible { outline: none; }
 
 /* The report, as the terminal prints it */
-.terminal { background: var(--night); color: var(--night-ink); border-radius: 3px; box-shadow: 0 26px 54px -30px rgba(17, 20, 23, 0.55); padding: clamp(18px, 2.4vw, 26px); font: 0.8rem/1.7 var(--mono); }
+/* The terminal is the night version of the icon: pale ink on dark board, with a gunmetal rim. */
+.terminal { background: var(--night) var(--board) 0 0 / var(--grain); color: var(--night-ink); border: 1px solid #45484C; border-radius: 14px;
+  box-shadow: 0 5px 0 -1px #050506, 0 34px 54px -30px rgba(20, 16, 8, 0.7); padding: clamp(18px, 2.4vw, 26px); font: 0.8rem/1.7 var(--mono); }
 .reports { display: grid; gap: 28px; }
 .command { color: var(--night-dim); margin-bottom: 12px; overflow-wrap: anywhere; }
 .report pre { margin: 0; font: inherit; white-space: pre-wrap; overflow-wrap: break-word; }
 .report pre::first-line { font-weight: 500; }
-.report.feasible pre::first-line, .report.risky pre::first-line { color: #FFFFFF; }
+.report.feasible pre::first-line, .report.risky pre::first-line { color: #FFF9EC; }
 .report.infeasible pre::first-line { color: var(--night-stop); }
 .report.undetermined pre::first-line { color: var(--night-brass); }
 
@@ -203,18 +225,22 @@ main:has(input[value="depends-on-the-cab"]:checked) .day { height: 218px; }
 .terminal.plain { overflow-x: auto; white-space: pre; margin: 0; }
 
 /* The name */
-.night { background: var(--ink); color: var(--ground); }
+.night { background: var(--night) var(--board) 0 0 / var(--grain); color: var(--night-ink); }
+.night h2 { text-shadow: none; }
 .night .label { color: var(--night-accent); }
 .night a:hover { color: var(--night-accent); }
-.night p { font-size: 1.22rem; line-height: 1.55; color: #DDDDD7; }
-.map { display: block; width: 100%; height: auto; background: var(--ground); border-radius: 3px; }
-.map .grid { stroke: var(--line); stroke-width: 1; fill: none; }
-.map .river { fill: none; stroke: #C3CBCF; stroke-width: 7; stroke-linecap: round; }
-.map .highway { fill: none; stroke: var(--ink); stroke-width: 3.2; }
-.map .road { fill: none; stroke: var(--ink); stroke-width: 2; }
+.night p { font-size: 1.22rem; line-height: 1.55; color: #DDD3BF; }
+.map { display: block; width: 100%; height: auto; background: var(--ground) var(--paper) 0 0 / var(--grain); border: 1px solid var(--rim); border-radius: 14px;
+  box-shadow: 0 5px 0 -1px var(--under), 0 6px 0 -1px var(--rim-deep), 0 30px 50px -28px rgba(0, 0, 0, 0.7); }
+.map .grid { stroke: var(--rim); stroke-width: 1; fill: none; opacity: 0.5; }
+.map .river { fill: none; stroke: #AEB8BA; stroke-width: 7; stroke-linecap: round; }
+.map .highway { fill: none; stroke: var(--vermilion); stroke-width: 6.5; }
+.map .road { fill: none; stroke: var(--vermilion); stroke-width: 4.2; }
 .map .track { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 7 5; }
 .map .town { fill: var(--ink); }
-.map .not-there { fill: var(--ground); stroke: var(--accent); stroke-width: 4.4; stroke-linecap: round; stroke-dasharray: 0.01 7.33; }
+.map .wood { fill: var(--olive); }
+.map .contour { fill: none; stroke: var(--rim); stroke-width: 1.2; opacity: 0.8; }
+.map .not-there { fill: var(--ground); stroke: var(--ink); stroke-width: 4.6; stroke-linecap: round; stroke-dasharray: 0.01 7.33; }
 .map text { fill: var(--ink); }
 .map .place { font: italic 400 23px var(--display); }
 .map .place.big { font-size: 31px; }
@@ -242,7 +268,7 @@ main:has(input[value="depends-on-the-cab"]:checked) .day { height: 218px; }
   .report pre { animation: none !important; }
 }
 
-footer { padding-block: 34px 46px; font-size: 0.93rem; color: var(--muted); border-top: 1px solid var(--line); }
+footer { padding-block: 34px 46px; font-size: 0.93rem; color: var(--muted); border-top: 1px solid var(--line); box-shadow: inset 0 1px 0 rgba(255, 253, 246, 0.7); }
 footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 40px; }
 
 @media (max-width: 900px) {
@@ -262,7 +288,7 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
 <header class="top">
   <div class="wrap">
     <a class="brand" href="./" aria-label="Agloe home">
-      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#C7491F"/><path d="M37.7 39.7H64M24.3 53.1V64M10.9 39.7H0M24.3 26.3V0" stroke="#FBFBF6" stroke-width="2.6"/><circle cx="24.3" cy="39.7" r="9.6" fill="none" stroke="#FBFBF6" stroke-width="3.1" stroke-linecap="round" stroke-dasharray="0.01 5.02" stroke-dashoffset="2.51"/></svg>
+      <img class="mark" src="img/mark.png" width="44" height="44" alt="">
       <svg class="word" viewBox="64 -728 2584 927" role="img" aria-label="Agloe"><path fill="currentColor" transform="scale(1,-1)" d="M594 599 277 93C252 51 223 30 172 25L166 0H388L394 25C318 30 301 49 326 87L405 215H678L696 87C701 45 679 30 603 25L596 0H856L863 25C817 30 800 51 794 98L714 700H688C641 700 592 706 544 712C489 720 424 728 375 728C175 728 64 617 64 481C64 376 128 311 222 311C315 311 382 373 382 452C382 488 357 520 318 520C286 520 261 496 261 461C261 436 276 419 276 398C276 371 253 357 217 357C154 357 115 407 115 481C115 602 217 683 372 683C431 683 514 671 560 658C596 648 620 640 594 599ZM433 259 629 573 672 259ZM1049 -199C1195 -199 1290 -141 1290 -55C1290 13 1244 47 1101 52C965 56 935 62 935 95C935 116 956 135 1001 135C1060 135 1063 113 1133 113C1265 113 1350 204 1350 318C1350 352 1336 395 1296 425C1309 439 1331 455 1349 455C1373 455 1377 429 1405 429C1434 429 1450 452 1450 474C1450 499 1426 514 1395 514C1355 514 1304 496 1261 444C1241 457 1211 466 1172 466C1040 466 955 375 955 261C955 226 967 194 991 169C924 165 864 128 864 70C864 37 877 11 909 -5C865 -21 831 -52 831 -98C831 -176 920 -199 1049 -199ZM1134 152C1078 152 1043 180 1043 243C1043 327 1085 427 1171 427C1227 427 1261 400 1261 335C1261 252 1220 152 1134 152ZM1054 -160C956 -160 893 -137 893 -90C893 -59 911 -36 958 -23C989 -30 1027 -34 1075 -35C1174 -37 1206 -52 1206 -87C1206 -123 1162 -160 1054 -160ZM1354 0H1577L1583 25C1530 30 1521 41 1530 77L1688 715H1656L1511 637L1507 617H1543C1565 617 1571 608 1565 584L1440 77C1431 41 1416 30 1360 25ZM1881 440 1871 461C1775 425 1675 342 1675 190C1675 72 1758 -15 1888 -15C2049 -15 2160 109 2160 262C2160 383 2078 460 1982 460C1904 460 1847 399 1847 312C1847 248 1884 201 1930 203C1962 203 1980 224 1980 249C1980 272 1966 290 1937 295C1913 298 1896 313 1896 345C1896 386 1922 421 1973 421C2030 421 2069 383 2069 295C2069 194 2019 24 1890 24C1805 24 1767 78 1767 157C1767 272 1816 398 1881 440ZM2416 -15C2539 -15 2626 76 2626 151C2626 174 2614 199 2580 199C2554 199 2526 178 2526 143C2526 125 2537 113 2537 94C2537 66 2496 27 2428 27C2335 27 2299 87 2299 167C2299 180 2299 192 2301 209L2648 317C2648 423 2558 466 2469 466C2328 466 2205 359 2205 185C2205 73 2283 -15 2416 -15ZM2472 427C2530 427 2569 400 2567 335L2308 254C2325 339 2371 427 2472 427Z"/></svg>
     </a>
     <nav class="links" aria-label="Main">
@@ -276,6 +302,8 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
 
 <main id="main">
   <section class="hero">
+    <svg class="contours northwest" viewBox="0 0 680 480" aria-hidden="true"><path d="M43 158C136 97 166 96 218 104S310 110 348 7M9 256C105 220 124 193 165 179C224 159 253 194 300 177C337 164 345 129 394 117C463 101 467 97 505 4M7 313C56 272 99 320 148 277C185 243 205 203 288 227C343 242 358 229 380 200C423 143 464 181 498 149C520 129 516 99 536 71C551 50 579 34 605 8M4 365C75 309 113 379 178 309C229 252 282 261 322 277C349 288 370 303 399 294C432 284 423 250 461 234C493 220 530 239 554 207C574 180 559 151 580 114C602 76 645 85 670 8M7 412C81 357 118 425 183 365C210 340 221 314 267 310C324 305 356 352 412 339Q419 338 425 335M9 474C69 470 94 437 156 434C202 432 216 429 246 396C280 359 310 358 351 369C402 384 451 395 485 348C505 320 514 302 552 294C599 283 618 253 609 204"/></svg>
+    <svg class="contours southeast" viewBox="430 700 824 554" aria-hidden="true"><path d="M469 1250C500 1159 520 1182 549 1124C573 1075 602 1075 632 1059C662 1044 678 1026 683 989C687 959 699 947 723 933C767 908 771 878 801 855C852 816 906 868 946 817C973 781 985 790 1014 785C1044 779 1055 758 1075 733C1123 673 1180 666 1244 675M532 1251C542 1187 562 1176 584 1158C613 1134 611 1109 661 1089C701 1074 721 1060 739 1012C757 962 781 936 822 913C900 870 963 907 1010 884C1055 863 1077 805 1114 768C1157 724 1193 716 1245 722M584 1250C590 1195 614 1189 638 1160C674 1112 702 1120 729 1114C762 1107 773 1086 781 1053C796 993 835 957 885 944C968 922 1025 969 1077 911C1093 893 1098 868 1120 841C1156 796 1199 784 1247 792M638 1250C659 1186 692 1158 747 1152C800 1148 815 1128 827 1081C841 1034 870 1006 908 992C958 973 1001 995 1051 977C1091 963 1110 940 1126 904C1150 852 1193 836 1243 841M708 1250C726 1196 758 1182 800 1178C842 1175 858 1157 872 1117C891 1062 937 1026 989 1023C1030 1020 1061 1028 1098 1011C1125 998 1139 977 1151 950C1169 910 1200 893 1244 891M856 1250C871 1195 907 1209 919 1155C926 1120 947 1099 982 1080C1034 1053 1071 1072 1110 1057C1135 1048 1148 1033 1161 1010C1183 974 1209 961 1241 956"/></svg>
     <div class="wrap split">
       <div class="hero-text">
         <span class="label">Open source · Being built in public</span>
@@ -540,13 +568,16 @@ uv run agloe check examples/a-must/cannot-work.json</pre>
       <svg class="map" viewBox="0 0 560 380" role="img" aria-labelledby="map-title map-desc">
         <title id="map-title">A sketch map with Agloe on it</title>
         <desc id="map-desc">A road runs north from the town of Roscoe, near the Beaver Kill. Where a track crosses the road, a dashed circle marks Agloe, the town that was not there.</desc>
-        <clipPath id="sheet"><rect width="560" height="380" rx="3"/></clipPath>
+        <clipPath id="sheet"><rect width="560" height="380" rx="14"/></clipPath>
+        <symbol id="fir" overflow="visible"><path transform="scale(0.24)" d="M0 -64Q4 -54 11 -45Q8 -47.5 5 -47Q9 -37 15.5 -27Q11 -30 6 -29.5Q11 -19 20 -7Q11 -11 3.2 -10V7H-3.2V-10Q-11 -11 -20 -7Q-11 -19 -6 -29.5Q-11 -30 -15.5 -27Q-9 -37 -5 -47Q-8 -47.5 -11 -45Q-4 -54 0 -64Z"/></symbol>
         <g clip-path="url(#sheet)">
           <path class="grid" d="M140 0v380M280 0v380M420 0v380M0 127h560M0 254h560"/>
           <path id="beaver-kill" class="river draw" pathLength="1" d="M0 354C96 322 198 336 268 318 338 300 340 280 384 224 428 168 470 92 560 52"/>
           <path class="highway draw second" pathLength="1" d="M0 318C150 300 252 246 322 264S470 300 560 320"/>
           <path class="road draw third" pathLength="1" d="M322 264C316 220 286 196 272 160S252 116 232 96 204 44 194 0"/>
+          <path class="contour" d="M0 44C42 34 70 48 112 28S168 16 190 0M0 78C52 68 86 84 130 58S200 40 232 0"/>
           <path class="track appear" d="M96 64 232 96l150 36"/>
+          <g class="wood appear"><use href="#fir" x="40" y="176"/><use href="#fir" x="62" y="176"/><use href="#fir" x="84" y="176"/><use href="#fir" x="51" y="198"/><use href="#fir" x="73" y="198"/><use href="#fir" x="95" y="198"/><use href="#fir" x="40" y="220"/><use href="#fir" x="62" y="220"/><use href="#fir" x="492" y="168"/><use href="#fir" x="514" y="168"/><use href="#fir" x="536" y="168"/><use href="#fir" x="503" y="190"/><use href="#fir" x="525" y="190"/><use href="#fir" x="492" y="212"/><use href="#fir" x="514" y="212"/></g>
         </g>
         <circle class="town appear" cx="322" cy="264" r="7.5"/>
         <circle class="not-there appear" cx="232" cy="96" r="14"/>

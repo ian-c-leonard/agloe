@@ -1,4 +1,6 @@
-# Agloe
+<p align="center">
+  <a href="https://agloe.ai"><img src=".github/assets/banner.jpg" alt="Agloe: itineraries that compile" width="100%"></a>
+</p>
 
 Agloe is a standard format for trips, a compiler that checks them, and an optimizer that finds the best version.
 
