@@ -178,6 +178,18 @@ Another right to an OPTION for a PERSON is a right that no BOOKING in the FILE s
 
 The unknown FACTs have a fixed order. First come the OPTIONs in the FILE's order. Each OPTION has its start, its duration and its access cutoff, then that it needs no right, then another right to it for each PERSON in the FILE's order, then the price of each of its OFFERs in the FILE's order, then what each of its BOOKINGs charged in the FILE's order, and then, for each WANT in the FILE's order, that it SATISFIES the WANT and that it does not. Then come the durations of the WAYs, in the FILE's order. Then come the other WAYs, in the FILE's order of their first PLACE and then of their second. Then, for each PERSON in the FILE's order whom no BUDGET lists, comes that a BUDGET can pay for them. A price or a payer that a report never asks about is not among the unknown FACTs, so it has no place in the order. Then come the conditions for another OPTION, in the FILE's order of WANTs and then of PERSONs. A set lists its FACTs in that order, and the sets are listed in that order too, comparing their first FACTs first.
 
+## The answer can come first
+
+A check can give its answer as soon as the answer is proved, ahead of its report. The report follows, and it is the report this page describes.
+
+| Answer | It is proved once | The report still has to find |
+|---|---|---|
+| FEASIBLE | one ITINERARY, with its way to pay, works in the worst case | the ITINERARY that the fixed rule shows, what it relies on, the WARNINGs and the money |
+| INFEASIBLE | nothing works in the best case | the FACTs, WANTs and DECISIONs that conflict |
+| UNDETERMINED | nothing works in the worst case, and something works in the best case | the unknown FACTs that would be enough |
+
+The answer comes with nothing else. The ITINERARY that proved a TRIP FEASIBLE is not shown: it is seldom the one the fixed rule shows. The answer is exact, so it is the answer of the report that follows, and the same FILE gives it on any machine. Whoever asked can act on the answer at once, and can stop there.
+
 ## Examples
 
 In every story but the last, each FILE says whether each of its OPTIONs needs a right. The museum, the boat tour, the Skydeck, the blues show, the night at the hotel and the flight need one, and a BOOKING covers each PERSON the story has in them. The rest need none. The last story is about the rights themselves, and its FILEs leave some of this out.
@@ -270,4 +282,4 @@ The Skydeck sells tickets for a set time, and Alex bought one for 10:00 am befor
 | [already overspent](../examples/a-ticket/already-overspent.json) | The cap is 50.00 USD. Jo has a BOOKING for the gallery talk that paid 25.00 USD from the trip money. | INFEASIBLE. Three records conflict: the two BOOKINGs and the cap. |
 | [depends on the talk](../examples/a-ticket/depends-on-the-talk.json) | Both have a BOOKING. Nobody has recorded whether Jo needs a ticket for the gallery talk. | UNDETERMINED. It works if the gallery talk needs no right. |
 
-Each FILE has its expected result beside it, as JSON and in words, and the tests compare the reference checker's answer with it. The command `agloe check` prints the same result for any FILE.
+Each FILE has its expected result beside it, as JSON and in words, and the tests compare the reference checker's answer with it. The command `agloe check` prints the same result for any FILE. With `--answer-first` it prints the answer as soon as it is proved, and then the result. With `--json` as well, each of the two is one line of JSON.

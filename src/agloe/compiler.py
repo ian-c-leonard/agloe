@@ -18,7 +18,7 @@ need more than that. The reference checker's own search then answers for the who
 search tries everything, so it is meant for small TRIPs.
 """
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from hashlib import sha256
 from itertools import combinations
@@ -66,18 +66,41 @@ def check(file: File) -> Report:
     A FILE with a cap goes to the reference checker: the solver does not yet share out what
     each BUDGET can still spend.
     """
+    *_, report = reports(file, ahead=False)
+    return report
+
+
+def reports(file: File, ahead: bool = True) -> Iterator[Report]:
+    """The answer as soon as it is proved, and then the Report that ``check`` gives.
+
+    The series is the reference checker's: ``answers.reports`` says when each answer is
+    proved, and what ``ahead`` is for.
+
+    Where the numbers of a FILE do not fit the solver, the reference checker starts over. Both
+    are exact, so its answer is the one the solver proved. What was given before is not given
+    again.
+    """
     if file.caps:
-        return answers.check(file)
+        yield from answers.reports(file, ahead=ahead)
+        return
+    given: list[Report] = []
     try:
         asked: _Asked = {}
-        return answers.check(
+        for report in answers.reports(
             file,
             shown,
             lambda left, world: works(left, world, asked),
             lambda left: can_work(left, asked),
-        )
+            ahead,
+        ):
+            given.append(report)
+            yield report
     except DoesNotFit:
-        return answers.check(file)
+        rest = answers.reports(file, ahead=ahead)
+        for said in given:
+            if next(rest) != said:
+                raise AssertionError("the solver proved an answer that the rules refuse") from None
+        yield from rest
 
 
 def shown(file: File, world: World) -> Itinerary | None:

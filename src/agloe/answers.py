@@ -136,6 +136,9 @@ class Report:
 
     In a FILE with a cap, a FEASIBLE Report has a row for each cap in ``caps``, and an
     UNDETERMINED one has a plan for each set of ``missing`` in ``plans``, in the same order.
+
+    ``unfinished`` marks the answer that ``reports`` gives ahead of the Report. It holds the
+    answer and nothing else: its evidence is not worked out yet.
     """
 
     answer: Answer
@@ -149,6 +152,7 @@ class Report:
     missing: tuple[tuple[Missing, ...], ...] = ()
     caps: tuple[CapRow, ...] = ()
     plans: tuple[Plan, ...] = ()
+    unfinished: bool = False
 
 
 type Shown = Callable[[File, World], Itinerary | None]
@@ -167,8 +171,38 @@ def check(
     ITINERARY that the rule puts first in a world, whether any ITINERARY works in a world,
     and whether any works in some best case of what is left of a FILE.
     """
+    *_, report = reports(file, shown, works, can_work, ahead=False)
+    return report
+
+
+def reports(
+    file: File,
+    shown: Shown = first_shown,
+    works: Works = any_works,
+    can_work: CanWork = can_work,
+    ahead: bool = True,
+) -> Iterator[Report]:
+    """The answer as soon as it is proved, and then the Report that ``check`` gives.
+
+    The answer comes ahead as a Report that is ``unfinished``: it holds the answer and nothing
+    else. Each answer is proved at one point, and nothing is given from less.
+
+    - FEASIBLE, once some ITINERARY works in the worst case. That takes one question more:
+      ``works`` stops at the first ITINERARY that does, where ``shown`` looks for the one
+      the rule puts first. The ITINERARY it found is not given. It can differ from one
+      machine to the next, and it is seldom the one the rule puts first.
+    - INFEASIBLE, once nothing works in any best case of the whole FILE.
+    - UNDETERMINED, once nothing works in the worst case and something does in a best case.
+
+    The searches are exact, so the answer ahead is the answer of the Report, and the same on
+    every machine. Without ``ahead`` only the Report is given, and the extra question is not
+    asked: this is how ``check`` runs.
+    """
     worst = worst_case(file)
-    plain = shown(file, worst)
+    sure = works(file, worst) if ahead else None
+    if sure:
+        yield Report(Answer.FEASIBLE, unfinished=True)
+    plain = None if sure is False else shown(file, worst)
     if plain is not None:
         longest = longest_case(file)
         # A ROBUST plan comes first, and then a plan that takes no place of an OFFER. The
@@ -193,16 +227,22 @@ def check(
             # The steps keep the order the ITINERARY lists them in: that is the plan shown.
             at_worst = tuple(broken_as_listed(file, longest, in_world(longest, chosen)))
         caps = _cap_rows(file, rights, ())
-        return Report(
-            Answer.FEASIBLE, chosen, tuple(relies_on), robust, at_worst, rights, caps=caps
-        )
-    found = _conflict(file, can_work)
-    if found is not None:
-        conflict, given_budgets = found
-        return Report(Answer.INFEASIBLE, conflict=conflict, given_budgets=given_budgets)
+        yield Report(Answer.FEASIBLE, chosen, tuple(relies_on), robust, at_worst, rights, caps=caps)
+        return
+    if sure:
+        raise AssertionError("an ITINERARY works in the worst case, and the rule shows none")
+    whole = Remaining(file)
+    if not can_work(whole):
+        if ahead:
+            yield Report(Answer.INFEASIBLE, unfinished=True)
+        conflict, given_budgets = _conflict(whole, can_work)
+        yield Report(Answer.INFEASIBLE, conflict=conflict, given_budgets=given_budgets)
+        return
+    if ahead:
+        yield Report(Answer.UNDETERMINED, unfinished=True)
     missing = _missing(file, works, shown)
     plans = tuple(_plan(file, some, shown) for some in missing) if file.caps else ()
-    return Report(Answer.UNDETERMINED, missing=missing, plans=plans)
+    yield Report(Answer.UNDETERMINED, missing=missing, plans=plans)
 
 
 def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> bool:
@@ -276,11 +316,11 @@ def _settles(file: File, itinerary: Itinerary, whole: CompleteFor) -> bool:
     )
 
 
-def _conflict(file: File, can_work: CanWork) -> tuple[tuple[str, ...], bool] | None:
-    """FACTs, WANTs and DECISIONs that make the TRIP INFEASIBLE by themselves, or None.
+def _conflict(whole: Remaining, can_work: CanWork) -> tuple[tuple[str, ...], bool]:
+    """FACTs, WANTs and DECISIONs that make the TRIP INFEASIBLE by themselves.
 
-    None says that an ITINERARY works in the best case, so the TRIP is not INFEASIBLE.
-    Otherwise no record can be removed from the set returned.
+    ``whole`` is the whole FILE, and nothing works in any best case of it. No record can be
+    removed from the set returned.
 
     The search asks one question again and again: with this record taken out as well, can
     anything work in some best case of what is left? A FACT that is taken out is unknown,
@@ -298,9 +338,7 @@ def _conflict(file: File, can_work: CanWork) -> tuple[tuple[str, ...], bool] | N
     test is made only where a record left is an OFFER with one. A conflict that holds a cap
     needs no test: the cap is about its BUDGET.
     """
-    kept = Remaining(file)
-    if can_work(kept):
-        return None
+    file, kept = whole.file, whole
     for record in _records(file):
         smaller = kept.without(record)
         if not can_work(smaller):
