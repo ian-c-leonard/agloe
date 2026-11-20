@@ -6,12 +6,17 @@ The page marks what it takes from elsewhere with the path of its source:
   example must be shown whole.
 - ``data-lines-from``: the words are whole lines of that file, one after another.
 
-The page also draws the first story as a day. Each bar is placed by numbers in the style
-sheet, one set for each version of the trip, and each number must be a FACT of that FILE.
+The page also draws the first story as a day that a reader can change. It draws the day from a
+FILE, and it carries each version of the story whole: its FILE, and the report the example
+expects, in words and as data. When a reader changes the trip, the page runs the reference
+checker in the reader's browser, through ``pages/checker.py``. That program must give the
+examples their expected reports where the solver is missing, as it is in a browser.
 """
 
 import json
 import re
+import subprocess
+import sys
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -148,51 +153,74 @@ def test_every_example_the_page_names_exists() -> None:
         assert (ROOT / file).is_file(), file
 
 
-def minutes(length: str) -> int:
-    """A length of time such as PT1H20M, in minutes."""
-    found = re.fullmatch(r"PT(?:(\d+)H)?(?:(\d+)M)?", length)
-    assert found, length
-    return int(found.group(1) or 0) * 60 + int(found.group(2) or 0)
+def offered() -> list[str]:
+    """The versions of the story that the page offers, in the order it offers them."""
+    return re.findall(r'name="version" value="([\w-]+)"', (PAGES / "index.html").read_text())
 
 
-def fact_in_minutes(fact: dict[str, Any], longest: bool) -> int:
-    """What a FACT states, as the page draws it: a time of day or a length, in minutes."""
-    if "starts_at" in fact:
-        hour, minute = fact["starts_at"][11:16].split(":")
-        return int(hour) * 60 + int(minute)
-    if "contingent_duration" in fact:
-        return minutes(fact["contingent_duration"]["longest" if longest else "shortest"])
-    for name in ("duration", "arrive_before_start"):
-        if name in fact:
-            return minutes(fact[name])
-    raise AssertionError(f"the page cannot draw {fact}")
+def test_the_page_carries_each_version_of_the_story_whole() -> None:
+    carried = {source for kind, source, _ in PAGE.passages if kind == "passage"}
+    assert offered()
+    for version in offered():
+        for ending in (".json", ".expected.txt", ".expected.json"):
+            assert f"{STORY}/{version}{ending}" in carried, f"{version}{ending}"
 
 
-def drawn_days() -> list[tuple[str, str, int]]:
-    """Each number the page draws a day from: the version, the name of the FACT, the number."""
-    style = "".join(PAGE.style)
-    days = re.findall(r'main:has\(input\[value="([\w-]+)"\]:checked\) \{([^}]*)\}', style)
-    return [
-        (version, name, int(number))
-        for version, block in days
-        for name, number in re.findall(r"--([\w-]+): (\d+);", block)
-    ]
-
-
-def test_the_page_draws_a_day_for_each_version_it_offers() -> None:
-    offered = set(
-        re.findall(r'name="version" value="([\w-]+)"', (PAGES / "index.html").read_text())
+def checked_in_a_browser(files: list[str]) -> list[dict[str, Any]]:
+    """What ``pages/checker.py`` says about each FILE where there is no solver, as in a browser."""
+    program = (
+        "import json, sys\n"
+        "sys.modules['ortools'] = None\n"  # so that importing the solver fails
+        f"exec(compile(open({str(PAGES / 'checker.py')!r}).read(), 'checker.py', 'exec'))\n"
+        "print(json.dumps([json.loads(check(text)) for text in json.load(sys.stdin)]))\n"
     )
-    assert offered
-    assert {version for version, _, _ in drawn_days()} == offered
+    ran = subprocess.run(
+        [sys.executable, "-c", program],
+        input=json.dumps(files),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(ran.stdout)
 
 
-@pytest.mark.parametrize(("version", "name", "number"), drawn_days())
-def test_each_number_of_a_day_is_a_fact_of_its_file(version: str, name: str, number: int) -> None:
-    file = json.loads((ROOT / STORY / f"{version}.json").read_text())
-    facts = {fact["id"]: fact for fact in file["facts"]}
-    longest = name.endswith("-longest")
-    assert fact_in_minutes(facts[name.removesuffix("-longest")], longest) == number
+def test_the_page_checks_a_trip_as_the_examples_expect() -> None:
+    versions = offered()
+    found = checked_in_a_browser([(ROOT / STORY / f"{name}.json").read_text() for name in versions])
+    for version, report in zip(versions, found, strict=True):
+        words = (ROOT / STORY / f"{version}.expected.txt").read_text()
+        data = json.loads((ROOT / STORY / f"{version}.expected.json").read_text())
+        assert report["text"] == words, version
+        assert report["json"] == data, version
+
+
+def test_the_page_says_how_a_file_breaks_the_format() -> None:
+    (report,) = checked_in_a_browser(['{"persons": 3}'])
+    assert "/persons: 3 is not of type 'array'" in report["refused"]
+
+
+def test_each_thing_a_reader_can_add_gives_a_report() -> None:
+    """Each addition is records for a FILE: added to the first version, alone and together."""
+    additions: dict[str, dict[str, Any]] = json.loads(
+        (PAGES / "trip" / "additions.json").read_text()
+    )
+    first: dict[str, list[Any]] = json.loads((ROOT / STORY / "works.json").read_text())
+    buttons = set(re.findall(r'data-add="([\w-]+)"', (PAGES / "index.html").read_text()))
+    assert buttons | {"complete"} == set(additions)
+
+    def with_these(names: list[str]) -> str:
+        file = {kind: list(records) for kind, records in first.items()}
+        for name in names:
+            for kind, records in additions[name].items():
+                if kind != "label":
+                    file[kind] += records
+        return json.dumps(file)
+
+    tried = [[name] for name in additions] + [[name for name in additions if name != "coffee"]]
+    reports = checked_in_a_browser([with_these(names) for names in tried])
+    for names, report in zip(tried, reports, strict=True):
+        assert "refused" not in report, (names, report)
+        assert report["answer"] in {"FEASIBLE", "INFEASIBLE", "UNDETERMINED"}, names
 
 
 def test_every_link_leads_somewhere() -> None:
