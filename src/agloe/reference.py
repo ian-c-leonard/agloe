@@ -1507,6 +1507,9 @@ class Routes:
         self._file, self._world, self._thin = file, world, thin
         self._found: dict[tuple[str, str, bool], list[Route]] = {}
         self._fitting: dict[tuple[int, int], list[Route]] = {}
+        self._at_the_ends: dict[tuple[str, str, int | None, int | None], list[Route]] = {}
+        self._lengths: dict[tuple[str, str, bool], list[int | None]] = {}
+        self._longest: dict[tuple[str, str, bool], int] = {}
 
     def between(self, here: str, there: str, last: bool = False) -> list[Route]:
         """Every route from one PLACE to another that is worth trying, shortest first.
@@ -1519,21 +1522,68 @@ class Routes:
             )
         return self._found[here, there, last]
 
+    def _within(
+        self, here: str, there: str, last: bool, leaves: int | None, there_by: int | None
+    ) -> list[Route]:
+        """The routes between two PLACEs that can start at one time and be over by another.
+
+        How long each route takes is worked out once for the two PLACEs.
+        """
+        possible = self.between(here, there, last)
+        if leaves is None or there_by is None:
+            return possible
+        if (here, there, last) not in self._lengths:
+            self._lengths[here, there, last] = [_length(self._world, each) for each in possible]
+        lengths = self._lengths[here, there, last]
+        if (here, there, last) not in self._longest:
+            self._longest[here, there, last] = max((each for each in lengths if each), default=0)
+        if _in_time(leaves, there_by, self._longest[here, there, last]):
+            return possible  # even the longest of them fits, so the list is as it was
+        return [
+            route
+            for route, takes in zip(possible, lengths, strict=True)
+            if _in_time(leaves, there_by, takes)
+        ]
+
     def after(self, first: int, then: int) -> list[Route]:
         """The routes from one OPTION to the next one a PERSON does, by position in the FILE.
 
-        They are the routes between the two PLACEs that ``_fits`` allows for the two OPTIONs,
-        worked out once for the pair.
+        They are the routes between the two PLACEs that fit between the two OPTIONs, worked
+        out once for the pair. The PERSON leaves when the first OPTION ends at the earliest,
+        and has to be there the access cutoff of the second one before it starts: see
+        ``_in_time``.
         """
         if (first, then) not in self._fitting:
             file, world = self._file, self._world
             before, after = file.options[first], file.options[then]
-            terms = world.terms[before.id], world.terms[after.id]
-            possible = self.between(before.destination, after.origin)
-            self._fitting[first, then] = [
-                route for route in possible if _fits(world, *terms, route)
-            ]
+            leaves = _over(world.terms[before.id])
+            there_by = _open_until(world.terms[after.id])
+            self._fitting[first, then] = self._within(
+                before.destination, after.origin, False, leaves, there_by
+            )
         return self._fitting[first, then]
+
+    def at_an_end(self, here: str, there: str, first: int | None, then: int | None) -> list[Route]:
+        """The routes at an end of a PERSON's path that the times of the TRIP allow.
+
+        ``then`` is the OPTION the PERSON does first, where the route leads to one, and
+        ``first`` the OPTION they do last, where the route comes after one. Both are positions
+        in the FILE, and both are None for a PERSON who takes part in no OPTION. A route that
+        starts a path cannot start before the TRIP starts, and a route that ends one has to be
+        over when the TRIP ends: see ``_in_time``. Each is worked out once.
+        """
+        key = (here, there, first, then)
+        if key not in self._at_the_ends:
+            file, world = self._file, self._world
+            opens, closes = file.trip_start(), file.trip_end()
+            leaves = None if opens is None else opens.at
+            there_by = None if closes is None else closes.at
+            if first is not None:
+                leaves = _over(world.terms[file.options[first].id])
+            if then is not None:
+                there_by = _open_until(world.terms[file.options[then].id])
+            self._at_the_ends[key] = self._within(here, there, then is None, leaves, there_by)
+        return self._at_the_ends[key]
 
 
 def _legs_in_file_order(file: File, route: Route) -> list[tuple[int, int, int]]:
@@ -1559,10 +1609,13 @@ def _schedules(
     are tried with the fewest WAYs first, then in the order of "Which ITINERARY is shown": PERSON
     by PERSON, the WAYs listed first. Then each way the timing can fall is tried.
 
-    A route between two OPTIONs that both start at fixed times is left out where it takes
-    longer than the time between them: see ``_fits``. No ITINERARY that works in this world
-    takes it in that order, whatever the other PERSONs do. So the routes that are left come in
-    the same order, and the first ITINERARY that works is the same one.
+    A route is left out where two times are known, the earliest it can start and the latest
+    it can be over, and it takes longer than the time between them: see ``_in_time``. Between
+    two OPTIONs that both start at fixed times, those are the end of the first and the access
+    cutoff of the second. At an end of a path, one of them is the start or the end of the
+    TRIP. No ITINERARY that works in this world takes such a route in that order, whatever
+    the other PERSONs do. So the routes that are left come in the same order, and the first
+    ITINERARY that works is the same one. Every other route is left to the timing.
     """
     # Which PERSON, after which of their OPTIONs, the routes. Before their first OPTION is -1.
     needed: list[tuple[int, int, list[Route]]] = []
@@ -1586,7 +1639,9 @@ def _schedules(
                 if 0 <= spot < len(order) - 1:
                     possible = known.after(order[spot], order[spot + 1])
                 else:
-                    possible = known.between(here, there, last)
+                    before = order[spot] if spot >= 0 else None
+                    after = None if last else order[spot + 1]
+                    possible = known.at_an_end(here, there, before, after)
                 if not possible:
                     return
                 needed.append((number, spot, possible))
@@ -1606,20 +1661,22 @@ def _schedules(
         yield from _timings(file, world, who, orders, hops)
 
 
-def _fits(world: World, before: Terms, after: Terms, route: Route) -> bool:
-    """Whether a PERSON could take this route between two OPTIONs, as far as their times say.
+def _over(terms: Terms) -> int | None:
+    """The earliest an OPTION that starts at a fixed time is over, where it has a known end."""
+    if terms.fixed_start is None or terms.longest is None:
+        return None
+    return terms.fixed_start + terms.shortest
 
-    The route has at least one WAY. False only where both OPTIONs start at fixed times and
-    the route takes longer than the time between them. The PERSON leaves when the first
-    OPTION ends at the earliest, takes each WAY for as long as this world says, and has to be
-    there the access cutoff of the second OPTION before it starts. Waiting, and a span that
-    rules an unlisted WAY out, only make them arrive later. Where a time is not fixed, or has
-    no limit, the timing decides.
-    """
-    if before.fixed_start is None or after.fixed_start is None:
-        return True
-    if before.longest is None or after.margin is None:
-        return True
+
+def _open_until(terms: Terms) -> int | None:
+    """The latest a PERSON who travels to an OPTION that starts at a fixed time can arrive."""
+    if terms.fixed_start is None or terms.margin is None:
+        return None
+    return terms.fixed_start - terms.margin
+
+
+def _length(world: World, route: Route) -> int | None:
+    """How long a route takes in this world at the least, or None where a WAY has no limit."""
     takes = 0
     for way, _, _ in route:
         if way is None:
@@ -1627,10 +1684,21 @@ def _fits(world: World, before: Terms, after: Terms, route: Route) -> bool:
             continue
         shortest, longest = world.takes[way]
         if longest is None:
-            return True
+            return None
         takes += shortest
-    leaves = before.fixed_start + before.shortest
-    return leaves + takes + after.margin <= after.fixed_start
+    return takes
+
+
+def _in_time(leaves: int | None, there_by: int | None, takes: int | None) -> bool:
+    """Whether a route that starts no earlier than one time can be over by another.
+
+    ``takes`` is how long the route takes at the least. Waiting, and a span that rules an
+    unlisted WAY out, only make a PERSON arrive later. True where a time is not known, or the
+    route has a WAY with no limit to how long it takes: then the timing decides.
+    """
+    if leaves is None or there_by is None or takes is None:
+        return True
+    return leaves + takes <= there_by
 
 
 def _fewest_first[T: Sized](choices: Sequence[Sequence[T]]) -> Iterator[tuple[T, ...]]:
