@@ -840,6 +840,60 @@ def test_the_tie_break_tells_apart_two_plans_that_differ_in_a_late_option(count:
     assert report == answers.check(file)
 
 
+def stranded(count: int) -> File:
+    """Some PERSONs start at a and must end the TRIP at b. The TRIP starts at noon.
+
+    No WAY is listed, and a COMPLETE FACT says that none goes from a to b from noon to 13:00.
+    In the best case each PERSON goes by an unlisted WAY after 13:00.
+    """
+    people = [f"person-{number}" for number in range(count)]
+    facts = [starts_from(person, "a") for person in people]
+    span = {"earliest": at(12), "latest": at(13)}
+    facts.append({"id": "no-way-at-noon", "complete": {"from": "a", "to": "b", "leaving": span}})
+    return trip(people, ["a", "b"], [], facts, [trip_starts(12)], wants=[ends_at("b", *people)])
+
+
+def test_a_plan_from_the_solver_is_checked_with_the_timing_the_solver_chose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nine PERSONs each take an unlisted WAY that a COMPLETE FACT rules out for an hour.
+
+    Each WAY could be tried as it falls, before the span and after it: 19,683 timings for the
+    nine. The solver's plan takes each one after the span, and only that side is checked.
+    """
+    file = stranded(9)
+    tried = 0
+    times = reference._times  # pyright: ignore[reportPrivateUsage]
+
+    def counted(*given: Any, **named: Any) -> Any:
+        nonlocal tried
+        tried += 1
+        return times(*given, **named)
+
+    monkeypatch.setattr(reference, "_times", counted)
+    assert compiler.works(file, best_case(file))
+    assert tried <= 1
+    small = stranded(2)
+    assert compiler.check(small) == answers.check(small)
+
+
+def test_a_way_is_tried_only_in_the_opening_that_holds_its_time() -> None:
+    """One PERSON goes from a to b by an unlisted WAY, which no span rules out after 13:00."""
+    file = stranded(1)
+    world = best_case(file)
+    who: tuple[tuple[str, ...], ...] = ()
+    orders: tuple[tuple[int, ...], ...] = ((),)
+    route: reference.Route = ((None, "a", "b"),)
+    by = {(0, -1): route}
+    after = reference.scheduled(file, world, who, orders, by, falls={(0, -1, 0): seconds(13, 30)})
+    assert after is not None
+    assert [(step.way, step.start) for step in after] == [(None, seconds(13) + 1)]
+    # Before the span is before the TRIP starts, so that opening has no timing that works.
+    before = reference.scheduled(file, world, who, orders, by, falls={(0, -1, 0): seconds(11)})
+    assert before is None
+    assert reference.scheduled(file, world, who, orders, by) == after
+
+
 def test_a_choice_is_scheduled_only_if_it_meets_every_constraint() -> None:
     """The check that every choice of the solver goes through covers all six CONSTRAINTs."""
     file = trip(
