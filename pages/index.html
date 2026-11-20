@@ -230,12 +230,18 @@ code { font-family: var(--mono); font-size: 0.9em; }
   border: 1px solid var(--line); border-radius: 10px; background: rgba(255, 253, 247, 0.72); box-shadow: inset 0 1px 2px rgba(59, 42, 20, 0.12); }
 .file-text span { display: block; padding-inline: 14px; min-width: max-content; }
 .file-text:not(:has(span)) { padding-inline: 14px; }
-.file-text .new { background: rgba(213, 80, 30, 0.13); box-shadow: inset 3px 0 0 var(--vermilion); }
+/* What differs from the first version is tinted in brass. Red is kept for what the report says clashes. */
+.file-text .new { background: rgba(154, 131, 48, 0.16); box-shadow: inset 3px 0 0 var(--brass); }
 .file-text .clash { background: rgba(213, 80, 30, 0.22); box-shadow: inset 3px 0 0 var(--stop); color: var(--stop); font-weight: 500; }
 .file-text.live, .report.live { display: none; }
 .trip.own .file-text.live, .trip.own .report.live { display: block; }
 .trip.own .as-data { display: none !important; }
-.pane .terminal { max-height: 430px; overflow: auto; scrollbar-color: #3a3e43 transparent; font-size: 0.72rem; padding: 16px 18px; }
+/* Each report scrolls by itself, so one that comes into view does not start where another was left. */
+.pane .terminal { font-size: 0.72rem; padding: 0; overflow: hidden; }
+.pane .terminal > * { max-height: 430px; overflow: auto; scrollbar-color: #3a3e43 transparent; padding: 16px 18px; }
+/* What the marks in the FILE mean. The marks need the script. */
+.pane > p.marks-key { display: none; }
+.trip.alive .pane > p.marks-key { display: block; }
 /* The report in its two forms: in words, and as data. Both are what the command line prints. */
 .as-data, #report-json { display: none; }
 .report-data, #report-json { margin: 0; font: inherit; white-space: pre; }
@@ -460,7 +466,7 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
           <div class="answer live" id="answer-live"><p></p></div>
         </div>
         <div class="tools" id="tools" hidden>
-          <p class="hint">Drag a block, the end of a block, the end of a road, or the time to be there. The small dotted ring beside the end of a road says how late that ride may run. The FILE changes with each move, and the checker runs again.</p>
+          <p class="hint">Drag a block, the end of a block, the end of a road, or the time to be there. The small brass mark by the end of a road says how late that ride may run. The FILE changes with each move, and the checker runs again.</p>
           <div class="add" role="group" aria-label="Add to the day">
             <span class="add-word">Add</span>
             <button type="button" data-add="lunch" aria-pressed="false">Lunch at the museum</button>
@@ -653,12 +659,13 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
   ]
 }</pre>
             <pre class="file-text live" id="file-live" tabindex="0" aria-label="The FILE for your version of the trip"></pre>
+            <p class="small marks-key">Tinted lines differ from the first version. Red lines are the records that rule out every plan.</p>
           </section>
           <section class="pane" aria-labelledby="pane-compiler">
             <div class="mile" aria-hidden="true"><svg class="town" viewBox="0 0 24 24" aria-hidden="true"><circle cx="20.40" cy="12.00" r="1.7"/><circle cx="19.27" cy="16.20" r="1.7"/><circle cx="16.20" cy="19.27" r="1.7"/><circle cx="12.00" cy="20.40" r="1.7"/><circle cx="7.80" cy="19.27" r="1.7"/><circle cx="4.73" cy="16.20" r="1.7"/><circle cx="3.60" cy="12.00" r="1.7"/><circle cx="4.73" cy="7.80" r="1.7"/><circle cx="7.80" cy="4.73" r="1.7"/><circle cx="12.00" cy="3.60" r="1.7"/><circle cx="16.20" cy="4.73" r="1.7"/><circle cx="19.27" cy="7.80" r="1.7"/></svg><i></i></div>
             <h3 id="pane-compiler"><span class="release">0.1</span> The COMPILER</h3>
             <p data-from="docs/VISION.md"><strong>A compiler</strong> that checks the whole plan and explains every conflict.</p>
-            <p class="small"><strong>The report is made for an AI agent that plans the trip</strong>, more than for a person. It names each record by its id, and it says what the FILE would have to say. The agent changes the FILE and checks again.</p>
+            <p class="small"><strong>The report is made for an AI agent that plans the trip</strong>, more than for a person. Its evidence is a plan, or the records that rule out every plan, or what the FILE would have to say. As data, it names each record by its id. The agent changes the FILE and checks again.</p>
             <p class="small">The first release is tested by an agent that plans a trip alone. <span data-from="docs/ROADMAP.md">It writes the FILE, reads the COMPILER's reports, and ends with a FEASIBLE TRIP, with no other help.</span></p>
             <div class="forms" role="radiogroup" aria-labelledby="forms-title">
               <span class="label" id="forms-title">What the agent reads</span>

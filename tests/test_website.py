@@ -356,6 +356,13 @@ def test_the_day_shows_what_the_report_says() -> None:
     # The flight lands at 3:45 pm. Another way back to the visit is drawn from then, to its start.
     back = shown["works: the flight leaves at 1:15 pm, and the visit starts at 4:00 pm"]["ways"]
     assert [(way["leaves"], way["shown"]) for way in back] == [(15 * 60 + 45, 15)]
+    # Lunch ends at 1:30 pm as coffee starts at O'Hare, and coffee ends at 2:00 pm as the visit
+    # starts. Each other way is drawn in the gap that it has to fill.
+    tight = shown["works: lunch, and coffee at 1:30 pm"]["ways"]
+    assert {(way["from"], way["to"]): way["leaves"] for way in tight} == {
+        ("art-institute", "ohare"): 13 * 60 + 30,
+        ("ohare", "art-institute"): 14 * 60,
+    }
 
 
 def test_every_link_leads_somewhere() -> None:

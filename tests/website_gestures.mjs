@@ -65,6 +65,12 @@ if (process.argv[2] === "files") {
   gesture(back, "move", scene(back, null).items.find((item) => item.id === "flight"), -400);
   gesture(back, "move", scene(back, null).items.find((item) => item.id === "museum-visit"), 120);
   made.push({ name: "works: the flight leaves at 1:15 pm, and the visit starts at 4:00 pm", file: back });
+  // A trip with a tight gap early in the day: lunch ends as coffee starts somewhere else.
+  const tight = copy(given.stories.works);
+  change.add(tight, given.additions.lunch);
+  change.add(tight, given.additions.coffee);
+  gesture(tight, "move", scene(tight, null).items.find((item) => item.id === "coffee"), -170);
+  made.push({ name: "works: lunch, and coffee at 1:30 pm", file: tight });
   console.log(JSON.stringify(made));
 } else if (process.argv[2] === "said") {
   console.log(JSON.stringify(given.map(({ name, report }) => ({ name, said: said(report) }))));

@@ -115,7 +115,7 @@ function start() {
     if (checker.running && time - checker.running.started > CHECK_LIMIT) {
       rest();
       if (checker.waiting === null) {
-        say(`No answer.\nThe reference checker was stopped after ${CHECK_LIMIT / 1000} s. It tries every order, and this day is too busy for it in a browser. Take something away and it checks again.`);
+        say(`No answer.\nThe reference checker gave no answer in ${CHECK_LIMIT / 1000} s, so the page stopped it. It tries every order, and a busy day can take it too long in a browser. Take something away and it checks again.`);
       }
       wake();
     } else if (checker.running && checker.waiting !== null && time - checker.running.started > 1500) {
@@ -197,7 +197,7 @@ function start() {
       at = last;
     }
     target.replaceChildren(...lines.map((each, at) => Object.assign(document.createElement("span"), { textContent: each, className: markOf[at] })));
-    const reach = (row) => (target.scrollTop = Math.max(0, row.getBoundingClientRect().top - target.getBoundingClientRect().top + target.scrollTop - 70));
+    const reach = (row) => target.scrollTo(0, Math.max(0, row.getBoundingClientRect().top - target.getBoundingClientRect().top + target.scrollTop - 70));
     if (own && edited !== null) {
       // The reader's own FILE scrolls to the line that the reader has just changed.
       const before = edited.replace(/\n$/, "").split("\n");
@@ -220,7 +220,7 @@ function start() {
       if (answer === "infeasible") answerLive.append(Object.assign(document.createElement("p"), { textContent: MARKED, className: "page-words" }));
       // The report, or the page's own words where the checker gave none. A new one starts at its top.
       const inWords = now.report ? now.report.text : "";
-      if (reportText.textContent !== inWords) reportLive.closest(".terminal").scrollTop = 0;
+      if (reportText.textContent !== inWords) reportLive.scrollTo(0, 0);
       reportText.textContent = inWords;
       reportJson.textContent = report ? JSON.stringify(report.json, null, 2) : inWords;
       reportLive.className = `report live ${report ? answer : ""}`;
@@ -318,7 +318,7 @@ function start() {
     const laneAt = (place) => (tall ? gutter : edge + 22) + lanes.indexOf(place) * (laneSize + gap);
     const across = (tall ? gutter : edge + 22) + lanes.length * laneSize + (lanes.length - 1) * gap;
     // Under the lanes: on a desk, room for the time to be there; on a phone, a line for each ride.
-    const size = tall ? [wide, at(LAST) + 26 + Math.max(1, rides.length) * 17] : [wide, across + 26];
+    const size = tall ? [wide, at(LAST) + 28 + Math.max(1, rides.length) * 17] : [wide, across + 26];
     // A point from "minutes along, pixels across".
     const point = (minutes, cross) => (tall ? [cross, at(minutes)] : [at(minutes), cross]);
     const box = (minutes, cross, minutesLong, crossSize) => {
@@ -424,8 +424,13 @@ function start() {
         if (name <= room * 1.1 || (!wraps && !turns)) {
           title.setAttribute("x", shape.x + 8);
           title.setAttribute("y", shape.y + Math.min(20, shape.height / 2 + 4.5));
-          // A name that is a little too wide is pressed together. One that is far too wide is cut off.
-          if (name > room && name <= room * 1.1) {
+          if (name > room * 1.25) {
+            // Far too wide, with no other way to place it: the letters that fit, and a mark for the rest.
+            let cut = item.name;
+            while (cut.length > 1 && widthOf(`${cut}…`, 600, big) > room) cut = cut.slice(0, -1);
+            title.textContent = `${cut}…`;
+          } else if (name > room) {
+            // A name that is a little too wide is pressed together.
             title.setAttribute("textLength", room);
             title.setAttribute("lengthAdjust", "spacingAndGlyphs");
           }
@@ -453,10 +458,14 @@ function start() {
         const all = inside();
         if (time) all.append(when(time, shape.x + 10, shape.y + shape.height / 2 + 13));
       } else {
-        // Too narrow for its name: the name and the time stand beside it, on the side that has room.
+        // Too narrow for its name: the name and the time stand beside it, on the side with room
+        // before the next block or the end of the lane.
         const lane = box(FIRST, laneAt(item.place), LAST - FIRST, laneSize);
         const time = times[times.length - 1];
-        const right = shape.x + shape.width + 18 + name + fits(time) < lane.x + lane.width;
+        const others = blocks.filter((other) => other.id !== item.id && other.place === item.place).map(shapeOf);
+        const after = Math.min(lane.x + lane.width, ...others.filter((other) => other.x >= shape.x + shape.width - 1).map((other) => other.x)) - shape.x - shape.width;
+        const before = shape.x - Math.max(lane.x, ...others.filter((other) => other.x + other.width <= shape.x + 1).map((other) => other.x + other.width));
+        const right = after >= name + fits(time) + 18 || after >= before;
         title.setAttribute("class", "block-name beside");
         title.setAttribute("x", right ? shape.x + shape.width + 8 : shape.x - 8);
         title.setAttribute("y", shape.y + shape.height / 2 + 4.5);
@@ -501,7 +510,7 @@ function start() {
         const until = item.start + item.length;
         const group = make("g", { class: `event${item.clash ? " clash" : ""}`, opacity: faint, tabindex: 0, role: "slider", "data-act": "move", "data-id": item.id,
           "aria-label": `${item.name}, ${clock(item.start)} to ${clock(until)}. Arrow keys move it. Shift and the arrow keys make it longer or shorter.`,
-          "aria-valuetext": `${clock(item.start)} to ${clock(until)}`, "aria-valuenow": Math.round(item.start), "aria-valuemin": FIRST, "aria-valuemax": LAST });
+          "aria-valuetext": `${clock(item.start)} to ${clock(until)}`, "aria-valuenow": Math.round(item.start), "aria-valuemin": FIRST, "aria-valuemax": Math.round(LAST - item.length) });
         group.append(make("rect", { class: "block", ...shape, rx: Math.min(7, shape.height / 2, shape.width / 2) }));
         // On a phone the hours at the side say am or pm, so the block leaves them out.
         const times = tall ? [`${short(item.start)} to ${short(until)}`, short(item.start)] : [`${clock(item.start)} to ${clock(until)}`, clock(item.start)];
@@ -522,7 +531,7 @@ function start() {
         // What leaves is drawn as the start of a road that fades: the rest of it is somewhere else.
         const shape = shapeOf(item);
         const group = make("g", { class: `departure${item.clash ? " clash" : ""}`, opacity: faint, tabindex: 0, role: "slider", "data-act": "move", "data-id": item.id,
-          "aria-label": `${item.name}, leaves at ${clock(item.start)}. Arrow keys move it.`, "aria-valuetext": clock(item.start), "aria-valuenow": Math.round(item.start), "aria-valuemin": FIRST, "aria-valuemax": LAST });
+          "aria-label": `${item.name}, leaves at ${clock(item.start)}. Arrow keys move it.`, "aria-valuetext": clock(item.start), "aria-valuenow": Math.round(item.start), "aria-valuemin": Math.round(FIRST + (item.cutoff ?? 0)), "aria-valuemax": LAST - 15 });
         const fade = `fade-${item.id}`;
         defs.append(make("linearGradient", { id: fade, x1: 0, y1: 0, x2: tall ? 0 : 1, y2: tall ? 1 : 0 },
           make("stop", { offset: 0.55, class: "road-stop" }), make("stop", { offset: 1, class: "road-stop", "stop-opacity": 0 })));
@@ -536,7 +545,7 @@ function start() {
           const [x2, y2] = point(when, place + laneSize);
           const mark = make("g", { class: `cutoff${item.clashCutoff ? " clash" : ""}`, opacity: faint, tabindex: 0, role: "slider", "data-act": "cutoff", "data-id": item.id,
             "aria-label": `People must be at the place ${span(item.cutoff)} before ${item.name} leaves, by ${clock(when)}. Arrow keys move it.`,
-            "aria-valuetext": `${span(item.cutoff)} before, by ${clock(when)}`, "aria-valuenow": Math.round(item.cutoff), "aria-valuemin": 0, "aria-valuemax": 180 });
+            "aria-valuetext": `${span(item.cutoff)} before, by ${clock(when)}`, "aria-valuenow": Math.round(item.cutoff), "aria-valuemin": 0, "aria-valuemax": Math.round(Math.min(180, item.start - FIRST)) });
           mark.append(make("line", { class: "cutoff-line", x1, y1, x2, y2 }));
           mark.append(make("circle", { class: "cutoff-ring", cx: x2, cy: y2, r: 8 }));
           mark.append(make("circle", { class: "cutoff-hit", cx: x2, cy: y2, r: 16 }));
@@ -601,28 +610,51 @@ function start() {
             "aria-label": known ? `${item.name} takes ${lengths}. Arrow keys change it. Shift and the arrow keys say how late it may run.` : `Nobody has recorded how long ${item.name} takes. Arrow keys set it.`,
             "aria-valuetext": lengths, "aria-valuenow": known ? Math.round(item.length) : 0, "aria-valuemin": 0, "aria-valuemax": 240 }));
           if (known) {
-            // The end that says how late the ride may run. Until it is pulled it waits beside the end of the road.
+            // The end that says how late the ride may run. Until it is pulled it waits beside the end
+            // of the road. Where it would lie on that end, or leave the drawing, it sits further into
+            // the lane instead, so each of the two ends can be pulled.
             const [lx, ly] = point(item.leaves + (item.longest ?? item.length), toEdge);
-            const [cx, cy] = [tall ? lx : lx + (range ? 0 : 20), tall ? ly + (range ? 0 : 18) : ly];
+            const inward = down ? 21 : -21;
+            const beside = range ? Math.hypot(lx - x2, ly - y2) < 24 : !tall && lx + 26 > at(LAST) + 7;
+            const [cx, cy] = beside ? (tall ? [lx + inward, ly] : [lx, ly + inward]) : range ? [lx, ly] : tall ? [lx, ly + 20] : [lx + 20, ly];
             ends.append(make("circle", { class: `late-end${range ? " set" : ""}`, cx, cy, r: 6 }));
-            ends.append(make("circle", { class: "late-hit", hint: "Pull to say how late it may run", cx, cy, r: range ? 14 : 11, "data-act": "late", "data-id": item.id }));
+            ends.append(make("circle", { class: "late-hit", hint: "Pull to say how late it may run", cx, cy, r: range && !beside ? 14 : 11, "data-act": "late", "data-id": item.id }));
           }
         }
       }
     }
     // The lists of rides. On a phone: every ride, under the day.
     if (tall) {
-      rides.forEach((item, row) => listed(item, gutter, at(LAST) + 40 + row * 17, "start"));
+      rides.forEach((item, row) => listed(item, gutter, at(LAST) + 42 + row * 17, "start"));
     } else {
-      // On a desk: where several rides run between the same PLACEs, a list in the gap beside them.
+      // On a desk: where several rides run between the same PLACEs, a list in the gap between the
+      // lanes, in the nearest stretch that is clear of roads and of the lines of times to be there.
       for (const group of pairs.values()) {
         if (group.length < 2) continue;
-        const starts = at(Math.min(...group.map((item) => item.leaves)));
-        const lands = at(Math.max(...group.map((item) => item.leaves + (item.longest ?? item.shown))));
-        const before = starts > 300; // room for the words before the roads start
-        const upper = Math.min(laneAt(group[0].from), laneAt(group[0].to));
-        const top = upper + laneSize + (gap - group.length * 17) / 2 + 12;
-        group.forEach((item, row) => listed(item, before ? starts - 22 : lands + 30, top + row * 17, before ? "end" : "start"));
+        const [upper, lower] = [group[0].from, group[0].to].sort((one, other) => lanes.indexOf(one) - lanes.indexOf(other));
+        const width = 44 + Math.max(...group.map((item) => widthOf(says(item, true), 600, 0.74)));
+        const taken = rides
+          .filter((item) => [item.from, item.to].includes(upper) && [item.from, item.to].includes(lower))
+          .map((item) => [at(item.leaves) - 12, at(item.leaves + Math.max(item.shown, item.longest ?? 0)) + 14]);
+        for (const item of view.items) {
+          if (item.kind === "departure" && item.cutoff !== null && item.place === lower) taken.push([at(item.start - item.cutoff) - 9, at(item.start - item.cutoff) + 9]);
+        }
+        taken.sort((one, other) => one[0] - other[0]);
+        const clear = [];
+        let from = 10;
+        for (const [start, end] of taken) {
+          if (start > from) clear.push([from, start]);
+          from = Math.max(from, end);
+        }
+        if (wide - 10 > from) clear.push([from, wide - 10]);
+        const fan = [at(Math.min(...group.map((item) => item.leaves))), at(Math.max(...group.map((item) => item.leaves + item.shown)))];
+        const away = ([start, end]) => (end <= fan[0] ? fan[0] - end : Math.max(0, start - fan[1]));
+        const roomy = clear.filter(([start, end]) => end - start >= width);
+        // With no stretch wide enough, the widest one.
+        const [start, end] = (roomy.length ? roomy.sort((one, other) => away(one) - away(other)) : clear.sort((one, other) => other[1] - other[0] - (one[1] - one[0])))[0] || [10, wide - 10];
+        const before = end <= fan[0] + 1;
+        const top = laneAt(upper) + laneSize + (gap - group.length * 17) / 2 + 12;
+        group.forEach((item, row) => listed(item, before ? end - 6 : start + 6, top + row * 17, before ? "end" : "start"));
       }
     }
     // How late people would be at worst, where the report says so: marked along the edge of the lane.
@@ -677,6 +709,9 @@ function start() {
     if (!held) return;
     const length = held.tall ? Math.round((LAST - FIRST) * 1.75) : day.clientWidth - 14;
     const by = ((held.tall ? event.clientY - held.y : event.clientX - held.x) / length) * (LAST - FIRST);
+    // Nothing changes until the pull has gone one whole step.
+    if (!held.moved && Math.abs(by) < STEP) return;
+    held.moved = true;
     const steps = Math.round(by / STEP);
     if (steps !== held.steps) {
       held.steps = steps;
@@ -716,8 +751,14 @@ function start() {
   // ------------------------------------------------------------ the story that plays by itself
 
   const PACE = 5600; // how long each version of the story stays, in milliseconds
-  // The story waits while the pointer or the keyboard is in the day, and while the day is out of sight.
+  // The story waits while the pointer is over the day, while the keyboard is in the day, in the
+  // versions or in the tools, and while the day is out of sight.
   const story = { timer: 0, spent: 0, near: false, within: false, seen: true };
+  /** Each report scrolls by itself. A report that has just come into view starts at its top left. */
+  function toTop() {
+    for (const pane of trip.querySelectorAll(".terminal > *")) pane.scrollTo(0, 0);
+  }
+  for (const input of trip.querySelectorAll('input[name="form"]')) input.addEventListener("change", toTop);
   /** What the button says. Playing the story replaces a trip that the reader has changed, so it says that. */
   function label() {
     playing.textContent = story.timer ? "Pause the story" : now.version === null ? "Drop my changes and play the story" : "Play the story";
@@ -727,8 +768,7 @@ function start() {
     checker.waiting = null; // a FILE that waits to be checked is the reader's, and the reader has left it
     trip.classList.remove("checking", "slow");
     now = { version, file: structuredClone(stories[version].file), report: stories[version].report };
-    // Each version's report starts at its top.
-    for (const pane of trip.querySelectorAll(".terminal")) pane.scrollTop = 0;
+    toTop();
     label();
     show(smooth);
   }
@@ -761,8 +801,10 @@ function start() {
   }
   day.addEventListener("pointerenter", () => (story.near = true));
   day.addEventListener("pointerleave", () => (story.near = false));
-  day.addEventListener("focusin", () => (story.within = true));
-  day.addEventListener("focusout", () => (story.within = false));
+  for (const part of [day, tools, trip.querySelector(".versions")]) {
+    part.addEventListener("focusin", () => (story.within = true));
+    part.addEventListener("focusout", () => (story.within = false));
+  }
   new IntersectionObserver((seen) => (story.seen = seen.some((entry) => entry.isIntersecting)), { threshold: 0.25 }).observe(day);
   playing.addEventListener("click", () => (story.timer ? stop() : play()));
   for (const version of versions) {

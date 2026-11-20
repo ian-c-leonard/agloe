@@ -173,13 +173,26 @@ export function scene(file, report) {
     // The length the ride is drawn with: its own, or the one the report asks for.
     ride.shown = ride.length ?? ride.atMost ?? asFarAs(ride.to, ride.leaves);
   }
-  // Each other way that the report asks about, once for each pair of PLACEs.
+  // The gaps in the day that travel has to fill: something ends at one PLACE, and the next thing
+  // is at another. Each has the time people can leave and the time by which they must be there.
+  const timed = items.filter((item) => item.kind !== "ride").sort((one, other) => one.start - other.start);
+  const gaps = [];
+  timed.slice(0, -1).forEach((first, at) => {
+    const next = timed[at + 1];
+    if (first.length === null) return;
+    gaps.push({ from: first.kind === "departure" ? first.lands : first.place, to: next.place, leaves: first.start + first.length, by: next.start - (next.cutoff ?? 0) });
+  });
+  // Each other way that the report asks about, once for each pair of PLACEs. It is drawn in the
+  // tightest gap between those PLACEs, because that is where another way is needed most. That is
+  // a place to draw it, and no claim.
   for (const other of missing.filter((need) => need.what === "other ways" && need.from && need.to)) {
     const id = `another-way-${other.from}-${other.to}`;
     if (items.some((item) => item.id === id)) continue;
     const atMost = lengthOf(other.at_most);
-    const leaves = leaving(other.from);
-    items.push({ kind: "ghost", id, from: other.from, to: other.to, leaves, atMost, shown: atMost ?? asFarAs(other.to, leaves) });
+    const gap = gaps.filter((each) => each.from === other.from && each.to === other.to).sort((one, two) => one.by - one.leaves - (two.by - two.leaves))[0];
+    const leaves = gap ? gap.leaves : leaving(other.from);
+    const room = gap ? Math.max(STEP, gap.by - gap.leaves) : asFarAs(other.to, leaves);
+    items.push({ kind: "ghost", id, from: other.from, to: other.to, leaves, atMost, shown: atMost ?? room });
   }
   // How late people would be at worst, where the report on a trip that may not hold says so.
   // Too late to arrive is counted from the time to be there. Still busy is counted from the start.
