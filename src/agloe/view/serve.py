@@ -54,9 +54,17 @@ def _static() -> dict[str, tuple[str, bytes]]:
     return parts
 
 
+def _no_number(name: str) -> object:
+    raise ValueError(f"{name} is not a JSON value")
+
+
 def _said(line: bytes) -> Event:
-    """One line that a check printed, as the event it is. Raises ValueError where it is none."""
-    said: object = json.loads(line.decode())
+    """One line that a check printed, as the event it is. Raises ValueError where it is none.
+
+    An event is passed on only if it holds all that a page reads from it, so that no page is
+    ever left with half an event.
+    """
+    said: object = json.loads(line.decode(), parse_constant=_no_number)
     if not isinstance(said, dict):
         raise ValueError("a check printed something that is no event")
     event = cast("Event", said)
@@ -64,10 +72,16 @@ def _said(line: bytes) -> Event:
     shape = SHAPES.get(kind) if isinstance(kind, str) else None
     if shape is None or set(event) != {"kind", *shape}:
         raise ValueError("a check printed something that is no event")
-    if not all(isinstance(event[name], kinds) for name, kinds in shape.items()):
-        raise ValueError("a check printed an event that does not hold what it must")
+    for name, kinds in shape.items():
+        if isinstance(event[name], bool) or not isinstance(event[name], kinds):
+            raise ValueError("a check printed an event that does not hold what it must")
     if "answer" in event and event["answer"] not in ANSWERS:
         raise ValueError("a check printed an answer that is none of the three")
+    seconds = event.get("seconds")
+    if isinstance(seconds, int | float) and not 0 <= seconds < float("inf"):
+        raise ValueError("a check printed a length of time that is none")
+    if "json" in event and cast("Event", event["json"]).get("answer") != event["answer"]:
+        raise ValueError("a check printed a report with another answer than its own")
     if "problems" in event and not all(
         isinstance(problem, str) for problem in cast("list[object]", event["problems"])
     ):
@@ -108,9 +122,10 @@ class View:
         However it ends, it ends the check that is running, lets every page go, and gives the
         port back, before it returns.
         """
-        self._serving = True
-        watching = threading.Thread(target=self._watch, daemon=True)
+        watching: threading.Thread | None = None
         try:
+            self._serving = True
+            watching = threading.Thread(target=self._watch, daemon=True)
             watching.start()
             # One request at a time is taken up, so that the view sees soon that it is closed.
             while not self.closed:
@@ -118,7 +133,7 @@ class View:
         finally:
             self._stop()
             self._server.server_close()
-            if watching.is_alive():
+            if watching is not None and watching.is_alive():
                 watching.join()
 
     def close(self) -> None:

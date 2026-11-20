@@ -8,6 +8,7 @@ import json
 import os
 import signal
 import sys
+import threading
 import webbrowser
 from collections.abc import Sequence
 from pathlib import Path
@@ -122,7 +123,9 @@ def _view(path: Path, port: int, in_a_browser: bool) -> int:
     try:
         print(f"The view of {path} is at {view.address}", flush=True)
         if in_a_browser:
-            webbrowser.open(view.address)
+            # A browser can take its time, and some wait until they are closed. The view
+            # serves meanwhile, or the browser would wait for a page that nobody sends.
+            threading.Thread(target=webbrowser.open, args=(view.address,), daemon=True).start()
         view.serve()
     except KeyboardInterrupt:
         pass

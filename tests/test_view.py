@@ -15,6 +15,7 @@ page says in each state. It has no page in it, so Node runs it here, through ``v
 import http.client
 import json
 import os
+import queue
 import re
 import select
 import shutil
@@ -77,29 +78,49 @@ def serving(path: Path, python: str = sys.executable) -> Generator[View]:
 
 
 class Sent:
-    """What the view sends a page, read one event at a time, each within a time limit."""
+    """What the view sends a page, read one event at a time, each within a time limit.
+
+    The events are read in a thread of their own, so a limit holds whatever the view sends.
+    """
 
     def __init__(self, view: View | str) -> None:
         address = view if isinstance(view, str) else view.address
-        self.reply = urllib.request.urlopen(f"{address}events", timeout=30)
+        self.reply = urllib.request.urlopen(f"{address}events", timeout=120)
+        self.read: queue.Queue[dict[str, Any] | None] = queue.Queue()
+        threading.Thread(target=self._listen, daemon=True).start()
+
+    def _listen(self) -> None:
+        try:
+            for raw in self.reply:
+                # The view says now and then that it is still there. That is no event.
+                if raw.startswith(b"data: "):
+                    self.read.put(json.loads(raw.removeprefix(b"data: ")))
+        except OSError, ValueError:
+            pass
+        self.read.put(None)
 
     def next(self, within: float = 60) -> dict[str, Any]:
-        late = time.monotonic() + within
-        for raw in self.reply:
-            if raw.startswith(b"data: "):
-                event: dict[str, Any] = json.loads(raw.removeprefix(b"data: "))
-                return event
-            # The view says now and then that it is still there. That is no event.
-            assert time.monotonic() < late, "the view sent no event in time"
-        raise AssertionError("the view stopped sending")
+        try:
+            event = self.read.get(timeout=within)
+        except queue.Empty:
+            raise AssertionError("the view sent no event in time") from None
+        assert event is not None, "the view stopped sending"
+        return event
 
     def until(self, kind: str, within: float = 60) -> Events:
-        """Every event up to the first of this kind."""
+        """Every event up to the first of this kind, all of them within the time."""
         late = time.monotonic() + within
         seen = [self.next(within)]
         while seen[-1]["kind"] != kind:
-            seen.append(self.next(max(1.0, late - time.monotonic())))
+            seen.append(self.next(max(0.0, late - time.monotonic())))
         return seen
+
+    def ended(self, within: float = 20) -> bool:
+        """Whether the view stops sending within the time, with no further event."""
+        try:
+            return self.read.get(timeout=within) is None
+        except queue.Empty:
+            return False
 
 
 def stand_in(folder: Path, does: str) -> str:
@@ -247,6 +268,21 @@ def test_a_file_that_cannot_be_read_has_no_report(tmp_path: Path) -> None:
     assert kinds(back) == ["file", "answer", "report"]
 
 
+@pytest.mark.parametrize("ending", [b"\n", b"\r\n", b"\r"], ids=["LF", "CRLF", "CR"])
+def test_a_file_that_is_no_json_is_refused_in_the_words_of_the_command(
+    ending: bytes, tmp_path: Path
+) -> None:
+    """The view and ``agloe check`` name the same line of the FILE, whatever ends its lines."""
+    path = tmp_path / "trip.json"
+    path.write_bytes(b"{" + ending + b'  "persons": [' + ending + b"?}")
+    with pytest.raises(FileError) as refused:
+        read(path)
+    assert "line 3" in refused.value.problems[0]
+    with serving(path) as view:
+        sent = Sent(view).until("refused")
+    assert sent[-1]["problems"] == list(refused.value.problems)
+
+
 def test_a_page_that_comes_late_is_sent_the_same(tmp_path: Path) -> None:
     path = tmp_path / "trip.json"
     shutil.copy(STORY / "works.json", path)
@@ -293,6 +329,10 @@ def test_the_answer_reaches_a_page_while_the_check_goes_on(tmp_path: Path) -> No
         """echo '{"kind": "answer", "answer": "PERHAPS", "seconds": 1}'""",
         """echo '{"kind": "refused", "problems": [1]}'""",
         """echo '{"kind": "file", "name": "another.json"}'""",
+        """echo '{"kind": "report", "answer": "FEASIBLE", "json": {}, "text": "", "seconds": 1}'""",
+        """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": true}'""",
+        """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": NaN}'""",
+        """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": -1}'""",
         None,
     ],
 )
@@ -319,9 +359,9 @@ def test_a_pipe_in_the_place_of_the_file_cannot_hold_the_view_up(tmp_path: Path)
     with serving(path) as view:
         sent = Sent(view)
         sent.until("report")
-        path.unlink()
-        os.mkfifo(path)
-        pipe = sent.until("unreadable")[-2:]
+        os.mkfifo(tmp_path / "pipe")
+        os.replace(tmp_path / "pipe", path)
+        pipe = sent.until("unreadable")
     assert kinds(pipe) == ["file", "unreadable"]
     assert pipe[-1]["problem"] == "It is not a regular file"
 
@@ -355,9 +395,9 @@ def test_the_view_stops_while_a_page_listens(tmp_path: Path) -> None:
     with serving(path) as view:
         sent = Sent(view)
         sent.until("report")
-    # The view has stopped, and it has let the page go: the page reads the end of the last
-    # event, and then the end of what the view sends.
-    assert sent.reply.read().strip() == b""
+    # The view has stopped, and it has let the page go: the page reads the end of what the view
+    # sends, and no further event.
+    assert sent.ended()
     # And nothing answers at the address any more.
     with pytest.raises(OSError):
         asked(view, "/")
@@ -474,6 +514,45 @@ def test_the_command_serves_the_view_until_it_is_stopped(
     # The check ran in a process of its own, and neither process had anything to complain of.
     assert started.stderr is not None
     assert started.stderr.read() == ""
+
+
+def test_the_command_serves_a_browser_that_it_opens_and_that_waits(tmp_path: Path) -> None:
+    """A browser that runs until it is closed gets its page, and does not hold the view up."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    got = tmp_path / "got"
+    # The stand-in for a browser asks for the page, notes what it got, and then stays open.
+    browser = tmp_path / "browser.py"
+    browser.write_text(
+        "import sys, time, urllib.request\n"
+        "with urllib.request.urlopen(sys.argv[1], timeout=20) as reply:\n"
+        f"    open({str(got)!r}, 'w').write(str(reply.status))\n"
+        "time.sleep(3)\n"
+    )
+    started = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from agloe.cli import main; sys.exit(main())",
+            "view",
+            str(path),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={**os.environ, "BROWSER": f"{sys.executable} {browser} %s"},
+    )
+    try:
+        late = time.monotonic() + 30
+        while not got.exists() and time.monotonic() < late:
+            time.sleep(0.05)
+        assert got.exists(), "the browser that the command opened got no page"
+        assert got.read_text() == "200"
+        started.send_signal(signal.SIGINT)
+        assert started.wait(timeout=20) == 0
+    finally:
+        started.kill()
+        started.wait(timeout=20)
 
 
 @pytest.mark.parametrize("stop", [signal.SIGINT, signal.SIGTERM], ids=["Ctrl-C", "ended"])

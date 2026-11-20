@@ -13,6 +13,7 @@ line of JSON. The view runs that in a process of its own, because a check can on
 by ending its process.
 """
 
+import io
 import json
 import sys
 import time
@@ -28,7 +29,9 @@ type Event = dict[str, object]
 def checked(content: bytes) -> Iterator[Event]:
     """The events for a FILE with this content: ``refused``, or ``answer`` and what follows it."""
     try:
-        file = parse(content.decode())
+        # The text is read as ``agloe check`` reads it from disk, with every kind of line ending
+        # taken for one, so that both name the same line of a FILE that is no JSON.
+        file = parse(io.TextIOWrapper(io.BytesIO(content), encoding="utf-8").read())
     except UnicodeDecodeError as problem:
         yield {"kind": "refused", "problems": [f"not readable as JSON: {problem}"]}
         return
