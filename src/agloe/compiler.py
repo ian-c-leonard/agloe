@@ -9,8 +9,9 @@ Only the search is different. The three answers, ROBUST and the evidence are wor
 ``answers.check``, with this module's search in place of the reference checker's.
 
 For INFEASIBLE, the search for the conflict asks whether anything can still work once records
-are taken out. The solver answers each such question with one model. Where taking FACTs out
-leaves it open whether an OPTION SATISFIES a WANT, the solver chooses that too.
+are taken out. Each such question takes one model at most. Where taking FACTs out leaves it
+open whether an OPTION SATISFIES a WANT, the solver chooses that too. Where LOCKs put a PERSON
+into two OPTIONs at once, no model is needed.
 
 The solver counts in 64-bit numbers. A TRIP with very long durations and very many routes can
 need more than that. The reference checker's own search then answers for the whole TRIP. That
@@ -103,8 +104,9 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
 
     The best cases differ only in the pairs that are left open: whether an OPTION SATISFIES a
     WANT that is a must for one PERSON and a must-not for another. The solver chooses that
-    for each pair, with the plan. So one question takes one model, however many pairs are
-    open. The reference checker then checks the plan in the best case the solver chose.
+    for each pair, with the plan. So one question takes one model at most, however many
+    pairs are open. The reference checker then checks the plan in the best case the solver
+    chose.
 
     ``asked`` holds what the solver answered for each model it was given before in the same
     check. A FACT that is taken out often changes nothing in the model: it said what the best
@@ -136,16 +138,17 @@ def _locked_twice_at_once(file: File, world: World) -> bool:
     A PERSON does one OPTION after another, so the later one starts no earlier than the
     first one ends. Two OPTIONs that both start at fixed times in this world can be done in
     an order only where that holds for it, and nothing follows an OPTION with no known end.
-    Where neither order holds, no ITINERARY has the PERSON in both, and the LOCKs ask for
-    both. So nothing works, and no model is needed to see it.
+    Where neither order holds, no ITINERARY that works in this world has the PERSON in both,
+    and the LOCKs ask for both. So nothing works, and no model is needed to see it.
+
+    Several LOCKs can name one OPTION for a PERSON. That is one OPTION, taken once.
     """
-    index = {option.id: number for number, option in enumerate(file.options)}
-    locked: dict[str, list[reference.Terms]] = {}
+    locked: dict[str, dict[str, reference.Terms]] = {}
     for lock in file.locks:
-        terms = world.terms[file.options[index[lock.option]].id]
+        terms = world.terms[lock.option]
         if terms.fixed_start is not None:
             for person in lock.persons:
-                locked.setdefault(person, []).append(terms)
+                locked.setdefault(person, {})[lock.option] = terms
 
     def follows(first: reference.Terms, then: reference.Terms) -> bool:
         if first.fixed_start is None or then.fixed_start is None or first.longest is None:
@@ -155,7 +158,7 @@ def _locked_twice_at_once(file: File, world: World) -> bool:
     return any(
         not follows(one, other) and not follows(other, one)
         for theirs in locked.values()
-        for one, other in combinations(theirs, 2)
+        for one, other in combinations(theirs.values(), 2)
     )
 
 

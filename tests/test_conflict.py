@@ -1,6 +1,7 @@
 """The search for a conflict: one yes-or-no question for each record, in the FILE's order."""
 
 from random import Random
+from typing import Any
 
 import pytest
 from ortools.sat.python import cp_model
@@ -365,7 +366,13 @@ def a_busy_day(rng: Random) -> File:
         for name in names
         if rng.random() < 0.8
     ]
-    return trip(people, places, options, facts, locks, ways=ways)
+    # A second LOCK for an OPTION that has one already, perhaps for the same PERSON.
+    again = [
+        {**lock(each["lock"], rng.choice(people)), "id": f"{each['id']}-again"}
+        for each in locks
+        if rng.random() < 0.3
+    ]
+    return trip(people, places, options, facts, [*locks, *again], ways=ways)
 
 
 def test_two_locked_options_at_once_rule_out_every_plan() -> None:
@@ -380,6 +387,18 @@ def test_two_locked_options_at_once_rule_out_every_plan() -> None:
                 seen += 1
                 assert not reference.any_works(file, world)
     assert seen > 100
+
+
+def test_two_locks_for_one_option_are_one_option() -> None:
+    """Sam is LOCKed into lunch twice, once alone and once with Alex. One lunch honors both."""
+    facts = [starts_at("lunch", 12), lasts("lunch", "PT30M")]
+    locks = [lock("lunch", "sam"), {**lock("lunch", "sam", "alex"), "id": "lock-lunch-for-both"}]
+    file = trip(["sam", "alex"], ["cafe"], [stays("lunch", "cafe")], facts, locks)
+    twice = compiler._locked_twice_at_once  # pyright: ignore[reportPrivateUsage]
+    assert not twice(file, reference.worst_case(file))
+    found = compiler.check(file)
+    assert (found.answer, found.robust) == (Answer.FEASIBLE, True)
+    assert found == check(file)
 
 
 def test_seeing_a_person_locked_twice_at_once_changes_no_report(
@@ -420,7 +439,16 @@ def test_a_double_booking_among_many_sailings_needs_few_models(
         facts += [starts_at(name, minutes // 60, minutes % 60), lasts(name, "PT20M")]
     decisions = [lock("breakfast", *people), lock("sailing-1", *people)]
     file = trip(people, ["port", "island"], options, facts, decisions)
-    solves = solves_counted(monkeypatch)
+    built = 0
+    search = compiler._Search  # pyright: ignore[reportPrivateUsage]
+    build = search.__init__
+
+    def counted(self: object, *given: Any, **named: Any) -> None:
+        nonlocal built
+        built += 1
+        build(self, *given, **named)  # pyright: ignore[reportArgumentType]
+
+    monkeypatch.setattr(search, "__init__", counted)
     found = compiler.check(file)
     assert found.conflict == (
         "breakfast-time",
@@ -429,4 +457,4 @@ def test_a_double_booking_among_many_sailings_needs_few_models(
         "lock-breakfast",
         "lock-sailing-1",
     )
-    assert len(solves) <= len(found.conflict)
+    assert built <= len(found.conflict)
