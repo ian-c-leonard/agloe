@@ -69,7 +69,8 @@ _MONTHS = [
 
 
 # What an answer says when it comes ahead of its Report. FEASIBLE promises no more than every
-# FEASIBLE Report says: the WARNINGs are known only once the plan to show is chosen.
+# FEASIBLE Report says: the WARNINGs are known only once the plan to show is chosen. INFEASIBLE
+# leaves open whether the conflict turns on the BUDGETs, as the Report does until its last test.
 _AHEAD = {
     Answer.FEASIBLE: [
         "FEASIBLE: this trip can work.",
@@ -80,7 +81,8 @@ _AHEAD = {
     Answer.INFEASIBLE: [
         "INFEASIBLE: this trip cannot work.",
         "",
-        "The check is still working out which FACTs, WANTs and DECISIONs rule out every plan.",
+        "The check is still working out which FACTs, WANTs and DECISIONs rule out every plan,"
+        " and whether they do so only with the BUDGETs of this FILE.",
     ],
     Answer.UNDETERMINED: [
         "UNDETERMINED: the FILE does not say enough to tell.",
@@ -90,13 +92,18 @@ _AHEAD = {
 }
 
 
-def as_json(file: File, report: Report) -> dict[str, object]:
-    """The Report in the shape of the expected results beside the examples.
+def answer_as_text(answer: Answer) -> str:
+    """An answer given ahead of its Report, in plain words, ending with a line break."""
+    return "\n".join(_AHEAD[answer]) + "\n"
 
-    An answer given ahead of its Report has the answer and ``unfinished``, and nothing else.
-    """
-    if report.unfinished:
-        return {"answer": report.answer.value, "unfinished": True}
+
+def answer_as_json(answer: Answer) -> dict[str, object]:
+    """An answer given ahead of its Report: the answer, and that the Report is unfinished."""
+    return {"answer": answer.value, "unfinished": True}
+
+
+def as_json(file: File, report: Report) -> dict[str, object]:
+    """The Report in the shape of the expected results beside the examples."""
     out: dict[str, object] = {"answer": report.answer.value}
     if report.answer is Answer.FEASIBLE:
         rights: dict[str | None, dict[str, str]] = {}
@@ -449,12 +456,7 @@ def _clock_for(file: File, report: Report) -> _Clock:
 
 
 def as_text(file: File, report: Report) -> str:
-    """The Report in plain words, ending with a line break.
-
-    An answer given ahead of its Report says what the check is still working out.
-    """
-    if report.unfinished:
-        return "\n".join(_AHEAD[report.answer]) + "\n"
+    """The Report in plain words, ending with a line break."""
     clock = _clock_for(file, report)
     if report.answer is Answer.FEASIBLE:
         lines = _feasible(file, clock, report)

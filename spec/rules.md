@@ -180,15 +180,15 @@ The unknown FACTs have a fixed order. First come the OPTIONs in the FILE's order
 
 ## The answer can come first
 
-A check can give its answer as soon as the answer is proved, ahead of its report. The report follows, and it is the report this page describes.
+A check can give its answer as soon as the answer is proved, ahead of its report. The answer comes by itself, marked as unfinished. It is no report and it shows no evidence: the evidence comes with the report, when the check is done. That report is the one this page describes.
 
 | Answer | It is proved once | The report still has to find |
 |---|---|---|
 | FEASIBLE | one ITINERARY, with its way to pay, works in the worst case | the ITINERARY that the fixed rule shows, what it relies on, the WARNINGs and the money |
-| INFEASIBLE | nothing works in the best case | the FACTs, WANTs and DECISIONs that conflict |
+| INFEASIBLE | nothing works in the best case | the FACTs, WANTs and DECISIONs that conflict, and whether they conflict only with the BUDGETs as the FILE lists them |
 | UNDETERMINED | nothing works in the worst case, and something works in the best case | the unknown FACTs that would be enough |
 
-The answer comes with nothing else. The ITINERARY that proved a TRIP FEASIBLE is not shown: it is seldom the one the fixed rule shows. The answer is exact, so it is the answer of the report that follows, and the same FILE gives it on any machine. Whoever asked can act on the answer at once, and can stop there.
+The ITINERARY that proved a TRIP FEASIBLE is not shown: it need not be the one the fixed rule shows. The answer is exact, so it is the answer of the report, and the same FILE gives it on any machine. Whoever asked can act on the answer at once, and can stop the check there.
 
 ## Examples
 
@@ -282,4 +282,4 @@ The Skydeck sells tickets for a set time, and Alex bought one for 10:00 am befor
 | [already overspent](../examples/a-ticket/already-overspent.json) | The cap is 50.00 USD. Jo has a BOOKING for the gallery talk that paid 25.00 USD from the trip money. | INFEASIBLE. Three records conflict: the two BOOKINGs and the cap. |
 | [depends on the talk](../examples/a-ticket/depends-on-the-talk.json) | Both have a BOOKING. Nobody has recorded whether Jo needs a ticket for the gallery talk. | UNDETERMINED. It works if the gallery talk needs no right. |
 
-Each FILE has its expected result beside it, as JSON and in words, and the tests compare the reference checker's answer with it. The command `agloe check` prints the same result for any FILE. With `--answer-first` it prints the answer as soon as it is proved, and then the result. With `--json` as well, each of the two is one line of JSON.
+Each FILE has its expected result beside it, as JSON and in words, and the tests compare the reference checker's answer with it. The command `agloe check` prints the same result for any FILE. With `--answer-first` it prints the answer as soon as it is proved, and the result when the check is done. With `--json` as well, each of the two is one line of JSON, and the answer has `"unfinished": true` in it. Where the result cannot be written, the command ends with 2, also after it has printed the answer.

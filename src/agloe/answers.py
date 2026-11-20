@@ -136,9 +136,6 @@ class Report:
 
     In a FILE with a cap, a FEASIBLE Report has a row for each cap in ``caps``, and an
     UNDETERMINED one has a plan for each set of ``missing`` in ``plans``, in the same order.
-
-    ``unfinished`` marks the answer that ``reports`` gives ahead of the Report. It holds the
-    answer and nothing else: its evidence is not worked out yet.
     """
 
     answer: Answer
@@ -152,7 +149,6 @@ class Report:
     missing: tuple[tuple[Missing, ...], ...] = ()
     caps: tuple[CapRow, ...] = ()
     plans: tuple[Plan, ...] = ()
-    unfinished: bool = False
 
 
 type Shown = Callable[[File, World], Itinerary | None]
@@ -172,6 +168,8 @@ def check(
     and whether any works in some best case of what is left of a FILE.
     """
     *_, report = reports(file, shown, works, can_work, ahead=False)
+    if not isinstance(report, Report):
+        raise AssertionError("a check ended with no Report")
     return report
 
 
@@ -181,16 +179,17 @@ def reports(
     works: Works = any_works,
     can_work: CanWork = can_work,
     ahead: bool = True,
-) -> Iterator[Report]:
+) -> Iterator[Answer | Report]:
     """The answer as soon as it is proved, and then the Report that ``check`` gives.
 
-    The answer comes ahead as a Report that is ``unfinished``: it holds the answer and nothing
-    else. Each answer is proved at one point, and nothing is given from less.
+    The answer comes ahead by itself, as an Answer. No evidence comes with it: a Report with
+    an empty ITINERARY says that nobody has to do anything, and that is not known yet. Each
+    answer is proved at one point, and nothing is given from less.
 
     - FEASIBLE, once some ITINERARY works in the worst case. That takes one question more:
       ``works`` stops at the first ITINERARY that does, where ``shown`` looks for the one
       the rule puts first. The ITINERARY it found is not given. It can differ from one
-      machine to the next, and it is seldom the one the rule puts first.
+      machine to the next, and it need not be the one the rule puts first.
     - INFEASIBLE, once nothing works in any best case of the whole FILE.
     - UNDETERMINED, once nothing works in the worst case and something does in a best case.
 
@@ -201,7 +200,7 @@ def reports(
     worst = worst_case(file)
     sure = works(file, worst) if ahead else None
     if sure:
-        yield Report(Answer.FEASIBLE, unfinished=True)
+        yield Answer.FEASIBLE
     plain = None if sure is False else shown(file, worst)
     if plain is not None:
         longest = longest_case(file)
@@ -234,12 +233,12 @@ def reports(
     whole = Remaining(file)
     if not can_work(whole):
         if ahead:
-            yield Report(Answer.INFEASIBLE, unfinished=True)
+            yield Answer.INFEASIBLE
         conflict, given_budgets = _conflict(whole, can_work)
         yield Report(Answer.INFEASIBLE, conflict=conflict, given_budgets=given_budgets)
         return
     if ahead:
-        yield Report(Answer.UNDETERMINED, unfinished=True)
+        yield Answer.UNDETERMINED
     missing = _missing(file, works, shown)
     plans = tuple(_plan(file, some, shown) for some in missing) if file.caps else ()
     yield Report(Answer.UNDETERMINED, missing=missing, plans=plans)

@@ -2,13 +2,14 @@
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 from agloe import compiler, report
-from agloe.answers import Answer
-from agloe.file import FileError, Unwritable, read
+from agloe.answers import Answer, Report
+from agloe.file import File, FileError, Unwritable, read
 
 
 def main(arguments: Sequence[str] | None = None) -> int:
@@ -24,7 +25,11 @@ def main(arguments: Sequence[str] | None = None) -> int:
         description=(
             "Reads one FILE and prints the COMPILER's report. "
             "Ends with 0 for FEASIBLE, 1 for INFEASIBLE or UNDETERMINED, "
-            "and 2 when the FILE could not be read or its report could not be written."
+            "and 2 when the FILE could not be read or its report could not be written. "
+            "With --answer-first, the answer is printed as soon as it is proved, and the "
+            "report follows when the check is done. With --json as well, the answer is the "
+            'line {"answer": ..., "unfinished": true}, and the report is one line after it. '
+            "To stop a check, end the command: closing its output does not stop the search."
         ),
     )
     check.add_argument("file", type=Path, help="the trip, as a JSON FILE")
@@ -32,10 +37,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
     check.add_argument(
         "--answer-first",
         action="store_true",
-        help=(
-            "print the answer as soon as it is proved, and then the report; "
-            "with --json, each of the two is one line of JSON"
-        ),
+        help="print the answer as soon as it is proved, ahead of the report",
     )
     chosen = parser.parse_args(arguments)
 
@@ -55,12 +57,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
     answer = None
     for found in series:
         try:
-            if chosen.json:
-                indent = None if chosen.answer_first else 2
-                shape = report.as_json(file, found)
-                printed = json.dumps(shape, indent=indent, ensure_ascii=False) + "\n"
-            else:
-                printed = report.as_text(file, found)
+            printed = _in_print(file, found, chosen.json, chosen.answer_first)
         except Unwritable:
             print(
                 f"{chosen.file}: the report holds a time outside the years 0001 to 9999, "
@@ -68,8 +65,39 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        if found.unfinished and not chosen.json:
-            printed += "\n"
-        print(printed, end="", flush=True)
-        answer = found.answer
+        try:
+            print(printed, end="", flush=True)
+        except BrokenPipeError:
+            _leave_the_output()
+            return 2
+        except (OSError, UnicodeError) as problem:
+            print(f"{chosen.file}: the output could not be written: {problem}", file=sys.stderr)
+            return 2
+        answer = found if isinstance(found, Answer) else found.answer
     return 0 if answer is Answer.FEASIBLE else 1
+
+
+def _in_print(file: File, found: Answer | Report, as_json: bool, on_one_line: bool) -> str:
+    """What the command prints for an answer given ahead of its Report, or for a Report."""
+    if as_json:
+        ahead = isinstance(found, Answer)
+        shape = report.answer_as_json(found) if ahead else report.as_json(file, found)
+        return json.dumps(shape, indent=None if on_one_line else 2, ensure_ascii=False) + "\n"
+    if isinstance(found, Answer):
+        # An empty line parts the answer from the report that follows.
+        return report.answer_as_text(found) + "\n"
+    return report.as_text(file, found)
+
+
+def _leave_the_output() -> None:
+    """Whoever read the output has stopped reading. Nothing more is written to it.
+
+    Python writes out what is left when it ends, and would report the same failure again. So
+    the output is pointed at nothing first.
+    """
+    try:
+        nothing = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(nothing, sys.stdout.fileno())
+        os.close(nothing)
+    except OSError, ValueError:
+        pass

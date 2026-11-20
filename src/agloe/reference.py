@@ -1276,7 +1276,7 @@ def _that_work(
     """The ITINERARIES of ``itineraries``, or with ``one_is_enough`` the first one that is found.
 
     The first one found works, like every one that ``scheduled`` returns. It need not be one in
-    which PERSONs take part the fewest times, and it is seldom the one a report shows.
+    which PERSONs take part the fewest times, nor the one a report shows.
     """
     best: list[tuple[_Shown, Itinerary]] = []
     fewest: int | None = None

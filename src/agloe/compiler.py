@@ -27,7 +27,7 @@ from math import inf
 from ortools.sat.python import cp_model
 
 from agloe import answers, reference
-from agloe.answers import Report
+from agloe.answers import Answer, Report
 from agloe.file import (
     Complete,
     File,
@@ -67,10 +67,12 @@ def check(file: File) -> Report:
     each BUDGET can still spend.
     """
     *_, report = reports(file, ahead=False)
+    if not isinstance(report, Report):
+        raise AssertionError("a check ended with no Report")
     return report
 
 
-def reports(file: File, ahead: bool = True) -> Iterator[Report]:
+def reports(file: File, ahead: bool = True) -> Iterator[Answer | Report]:
     """The answer as soon as it is proved, and then the Report that ``check`` gives.
 
     The series is the reference checker's: ``answers.reports`` says when each answer is
@@ -83,7 +85,7 @@ def reports(file: File, ahead: bool = True) -> Iterator[Report]:
     if file.caps:
         yield from answers.reports(file, ahead=ahead)
         return
-    given: list[Report] = []
+    given: list[Answer | Report] = []
     try:
         asked: _Asked = {}
         for report in answers.reports(

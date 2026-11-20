@@ -27,7 +27,7 @@ uv run agloe check examples/flight-home/works.json
 uv run agloe check examples/a-must/cannot-work.json
 ```
 
-With `--answer-first`, the command prints the answer as soon as it is proved, and then the report.
+With `--answer-first`, the command prints the answer as soon as it is proved, and the report when the check is done.
 
 The releases:
 

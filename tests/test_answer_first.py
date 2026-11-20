@@ -2,8 +2,11 @@
 
 import io
 import json
+import os
+import select
+import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from random import Random
 
@@ -43,9 +46,19 @@ PROGRAMS: dict[str, Program] = {
     "the reference checker": (reference.first_shown, reference.any_works, reference.can_work),
     "the solver": (compiler.shown, compiler.works, compiler.can_work),
 }
-SERIES: dict[str, Callable[[File], list[Report]]] = {
-    "the reference checker": lambda file: list(answers.reports(file)),
-    "the solver": lambda file: list(compiler.reports(file)),
+
+
+def the_two(series: Iterable[Answer | Report]) -> tuple[Answer, Report]:
+    """A series is the answer and then the Report, and nothing more."""
+    ahead, full = series
+    assert isinstance(ahead, Answer)
+    assert isinstance(full, Report)
+    return ahead, full
+
+
+SERIES: dict[str, Callable[[File], tuple[Answer, Report]]] = {
+    "the reference checker": lambda file: the_two(answers.reports(file)),
+    "the solver": lambda file: the_two(compiler.reports(file)),
 }
 
 
@@ -70,8 +83,8 @@ class Asked:
         self.left.append(remaining)
         return self._can_work(remaining)
 
-    def reports(self, file: File) -> list[Report]:
-        return list(answers.reports(file, self.shown, self.works, self.can_work))
+    def reports(self, file: File) -> tuple[Answer, Report]:
+        return the_two(answers.reports(file, self.shown, self.works, self.can_work))
 
     def check(self, file: File) -> Report:
         return answers.check(file, self.shown, self.works, self.can_work)
@@ -105,22 +118,17 @@ def test_feasible_is_given_before_the_plan_to_show_is_looked_for(program: str) -
     file = two_shows()
     asked = Asked(PROGRAMS[program])
     series = answers.reports(file, asked.shown, asked.works, asked.can_work)
-    assert next(series) == Report(Answer.FEASIBLE, unfinished=True)
+    assert next(series) is Answer.FEASIBLE
     assert asked.questions == ["does anything work"]
     full = next(series)
+    assert isinstance(full, Report)
     assert asked.questions[1:] == ["which plan is shown"] * 2
     assert [step.option for step in full.itinerary] == ["matinee"]
-    assert not full.unfinished
     assert list(series) == []
 
 
-@pytest.mark.parametrize("program", PROGRAMS)
-def test_the_first_plan_found_is_not_the_plan_shown(
-    program: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """So the answer ahead holds no plan. The question stops at the first plan that works."""
-    file = two_shows()
-    worst = worst_case(file)
+def found_by(works: Works, file: File, monkeypatch: pytest.MonkeyPatch) -> list[Itinerary]:
+    """Each ITINERARY that passed the rules while this search looked for one in the worst case."""
     found: list[Itinerary] = []
     scheduled = reference.scheduled
 
@@ -131,11 +139,30 @@ def test_the_first_plan_found_is_not_the_plan_shown(
         return result
 
     monkeypatch.setattr(reference, "scheduled", noted)
-    assert PROGRAMS[program][1](file, worst)
+    assert works(file, worst_case(file))
     monkeypatch.undo()
-    assert [[step.option for step in each] for each in found] == [["evening"]]
-    shown = reference.first_shown(file, worst)
+    return found
+
+
+@pytest.mark.parametrize("program", PROGRAMS)
+def test_the_question_before_feasible_stops_at_the_first_plan_that_works(
+    program: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Which plan that is can differ: the solver may find either show first."""
+    found = found_by(PROGRAMS[program][1], two_shows(), monkeypatch)
+    assert len(found) == 1
+    assert [step.option for step in found[0]] in (["matinee"], ["evening"])
+
+
+def test_the_first_plan_the_reference_checker_finds_is_not_the_plan_shown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """So no plan is given with the answer: the plan to show is still to be chosen."""
+    file = two_shows()
+    (first,) = found_by(reference.any_works, file, monkeypatch)
+    shown = reference.first_shown(file, worst_case(file))
     assert shown is not None
+    assert [step.option for step in first] == ["evening"]
     assert [step.option for step in shown] == ["matinee"]
 
 
@@ -144,10 +171,11 @@ def test_infeasible_is_given_before_any_record_is_taken_out(program: str) -> Non
     file = read(CANNOT_WORK)
     asked = Asked(PROGRAMS[program])
     series = answers.reports(file, asked.shown, asked.works, asked.can_work)
-    assert next(series) == Report(Answer.INFEASIBLE, unfinished=True)
+    assert next(series) is Answer.INFEASIBLE
     assert asked.questions == ["does anything work", "can anything work"]
     assert asked.left == [Remaining(file)]
     full = next(series)
+    assert isinstance(full, Report)
     assert full.answer is Answer.INFEASIBLE
     assert full.conflict
     assert len(asked.left) > 1
@@ -159,9 +187,10 @@ def test_undetermined_is_given_before_any_missing_fact_is_tried(program: str) ->
     file = read(DEPENDS)
     asked = Asked(PROGRAMS[program])
     series = answers.reports(file, asked.shown, asked.works, asked.can_work)
-    assert next(series) == Report(Answer.UNDETERMINED, unfinished=True)
+    assert next(series) is Answer.UNDETERMINED
     assert asked.questions == ["does anything work", "can anything work"]
     full = next(series)
+    assert isinstance(full, Report)
     assert full.answer is Answer.UNDETERMINED
     assert full.missing
     assert len(asked.questions) > 2
@@ -189,7 +218,7 @@ def test_two_locks_at_once_are_asked_about_in_both_cases() -> None:
     )
     for series in SERIES.values():
         ahead, full = series(file)
-        assert ahead == Report(Answer.UNDETERMINED, unfinished=True)
+        assert ahead is Answer.UNDETERMINED
         assert full.answer is Answer.UNDETERMINED
 
 
@@ -197,7 +226,7 @@ def test_an_empty_file_has_no_plan_ahead_and_an_empty_plan_in_its_report() -> No
     file = trip([], [], [], [], [])
     for series in SERIES.values():
         ahead, full = series(file)
-        assert report.as_json(file, ahead) == {"answer": "FEASIBLE", "unfinished": True}
+        assert report.answer_as_json(ahead) == {"answer": "FEASIBLE", "unfinished": True}
         shape = report.as_json(file, full)
         assert shape["itinerary"] == []
         assert "unfinished" not in shape
@@ -209,7 +238,7 @@ def test_a_plain_check_asks_what_it_asked_before(program: str, path: Path) -> No
     """The question that gives FEASIBLE ahead is asked only where the answer is wanted ahead."""
     file = read(path)
     ahead, plain = Asked(PROGRAMS[program]), Asked(PROGRAMS[program])
-    *_, full = ahead.reports(file)
+    _, full = ahead.reports(file)
     assert plain.check(file) == full
     assert plain.questions[0] == "which plan is shown"
     assert ahead.questions[0] == "does anything work"
@@ -226,7 +255,7 @@ def test_the_answer_ahead_is_the_answer_of_the_expected_result(program: str, pat
     file = read(path)
     expected = json.loads(path.with_name(path.stem + ".expected.json").read_text())
     ahead, full = SERIES[program](file)
-    assert ahead == Report(Answer(expected["answer"]), unfinished=True)
+    assert ahead is Answer(expected["answer"])
     assert report.as_json(file, full) == expected
 
 
@@ -243,10 +272,9 @@ def test_the_two_programs_give_the_same_series_on_random_trips() -> None:
     trips += [random_trip(rng, 0.2, with_wants=0.5, with_rights=0.8) for _ in range(60)]
     seen: set[Answer] = set()
     for file in trips:
-        series = list(answers.reports(file))
-        assert list(compiler.reports(file)) == series
-        ahead, full = series
-        assert ahead == Report(full.answer, unfinished=True)
+        ahead, full = the_two(answers.reports(file))
+        assert the_two(compiler.reports(file)) == (ahead, full)
+        assert ahead is full.answer
         assert full == answers.check(file)
         seen.add(full.answer)
     assert seen == set(Answer)
@@ -267,6 +295,19 @@ def test_the_reference_checker_takes_over_without_saying_anything_twice(
     monkeypatch.setattr(compiler, search, does_not_fit)
     assert list(compiler.reports(file)) == expected
     assert compiler.check(file) == expected[-1]
+
+
+def test_an_answer_that_the_reference_checker_does_not_confirm_is_a_fault(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The solver says that a trip works which cannot, and then its numbers stop fitting."""
+    file = read(CANNOT_WORK)
+    monkeypatch.setattr(compiler, "works", lambda *given, **named: True)  # type: ignore[misc]
+    monkeypatch.setattr(compiler, "shown", does_not_fit)
+    series = compiler.reports(file)
+    assert next(series) is Answer.FEASIBLE
+    with pytest.raises(AssertionError, match="the solver proved an answer that the rules refuse"):
+        next(series)
 
 
 def test_the_numbers_stop_fitting_after_infeasible_was_given(
@@ -300,29 +341,46 @@ def test_times_too_far_apart_for_the_solver_still_get_the_answer_once() -> None:
     file = trip(["sam"], places, visits, far, [], ways=[way("far", "p0", "p1")])
     with pytest.raises(compiler.DoesNotFit):
         compiler.works(file, worst_case(file))
-    ahead, full = compiler.reports(file)
-    assert ahead == Report(Answer.FEASIBLE, unfinished=True)
-    assert (full.answer, full.itinerary, full.unfinished) == (Answer.FEASIBLE, (), False)
+    ahead, full = the_two(compiler.reports(file))
+    assert ahead is Answer.FEASIBLE
+    assert (full.answer, full.itinerary) == (Answer.FEASIBLE, ())
 
 
 def test_an_answer_ahead_in_words() -> None:
-    file = two_shows()
-    assert report.as_text(file, Report(Answer.FEASIBLE, unfinished=True)).splitlines() == [
+    assert report.answer_as_text(Answer.FEASIBLE).splitlines() == [
         "FEASIBLE: this trip can work.",
         "",
         "The check is still choosing the plan to show. The report will say whether that plan is"
         " sure to hold, and what is still to buy.",
     ]
-    assert report.as_text(file, Report(Answer.INFEASIBLE, unfinished=True)).splitlines() == [
+    assert report.answer_as_text(Answer.INFEASIBLE).splitlines() == [
         "INFEASIBLE: this trip cannot work.",
         "",
-        "The check is still working out which FACTs, WANTs and DECISIONs rule out every plan.",
+        "The check is still working out which FACTs, WANTs and DECISIONs rule out every plan, and"
+        " whether they do so only with the BUDGETs of this FILE.",
     ]
-    assert report.as_text(file, Report(Answer.UNDETERMINED, unfinished=True)).splitlines() == [
+    assert report.answer_as_text(Answer.UNDETERMINED).splitlines() == [
         "UNDETERMINED: the FILE does not say enough to tell.",
         "",
         "The check is still working out which missing FACTs would be enough.",
     ]
+
+
+def test_an_answer_ahead_holds_no_plan_at_all() -> None:
+    """Sam is LOCKed into a museum visit. An empty plan would say that nobody has to do anything."""
+    file = trip(
+        ["sam"],
+        ["museum"],
+        [stays("visit", "museum")],
+        [starts_at("visit", 10), lasts("visit", "PT2H"), cutoff("visit", "PT0S")],
+        [lock("visit", "sam")],
+    )
+    for series in SERIES.values():
+        ahead, full = series(file)
+        assert ahead is Answer.FEASIBLE
+        assert not hasattr(ahead, "itinerary")
+        assert report.answer_as_json(ahead) == {"answer": "FEASIBLE", "unfinished": True}
+        assert [step.option for step in full.itinerary] == ["visit"]
 
 
 @pytest.mark.parametrize("path", FILES, ids=lambda path: f"{path.parent.name}/{path.stem}")
@@ -342,10 +400,9 @@ def test_the_command_prints_the_answer_and_then_the_expected_result(
 def test_the_command_prints_the_answer_and_then_the_expected_words(
     path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    file = read(path)
     answer = Answer(json.loads(path.with_name(path.stem + ".expected.json").read_text())["answer"])
     main(["check", str(path), "--answer-first"])
-    ahead = report.as_text(file, Report(answer, unfinished=True))
+    ahead = report.answer_as_text(answer)
     expected = path.with_name(path.stem + ".expected.txt").read_text()
     assert capsys.readouterr().out == f"{ahead}\n{expected}"
 
@@ -419,3 +476,96 @@ def test_an_answer_can_be_printed_before_a_report_that_cannot_be_written(
     assert printed.err == (
         f"{path}: the report holds a time outside the years 0001 to 9999, so it cannot be written\n"
     )
+
+
+PLAIN = "import sys; from agloe.cli import main; sys.exit(main(sys.argv[1:]))"
+
+# The command, with a search for the plan to show that waits for a line on its input.
+HELD = """
+import sys
+
+from agloe import compiler
+from agloe.cli import main
+
+shown = compiler.shown
+
+
+def held(file, world):
+    sys.stdin.readline()
+    return shown(file, world)
+
+
+compiler.shown = held
+sys.exit(main(sys.argv[1:]))
+"""
+
+
+def started(program: str, *arguments: str, **environment: str) -> subprocess.Popen[str]:
+    """The command as a process of its own, with pipes for what it reads and writes."""
+    return subprocess.Popen(
+        [sys.executable, "-c", program, *arguments],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={**os.environ, **environment},
+    )
+
+
+def first_line(command: subprocess.Popen[str]) -> str:
+    """The first line the command writes out, while its search waits."""
+    assert command.stdout is not None
+    ready, _, _ = select.select([command.stdout], [], [], 60)
+    assert ready, "nothing was written out before the search went on"
+    return command.stdout.readline()
+
+
+def test_the_answer_comes_through_a_pipe_while_the_search_waits() -> None:
+    command = started(HELD, "check", str(WORKS), "--json", "--answer-first")
+    assert first_line(command) == '{"answer": "FEASIBLE", "unfinished": true}\n'
+    rest, problems = command.communicate(timeout=60)
+    assert json.loads(rest) == json.loads(WORKS.with_name("works.expected.json").read_text())
+    assert (command.returncode, problems) == (0, "")
+
+
+def test_a_reader_that_leaves_after_the_answer_gets_no_report() -> None:
+    """The command ends with 2, and with no complaint: nobody is there to read one."""
+    command = started(HELD, "check", str(WORKS), "--json", "--answer-first")
+    assert first_line(command) == '{"answer": "FEASIBLE", "unfinished": true}\n'
+    assert command.stdout is not None
+    assert command.stdin is not None
+    assert command.stderr is not None
+    command.stdout.close()
+    command.stdin.close()
+    assert command.wait(timeout=60) == 2
+    assert command.stderr.read() == ""
+    command.stderr.close()
+
+
+def test_a_name_the_output_cannot_write_ends_the_command_with_2(tmp_path: Path) -> None:
+    """Ren\u00e9 stays at the hotel, and the output takes ASCII only.
+
+    The answer holds no name, so it is written. The report in words is not, and the command
+    says so. As JSON the report holds ids only.
+    """
+    document = {
+        "persons": [{"id": "rene", "name": "Ren\u00e9"}],
+        "places": [{"id": "hotel", "name": "Hotel"}],
+        "options": [stays("night", "hotel")],
+        "ways": [],
+        "wants": [],
+        "facts": [starts_at("night", 22), lasts("night", "PT8H"), needs_no_right("night")],
+        "decisions": [lock("night", "rene")],
+    }
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(document))
+    for flags, written in (
+        (["--answer-first"], report.answer_as_text(Answer.FEASIBLE) + "\n"),
+        ([], ""),
+    ):
+        command = started(PLAIN, "check", str(path), *flags, PYTHONIOENCODING="ascii")
+        out, problems = command.communicate(timeout=60)
+        assert out == written
+        assert command.returncode == 2
+        assert problems.startswith(f"{path}: the output could not be written: ")
+        assert "Traceback" not in problems
