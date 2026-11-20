@@ -349,11 +349,16 @@ def test_a_transfer_too_slow_for_the_train_is_tried_for_nobody(
 
 
 def test_a_route_that_does_not_fit_is_in_no_plan() -> None:
-    """Each route that is left out is refused by the timing too, whatever else is chosen."""
+    """Each route that is left out is refused by the timing too, whatever else is chosen.
+
+    Sam starts wherever the first stop is, so that nothing else can refuse the plan.
+    """
     rng = Random(7070)
     refused = 0
-    for _ in range(300):
+    for _ in range(600):
         file = with_parallel_ways(rng)
+        if file.starts_from("sam") is not None:
+            continue
         for world in (worst_case(file), best_case(file), longest_case(file)):
             known = Routes(file, world)
             count = len(file.options)
@@ -386,7 +391,7 @@ def test_a_route_that_does_not_fit_is_in_no_plan() -> None:
 def test_leaving_out_routes_that_do_not_fit_changes_no_report(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The reference checker and the solver give the report of a search that tries every route."""
+    """The reference checker and the solver give the report of the search without this cut."""
     rng = Random(8080)
     files = [with_parallel_ways(rng) for _ in range(300)]
     found = [(answers.check(file), compiler.check(file)) for file in files]
