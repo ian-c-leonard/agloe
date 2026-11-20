@@ -8,3 +8,4 @@ Each significant or hard-to-reverse decision gets a short record here before cod
 | [0002](0002-hand-written-json-schema.md) | A hand-written JSON Schema is the source of truth | Accepted |
 | [0003](0003-apache-2-license.md) | Apache License 2.0 for code and specification | Accepted |
 | [0004](0004-rules-in-words-with-a-reference-checker.md) | The rules in words, with a reference checker that defines the right answer | Accepted |
+| [0005](0005-the-home-page-runs-the-reference-checker.md) | The home page runs the reference checker in the reader's browser | Accepted |

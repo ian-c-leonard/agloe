@@ -1,0 +1,57 @@
+{
+  "lunch": {
+    "label": "Lunch at the museum",
+    "options": [
+      { "id": "lunch", "name": "Lunch", "place": "art-institute" }
+    ],
+    "facts": [
+      { "id": "lunch-time", "option": "lunch", "starts_at": "2027-05-15T12:45:00-05:00[America/Chicago]" },
+      { "id": "lunch-length", "option": "lunch", "duration": "PT45M" },
+      { "id": "lunch-table", "option": "lunch", "arrive_before_start": "PT0S" },
+      { "id": "lunch-is-walk-up", "option": "lunch", "needs_right": false }
+    ],
+    "decisions": [
+      { "id": "lock-lunch", "lock": "lunch", "persons": ["alex", "sam"] }
+    ]
+  },
+  "coffee": {
+    "label": "Coffee at the gate",
+    "options": [
+      { "id": "coffee", "name": "Coffee", "place": "ohare" }
+    ],
+    "facts": [
+      { "id": "coffee-time", "option": "coffee", "starts_at": "2027-05-15T16:20:00-05:00[America/Chicago]" },
+      { "id": "coffee-length", "option": "coffee", "duration": "PT30M" },
+      { "id": "coffee-counter", "option": "coffee", "arrive_before_start": "PT0S" },
+      { "id": "coffee-is-walk-up", "option": "coffee", "needs_right": false }
+    ],
+    "decisions": [
+      { "id": "lock-coffee", "lock": "coffee", "persons": ["alex", "sam"] }
+    ]
+  },
+  "cab": {
+    "label": "A cab to O'Hare",
+    "options": [
+      { "id": "cab", "name": "Cab to O'Hare", "from": "art-institute", "to": "ohare" }
+    ],
+    "facts": [
+      { "id": "cab-time", "option": "cab", "starts_any_time": true },
+      { "id": "cab-is-walk-up", "option": "cab", "needs_right": false }
+    ]
+  },
+  "complete": {
+    "label": "These are all the ways to O'Hare",
+    "facts": [
+      {
+        "id": "ways-to-ohare",
+        "complete": {
+          "to": "ohare",
+          "leaving": {
+            "earliest": "2027-05-15T12:00:00-05:00[America/Chicago]",
+            "latest": "2027-05-15T18:00:00-05:00[America/Chicago]"
+          }
+        }
+      }
+    ]
+  }
+}

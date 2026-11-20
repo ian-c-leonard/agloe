@@ -80,7 +80,9 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .brand { display: flex; align-items: center; gap: 13px; text-decoration: none; }
 .brand:hover { color: inherit; }
 .brand .mark { width: 44px; height: 44px; flex: none; }
-.brand .word { height: 34px; width: auto; display: block; overflow: visible; }
+/* The name sits 3px low, so that the bodies of its letters are level with the middle of the icon.
+   Centred as a whole, the tail of the g would count, and the letters would ride high. */
+.brand .word { height: 34px; width: auto; display: block; overflow: visible; margin-top: 6px; }
 .links { display: flex; gap: 6px 26px; flex-wrap: wrap; font-size: 0.98rem; }
 .links a { text-decoration: none; }
 .links a:hover { color: var(--accent); }
@@ -102,44 +104,141 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .button.quiet { background: rgba(255, 253, 247, 0.55); color: var(--ink); border-color: var(--rim-deep); box-shadow: 0 2px 0 rgba(138, 109, 34, 0.3), 0 3px 0 rgba(255, 253, 246, 0.7); }
 .button.quiet:hover { background: var(--surface); border-color: var(--ink); color: var(--ink); }
 
-/* The trip, drawn as a day. Each bar is placed by FACTs of the FILE for the chosen version:
-   a time of day is in minutes after midnight, and a length of time is in minutes. */
-main { --visit-time: 840; --visit-length: 60; --train-length: 60; --train-length-longest: 60; --flight-time: 1020; --bag-drop: 45; }
-main:has(input[value="works"]:checked) { --visit-time: 840; --visit-length: 60; --train-length: 60; --train-length-longest: 60; --flight-time: 1020; --bag-drop: 45; }
-main:has(input[value="cannot-work"]:checked) { --visit-time: 870; --visit-length: 60; --train-length: 60; --train-length-longest: 60; --flight-time: 1020; --bag-drop: 45; }
-main:has(input[value="depends-on-the-cab"]:checked) { --visit-time: 870; --visit-length: 60; --train-length: 60; --train-length-longest: 60; --flight-time: 1020; --bag-drop: 45; }
-main:has(input[value="works-but-risky"]:checked) { --visit-time: 840; --visit-length: 60; --train-length: 60; --train-length-longest: 80; --flight-time: 1020; --bag-drop: 45; }
+/* The trip: one sheet that holds the day, the FILE it is drawn from, the COMPILER's answer and
+   the OPTIMIZER to come. trip.js draws the day and lets the reader change it. */
+/* The opening is short, so the trip below it starts on the first screen. */
+.hero { padding-block: clamp(30px, 4vw, 52px) clamp(52px, 7vw, 92px); }
+.hero-text { grid-template-columns: minmax(0, 1fr) auto; gap: 14px 48px; align-items: center; }
+.hero-text .label, .hero-text h1 { grid-column: 1 / -1; }
+.hero-text .lead { grid-column: 1; grid-row: 3; }
+.hero-text .small { grid-column: 1; grid-row: 4; }
+.hero-text .actions { grid-column: 2; grid-row: 3 / span 2; margin: 0; }
+.trip { margin-top: clamp(26px, 3.4vw, 40px); padding: clamp(18px, 2.6vw, 32px); display: grid; gap: 20px; }
+.trip-head { display: grid; grid-template-columns: minmax(0, 0.72fr) minmax(0, 1fr) auto; gap: 14px 36px; align-items: start; }
+.trip-head .stack { gap: 8px; }
+.trip h2 { font-size: clamp(1.6rem, 2.6vw, 2.1rem); }
+.story { color: var(--ink2); font-size: 0.97rem; line-height: 1.55; padding-top: 2px; display: grid; gap: 3px; }
+.story-word { font: 500 0.68rem/1.4 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+#playing { padding: 8px 15px; font-size: 0.9rem; display: none; justify-self: start; }
+.trip.alive #playing { display: inline-block; }
 
-.trip-card { padding: clamp(20px, 2.6vw, 30px); display: grid; gap: 18px; }
-.trip-card h2 { font-size: clamp(1.5rem, 2.4vw, 1.85rem); }
-.day { --t0: 810; --span: 262; --leave: calc(var(--visit-time) + var(--visit-length)); --close: calc(var(--flight-time) - var(--bag-drop));
-  --arrive: calc(var(--leave) + var(--train-length)); --arrive-late: calc(var(--leave) + var(--train-length-longest));
-  position: relative; height: 176px; }
-.day .hour { position: absolute; top: 0; bottom: 24px; left: calc((var(--at) - var(--t0)) / var(--span) * 100%); border-left: 1px solid var(--line); }
-.day .hour span { position: absolute; bottom: -24px; left: 0; transform: translateX(-50%); font: 0.68rem/1 var(--mono); letter-spacing: 0.06em; color: var(--muted); white-space: nowrap; }
-.bar { position: absolute; height: 30px; left: calc((var(--from) - var(--t0)) / var(--span) * 100%); width: calc(var(--len) / var(--span) * 100%);
-  display: flex; align-items: center; padding-inline: 9px; overflow: hidden; white-space: nowrap; border-radius: 5px;
-  font: 500 0.7rem/1 var(--mono); letter-spacing: 0.04em; color: var(--surface);
-  box-shadow: inset 0 1px 1.5px rgba(20, 10, 2, 0.45), 0 1px 0 rgba(255, 253, 246, 0.75);
-  transition: left 0.75s var(--ease), width 0.75s var(--ease), opacity 0.4s ease; }
-.bar.visit { --from: var(--visit-time); --len: var(--visit-length); top: 10px; background: var(--ink); }
-.bar.train { --from: var(--leave); --len: var(--train-length); top: 52px; background: var(--travel); }
-.bar.slow { --from: var(--arrive); --len: calc(var(--train-length-longest) - var(--train-length)); top: 52px; padding: 0;
-  background: repeating-linear-gradient(135deg, var(--brass) 0 4px, transparent 4px 8px); border: 1px solid var(--brass); border-left: 0; border-radius: 0 5px 5px 0; box-shadow: none; }
-.bar.late { --from: var(--close); top: 52px; padding: 0; width: max(0%, calc((var(--arrive) - var(--close)) / var(--span) * 100%));
-  background: repeating-linear-gradient(135deg, var(--stop) 0 4px, #F1C9BA 4px 8px); border-radius: 0 5px 5px 0; }
-.bar.cab { --from: var(--leave); --len: calc(var(--close) - var(--leave)); top: 94px; opacity: 0; background: transparent; color: var(--brass-ink);
-  border: 1.5px dashed var(--brass); box-shadow: none; }
-.bar.flight { --from: var(--flight-time); --len: calc(var(--t0) + var(--span) - var(--flight-time)); top: 94px; background: var(--travel);
-  border-radius: 5px 0 0 5px; -webkit-mask-image: linear-gradient(90deg, #000 55%, transparent); mask-image: linear-gradient(90deg, #000 55%, transparent); }
-.close { position: absolute; top: 40px; bottom: 24px; left: calc((var(--close) - var(--t0)) / var(--span) * 100%); border-left: 1.5px dashed var(--ink);
-  transition: left 0.75s var(--ease); }
-.close span { position: absolute; top: -30px; left: 0; transform: translateX(-50%); font: 0.68rem/1.25 var(--mono); letter-spacing: 0.04em; color: var(--ink2); white-space: nowrap; text-align: center; }
-main:has(input[value="depends-on-the-cab"]:checked) .bar.cab { opacity: 1; }
-main:has(input[value="depends-on-the-cab"]:checked) .bar.flight { top: 136px; }
-main:has(input[value="depends-on-the-cab"]:checked) .day { height: 218px; }
-.day { transition: height 0.5s var(--ease); }
-.bar.flight { transition: left 0.75s var(--ease), width 0.75s var(--ease), top 0.5s var(--ease); }
+/* The day. Each PLACE has a lane; what happens there is a block of ink, and travel is a road. */
+.day { min-height: 250px; user-select: none; -webkit-user-select: none; }
+.day svg { display: block; overflow: visible; }
+.day .hour { stroke: var(--line); stroke-width: 1; }
+.day .hour-name, .day .lane-name, .day .cutoff-name { font: 500 0.68rem var(--mono); letter-spacing: 0.06em; fill: var(--muted); }
+.day .lane { fill: rgba(194, 164, 85, 0.1); stroke: var(--line); stroke-width: 1; }
+.day .lane-name { text-transform: uppercase; letter-spacing: 0.12em; fill: var(--ink2); }
+.day .block { fill: var(--ink); filter: drop-shadow(0 1px 0 rgba(255, 253, 246, 0.9)); }
+.day .road-stop { stop-color: var(--travel); }
+.day .block-name { font: 600 0.82rem var(--text); fill: var(--surface); pointer-events: none; }
+.day .block-time { font: 400 0.66rem var(--mono); fill: var(--surface); opacity: 0.78; pointer-events: none; }
+.day.tall .block-name { font-size: 0.76rem; }
+.day .grip { fill: transparent; cursor: ew-resize; }
+.day .grip-mark { stroke: var(--surface); stroke-width: 2; stroke-linecap: round; opacity: 0.55; pointer-events: none; }
+.day .event, .day .departure { cursor: grab; }
+.day .road-line { stroke: var(--vermilion); stroke-width: 11; stroke-linecap: round; }
+.day .road-name { font: 600 0.74rem var(--text); fill: var(--accent); }
+.day .road-end { fill: var(--surface); stroke: var(--under); stroke-width: 3; cursor: grab; }
+.day .late-end { fill: var(--surface); stroke: var(--brass); stroke-width: 2; stroke-dasharray: 3 2.5; cursor: grab; }
+.day .late-end.set { fill: var(--brass); stroke-dasharray: none; }
+.day .may-run-late { fill: url(#may-run-late); stroke: var(--brass); stroke-width: 1; opacity: 0.75; }
+.day .hatch-brass { fill: var(--brass); }
+.day .hatch-stop { fill: var(--stop); }
+.day .late-at-worst { fill: url(#too-late); stroke: var(--stop); stroke-width: 1; }
+.day .ride.unknown .road-line { stroke: var(--brass); stroke-width: 5; stroke-dasharray: 1 11; }
+.day .ride.unknown .road-name { fill: var(--brass-ink); }
+.day .ride.unknown + .road-end { stroke: var(--brass); }
+.day .ride.ghost .road-line { stroke-width: 3; stroke-dasharray: 1 8; opacity: 0.8; }
+.day .ride.idle { opacity: 0.32; }
+.day .cutoff { cursor: grab; }
+.day .cutoff-line { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.day .cutoff-ring { fill: var(--surface); stroke: var(--ink); stroke-width: 2.7; stroke-linecap: round; stroke-dasharray: 0.01 4.18; }
+.day .cutoff-hit { fill: transparent; }
+.day .cutoff-name { fill: var(--ink2); }
+/* What the report names as clashing is ringed in vermilion. */
+.day .clash .block, .day .clash .cutoff-ring { stroke: var(--vermilion); stroke-width: 3; }
+.day .clash .cutoff-line { stroke: var(--stop); }
+.day .clash .road-line { filter: drop-shadow(0 0 0 var(--ink)) drop-shadow(0 1px 0 var(--ink)); }
+/* A finger on anything that moves drags it, and does not scroll the page. */
+.day [data-act], .day [data-act] * { touch-action: none; }
+.day.holding, .day.holding * { cursor: grabbing !important; }
+.day [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+
+.tools { display: grid; gap: 12px; }
+.tools[hidden] { display: none; }
+.hint { font-size: 0.9rem; color: var(--muted); }
+.add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.add-word { font: 500 0.72rem var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); margin-right: 2px; }
+.add button { font: 500 0.9rem var(--text); color: var(--ink); background: rgba(255, 253, 247, 0.7); border: 1px solid var(--rim-deep); border-radius: 999px; padding: 7px 14px 7px 12px; cursor: pointer;
+  box-shadow: 0 1.5px 0 rgba(138, 109, 34, 0.3), 0 2.5px 0 rgba(255, 253, 246, 0.7); }
+.add button::before { content: "+ "; color: var(--accent); font-weight: 700; }
+.add button:hover { border-color: var(--ink); }
+.add button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--surface); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16); }
+.add button[aria-pressed="true"]::before { content: "× "; color: #F0875B; }
+.switch { display: inline-flex; align-items: center; gap: 8px; font-size: 0.9rem; margin-left: 6px; cursor: pointer; }
+.switch input { width: 1.05em; height: 1.05em; accent-color: var(--accent); margin: 0; }
+
+/* The four versions of the story, side by side. While the story plays, a line fills under the version shown. */
+.trip.playing .versions label:has(input:checked) { background-image: linear-gradient(var(--vermilion), var(--vermilion)); background-repeat: no-repeat; background-position: 0 100%; background-size: calc(var(--told, 0) * 100%) 3px; }
+.trip .versions { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.trip .versions label { font-size: 0.86rem; align-content: start; }
+.trip.own .answer[data-version] { visibility: hidden; opacity: 0; }
+.answer.live { display: none; }
+.trip.own .answer.live { display: grid; visibility: visible; opacity: 1; }
+.answer.live p + p { color: var(--ink2); font-weight: 400; }
+.answer.refused { --dot: var(--stop); color: var(--stop); }
+/* After a change there is no answer on the page until the checker has answered on the new FILE.
+   A check that takes more than a moment says that it is checking. */
+.answer.live.pending { min-height: 1.5em; }
+.trip.slow .answer.live.pending::after { content: "Checking."; padding-left: 20px; color: var(--muted); font-weight: 400; }
+.answer.live p { animation: inked 0.2s ease both; }
+@keyframes inked { from { opacity: 0.3; } }
+/* The page's own words, where the checker gave no answer. They do not look like an answer. */
+.answer.stopped { --dot: var(--muted); color: var(--ink2); }
+/* The answer sits under the day, like a stamp on the sheet. */
+.trip .answers-now { min-height: 4.2em; padding: 12px 16px; border: 1px solid var(--line); border-radius: 10px; background: rgba(250, 242, 227, 0.6); box-shadow: inset 0 1px 2px rgba(59, 42, 20, 0.1); }
+.trip .answer { font-size: 0.98rem; }
+.trip .answer p + p { font-size: 0.86rem; }
+
+/* The three parts, as places along one road: the FILE, the COMPILER, and the OPTIMIZER to come. */
+.panes { --between: clamp(18px, 2.4vw, 30px); display: grid; grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.38fr) minmax(0, 0.7fr); gap: var(--between); align-items: start; margin-top: 6px; }
+.pane { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.mile { display: flex; align-items: center; height: 26px; }
+.mile .town { width: 26px; height: 26px; flex: none; fill: var(--ink); }
+.mile i { flex: 1; height: 8px; margin: 0 calc(-1 * var(--between)) 0 3px; border-radius: 4px; background: var(--vermilion); box-shadow: inset 0 1px 1px rgba(60, 20, 0, 0.35), 0 1px 0 rgba(255, 253, 246, 0.8); }
+.pane:nth-child(2) .mile i { background: repeating-linear-gradient(90deg, var(--vermilion) 0 12px, transparent 12px 22px); box-shadow: none; opacity: 0.75; }
+.pane.unbuilt .mile .town { fill: none; stroke: var(--muted); stroke-width: 0.9; }
+.pane h3 { font-size: 1.45rem; }
+.release { font: 500 0.78rem var(--mono); font-style: normal; letter-spacing: 0.08em; color: var(--accent); margin-right: 6px; vertical-align: 0.2em; text-shadow: none; }
+.pane > p { font-size: 0.95rem; line-height: 1.5; color: var(--ink2); }
+.pane > p.small { font-size: 0.85rem; color: var(--muted); }
+.file-text { margin: 0; padding: 14px 0; max-height: 430px; overflow: auto; font: 0.7rem/1.7 var(--mono); white-space: pre; tab-size: 2;
+  border: 1px solid var(--line); border-radius: 10px; background: rgba(255, 253, 247, 0.72); box-shadow: inset 0 1px 2px rgba(59, 42, 20, 0.12); }
+.file-text span { display: block; padding-inline: 14px; min-width: max-content; }
+.file-text:not(:has(span)) { padding-inline: 14px; }
+.file-text .new { background: rgba(213, 80, 30, 0.13); box-shadow: inset 3px 0 0 var(--vermilion); }
+.file-text .clash { background: rgba(213, 80, 30, 0.22); box-shadow: inset 3px 0 0 var(--stop); color: var(--stop); font-weight: 500; }
+.file-text.live, .report.live { display: none; }
+.trip.own .file-text.live, .trip.own .report.live { display: block; }
+.pane .terminal { max-height: 430px; overflow: auto; scrollbar-color: #3a3e43 transparent; font-size: 0.72rem; padding: 16px 18px; }
+.report-data { display: none; }
+/* The OPTIMIZER is pressed into the sheet without ink: it is not built yet. */
+.pane.unbuilt h3, .pane.unbuilt > p { color: var(--muted); }
+.blind { display: grid; gap: 9px; padding: 14px; border-radius: 10px; box-shadow: inset 1px 1px 2px rgba(59, 42, 20, 0.28), inset -1px -1px 0 rgba(255, 253, 246, 0.9); }
+.blind i { height: 20px; border-radius: 6px; box-shadow: inset 1px 1px 1.5px rgba(59, 42, 20, 0.3), inset -1px -1px 0 rgba(255, 253, 246, 0.95); }
+.blind i:nth-child(2) { width: 76%; }
+.blind i:nth-child(3) { width: 52%; }
+.soon { font: 500 0.72rem var(--mono); letter-spacing: 0.12em; text-transform: uppercase; }
+
+@media (max-width: 900px) {
+  .hero-text, .trip-head { grid-template-columns: minmax(0, 1fr); }
+  .hero-text .lead, .hero-text .small, .hero-text .actions { grid-column: 1; grid-row: auto; }
+  .panes { grid-template-columns: minmax(0, 1fr); gap: 30px; }
+  .mile i { margin-right: 0; }
+  .trip .versions { grid-template-columns: minmax(0, 1fr); }
+  .day .grip { cursor: ns-resize; }
+}
 
 /* The answer for the chosen version, under the day */
 .answers-now { display: grid; min-height: 3.4em; }
@@ -166,7 +265,6 @@ main:has(input[value="depends-on-the-cab"]:checked) .day { height: 218px; }
 /* The terminal is the night version of the icon: pale ink on dark board, with a gunmetal rim. */
 .terminal { background: var(--night) var(--board) 0 0 / var(--grain); color: var(--night-ink); border: 1px solid #45484C; border-radius: 14px;
   box-shadow: 0 5px 0 -1px #050506, 0 34px 54px -30px rgba(20, 16, 8, 0.7); padding: clamp(18px, 2.4vw, 26px); font: 0.8rem/1.7 var(--mono); }
-.reports { display: grid; gap: 28px; }
 .command { color: var(--night-dim); margin-bottom: 12px; overflow-wrap: anywhere; }
 .report pre { margin: 0; font: inherit; white-space: pre-wrap; overflow-wrap: break-word; }
 .report pre::first-line { font-weight: 500; }
@@ -176,8 +274,7 @@ main:has(input[value="depends-on-the-cab"]:checked) .day { height: 218px; }
 
 /* Where the browser can tell which version is chosen, show only that version's answer and report. */
 @supports selector(:has(*)) {
-  .reports { display: block; height: 540px; overflow-y: auto; scrollbar-color: #3a3e43 transparent; }
-  .report { display: none; }
+  .report, .file-text { display: none; }
   main:has(input[value="works"]:checked) .answer[data-version="works"],
   main:has(input[value="cannot-work"]:checked) .answer[data-version="cannot-work"],
   main:has(input[value="depends-on-the-cab"]:checked) .answer[data-version="depends-on-the-cab"],
@@ -185,7 +282,11 @@ main:has(input[value="depends-on-the-cab"]:checked) .day { height: 218px; }
   main:has(input[value="works"]:checked) .report[data-version="works"],
   main:has(input[value="cannot-work"]:checked) .report[data-version="cannot-work"],
   main:has(input[value="depends-on-the-cab"]:checked) .report[data-version="depends-on-the-cab"],
-  main:has(input[value="works-but-risky"]:checked) .report[data-version="works-but-risky"] { display: block; }
+  main:has(input[value="works-but-risky"]:checked) .report[data-version="works-but-risky"],
+  main:has(input[value="works"]:checked) .file-text[data-version="works"],
+  main:has(input[value="cannot-work"]:checked) .file-text[data-version="cannot-work"],
+  main:has(input[value="depends-on-the-cab"]:checked) .file-text[data-version="depends-on-the-cab"],
+  main:has(input[value="works-but-risky"]:checked) .file-text[data-version="works-but-risky"] { display: block; }
   main:has(input[value="works"]:checked) .report[data-version="works"] pre,
   main:has(input[value="cannot-work"]:checked) .report[data-version="cannot-work"] pre,
   main:has(input[value="depends-on-the-cab"]:checked) .report[data-version="depends-on-the-cab"] pre,
@@ -256,15 +357,10 @@ main:has(input[value="depends-on-the-cab"]:checked) .day { height: 218px; }
   .map .appear { transition: opacity 0.6s ease 1.5s; }
   .map.unseen .appear { opacity: 0; }
   .map .not-there { animation: march 14s linear infinite; }
-  .bar.visit, .bar.train, .bar.flight, .close { animation: arrive 0.8s var(--ease) both; }
-  .bar.train { animation-delay: 0.12s; }
-  .bar.flight { animation-delay: 0.24s; }
-  .close { animation-delay: 0.4s; }
 }
 @keyframes march { to { stroke-dashoffset: -88; } }
-@keyframes arrive { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .bar, .close, .day, .answer { transition: none; }
+  .answer { transition: none; }
   .report pre { animation: none !important; }
 }
 
@@ -273,9 +369,6 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
 
 @media (max-width: 900px) {
   .split, .hero .split, .two, .parts, .musts, footer .wrap { grid-template-columns: minmax(0, 1fr); }
-  .reports { height: 420px; }
-  .day { --t0: 832; --span: 232; }
-  .bar { font-size: 0.6rem; letter-spacing: 0; padding-inline: 4px; }
   .parts { gap: 34px; }
   h1 { font-size: clamp(2.5rem, 11vw, 3.4rem); }
 }
@@ -304,8 +397,8 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
   <section class="hero">
     <svg class="contours northwest" viewBox="0 0 680 480" aria-hidden="true"><path d="M43 158C136 97 166 96 218 104S310 110 348 7M9 256C105 220 124 193 165 179C224 159 253 194 300 177C337 164 345 129 394 117C463 101 467 97 505 4M7 313C56 272 99 320 148 277C185 243 205 203 288 227C343 242 358 229 380 200C423 143 464 181 498 149C520 129 516 99 536 71C551 50 579 34 605 8M4 365C75 309 113 379 178 309C229 252 282 261 322 277C349 288 370 303 399 294C432 284 423 250 461 234C493 220 530 239 554 207C574 180 559 151 580 114C602 76 645 85 670 8M7 412C81 357 118 425 183 365C210 340 221 314 267 310C324 305 356 352 412 339Q419 338 425 335M9 474C69 470 94 437 156 434C202 432 216 429 246 396C280 359 310 358 351 369C402 384 451 395 485 348C505 320 514 302 552 294C599 283 618 253 609 204"/></svg>
     <svg class="contours southeast" viewBox="430 700 824 554" aria-hidden="true"><path d="M469 1250C500 1159 520 1182 549 1124C573 1075 602 1075 632 1059C662 1044 678 1026 683 989C687 959 699 947 723 933C767 908 771 878 801 855C852 816 906 868 946 817C973 781 985 790 1014 785C1044 779 1055 758 1075 733C1123 673 1180 666 1244 675M532 1251C542 1187 562 1176 584 1158C613 1134 611 1109 661 1089C701 1074 721 1060 739 1012C757 962 781 936 822 913C900 870 963 907 1010 884C1055 863 1077 805 1114 768C1157 724 1193 716 1245 722M584 1250C590 1195 614 1189 638 1160C674 1112 702 1120 729 1114C762 1107 773 1086 781 1053C796 993 835 957 885 944C968 922 1025 969 1077 911C1093 893 1098 868 1120 841C1156 796 1199 784 1247 792M638 1250C659 1186 692 1158 747 1152C800 1148 815 1128 827 1081C841 1034 870 1006 908 992C958 973 1001 995 1051 977C1091 963 1110 940 1126 904C1150 852 1193 836 1243 841M708 1250C726 1196 758 1182 800 1178C842 1175 858 1157 872 1117C891 1062 937 1026 989 1023C1030 1020 1061 1028 1098 1011C1125 998 1139 977 1151 950C1169 910 1200 893 1244 891M856 1250C871 1195 907 1209 919 1155C926 1120 947 1099 982 1080C1034 1053 1071 1072 1110 1057C1135 1048 1148 1033 1161 1010C1183 974 1209 961 1241 956"/></svg>
-    <div class="wrap split">
-      <div class="hero-text">
+    <div class="wrap">
+<div class="hero-text">
         <span class="label">Open source · Being built in public</span>
         <h1>Check whether a trip works.</h1>
         <p class="lead" data-from="README.md">Agloe is a standard format for trips, a compiler that checks them, and an optimizer that finds the best version.</p>
@@ -315,28 +408,34 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
         </div>
         <p class="small" data-from="README.md">Agloe is being built in public, and nothing is published to install yet.</p>
       </div>
-
-      <div class="trip-card card">
-        <span class="label">One trip, four versions</span>
-        <h2 id="trip-title">Can Alex and Sam make their flight?</h2>
-        <div class="day" aria-hidden="true">
-          <i class="hour" style="--at: 840"><span>2 pm</span></i>
-          <i class="hour" style="--at: 900"><span>3 pm</span></i>
-          <i class="hour" style="--at: 960"><span>4 pm</span></i>
-          <i class="hour" style="--at: 1020"><span>5 pm</span></i>
-          <div class="bar visit">Museum visit</div>
-          <div class="bar train">Blue Line</div>
-          <div class="bar slow"></div>
-          <div class="bar late"></div>
-          <div class="bar cab">Cab ?</div>
-          <div class="bar flight">Flight home</div>
-          <div class="close"><span>Bag drop<br>closes</span></div>
+    </div>
+    <div class="wrap">
+      <section class="trip card" id="trip" aria-labelledby="trip-title">
+        <div class="trip-head">
+          <div class="stack">
+            <span class="label">One trip, four versions</span>
+            <h2 id="trip-title">Can Alex and Sam make their flight?</h2>
+          </div>
+          <div class="story"><span class="story-word">How the story starts</span><p data-from="spec/rules.md">Alex and Sam spend their last afternoon in Chicago at the Art Institute, then fly home from O'Hare. The flight leaves at 5:00 pm, and bag drop closes 45 minutes earlier. The Blue Line takes an hour from the museum to the terminal.</p></div>
+          <button class="button quiet" id="playing" type="button" aria-pressed="false">Play the story</button>
         </div>
+        <div class="day" id="day"><noscript><p class="small">The drawing of the day needs JavaScript. The four versions, their FILEs and their reports are below.</p></noscript></div>
         <div class="answers-now" aria-live="polite">
           <div class="answer feasible" data-version="works"><p data-lines-from="examples/flight-home/works.expected.txt">FEASIBLE: this trip works.</p></div>
           <div class="answer infeasible" data-version="cannot-work"><p data-lines-from="examples/flight-home/cannot-work.expected.txt">INFEASIBLE: this trip cannot work.</p></div>
           <div class="answer undetermined" data-version="depends-on-the-cab"><p data-lines-from="examples/flight-home/depends-on-the-cab.expected.txt">UNDETERMINED: the FILE does not say enough to tell.</p><p data-lines-from="examples/flight-home/depends-on-the-cab.expected.txt">The trip works if Cab to O'Hare takes 45 min or less.</p></div>
           <div class="answer risky" data-version="works-but-risky"><p data-lines-from="examples/flight-home/works-but-risky.expected.txt">FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold.</p><p data-lines-from="examples/flight-home/works-but-risky.expected.txt">! Alex and Sam would be 5 min too late for this.</p></div>
+          <div class="answer live" id="answer-live"><p></p></div>
+        </div>
+        <div class="tools" id="tools" hidden>
+          <p class="hint">Drag anything on the day: a block, the end of a block, the end of a road, or the time to be there. The FILE changes with it, and the checker runs again.</p>
+          <div class="add" role="group" aria-label="Add to the day">
+            <span class="add-word">Add</span>
+            <button type="button" data-add="lunch" aria-pressed="false">Lunch at the museum</button>
+            <button type="button" data-add="coffee" aria-pressed="false">Coffee at the gate</button>
+            <button type="button" data-add="cab" aria-pressed="false">A cab to O'Hare</button>
+            <label class="switch"><input type="checkbox" id="complete"><span>A FACT says every way straight to O'Hare that leaves from noon to 6:00 pm is listed</span></label>
+          </div>
         </div>
         <fieldset class="versions" aria-labelledby="trip-title">
           <label><input type="radio" name="version" value="works" checked><span data-from="spec/rules.md">They leave the museum at 3:00 pm.</span></label>
@@ -344,25 +443,190 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
           <label><input type="radio" name="version" value="depends-on-the-cab"><span data-from="spec/rules.md">They leave at 3:30 pm. A cab is listed, but nobody has recorded how long it takes.</span></label>
           <label><input type="radio" name="version" value="works-but-risky"><span data-from="spec/rules.md">They leave at 3:00 pm, and the Blue Line can take up to 80 minutes.</span></label>
         </fieldset>
-      </div>
-    </div>
-  </section>
-
-  <section class="band tint" id="report" aria-labelledby="report-title">
-    <div class="wrap split">
-      <div class="stack">
-        <span class="label">The compiler</span>
-        <h2 id="report-title">One of three answers, each with its evidence.</h2>
-        <p class="lead" data-from="spec/rules.md">Alex and Sam spend their last afternoon in Chicago at the Art Institute, then fly home from O'Hare. The flight leaves at 5:00 pm, and bag drop closes 45 minutes earlier. The Blue Line takes an hour from the museum to the terminal.</p>
-        <ul class="key">
-          <li class="feasible" data-from="README.md"><strong>FEASIBLE:</strong> the trip works. The report shows a plan, and warns when the plan holds only if uncertain durations stay short.</li>
-          <li class="infeasible" data-from="README.md"><strong>INFEASIBLE:</strong> the trip cannot work. The report names the FACTs, WANTs and DECISIONs that clash.</li>
-          <li class="undetermined" data-from="README.md"><strong>UNDETERMINED:</strong> the file does not say enough to tell. The report names what it would have to say for the trip to work.</li>
-        </ul>
-        <p class="small" data-from="README.md">The <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">rules</a> say exactly what it checks, and every trip under <a href="https://github.com/ian-c-leonard/agloe/tree/main/examples"><code>examples/</code></a> is one of its tests.</p>
-      </div>
-      <div class="terminal">
-        <div class="reports">
+        <div class="panes">
+          <section class="pane" aria-labelledby="pane-file">
+            <div class="mile" aria-hidden="true"><svg class="town" viewBox="0 0 24 24" aria-hidden="true"><circle cx="20.40" cy="12.00" r="1.7"/><circle cx="19.27" cy="16.20" r="1.7"/><circle cx="16.20" cy="19.27" r="1.7"/><circle cx="12.00" cy="20.40" r="1.7"/><circle cx="7.80" cy="19.27" r="1.7"/><circle cx="4.73" cy="16.20" r="1.7"/><circle cx="3.60" cy="12.00" r="1.7"/><circle cx="4.73" cy="7.80" r="1.7"/><circle cx="7.80" cy="4.73" r="1.7"/><circle cx="12.00" cy="3.60" r="1.7"/><circle cx="16.20" cy="4.73" r="1.7"/><circle cx="19.27" cy="7.80" r="1.7"/></svg><i></i></div>
+            <h3 id="pane-file"><span class="release">0.0</span> The FILE</h3>
+            <p data-from="docs/VISION.md"><strong>A standard format</strong> that represents a trip and all its nuances, readable by people and machines. It is the lasting record.</p>
+            <p class="small"><span data-from="spec/rules.md">A FILE lists PERSONs, PLACEs, OPTIONs, WAYs, WANTs, FACTs and DECISIONs.</span> The <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/vocabulary.md">vocabulary</a> says what each term in capitals means.</p>
+          <pre class="file-text" tabindex="0" aria-label="The FILE for this version of the trip" data-version="works" data-from="examples/flight-home/works.json">{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" }
+  ],
+  "places": [
+    { "id": "art-institute", "name": "the Art Institute" },
+    { "id": "ohare", "name": "O'Hare" },
+    { "id": "home", "name": "home" }
+  ],
+  "options": [
+    { "id": "museum-visit", "name": "Museum visit", "place": "art-institute" },
+    { "id": "blue-line", "name": "Blue Line to O'Hare", "from": "art-institute", "to": "ohare" },
+    { "id": "flight", "name": "Flight home", "from": "ohare", "to": "home" }
+  ],
+  "ways": [],
+  "wants": [],
+  "facts": [
+    { "id": "visit-time", "option": "museum-visit", "starts_at": "2027-05-15T14:00:00-05:00[America/Chicago]" },
+    { "id": "visit-length", "option": "museum-visit", "duration": "PT1H" },
+    { "id": "visit-needs-a-ticket", "option": "museum-visit", "needs_right": true },
+    { "id": "museum-tickets", "booking": { "option": "museum-visit", "covers": ["alex", "sam"] } },
+    { "id": "train-time", "option": "blue-line", "starts_any_time": true },
+    { "id": "train-length", "option": "blue-line", "duration": "PT1H" },
+    { "id": "train-is-walk-up", "option": "blue-line", "needs_right": false },
+    { "id": "flight-time", "option": "flight", "starts_at": "2027-05-15T17:00:00-05:00[America/Chicago]" },
+    { "id": "flight-length", "option": "flight", "duration": "PT2H30M" },
+    { "id": "bag-drop", "option": "flight", "arrive_before_start": "PT45M" },
+    { "id": "flight-needs-a-ticket", "option": "flight", "needs_right": true },
+    { "id": "flight-tickets", "booking": { "option": "flight", "covers": ["alex", "sam"] } }
+  ],
+  "decisions": [
+    { "id": "lock-visit", "lock": "museum-visit", "persons": ["alex", "sam"] },
+    { "id": "lock-flight", "lock": "flight", "persons": ["alex", "sam"] }
+  ]
+}</pre>
+          <pre class="file-text" tabindex="0" aria-label="The FILE for this version of the trip" data-version="cannot-work" data-from="examples/flight-home/cannot-work.json">{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" }
+  ],
+  "places": [
+    { "id": "art-institute", "name": "the Art Institute" },
+    { "id": "ohare", "name": "O'Hare" },
+    { "id": "home", "name": "home" }
+  ],
+  "options": [
+    { "id": "museum-visit", "name": "Museum visit", "place": "art-institute" },
+    { "id": "blue-line", "name": "Blue Line to O'Hare", "from": "art-institute", "to": "ohare" },
+    { "id": "flight", "name": "Flight home", "from": "ohare", "to": "home" }
+  ],
+  "ways": [],
+  "wants": [],
+  "facts": [
+    { "id": "visit-time", "option": "museum-visit", "starts_at": "2027-05-15T14:30:00-05:00[America/Chicago]" },
+    { "id": "visit-length", "option": "museum-visit", "duration": "PT1H" },
+    { "id": "visit-needs-a-ticket", "option": "museum-visit", "needs_right": true },
+    { "id": "museum-tickets", "booking": { "option": "museum-visit", "covers": ["alex", "sam"] } },
+    { "id": "train-time", "option": "blue-line", "starts_any_time": true },
+    { "id": "train-length", "option": "blue-line", "duration": "PT1H" },
+    { "id": "train-is-walk-up", "option": "blue-line", "needs_right": false },
+    { "id": "flight-time", "option": "flight", "starts_at": "2027-05-15T17:00:00-05:00[America/Chicago]" },
+    { "id": "flight-length", "option": "flight", "duration": "PT2H30M" },
+    { "id": "bag-drop", "option": "flight", "arrive_before_start": "PT45M" },
+    { "id": "flight-needs-a-ticket", "option": "flight", "needs_right": true },
+    { "id": "flight-tickets", "booking": { "option": "flight", "covers": ["alex", "sam"] } },
+    {
+      "id": "ways-to-ohare",
+      "complete": {
+        "to": "ohare",
+        "leaving": {
+          "earliest": "2027-05-15T12:00:00-05:00[America/Chicago]",
+          "latest": "2027-05-15T18:00:00-05:00[America/Chicago]"
+        }
+      }
+    }
+  ],
+  "decisions": [
+    { "id": "lock-visit", "lock": "museum-visit", "persons": ["alex", "sam"] },
+    { "id": "lock-flight", "lock": "flight", "persons": ["alex", "sam"] }
+  ]
+}</pre>
+          <pre class="file-text" tabindex="0" aria-label="The FILE for this version of the trip" data-version="depends-on-the-cab" data-from="examples/flight-home/depends-on-the-cab.json">{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" }
+  ],
+  "places": [
+    { "id": "art-institute", "name": "the Art Institute" },
+    { "id": "ohare", "name": "O'Hare" },
+    { "id": "home", "name": "home" }
+  ],
+  "options": [
+    { "id": "museum-visit", "name": "Museum visit", "place": "art-institute" },
+    { "id": "blue-line", "name": "Blue Line to O'Hare", "from": "art-institute", "to": "ohare" },
+    { "id": "flight", "name": "Flight home", "from": "ohare", "to": "home" },
+    { "id": "cab", "name": "Cab to O'Hare", "from": "art-institute", "to": "ohare" }
+  ],
+  "ways": [],
+  "wants": [],
+  "facts": [
+    { "id": "visit-time", "option": "museum-visit", "starts_at": "2027-05-15T14:30:00-05:00[America/Chicago]" },
+    { "id": "visit-length", "option": "museum-visit", "duration": "PT1H" },
+    { "id": "visit-needs-a-ticket", "option": "museum-visit", "needs_right": true },
+    { "id": "museum-tickets", "booking": { "option": "museum-visit", "covers": ["alex", "sam"] } },
+    { "id": "train-time", "option": "blue-line", "starts_any_time": true },
+    { "id": "train-length", "option": "blue-line", "duration": "PT1H" },
+    { "id": "train-is-walk-up", "option": "blue-line", "needs_right": false },
+    { "id": "cab-time", "option": "cab", "starts_any_time": true },
+    { "id": "cab-is-walk-up", "option": "cab", "needs_right": false },
+    { "id": "flight-time", "option": "flight", "starts_at": "2027-05-15T17:00:00-05:00[America/Chicago]" },
+    { "id": "flight-length", "option": "flight", "duration": "PT2H30M" },
+    { "id": "bag-drop", "option": "flight", "arrive_before_start": "PT45M" },
+    { "id": "flight-needs-a-ticket", "option": "flight", "needs_right": true },
+    { "id": "flight-tickets", "booking": { "option": "flight", "covers": ["alex", "sam"] } },
+    {
+      "id": "ways-to-ohare",
+      "complete": {
+        "to": "ohare",
+        "leaving": {
+          "earliest": "2027-05-15T12:00:00-05:00[America/Chicago]",
+          "latest": "2027-05-15T18:00:00-05:00[America/Chicago]"
+        }
+      }
+    }
+  ],
+  "decisions": [
+    { "id": "lock-visit", "lock": "museum-visit", "persons": ["alex", "sam"] },
+    { "id": "lock-flight", "lock": "flight", "persons": ["alex", "sam"] }
+  ]
+}</pre>
+          <pre class="file-text" tabindex="0" aria-label="The FILE for this version of the trip" data-version="works-but-risky" data-from="examples/flight-home/works-but-risky.json">{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" }
+  ],
+  "places": [
+    { "id": "art-institute", "name": "the Art Institute" },
+    { "id": "ohare", "name": "O'Hare" },
+    { "id": "home", "name": "home" }
+  ],
+  "options": [
+    { "id": "museum-visit", "name": "Museum visit", "place": "art-institute" },
+    { "id": "blue-line", "name": "Blue Line to O'Hare", "from": "art-institute", "to": "ohare" },
+    { "id": "flight", "name": "Flight home", "from": "ohare", "to": "home" }
+  ],
+  "ways": [],
+  "wants": [],
+  "facts": [
+    { "id": "visit-time", "option": "museum-visit", "starts_at": "2027-05-15T14:00:00-05:00[America/Chicago]" },
+    { "id": "visit-length", "option": "museum-visit", "duration": "PT1H" },
+    { "id": "visit-needs-a-ticket", "option": "museum-visit", "needs_right": true },
+    { "id": "museum-tickets", "booking": { "option": "museum-visit", "covers": ["alex", "sam"] } },
+    { "id": "train-time", "option": "blue-line", "starts_any_time": true },
+    { "id": "train-is-walk-up", "option": "blue-line", "needs_right": false },
+    {
+      "id": "train-length",
+      "option": "blue-line",
+      "contingent_duration": { "shortest": "PT1H", "longest": "PT1H20M" }
+    },
+    { "id": "flight-time", "option": "flight", "starts_at": "2027-05-15T17:00:00-05:00[America/Chicago]" },
+    { "id": "flight-length", "option": "flight", "duration": "PT2H30M" },
+    { "id": "bag-drop", "option": "flight", "arrive_before_start": "PT45M" },
+    { "id": "flight-needs-a-ticket", "option": "flight", "needs_right": true },
+    { "id": "flight-tickets", "booking": { "option": "flight", "covers": ["alex", "sam"] } }
+  ],
+  "decisions": [
+    { "id": "lock-visit", "lock": "museum-visit", "persons": ["alex", "sam"] },
+    { "id": "lock-flight", "lock": "flight", "persons": ["alex", "sam"] }
+  ]
+}</pre>
+            <pre class="file-text live" id="file-live" tabindex="0" aria-label="The FILE for your version of the trip"></pre>
+          </section>
+          <section class="pane" aria-labelledby="pane-compiler">
+            <div class="mile" aria-hidden="true"><svg class="town" viewBox="0 0 24 24" aria-hidden="true"><circle cx="20.40" cy="12.00" r="1.7"/><circle cx="19.27" cy="16.20" r="1.7"/><circle cx="16.20" cy="19.27" r="1.7"/><circle cx="12.00" cy="20.40" r="1.7"/><circle cx="7.80" cy="19.27" r="1.7"/><circle cx="4.73" cy="16.20" r="1.7"/><circle cx="3.60" cy="12.00" r="1.7"/><circle cx="4.73" cy="7.80" r="1.7"/><circle cx="7.80" cy="4.73" r="1.7"/><circle cx="12.00" cy="3.60" r="1.7"/><circle cx="16.20" cy="4.73" r="1.7"/><circle cx="19.27" cy="7.80" r="1.7"/></svg><i></i></div>
+            <h3 id="pane-compiler"><span class="release">0.1</span> The COMPILER</h3>
+            <p data-from="docs/VISION.md"><strong>A compiler</strong> that checks the whole plan and explains every conflict.</p>
+            <div class="terminal">
           <div class="report feasible" data-version="works">
             <p class="command"><span aria-hidden="true">$ </span>uv run agloe check examples/flight-home/works.json</p>
             <pre data-from="examples/flight-home/works.expected.txt">FEASIBLE: this trip works.
@@ -436,80 +700,186 @@ The plan relies on these FACTs and DECISIONs:
   lock-visit: Alex and Sam take part in Museum visit
   lock-flight: Alex and Sam take part in Flight home</pre>
           </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="band" id="file" aria-labelledby="file-title">
-    <div class="wrap split">
-      <div class="stack">
-        <span class="label">The format</span>
-        <h2 id="file-title">The whole trip is one FILE.</h2>
-        <p class="lead"><span data-from="spec/rules.md">A FILE lists PERSONs, PLACEs, OPTIONs, WAYs, WANTs, FACTs and DECISIONs.</span> This one is the first version of the trip above.</p>
-        <p class="small">The <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/vocabulary.md">vocabulary</a> says what each term in capitals means.</p>
-      </div>
-      <pre class="document card" tabindex="0" aria-label="The FILE for the first version of the trip" data-from="examples/flight-home/works.json">{
-  "persons": [
-    { "id": "alex", "name": "Alex" },
-    { "id": "sam", "name": "Sam" }
+              <div class="report live" id="report-live">
+                <p class="command" id="report-note"></p>
+                <pre id="report-text"></pre>
+              </div>
+            </div>
+          <pre class="report-data" hidden data-version="works" data-from="examples/flight-home/works.expected.json">{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "museum-visit",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T14:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T15:00:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "museum-tickets",
+        "sam": "museum-tickets"
+      }
+    },
+    {
+      "option": "blue-line",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T15:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T16:00:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "flight",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T17:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T19:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "flight-tickets",
+        "sam": "flight-tickets"
+      }
+    }
   ],
-  "places": [
-    { "id": "art-institute", "name": "the Art Institute" },
-    { "id": "ohare", "name": "O'Hare" },
-    { "id": "home", "name": "home" }
+  "relies_on": [
+    "visit-time",
+    "visit-length",
+    "visit-needs-a-ticket",
+    "museum-tickets",
+    "train-time",
+    "train-length",
+    "train-is-walk-up",
+    "flight-time",
+    "flight-length",
+    "bag-drop",
+    "flight-needs-a-ticket",
+    "flight-tickets",
+    "lock-visit",
+    "lock-flight"
   ],
-  "options": [
-    { "id": "museum-visit", "name": "Museum visit", "place": "art-institute" },
-    { "id": "blue-line", "name": "Blue Line to O'Hare", "from": "art-institute", "to": "ohare" },
-    { "id": "flight", "name": "Flight home", "from": "ohare", "to": "home" }
-  ],
-  "ways": [],
-  "wants": [],
-  "facts": [
-    { "id": "visit-time", "option": "museum-visit", "starts_at": "2027-05-15T14:00:00-05:00[America/Chicago]" },
-    { "id": "visit-length", "option": "museum-visit", "duration": "PT1H" },
-    { "id": "visit-needs-a-ticket", "option": "museum-visit", "needs_right": true },
-    { "id": "museum-tickets", "booking": { "option": "museum-visit", "covers": ["alex", "sam"] } },
-    { "id": "train-time", "option": "blue-line", "starts_any_time": true },
-    { "id": "train-length", "option": "blue-line", "duration": "PT1H" },
-    { "id": "train-is-walk-up", "option": "blue-line", "needs_right": false },
-    { "id": "flight-time", "option": "flight", "starts_at": "2027-05-15T17:00:00-05:00[America/Chicago]" },
-    { "id": "flight-length", "option": "flight", "duration": "PT2H30M" },
-    { "id": "bag-drop", "option": "flight", "arrive_before_start": "PT45M" },
-    { "id": "flight-needs-a-ticket", "option": "flight", "needs_right": true },
-    { "id": "flight-tickets", "booking": { "option": "flight", "covers": ["alex", "sam"] } }
-  ],
-  "decisions": [
-    { "id": "lock-visit", "lock": "museum-visit", "persons": ["alex", "sam"] },
-    { "id": "lock-flight", "lock": "flight", "persons": ["alex", "sam"] }
+  "robust": true
+}</pre>
+          <pre class="report-data" hidden data-version="cannot-work" data-from="examples/flight-home/cannot-work.expected.json">{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "visit-time",
+    "visit-length",
+    "train-length",
+    "flight-time",
+    "bag-drop",
+    "ways-to-ohare",
+    "lock-visit",
+    "lock-flight"
   ]
 }</pre>
+          <pre class="report-data" hidden data-version="depends-on-the-cab" data-from="examples/flight-home/depends-on-the-cab.expected.json">{
+  "answer": "UNDETERMINED",
+  "missing": [
+    [
+      {
+        "what": "duration",
+        "option": "cab",
+        "at_most": "PT45M"
+      }
+    ]
+  ]
+}</pre>
+          <pre class="report-data" hidden data-version="works-but-risky" data-from="examples/flight-home/works-but-risky.expected.json">{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "museum-visit",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T14:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T15:00:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "museum-tickets",
+        "sam": "museum-tickets"
+      }
+    },
+    {
+      "option": "blue-line",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T15:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T16:00:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "flight",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T17:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T19:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "flight-tickets",
+        "sam": "flight-tickets"
+      }
+    }
+  ],
+  "relies_on": [
+    "visit-time",
+    "visit-length",
+    "visit-needs-a-ticket",
+    "museum-tickets",
+    "train-time",
+    "train-is-walk-up",
+    "train-length",
+    "flight-time",
+    "flight-length",
+    "bag-drop",
+    "flight-needs-a-ticket",
+    "flight-tickets",
+    "lock-visit",
+    "lock-flight"
+  ],
+  "robust": false,
+  "at_worst": [
+    {
+      "constraint": "Each PERSON arrives in time",
+      "option": "flight",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "late": "PT5M"
+    }
+  ]
+}</pre>
+          </section>
+          <section class="pane unbuilt" aria-labelledby="pane-optimizer">
+            <div class="mile" aria-hidden="true"><svg class="town" viewBox="0 0 24 24" aria-hidden="true"><circle cx="20.40" cy="12.00" r="1.7"/><circle cx="19.27" cy="16.20" r="1.7"/><circle cx="16.20" cy="19.27" r="1.7"/><circle cx="12.00" cy="20.40" r="1.7"/><circle cx="7.80" cy="19.27" r="1.7"/><circle cx="4.73" cy="16.20" r="1.7"/><circle cx="3.60" cy="12.00" r="1.7"/><circle cx="4.73" cy="7.80" r="1.7"/><circle cx="7.80" cy="4.73" r="1.7"/><circle cx="12.00" cy="3.60" r="1.7"/><circle cx="16.20" cy="4.73" r="1.7"/><circle cx="19.27" cy="7.80" r="1.7"/></svg></div>
+            <h3 id="pane-optimizer"><span class="release">0.2</span> The OPTIMIZER</h3>
+            <p data-from="docs/VISION.md"><strong>An optimizer</strong> that finds the best version for the priorities people set.</p>
+            <p class="small" data-from="docs/ROADMAP.md">The OPTIMIZER: ranking FEASIBLE ITINERARIES by SCORE, with each PERSON's SCORE shown beside the total.</p>
+            <div class="blind" aria-hidden="true"><i></i><i></i><i></i></div>
+            <p class="small soon">It is not built yet.</p>
+          </section>
+        </div>
+      </section>
     </div>
   </section>
 
   <section class="band tint" id="what" aria-labelledby="what-title">
-    <div class="wrap">
+    <div class="wrap split">
       <div class="stack">
-        <span class="label">The plan</span>
-        <h2 id="what-title" data-from="docs/VISION.md">What Agloe is</h2>
-      </div>
-      <div class="parts">
-        <div class="part">
-          <svg viewBox="0 0 54 54" aria-hidden="true"><path d="M12 5h20l10 10v34H12z"/><path d="M32 5v10h10"/><path class="t" d="M19 25h16M19 32h16M19 39h9"/></svg>
-          <p data-from="docs/VISION.md"><strong>A standard format</strong> that represents a trip and all its nuances, readable by people and machines. It is the lasting record.</p>
-          <span class="label">Release 0.1</span>
-        </div>
-        <div class="part">
-          <svg viewBox="0 0 54 54" aria-hidden="true"><circle cx="27" cy="27" r="21"/><path class="t" d="m17 28 7 7 14-15"/></svg>
-          <p data-from="docs/VISION.md"><strong>A compiler</strong> that checks the whole plan and explains every conflict.</p>
-          <span class="label">Release 0.1 · Being built now</span>
-        </div>
-        <div class="part">
-          <svg viewBox="0 0 54 54" aria-hidden="true"><path d="M6 46h42"/><path d="M12 46V30h8v16M23 46V12h8v34M34 46V22h8v24"/><path class="b" d="m27 3 1.6 3.4 3.7.4-2.8 2.5.8 3.7-3.3-1.9-3.3 1.9.8-3.7-2.8-2.5 3.7-.4z"/></svg>
-          <p data-from="docs/VISION.md"><strong>An optimizer</strong> that finds the best version for the priorities people set.</p>
-          <span class="label">Release 0.2</span>
-        </div>
+        <span class="label">The compiler</span>
+        <h2 id="what-title">One of three answers, each with its evidence.</h2>
+        <ul class="key">
+          <li class="feasible" data-from="README.md"><strong>FEASIBLE:</strong> the trip works. The report shows a plan, and warns when the plan holds only if uncertain durations stay short.</li>
+          <li class="infeasible" data-from="README.md"><strong>INFEASIBLE:</strong> the trip cannot work. The report names the FACTs, WANTs and DECISIONs that clash.</li>
+          <li class="undetermined" data-from="README.md"><strong>UNDETERMINED:</strong> the file does not say enough to tell. The report names what it would have to say for the trip to work.</li>
+        </ul>
+        <p class="small" data-from="README.md">The <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">rules</a> say exactly what it checks, and every trip under <a href="https://github.com/ian-c-leonard/agloe/tree/main/examples"><code>examples/</code></a> is one of its tests.</p>
       </div>
       <div class="after">
         <p data-from="docs/VISION.md">AI agents are starting to plan trips. An agent can seat eight friends at dinner in its head. Seating 800 is different: it needs the guest list written down, the rules codified, and something that checks every seat against every rule. A real trip is the 800 case: many people, legs, bookings and times, all affecting each other.</p>
@@ -599,7 +969,7 @@ uv run agloe check examples/a-must/cannot-work.json</pre>
 </footer>
 
 <script>
-// Two small touches. Nothing on the page needs them.
+// The map draws itself once. Nothing on the page needs this.
 (() => {
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   // The map draws itself the first time it comes into view.
@@ -610,25 +980,9 @@ uv run agloe check examples/a-must/cannot-work.json</pre>
       if (seen.some((entry) => entry.isIntersecting)) { map.classList.remove("unseen"); watcher.disconnect(); }
     }, { threshold: 0.35 }).observe(map);
   }
-  // The trip steps through its versions until the reader takes over.
-  const versions = [...document.querySelectorAll('input[name="version"]')];
-  const card = document.querySelector(".trip-card");
-  if (!versions.length || !card || still) return;
-  // It goes round once, and it stops for good if the reader touches it or scrolls on.
-  let turns = 0;
-  const turn = setInterval(() => {
-    if (document.hidden) return;
-    const now = versions.findIndex((version) => version.checked);
-    versions[(now + 1) % versions.length].checked = true;
-    if (++turns >= versions.length) clearInterval(turn);
-  }, 6500);
-  const stop = () => clearInterval(turn);
-  for (const kind of ["pointerdown", "keydown", "focusin"]) card.addEventListener(kind, stop, { once: true });
-  if ("IntersectionObserver" in window) {
-    new IntersectionObserver((seen) => { if (seen.some((entry) => !entry.isIntersecting)) stop(); }, { threshold: 0.4 }).observe(card);
-  }
 })();
 </script>
+<script type="module" src="trip.js"></script>
 
 </body>
 </html>
