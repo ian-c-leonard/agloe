@@ -18,6 +18,7 @@ import os
 import queue
 import re
 import select
+import shlex
 import shutil
 import signal
 import subprocess
@@ -80,13 +81,14 @@ def serving(path: Path, python: str = sys.executable) -> Generator[View]:
 class Sent:
     """What the view sends a page, read one event at a time, each within a time limit.
 
-    The events are read in a thread of their own, so a limit holds whatever the view sends.
+    The events are read in a thread of their own, and each is noted with the time it came at.
+    So a limit holds whatever the view sends, and an event that came after it does not count.
     """
 
     def __init__(self, view: View | str) -> None:
         address = view if isinstance(view, str) else view.address
         self.reply = urllib.request.urlopen(f"{address}events", timeout=120)
-        self.read: queue.Queue[dict[str, Any] | None] = queue.Queue()
+        self.read: queue.Queue[tuple[float, dict[str, Any] | Exception | None]] = queue.Queue()
         threading.Thread(target=self._listen, daemon=True).start()
 
     def _listen(self) -> None:
@@ -94,33 +96,41 @@ class Sent:
             for raw in self.reply:
                 # The view says now and then that it is still there. That is no event.
                 if raw.startswith(b"data: "):
-                    self.read.put(json.loads(raw.removeprefix(b"data: ")))
-        except OSError, ValueError:
+                    self.read.put((time.monotonic(), json.loads(raw.removeprefix(b"data: "))))
+        except OSError:
             pass
-        self.read.put(None)
+        except ValueError as problem:
+            self.read.put((time.monotonic(), problem))
+        self.read.put((time.monotonic(), None))
 
-    def next(self, within: float = 60) -> dict[str, Any]:
+    def _next(self, late: float) -> dict[str, Any] | None:
+        """The next event that came before this time, or None where the view stopped sending."""
         try:
-            event = self.read.get(timeout=within)
+            came, event = self.read.get(timeout=max(0.0, late - time.monotonic()))
         except queue.Empty:
             raise AssertionError("the view sent no event in time") from None
+        assert came <= late, "the view sent no event in time"
+        assert not isinstance(event, Exception), f"the view sent a line that is no event: {event}"
+        return event
+
+    def next(self, within: float = 60) -> dict[str, Any]:
+        event = self._next(time.monotonic() + within)
         assert event is not None, "the view stopped sending"
         return event
 
     def until(self, kind: str, within: float = 60) -> Events:
         """Every event up to the first of this kind, all of them within the time."""
         late = time.monotonic() + within
-        seen = [self.next(within)]
-        while seen[-1]["kind"] != kind:
-            seen.append(self.next(max(0.0, late - time.monotonic())))
+        seen: Events = []
+        while not seen or seen[-1]["kind"] != kind:
+            event = self._next(late)
+            assert event is not None, "the view stopped sending"
+            seen.append(event)
         return seen
 
     def ended(self, within: float = 20) -> bool:
         """Whether the view stops sending within the time, with no further event."""
-        try:
-            return self.read.get(timeout=within) is None
-        except queue.Empty:
-            return False
+        return self._next(time.monotonic() + within) is None
 
 
 def stand_in(folder: Path, does: str) -> str:
@@ -175,7 +185,7 @@ def test_a_page_is_sent_the_file_then_the_answer_then_the_report(name: str, tmp_
     expected = json.loads((STORY / f"{name}.expected.json").read_text())
     with serving(path) as view:
         file, answer, report = Sent(view).until("report")
-    assert file == {"kind": "file", "name": "trip.json", "revision": 1}
+    assert file == {"kind": "file", "name": "trip.json", "revision": 1, "view": view.id}
     assert (answer["kind"], answer["answer"]) == ("answer", expected["answer"])
     assert report["answer"] == expected["answer"]
     assert report["json"] == expected
@@ -283,6 +293,16 @@ def test_a_file_that_is_no_json_is_refused_in_the_words_of_the_command(
     assert sent[-1]["problems"] == list(refused.value.problems)
 
 
+def test_each_view_has_a_name_of_its_own(tmp_path: Path) -> None:
+    """A page that listened to one view can tell when another one answers at the same address."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    with serving(path) as one, serving(path) as other:
+        assert one.id != other.id
+        assert Sent(one).next()["view"] == one.id
+        assert Sent(other).next()["view"] == other.id
+
+
 def test_a_page_that_comes_late_is_sent_the_same(tmp_path: Path) -> None:
     path = tmp_path / "trip.json"
     shutil.copy(STORY / "works.json", path)
@@ -333,6 +353,11 @@ def test_the_answer_reaches_a_page_while_the_check_goes_on(tmp_path: Path) -> No
         """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": true}'""",
         """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": NaN}'""",
         """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": -1}'""",
+        """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": 1e400}'""",
+        (
+            """echo '{"kind": "report", "answer": "FEASIBLE", "text": "", "seconds": 1, """
+            """"json": {"answer": "FEASIBLE", "robust": 1e400}}'"""
+        ),
         None,
     ],
 )
@@ -347,7 +372,7 @@ def test_a_check_that_ends_without_a_report_has_stopped(does: str | None, tmp_pa
     with serving(path, python=python) as view:
         stopped = Sent(view).until("stopped", within=20)
     assert stopped == [
-        {"kind": "file", "name": "trip.json", "revision": 1},
+        {"kind": "file", "name": "trip.json", "revision": 1, "view": view.id},
         {"kind": "stopped", "revision": 1},
     ]
 
@@ -522,13 +547,15 @@ def test_the_command_serves_a_browser_that_it_opens_and_that_waits(tmp_path: Pat
     shutil.copy(STORY / "works.json", path)
     got = tmp_path / "got"
     # The stand-in for a browser asks for the page, notes what it got, and then stays open.
-    browser = tmp_path / "browser.py"
+    browser = tmp_path / "a browser.py"
     browser.write_text(
-        "import sys, time, urllib.request\n"
+        "import os, sys, time, urllib.request\n"
         "with urllib.request.urlopen(sys.argv[1], timeout=20) as reply:\n"
-        f"    open({str(got)!r}, 'w').write(str(reply.status))\n"
+        f"    open({str(got) + '.new'!r}, 'w').write(str(reply.status))\n"
+        f"os.replace({str(got) + '.new'!r}, {str(got)!r})\n"
         "time.sleep(3)\n"
     )
+    opens = f"{shlex.quote(sys.executable)} {shlex.quote(str(browser))} %s"
     started = subprocess.Popen(
         [
             sys.executable,
@@ -540,7 +567,7 @@ def test_the_command_serves_a_browser_that_it_opens_and_that_waits(tmp_path: Pat
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        env={**os.environ, "BROWSER": f"{sys.executable} {browser} %s"},
+        env={**os.environ, "BROWSER": opens},
     )
     try:
         late = time.monotonic() + 30
@@ -613,9 +640,11 @@ def page_says(trips: list[Events]) -> list[Events]:
     return said
 
 
-def sent_for(content: bytes, revision: int = 1, name: str = "trip.json") -> Events:
+def sent_for(
+    content: bytes, revision: int = 1, name: str = "trip.json", view: str = "one"
+) -> Events:
     """What the view sends a page about one state of a FILE, as ``serve`` puts it together."""
-    file: dict[str, Any] = {"kind": "file", "name": name, "revision": revision}
+    file: dict[str, Any] = {"kind": "file", "name": name, "revision": revision, "view": view}
     return [file, *({**event, "revision": revision} for event in checked(content))]
 
 
@@ -655,7 +684,7 @@ def test_the_page_marks_a_report_on_the_file_as_it_was() -> None:
     first = sent_for((STORY / "works.json").read_bytes(), 1)
     second = sent_for((STORY / "cannot-work.json").read_bytes(), 2)
     refused: Events = [
-        {"kind": "file", "name": "trip.json", "revision": 3},
+        {"kind": "file", "name": "trip.json", "revision": 3, "view": "one"},
         {"kind": "refused", "problems": ["/facts/0: fits no known shape"], "revision": 3},
     ]
     last = sent_for((STORY / "works.json").read_bytes(), 4)
@@ -683,7 +712,7 @@ def test_the_page_marks_a_report_on_the_file_as_it_was() -> None:
 def test_the_page_takes_no_answer_for_another_state_of_the_file() -> None:
     """An event that names another revision than the page was last told of is passed over."""
     file, answer, report = sent_for((STORY / "cannot-work.json").read_bytes(), 1)
-    newer: dict[str, Any] = {"kind": "file", "name": "trip.json", "revision": 2}
+    newer: dict[str, Any] = {"kind": "file", "name": "trip.json", "revision": 2, "view": "one"}
     (said,) = page_says([[file, newer, answer, report, {"kind": "stopped", "revision": 1}]])
     for after_it in said[2:]:
         assert after_it["mark"] == "checking"
@@ -709,7 +738,7 @@ def test_the_page_says_when_a_check_has_stopped() -> None:
 
 def test_the_page_says_why_a_file_has_no_report() -> None:
     """A FILE that cannot be read is not said to break the format."""
-    file: dict[str, Any] = {"kind": "file", "name": "trip.json", "revision": 1}
+    file: dict[str, Any] = {"kind": "file", "name": "trip.json", "revision": 1, "view": "one"}
     unreadable = {"kind": "unreadable", "problem": "No such file or directory", "revision": 1}
     ((_, _, away),) = page_says([[file, unreadable]])
     assert away["mark"] == "unreadable"
@@ -764,12 +793,28 @@ def test_the_page_says_when_it_no_longer_hears_the_view() -> None:
     assert said[-1]["old"] is False
 
 
+def test_the_page_keeps_no_report_from_another_view() -> None:
+    """A view was stopped, and another one now serves another FILE at the same address."""
+    first = sent_for((STORY / "works.json").read_bytes(), 3, view="one")
+    other: Events = [
+        {"kind": "file", "name": "other.json", "revision": 1, "view": "two"},
+        {"kind": "refused", "problems": ["not readable as JSON"], "revision": 1},
+    ]
+    (said,) = page_says([[*first, {"kind": "lost"}, *other]])
+    assert said[4]["report"] == (STORY / "works.expected.txt").read_text()
+    for after_it in said[5:]:
+        assert after_it["name"] == "other.json"
+        assert after_it["report"] is None
+        assert after_it["old"] is False
+    assert said[-1]["mark"] == "refused"
+
+
 def test_the_page_knows_every_event_it_is_sent() -> None:
     """An event that the page's code does not know is an error, and never passed over."""
     node = shutil.which("node")
     if node is None:
         pytest.skip("needs Node")
-    file = {"kind": "file", "name": "trip.json", "revision": 1}
+    file = {"kind": "file", "name": "trip.json", "revision": 1, "view": "one"}
     done = subprocess.run(
         [node, str(Path(__file__).parent / "view_page.mjs")],
         input=json.dumps([[file, {"kind": "something else", "revision": 1}]]),

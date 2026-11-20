@@ -12,7 +12,9 @@ FILE changes is ended.
 
 import contextlib
 import json
+import math
 import os
+import secrets
 import socket
 import stat
 import subprocess
@@ -28,6 +30,7 @@ if TYPE_CHECKING:
     # Only the name of the type is needed here. The check itself runs in a process of its own.
     from agloe.view.check import Event
 
+PAGE = ("index.html", "view.css", "view.js", "state.js")  # the page and its files
 KINDS = {".html": "text/html", ".css": "text/css", ".js": "text/javascript"}
 LOOK = 0.1  # seconds between two looks at the FILE, and at whether the view is closed
 QUIET = 15.0  # seconds after which a page with nothing new is told that the view is still there
@@ -47,9 +50,10 @@ POLICY = "default-src 'self'; frame-ancestors 'none'"
 def _static() -> dict[str, tuple[str, bytes]]:
     """The page and its files, each by the path a browser asks for: its kind and its content."""
     parts: dict[str, tuple[str, bytes]] = {}
-    for part in resources.files("agloe.view").joinpath("static").iterdir():
-        kind = KINDS[Path(part.name).suffix]
-        parts[f"/{part.name}"] = (f"{kind}; charset=utf-8", part.read_bytes())
+    folder = resources.files("agloe.view").joinpath("static")
+    for name in PAGE:
+        content = folder.joinpath(name).read_bytes()
+        parts[f"/{name}"] = (f"{KINDS[Path(name).suffix]}; charset=utf-8", content)
     parts["/"] = parts.pop("/index.html")
     return parts
 
@@ -58,13 +62,21 @@ def _no_number(name: str) -> object:
     raise ValueError(f"{name} is not a JSON value")
 
 
+def _finite(written: str) -> float:
+    """A number as JSON writes it. One too large to hold is no number that a page can read."""
+    number = float(written)
+    if not math.isfinite(number):
+        raise ValueError(f"{written} is too large a number")
+    return number
+
+
 def _said(line: bytes) -> Event:
     """One line that a check printed, as the event it is. Raises ValueError where it is none.
 
     An event is passed on only if it holds all that a page reads from it, so that no page is
     ever left with half an event.
     """
-    said: object = json.loads(line.decode(), parse_constant=_no_number)
+    said: object = json.loads(line.decode(), parse_constant=_no_number, parse_float=_finite)
     if not isinstance(said, dict):
         raise ValueError("a check printed something that is no event")
     event = cast("Event", said)
@@ -103,6 +115,9 @@ class View:
         self._server.timeout = LOOK
         self._port = int(self._server.server_address[1])
         self.address = f"http://127.0.0.1:{self._port}/"
+        # A name of its own, so that a page can tell this view from one that served the same
+        # address before it. The page keeps nothing that another view told it.
+        self.id = secrets.token_hex(8)
         self.static = _static()
         self.changed = threading.Condition()
         self.revision = 0  # counts the states of the FILE that have been seen
@@ -207,7 +222,7 @@ class View:
                     seen = now
                     self.revision += 1
                     self._end_the_check()
-                    self.events = [self._about("file", name=self.path.name)]
+                    self.events = [self._about("file", name=self.path.name, view=self.id)]
                     if isinstance(now, str):
                         self.events.append(self._about("unreadable", problem=now))
                     else:

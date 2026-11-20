@@ -1,8 +1,8 @@
 // What the page says in each state. There is no page in here, so the tests run this as it is.
 //
 // The view sends the page events. Each one names the state of the FILE that it is about, by a
-// number, its revision. `file` says that there is a new state to check. What follows is about
-// that state: `answer` as soon as the COMPILER has proved one, then `report`. A FILE that does
+// number, its revision. `file` says that there is a new state to check, and which view says so.
+// What follows is about that state: `answer` as soon as the COMPILER has proved one, then `report`. A FILE that does
 // not follow the format gets `refused` with the problems, a FILE that cannot be read gets
 // `unreadable`, a report that cannot be written gets `unwritable`, and a check that ends with
 // none of these gets `stopped`. The page itself adds `lost` when it no longer hears the view.
@@ -17,14 +17,17 @@ const none = { checking: false, answer: null, answered: null, problems: null, un
 
 /** Before the view has sent anything. */
 export function start() {
-  return { ...none, name: null, revision: null, report: null, reported: null, old: false };
+  return { ...none, view: null, name: null, revision: null, report: null, reported: null, old: false };
 }
 
 /** The state after one more event. */
 export function after(state, event) {
   if (event.kind === "lost") return { ...state, checking: false, lost: true, old: state.report !== null };
   if (event.kind === "file") {
-    return { ...state, ...none, name: event.name, revision: event.revision, checking: true, old: state.report !== null };
+    // Each view has a name of its own. Where another view now serves this address, the report
+    // on the page is on a FILE that this view knows nothing of, so the page lets it go.
+    const kept = state.view === null || event.view === state.view ? state : { ...state, report: null, reported: null };
+    return { ...kept, ...none, view: event.view, name: event.name, revision: event.revision, checking: true, old: kept.report !== null };
   }
   // An event about another state of the FILE than the one the page was last told of says nothing
   // about the FILE on the page, so it is passed over.
