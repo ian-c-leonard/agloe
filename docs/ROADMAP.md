@@ -18,3 +18,9 @@ Agloe grows in releases, each built on one that already works. Before 1.0, anyth
 - Comparing VARIANTs side by side, fairness reporting, and repair when the agreed ITINERARY stops working.
 
 Later releases are planned once 0.2 works.
+
+## The view
+
+The view is a page for a person. It shows a TRIP from its FILE and from the COMPILER's report, and it follows the FILE as the FILE changes. The command `agloe view FILE` serves it on the person's own machine.
+
+The view is built beside the releases, in steps of its own, and it holds no release up. Its first step shows the COMPILER's answer and report, and keeps them up to date. Each later step adds one drawing of the TRIP, or one way to change the TRIP by hand.

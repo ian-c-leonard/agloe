@@ -1,0 +1,36 @@
+/* The view: a plain page. Colour is kept for what the COMPILER's report says. */
+:root {
+  --ground: #FBFAF8; --surface: #FFFFFF; --ink: #1C1A17; --ink2: #4B463E; --muted: #766F62; --line: #E2DFD8;
+  --stop: #B8431A; --stop-wash: #FFF8F4; --ask: #6E5D1C; --ask-rim: #9A8330; --ask-wash: #FFFDF4;
+  --text: system-ui, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 15px/1.5 var(--text); }
+p, h2, ul { margin: 0; }
+header { display: flex; align-items: baseline; gap: 16px; padding: 12px 28px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.word { font: italic 400 24px/1 Georgia, serif; }
+.name { font: 500 13px var(--mono); color: var(--ink2); }
+main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: grid; gap: 18px; }
+
+.answer { background: var(--surface); border: 1px solid var(--line); border-left: 6px solid var(--ink); border-radius: 9px; padding: 12px 16px; display: grid; gap: 4px; }
+.line { font: 500 16px/1.4 var(--mono); }
+.note { color: var(--muted); font-size: 13.5px; }
+.note:empty { display: none; }
+.answer.waiting, .answer.checking, .answer.stopped { border-left-color: var(--muted); }
+.answer.waiting .line, .answer.checking .line, .answer.stopped .line { color: var(--ink2); }
+.answer.stopped { border-style: dashed; border-left-style: solid; }
+.answer.warning, .answer.undetermined { border-left-color: var(--ask-rim); background: var(--ask-wash); }
+.answer.warning .line, .answer.undetermined .line { color: var(--ask); }
+.answer.infeasible, .answer.refused { border-left-color: var(--stop); background: var(--stop-wash); }
+.answer.infeasible .line, .answer.refused .line { color: var(--stop); }
+.problems { padding-left: 20px; margin-top: 6px; font: 13px/1.5 var(--mono); color: var(--ink2); display: grid; gap: 3px; }
+
+.report-part { display: grid; gap: 8px; }
+.report-part h2 { font: 600 13px var(--text); color: var(--ink2); }
+.report-part pre { margin: 0; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; font: 13px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* A report on the FILE as it was before is shown pale until the next report comes. */
+.report-part.old pre { opacity: 0.45; }
+
+.stopped { border: 1px dashed var(--muted); border-radius: 9px; padding: 10px 16px; color: var(--ink2); }
+code { font-family: var(--mono); font-size: 0.92em; }
