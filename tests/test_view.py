@@ -37,7 +37,7 @@ from agloe.cli import main
 from agloe.file import FileError, read
 from agloe.view import View
 from agloe.view.check import checked
-from agloe.view.serve import PAGE
+from agloe.view.serve import PAGE, REFUSED_BY_BROWSERS
 from tests.stories import EXAMPLES, lasts, lock, needs_no_right, stays
 
 STORY = EXAMPLES / "flight-home"
@@ -606,6 +606,28 @@ def test_stopping_the_command_ends_the_check_that_is_running(
     finally:
         started.kill()
         started.wait(timeout=20)
+
+
+@pytest.mark.parametrize("port", [80, 1023, 65536, -1, 6000, 10080])
+def test_the_view_serves_only_a_port_that_browsers_open(port: int, tmp_path: Path) -> None:
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    with pytest.raises(ValueError, match=str(port)):
+        View(path, port=port)
+
+
+def test_the_view_takes_a_free_port_that_browsers_open(tmp_path: Path) -> None:
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    views = [View(path) for _ in range(5)]
+    try:
+        ports = [port_of(view) for view in views]
+        assert len(set(ports)) == len(ports)
+        assert not set(ports) & REFUSED_BY_BROWSERS
+        assert all(1024 <= port <= 65535 for port in ports)
+    finally:
+        for view in views:
+            view.close()
 
 
 def test_the_command_needs_a_file_that_is_there(

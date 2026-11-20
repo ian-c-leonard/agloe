@@ -59,7 +59,10 @@ def main(arguments: Sequence[str] | None = None) -> int:
         "--port",
         type=int,
         default=0,
-        help="the port to serve on, from 1024 to 65535, or any free port if not given",
+        help=(
+            "the port to serve on: one from 1024 to 65535 that browsers open, "
+            "or a free port if not given"
+        ),
     )
     view.add_argument("--no-browser", action="store_true", help="do not open the page in a browser")
     chosen = parser.parse_args(arguments)
@@ -102,33 +105,19 @@ def main(arguments: Sequence[str] | None = None) -> int:
     return 0 if answer is Answer.FEASIBLE else 1
 
 
-# The ports from 1024 up that browsers refuse to open a page on: the bad ports of the Fetch
-# Standard. A free port that the system picks is never one of them.
-_REFUSED_BY_BROWSERS = frozenset(
-    {1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566}
-    | {6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080}
-)
-
-
 def _view(path: Path, port: int, in_a_browser: bool) -> int:
     """Serve the view of one FILE on this machine until the command is stopped."""
     if not path.is_file():
         print(f"{path}: there is no such FILE", file=sys.stderr)
-        return 2
-    if port != 0 and not 1024 <= port <= 65535:
-        print(f"{port} is no port for the view: give one from 1024 to 65535", file=sys.stderr)
-        return 2
-    if port in _REFUSED_BY_BROWSERS:
-        print(
-            f"browsers refuse to open a page on port {port}: give another, or leave --port out",
-            file=sys.stderr,
-        )
         return 2
     # The view needs sockets and processes, so it is loaded only where it is asked for.
     from agloe.view import View
 
     try:
         view = View(path, port)
+    except ValueError as problem:
+        print(f"{problem}. Leave --port out, and the view takes a free port.", file=sys.stderr)
+        return 2
     except OSError as problem:
         print(f"the view cannot be served on port {port}: {problem.strerror}", file=sys.stderr)
         return 2

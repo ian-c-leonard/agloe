@@ -30,10 +30,10 @@ The view is a page that the command `agloe view FILE` serves on the person's own
 
 ## Consequences
 
-- A person needs Agloe on their machine to use the view. A view for people without it needs the first or the second option, by a decision of its own.
+- A person needs Agloe on their machine to use the view. The view is checked on Linux and on macOS, as the rest of Agloe is. A view for people without it needs the first or the second option, by a decision of its own.
 - The view shows what a report holds. A report shows an ITINERARY that the travelers can use only for a FEASIBLE TRIP.
 - A check that takes long shows its answer first, and the page says that the report is on its way.
 - The words the page shows for each state are worked out in [`src/agloe/view/static/state.js`](../../src/agloe/view/static/state.js), which has no page in it. A test runs it with Node on what the command sends for the examples.
 - The tests start the view on an example, change the FILE, and read what a page is sent. They also stop the command while a page listens, and put a program that never ends in the place of a check.
-- The view serves a port from 1024 to 65535 that browsers open, or a free port that the system picks. It refuses a request that names another host, or that says it comes from another site, and it tells the browser to show the page in no other page.
+- The view serves a port from 1024 to 65535 that browsers open. Where no port is given, it takes a free one of those. It refuses a request that names another host, or that says it comes from another site, and it tells the browser to show the page in no other page.
 - Each view has a name of its own and says it with each new state of the FILE. A page that listened to one view lets its report go when another view answers at the same address.

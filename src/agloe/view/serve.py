@@ -35,6 +35,12 @@ KINDS = {".html": "text/html", ".css": "text/css", ".js": "text/javascript"}
 LOOK = 0.1  # seconds between two looks at the FILE, and at whether the view is closed
 QUIET = 15.0  # seconds after which a page with nothing new is told that the view is still there
 LONGEST = 1e9  # seconds: no check takes this long, and a page can still write the number
+# The ports from 1024 up that browsers refuse to open a page on: the bad ports of the Fetch
+# Standard.
+REFUSED_BY_BROWSERS = frozenset(
+    {1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566}
+    | {6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080}
+)
 ANSWERS = {"FEASIBLE", "INFEASIBLE", "UNDETERMINED"}
 # What a check can say, and what each of its events must hold. A check ends with one of ENDS.
 SHAPES: dict[str, dict[str, type | tuple[type, ...]]] = {
@@ -111,7 +117,7 @@ class View:
     def __init__(self, path: Path, port: int = 0, python: str = sys.executable) -> None:
         self.path = path
         self.python = python
-        self._server = _Server(("127.0.0.1", port), _Asked)
+        self._server = _listening(port)
         self._server.view = self
         self._server.timeout = LOOK
         self._port = int(self._server.server_address[1])
@@ -194,7 +200,9 @@ class View:
         waiting for it, so a pipe with nobody writing to it cannot hold the view up.
         """
         try:
-            opened = os.open(self.path, os.O_RDONLY | os.O_NONBLOCK)
+            # Where the system has no way to open without waiting, it has no such pipes either.
+            how = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+            opened = os.open(self.path, how)
         except OSError as problem:
             return problem.strerror or str(problem)
         try:
@@ -293,6 +301,30 @@ class View:
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
     view: View
+
+
+def _listening(port: int) -> _Server:
+    """A server on this port of this machine, or on a free port where the port is 0.
+
+    Raises ValueError for a port that the view does not serve, and OSError where the port
+    cannot be had. A free port is one that browsers open: one that they refuse is held until
+    another is found, so that the system does not offer it again.
+    """
+    if port != 0 and not 1024 <= port <= 65535:
+        raise ValueError(f"{port} is no port for the view: give one from 1024 to 65535")
+    if port in REFUSED_BY_BROWSERS:
+        raise ValueError(f"browsers refuse to open a page on port {port}")
+    refused: list[_Server] = []
+    try:
+        for _ in range(len(REFUSED_BY_BROWSERS) + 1):
+            server = _Server(("127.0.0.1", port), _Asked)
+            if server.server_address[1] not in REFUSED_BY_BROWSERS:
+                return server
+            refused.append(server)
+        raise OSError("the system offers no free port that browsers open")
+    finally:
+        for server in refused:
+            server.server_close()
 
 
 class _Asked(BaseHTTPRequestHandler):
