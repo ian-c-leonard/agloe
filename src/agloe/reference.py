@@ -696,13 +696,52 @@ def _rights(file: File, world: World, taking_part: Mapping[str, tuple[str, ...]]
             out.append(Broken(Constraint.RIGHT, option, left_out[free:]))
         if left_out[:free]:
             out.append(Broken(Constraint.PAID, option, left_out[:free]))
-    for key, cap in file.caps.items():
-        charged = world.spent.get(key, 0)
-        if charged is None or charged > cap.limit.units:
-            out.append(Broken(Constraint.CAP, None, (), cap=cap.id))
+    out += [
+        Broken(Constraint.CAP, None, (), cap=cap) for cap in passed_by_the_bookings(file, world)
+    ]
     if file.caps and not out and way_to_pay(file, world, taking_part) is None:
         out.append(Broken(Constraint.CAP, None, ()))
     return out
+
+
+def passed_by_the_bookings(file: File, world: World) -> list[str]:
+    """Each cap that what the BOOKINGs charged passes in this world, or might, by itself."""
+    return [
+        cap.id
+        for key, cap in file.caps.items()
+        if (charged := world.spent.get(key, 0)) is None or charged > cap.limit.units
+    ]
+
+
+type Pair = tuple[str, str | None, tuple[str, str] | None, int]
+
+
+def pairs_to_pay(file: File, world: World, option: str, person: str) -> list[Pair]:
+    """Each pair of an OFFER and a BUDGET this PERSON can take for a place, in the FILE's order.
+
+    A pair holds the OFFER, the BUDGET, the cap that counts the purchase by its BUDGET and
+    currency, and the price in ten-thousandths. The BUDGET is None for a place that costs
+    nothing, and where money from outside the FILE pays: no cap counts those. BUDGETs with no
+    cap in the currency of the price are alike, so only the first of them makes a pair.
+    """
+    able: list[Pair] = []
+    for offer in file.offers(option):
+        if (offer.id, person) not in world.payable:
+            continue
+        price = offer.price
+        sources = () if price is None or not price.amount else file.payers(person, price.currency)
+        if price is None or not sources:
+            able.append((offer.id, None, None, 0))
+            continue
+        free_to_spend = False
+        for budget in sources:
+            key = (budget.id, price.currency)
+            if key in file.caps:
+                able.append((offer.id, budget.id, key, price.units))
+            elif not free_to_spend:
+                able.append((offer.id, budget.id, None, price.units))
+                free_to_spend = True
+    return able
 
 
 def way_to_pay(
@@ -748,31 +787,7 @@ def way_to_pay(
         if charged is None or charged > cap.limit.units:
             return None
         room[key] = cap.limit.units - charged
-    # Each pair a purchase can take: the OFFER, the BUDGET, and what it draws on which cap.
-    pairs: list[list[tuple[str, str | None, tuple[str, str] | None, int]]] = []
-    for option, person in buyers:
-        able: list[tuple[str, str | None, tuple[str, str] | None, int]] = []
-        for offer in file.offers(option):
-            if (offer.id, person) not in world.payable:
-                continue
-            price = offer.price
-            sources = (
-                () if price is None or not price.amount else file.payers(person, price.currency)
-            )
-            if price is None or not sources:
-                # It costs nothing, or money from outside the FILE pays: no cap counts it.
-                able.append((offer.id, None, None, 0))
-                continue
-            free_to_spend = False
-            for budget in sources:
-                key = (budget.id, price.currency)
-                if key in room:
-                    able.append((offer.id, budget.id, key, price.units))
-                elif not free_to_spend:
-                    # BUDGETs with no cap in this currency are alike: the first one pays.
-                    able.append((offer.id, budget.id, None, price.units))
-                    free_to_spend = True
-        pairs.append(able)
+    pairs = [pairs_to_pay(file, world, option, person) for option, person in buyers]
     left = {offer.id: offer.places for option in taking_part for offer in file.offers(option)}
     picked: list[int] = []
     start = 0

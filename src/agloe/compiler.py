@@ -14,8 +14,9 @@ open whether an OPTION SATISFIES a WANT, the solver chooses that too. Where LOCK
 into two OPTIONs at once, no model is needed.
 
 The solver counts in 64-bit numbers. A TRIP with very long durations and very many routes can
-need more than that. The reference checker's own search then answers for the whole TRIP. That
-search tries everything, so it is meant for small TRIPs.
+need more than that, and so can very many purchases at very high prices beside a cap. The
+reference checker's own search then answers for the whole TRIP. That search tries everything,
+so it is meant for small TRIPs.
 """
 
 from collections.abc import Iterable, Iterator, Sequence
@@ -61,11 +62,7 @@ class DoesNotFit(Exception):
 
 
 def check(file: File) -> Report:
-    """The answer for this TRIP, with its evidence. The same Report as the reference checker's.
-
-    A FILE with a cap goes to the reference checker: the solver does not yet share out what
-    each BUDGET can still spend.
-    """
+    """The answer for this TRIP, with its evidence. The same Report as the reference checker's."""
     *_, report = reports(file, ahead=False)
     if not isinstance(report, Report):
         raise AssertionError("a check ended with no Report")
@@ -82,9 +79,6 @@ def reports(file: File, ahead: bool = True) -> Iterator[Answer | Report]:
     are exact, so its answer is the one the solver proved. What was given before is not given
     again.
     """
-    if file.caps:
-        yield from answers.reports(file, ahead=ahead)
-        return
     given: list[Answer | Report] = []
     try:
         asked: _Asked = {}
@@ -108,6 +102,8 @@ def reports(file: File, ahead: bool = True) -> Iterator[Answer | Report]:
 def shown(file: File, world: World) -> Itinerary | None:
     """The ITINERARY that "Which ITINERARY is shown" puts first in this world, or None."""
     world = _with_the_ways_that_can_start(file, world)
+    if reference.passed_by_the_bookings(file, world):
+        return None
     if _locked_twice_at_once(file, world) or _has_to_take_two_apart(file, world):
         return None
     search = _Search(file, world)
@@ -118,6 +114,8 @@ def shown(file: File, world: World) -> Itinerary | None:
 def works(file: File, world: World, asked: _Asked | None = None) -> bool:
     """Whether any ITINERARY works in this world. ``asked`` is as for ``can_work``."""
     world = _with_the_ways_that_can_start(file, world)
+    if reference.passed_by_the_bookings(file, world):
+        return False
     if _locked_twice_at_once(file, world) or _has_to_take_two_apart(file, world):
         return False
     choice = _plan(_Search(file, world, plain=True), asked)
@@ -140,12 +138,12 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
     case takes anyway. The same model has the same answer, so the solver is asked once. The
     plan is read from that answer for what is left this time, and checked against it.
 
-    Like ``shown`` and ``works``, this is for a FILE with no cap: ``check`` hands a FILE with
-    a cap to the reference checker.
     """
     file = remaining.file
     world, open_pairs = reference.best_case_left(remaining)
     world = _with_the_ways_that_can_start(file, world)
+    if reference.passed_by_the_bookings(file, world):
+        return False
     if _locked_twice_at_once(file, world) or _has_to_take_two_apart(file, world, open_pairs):
         return False
     search = _Search(file, world, open_pairs, plain=True)
@@ -503,13 +501,46 @@ class _Search:
         self.left_out.add((number, index))
 
     def _hold_to_the_rights(self) -> None:
-        """Nobody takes part without a right in an OPTION that needs one."""
+        """Nobody takes part without a right in an OPTION that needs one, and no cap is passed."""
         file, world = self.file, self.world
         people = list(enumerate(file.persons))
+        # What the purchases draw on each cap: the price, and the choice that draws it.
+        self.drawn: dict[tuple[str, str], list[tuple[int, cp_model.IntVar]]] = {
+            key: [] for key in file.caps
+        }
         for index, option in enumerate(file.options):
             if option.id in world.needs_right:
                 without = [n for n, person in people if (option.id, person.id) not in world.rights]
                 self._share_out(index, without)
+        self._hold_to_the_caps()
+
+    def _hold_to_the_caps(self) -> None:
+        """No cap is passed: what the BOOKINGs charged, plus what is bought, is within it.
+
+        ``World.spent`` says the most that the BOOKINGs might have charged to each cap in
+        this world. The rest of the cap is room for the purchases that draw on it. A place
+        that costs more than the room is never paid from that BUDGET. ``shown``, ``works``
+        and ``can_work`` build no model where the BOOKINGs pass a cap by themselves.
+
+        The amounts are whole ten-thousandths, and the largest a FILE can state takes 54 bits.
+        So a sum of many can pass what the solver counts with, and then the TRIP does not fit.
+        """
+        model = self.model
+        for key, cap in self.file.caps.items():
+            charged = self.world.spent.get(key, 0)
+            if charged is None or charged > cap.limit.units:
+                raise AssertionError("a model was built where the BOOKINGs pass a cap")
+            room = cap.limit.units - charged
+            fitting: list[tuple[int, cp_model.IntVar]] = []
+            for units, pick in self.drawn[key]:
+                if units > room:
+                    model.add(pick == 0)
+                else:
+                    fitting.append((units, pick))
+            if sum(units for units, _ in fitting) >= 2**62:
+                raise DoesNotFit("the amounts of this TRIP are too large to add up")
+            if sum(units for units, _ in fitting) > room:
+                model.add(sum(units * pick for units, pick in fitting) <= room)
 
     def _share_out(self, index: int, without: Sequence[int]) -> None:
         """Each of these PERSONs who takes part in an OPTION takes a place they can pay for.
@@ -519,11 +550,37 @@ class _Search:
         A PERSON who is ruled out of the OPTION needs no place. A PERSON who can pay for no
         place stays out, and an OFFER that none of them can pay for is left out. Where each of
         the others can pay for a place of every other OFFER, the places are alike, and it is
-        enough to count them. Otherwise the model chooses an OFFER for each PERSON.
+        enough to count them. Otherwise the model chooses an OFFER for each PERSON. Where a
+        cap counts a purchase that one of them could make, it chooses the BUDGET too: each
+        takes one of the pairs that ``reference.pairs_to_pay`` gives.
         """
         model, world, option = self.model, self.world, self.file.options[index]
         people = self.file.persons
         without = [number for number in without if (number, index) not in self.left_out]
+        pairs = {
+            number: reference.pairs_to_pay(self.file, world, option.id, people[number].id)
+            for number in (without if self.file.caps else ())
+        }
+        if any(key is not None for able in pairs.values() for _, _, key, _ in able):
+            # A cap counts some of these purchases, so the model chooses a BUDGET as well.
+            filled: dict[str, list[cp_model.IntVar]] = {}
+            for number in without:
+                picks: list[cp_model.IntVar] = []
+                for offer, budget, key, units in pairs[number]:
+                    name = f"{people[number].id} takes a place of {offer} paid from {budget}"
+                    pick = model.new_bool_var(name)
+                    picks.append(pick)
+                    filled.setdefault(offer, []).append(pick)
+                    if key is not None:
+                        self.drawn[key].append((units, pick))
+                if not picks:
+                    self._rule_out(number, index)
+                    continue
+                model.add(sum(picks) >= self.takes[number][index])
+            for offer in self.file.offers(option.id):
+                if len(filled.get(offer.id, ())) > offer.places:
+                    model.add(sum(filled[offer.id]) <= offer.places)
+            return
         able = {
             number: [
                 offer
@@ -1010,12 +1067,18 @@ class _Search:
         if fewest is None:
             return None
         model.add(taking_part * (count + 1) + sum(self.used) == fewest)
-        self._settle(self.used)
+        # An OPTION that somebody has to take part in happens: that is not left to choose.
+        happens = {index for theirs in self.have_to.values() for index in theirs}
+        self._settle([used for index, used in enumerate(self.used) if index not in happens])
 
         # Each PERSON in turn: the OPTION listed first that can come next, or nothing more.
         ends = count  # the two ends of a path, as one point of its circuit
         orders: list[tuple[int, ...]] = []
         for number in range(len(file.persons)):
+            only = self._only_order(number)
+            if only is not None:
+                orders.append(only)
+                continue
             follows = self.follows[number]
             order: list[int] = []
             here = ends
@@ -1037,6 +1100,19 @@ class _Search:
                 here = found
             orders.append(tuple(order))
         return self._who(orders), tuple(orders), None, None
+
+    def _only_order(self, number: int) -> tuple[int, ...] | None:
+        """The OPTIONs this PERSON does, where they have nothing to choose, or None.
+
+        A PERSON can take part in one OPTION at most, and has to take part in it:
+        ``_have_to_take`` says so. Or they can take part in none. Something works in this
+        model, so they do just that, and no question about their order is put to the solver.
+        """
+        can = [
+            index for index in range(len(self.file.options)) if (number, index) not in self.left_out
+        ]
+        theirs = self.have_to.get(self.file.persons[number].id, set())
+        return tuple(can) if len(can) < 2 and theirs.issuperset(can) else None
 
     def _who(self, orders: Sequence[tuple[int, ...]]) -> tuple[tuple[str, ...], ...]:
         """The PERSONs in each OPTION, given the OPTIONs each PERSON does."""

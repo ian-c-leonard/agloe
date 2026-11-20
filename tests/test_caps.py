@@ -8,9 +8,9 @@ from random import Random
 
 import pytest
 
-from agloe import compiler, report
-from agloe.answers import Answer, CapRow, Cover, Plan
-from agloe.file import Booking, Cap, File, FileError, Money, Offer, Payment
+from agloe import answers, compiler, reference, report
+from agloe.answers import Answer, CapRow, Cover, Plan, Report
+from agloe.file import Booking, Cap, File, FileError, Money, Offer
 from agloe.reference import (
     Broken,
     Constraint,
@@ -29,6 +29,7 @@ from tests.stories import (
     budget,
     cap,
     cutoff,
+    ends_at,
     every,
     every_right,
     lasts,
@@ -41,9 +42,13 @@ from tests.stories import (
     satisfies,
     seconds,
     starts_at,
+    starts_from,
     stays,
+    takes,
     trip,
+    way_between,
 )
+from tests.test_conflict import solves_counted
 from tests.test_where_a_path_ends import checked, has_no_record_to_spare, ruled_out
 
 EVERYONE = ["alex", "sam", "jo"]
@@ -890,8 +895,251 @@ def test_the_answers_hold_for_one_way_to_pay_in_every_possible_world() -> None:
     assert split > 0
 
 
-def test_a_file_with_a_cap_is_served_by_the_reference_checker() -> None:
+# ------------------------------------- With the solver --------------------------------------
+
+
+def two_capped_visits(rng: Random) -> File:
+    """Two visits at one PLACE with BOOKINGs, OFFERs, two BUDGETs and their caps.
+
+    Nothing about time is unknown. Rights, prices, payers and charges can be.
+    """
+    persons = ["alex", "sam", "jo"]
+    options = [stays("tour", "dock"), stays("talk", "dock")]
+    pots = [
+        budget("a", *rng.sample(persons, rng.randrange(1, 4))),
+        budget("b", *rng.sample(persons, 2)),
+    ]
+    facts: list[Document] = []
+    decisions: list[Document] = []
+    for number, option in enumerate(("tour", "talk")):
+        facts += at(option, 10 + 2 * number)
+        if rng.random() < 0.8:
+            facts.append(needs_right(option))
+        for count in range(rng.randrange(0, 3)):
+            paid = rng.choice([None, "0 USD", "1 USD", "2 USD"])
+            source = rng.choice([None, "a", "b"]) if paid else None
+            covered = rng.sample(persons, rng.randrange(1, 3))
+            ticket = f"{option}-ticket-{count}"
+            facts.append(booking(option, *covered, id=ticket, paid=paid, budget=source))
+        offers = [f"{option}-offer-{count}" for count in range(rng.randrange(0, 3))]
+        prices = ["0 USD", "1 USD", "2 USD", None]
+        facts += [
+            offer(option, rng.choice([1, 2]), id=name, price=rng.choice(prices)) for name in offers
+        ]
+        if rng.random() < 0.6:
+            facts.append(every_right(option, *offers))
+        if rng.random() < 0.8:
+            decisions.append(lock(option, *rng.sample(persons, rng.randrange(1, 4))))
+    decisions += [
+        cap(pot, f"{rng.randrange(0, 5)} USD") for pot in ("a", "b") if rng.random() < 0.8
+    ]
+    return trip(persons, ["dock"], options, facts, decisions, tickets=True, budgets=pots)
+
+
+def test_the_solver_gives_the_reference_checkers_report_for_trips_with_caps() -> None:
+    """The answer ahead and the Report, on random trips with one visit and with two."""
+    rng = Random(4848)
+    seen: set[Answer] = set()
+    capped = with_plans = 0
+    trips = [two_capped_visits(rng) for _ in range(250)]
+    trips += [a_capped_tour(rng) for _ in range(150)]
+    for file in trips:
+        series = list(answers.reports(file))
+        assert list(compiler.reports(file)) == series
+        found = series[-1]
+        assert isinstance(found, Report)
+        assert compiler.check(file) == found
+        seen.add(found.answer)
+        capped += bool(file.caps)
+        with_plans += bool(found.plans)
+    assert seen == set(Answer)
+    assert capped > 250
+    assert with_plans > 30
+
+
+def test_the_solver_builds_a_model_for_a_trip_with_a_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reference checker's own search is not asked: the solver shares out the BUDGETs."""
     paid = booking("tour", "alex", paid="32.00 USD", budget="trip-money")
     file = a_tour(paid, offer("tour", 2, price="32.00 USD"), caps=[cap("trip-money", "200.00 USD")])
-    assert compiler.check(file) == checked(file)
-    assert isinstance(file.decisions[-1], Cap) and Payment
+    expected = checked(file)
+
+    def not_asked(*given: object, **named: object) -> None:
+        raise AssertionError("the reference checker's search was asked")
+
+    monkeypatch.setattr(reference, "itineraries", not_asked)
+    assert compiler.check(file) == expected
+    (row,) = expected.caps
+    assert (row.paid, row.to_buy, row.left) == (320_000, 320_000, 1_360_000)
+
+
+def test_a_place_that_costs_more_than_a_cap_has_left_is_paid_from_another_budget() -> None:
+    """Sam's place costs 2 USD. The first BUDGET has 1 USD left, and the second has room."""
+    pots = [budget("a", "sam"), budget("b", "sam")]
+    paid = booking("tour", "alex", paid="1 USD", budget="a")
+    caps = [cap("a", "2 USD"), cap("b", "2 USD")]
+    file = a_tour(paid, offer("tour", 1, price="2 USD"), budgets=pots, caps=caps)
+    found = compiler.check(file)
+    assert found == checked(file)
+    assert [(cover.person, cover.budget) for cover in found.rights if cover.to_buy] == [
+        ("sam", "b")
+    ]
+
+
+def test_amounts_too_large_for_the_solver_go_to_the_reference_checker() -> None:
+    """A cap, and six hundred places at the largest price a FILE can state."""
+    most = "999999999999.9999 USD"
+    persons = [f"p{number}" for number in range(3)]
+    places = [offer("tour", 1, id=f"offer-{number}", price=most) for number in range(600)]
+    file = a_tour(*places, locked=["p0"], caps=[cap("trip-money", most)], persons=persons)
+    with pytest.raises(compiler.DoesNotFit):
+        compiler.works(file, worst_case(file))
+    found = compiler.check(file)
+    assert found == checked(file)
+    assert found.answer is Answer.FEASIBLE
+
+
+def test_bookings_that_pass_a_cap_are_seen_before_a_model_is_built(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One BOOKING paid 2 USD from a BUDGET with a cap of 1 USD. No plan can change that.
+
+    So the two questions that give the answer need no model. The search for the conflict
+    builds one only where the BOOKING or the cap is taken out.
+    """
+    facts = [starts_from("sam", "home"), needs_right("ride")]
+    facts.append(booking("ride", "sam", paid="2 USD", budget="money"))
+    options = [moves("ride", "stop", "home")]
+    file = trip(["sam"], ["home", "stop"], options, facts, [cap("money", "1 USD")], tickets=True)
+    found = compiler.check(file)
+    assert found == checked(file)
+    assert found.answer is Answer.INFEASIBLE
+    assert found.conflict == ("ride-booking", "money-cap")
+
+    def not_built(*given: object, **named: object) -> None:
+        raise AssertionError("a model was built")
+
+    monkeypatch.setattr(compiler._Search, "__init__", not_built)  # pyright: ignore[reportPrivateUsage]
+    assert compiler.shown(file, worst_case(file)) is None
+    assert not compiler.works(file, worst_case(file))
+    assert not compiler.can_work(Remaining(file))
+    still = Remaining(file).without("ride-needs-right")
+    assert still != Remaining(file)
+    assert not compiler.can_work(still)
+
+
+def a_weekend(limit: str, sold: bool = False) -> File:
+    """Four PERSONs start from the hotel and must end there, with a cap on the trip money.
+
+    Each of three sights is a WANT that all four must have, and it has two times to choose
+    from. Every visit needs a ticket at 10 USD. Alex has paid for the first one. With
+    ``sold``, FACTs say that the OFFER listed for each visit is every right to it.
+    """
+    people = ["alex", "sam", "jo", "max"]
+    sights = ["skydeck", "museum", "pier"]
+    ways = [way_between(f"hotel-{sight}", "hotel", sight) for sight in sights]
+    ways += [way_between("skydeck-museum", "skydeck", "museum")]
+    ways += [way_between("museum-pier", "museum", "pier")]
+    facts = [starts_from(person, "hotel") for person in people]
+    facts += [takes(each["id"], "PT10M") for each in ways]
+    options: list[Document] = []
+    wants = [ends_at("hotel", *people)]
+    for number, sight in enumerate(sights):
+        wants.append(must(f"see-{sight}", *people))
+        facts.append(every(f"see-{sight}"))
+        for turn in ("early", "late"):
+            name = f"{sight}-{turn}"
+            options.append(stays(name, sight))
+            facts += [*at(name, 9 + 2 * number + (turn == "late")), satisfies(name, f"see-{sight}")]
+            facts += [needs_right(name), offer(name, 4, price="10.00 USD")]
+            facts += [every_right(name, f"{name}-offer")] if sold else []
+    facts.append(booking("skydeck-early", "alex", paid="10.00 USD", budget="money"))
+    return trip(
+        people, ["hotel", *sights], options, facts, [cap("money", limit)], ways, wants, True
+    )
+
+
+def test_the_solver_answers_a_weekend_with_a_cap() -> None:
+    """The reference checker tries every way to share out the visits.
+
+    Nine minutes are not enough for it, so no test compares the two on this FILE.
+    """
+    found = compiler.check(a_weekend("200.00 USD"))
+    assert found.answer is Answer.FEASIBLE
+    visits = [step.option for step in found.itinerary if step.option is not None]
+    assert visits == ["skydeck-early", "museum-early", "pier-early"]
+    (row,) = found.caps
+    assert (row.paid, row.to_buy, row.left) == (100_000, 1_100_000, 800_000)
+
+
+def test_a_weekend_over_its_cap_cannot_work_where_the_tickets_listed_are_all_there_are() -> None:
+    """Eleven tickets at 10 USD are still to buy, and Alex's ticket took 10 USD of the cap."""
+    found = compiler.check(a_weekend("110.00 USD", sold=True))
+    assert found.answer is Answer.INFEASIBLE
+    assert "money-cap" in found.conflict
+    assert compiler.check(a_weekend("120.00 USD", sold=True)).answer is Answer.FEASIBLE
+
+
+def test_a_weekend_over_its_cap_depends_on_what_the_file_does_not_say() -> None:
+    """Nothing says that the tickets listed are all there are, so another right might be found.
+
+    The cap is 10 USD short, so one right for anybody to any visit they need is enough. The
+    answer comes before any of those is looked for.
+    """
+    file = a_weekend("110.00 USD")
+    assert next(compiler.reports(file)) is Answer.UNDETERMINED
+    found = compiler.check(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert len(found.missing) == 22
+    assert {needed.unknown.what for (needed,) in found.missing} == {"another right"}
+    assert len(found.plans) == 22
+
+
+def test_a_purchase_counts_against_the_cap_in_its_own_currency() -> None:
+    """Sam's ticket costs 1 EUR. The BUDGET has a cap of nothing in USD, and of 1 EUR.
+
+    The cap in USD is listed first, and the purchase does not touch it.
+    """
+    pot = budget("wallet", "sam", holds=["USD", "EUR"])
+    caps = [cap("wallet", "0 USD", id="usd-cap"), cap("wallet", "1 EUR", id="eur-cap")]
+    place = offer("tour", 1, price="1 EUR")
+    file = a_tour(
+        place, every_right("tour", "tour-offer"), budgets=[pot], caps=caps, persons=["sam"]
+    )
+    for found in (compiler.check(file), answers.check(file)):
+        assert found.answer is Answer.FEASIBLE
+        dollars, euros = found.caps
+        assert (dollars.cap, dollars.to_buy, dollars.left) == ("usd-cap", 0, 0)
+        assert (euros.cap, euros.to_buy, euros.left) == ("eur-cap", 10_000, 0)
+        assert [(cover.person, cover.budget) for cover in found.rights] == [("sam", "wallet")]
+
+
+def a_group_on_one_tour(count: int, limit: str) -> File:
+    """A group is LOCKed into one boat tour at 10 USD each, with a cap on the money they share."""
+    people = [f"p{number}" for number in range(count)]
+    pot = budget("kitty", *people)
+    place = offer("tour", count, price="10 USD")
+    return a_tour(place, locked=people, budgets=[pot], caps=[cap("kitty", limit)], persons=people)
+
+
+def test_a_group_with_nothing_to_choose_is_asked_about_no_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Six are LOCKed into the one tour, and the cap has room for four tickets.
+
+    The report names each two of them who could find another right. Each plan takes one
+    question to the solver: nobody has an order to choose, and the tour has to happen.
+    """
+    file = a_group_on_one_tour(6, "40 USD")
+    found = compiler.check(file)
+    assert found == answers.check(file)
+    assert len(found.missing) == 15
+    solves = solves_counted(monkeypatch)
+    assert compiler.shown(file, reference.best_case(file)) is not None
+    assert len(solves) == 1
+    solves.clear()
+    monkeypatch.setattr(compiler._Search, "_only_order", lambda self, number: None)  # pyright: ignore[reportPrivateUsage, reportUnknownLambdaType, reportUnknownArgumentType]
+    assert compiler.shown(file, reference.best_case(file)) is not None
+    assert len(solves) > 10
+    assert compiler.check(file) == found
