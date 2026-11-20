@@ -80,7 +80,9 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .brand { display: flex; align-items: center; gap: 13px; text-decoration: none; }
 .brand:hover { color: inherit; }
 .brand .mark { width: 44px; height: 44px; flex: none; }
-.brand .word { height: 34px; width: auto; display: block; overflow: visible; }
+/* The name sits 3px low, so that the bodies of its letters are level with the middle of the icon.
+   Centred as a whole, the tail of the g would count, and the letters would ride high. */
+.brand .word { height: 34px; width: auto; display: block; overflow: visible; margin-top: 6px; }
 .links { display: flex; gap: 6px 26px; flex-wrap: wrap; font-size: 0.98rem; }
 .links a { text-decoration: none; }
 .links a:hover { color: var(--accent); }
