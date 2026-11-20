@@ -10,10 +10,11 @@ import pytest
 
 from agloe import answers, compiler, reference
 from agloe.answers import Answer
-from agloe.file import File, Lock
-from agloe.reference import NoTimeBetween, World, best_case, longest_case, worst_case
+from agloe.file import Complete, File, Lock
+from agloe.reference import NoTimeBetween, Remaining, World, best_case, longest_case, worst_case
 from tests.stories import (
     Document,
+    at,
     complete,
     cutoff,
     every,
@@ -32,6 +33,7 @@ from tests.stories import (
     way,
     way_between,
 )
+from tests.test_conflict import searched, solves_counted
 from tests.test_cross_check import possible_world, random_trip, two_places_with_no_listed_way
 
 PLACES = ["hotel", "museum", "dock", "pier"]
@@ -111,6 +113,14 @@ GENERATORS: list[Callable[[Random], File]] = [
 ]
 
 
+def with_other_ways(rng: Random, file: File, world: World) -> World:
+    """The same world, with unlisted WAYs between some PLACEs of this FILE, at some length."""
+    places = [place.id for place in file.places]
+    pairs = [(here, there) for here in places for there in places if here != there]
+    joined = frozenset(pair for pair in pairs if rng.random() < 0.3)
+    return replace(world, unlisted=joined, unlisted_takes=rng.choice([0, 300, 900, 3600]))
+
+
 def kind_of(file: File, world: World, one: int, other: int) -> str:
     """Why two OPTIONs are apart: their times overlap, or the travel between them takes too long."""
     first, then = sorted(
@@ -135,7 +145,8 @@ def test_no_itinerary_has_a_person_in_two_options_that_are_apart() -> None:
     for round_ in range(700):
         file = GENERATORS[round_ % len(GENERATORS)](rng)
         worlds = [worst_case(file), best_case(file), longest_case(file)]
-        worlds += [possible_world(rng, file) for _ in range(2)]
+        worlds += [with_other_ways(rng, file, possible_world(rng, file)) for _ in range(2)]
+        spans = [fact for fact in file.facts if isinstance(fact, Complete)]
         for world in worlds:
             no_time = NoTimeBetween(file, world)
             for one, other in combinations(range(len(file.options)), 2):
@@ -145,8 +156,14 @@ def test_no_itinerary_has_a_person_in_two_options_that_are_apart() -> None:
                 seen[kind] += 1
                 if any(option.origin != option.destination for option in file.options):
                     seen[f"{kind}, with a ride in the FILE"] += 1
-                if world.unlisted is None or world.unlisted:
+                if world.unlisted:
                     seen[f"{kind}, in a world with unlisted WAYs"] += 1
+                    if any(
+                        fact.rules_out(*pair, fact.earliest)
+                        for fact in spans
+                        for pair in world.unlisted
+                    ):
+                        seen[f"{kind}, where a COMPLETE FACT is about one of them"] += 1
                 both = (
                     Lock("both-one", file.options[one].id, (file.persons[0].id,)),
                     Lock("both-other", file.options[other].id, (file.persons[0].id,)),
@@ -157,6 +174,7 @@ def test_no_itinerary_has_a_person_in_two_options_that_are_apart() -> None:
     assert seen["too far"] > 100
     assert seen["too far, with a ride in the FILE"] > 20
     assert seen["too far, in a world with unlisted WAYs"] > 20
+    assert seen["too far, where a COMPLETE FACT is about one of them"] > 20
 
 
 def lunch_and_a_boat(*more: Document, walk: str = "PT20M", others: int = 0) -> File:
@@ -360,3 +378,101 @@ def test_an_option_that_might_meet_a_must_leaves_the_other_one_open(
     monkeypatch.setattr(compiler, "_has_to_take_two_apart", never)
     monkeypatch.setattr(compiler._Search, "_take_one_of_two_apart", nothing)  # pyright: ignore[reportPrivateUsage]
     assert compiler.check(file) == report
+
+
+def test_a_way_that_opens_after_ten_is_there_for_noon_and_not_for_ten() -> None:
+    """Sam is LOCKed at the hotel at 9:00 and at the dock at noon. A ride back leaves at 10:00.
+
+    A FACT says the FILE lists every way from the hotel to the dock that leaves from 9:00 to
+    10:00, and it lists none. So nobody gets from the hotel to the ride. Sam can still leave
+    for the dock a second after 10:00, by a way that nobody has listed, and be there at noon.
+    The two pairs leave the same PLACE, and each has its own answer.
+    """
+    closed = complete("hotel", "dock")
+    closed["complete"]["leaving"] = {"earliest": at(9), "latest": at(10)}
+    stops = {"morning": 9, "noon": 12, "back": 10}
+    file = trip(
+        ["sam"],
+        ["hotel", "dock"],
+        [stays("morning", "hotel"), stays("noon", "dock"), moves("back", "dock", "hotel")],
+        [
+            *(
+                fact
+                for stop, hour in stops.items()
+                for fact in (starts_at(stop, hour), lasts(stop, "PT0S"), cutoff(stop, "PT0S"))
+            ),
+            closed,
+        ],
+        [lock("morning", "sam"), lock("noon", "sam")],
+    )
+    report = compiler.check(file)
+    assert report == answers.check(file)
+    assert report.answer is Answer.UNDETERMINED
+    ((needed,),) = report.missing
+    assert (needed.unknown.what, needed.at_most) == ("other ways", 2 * 3600 - 1)
+
+
+def lunch_and_two_boats(stops: int) -> File:
+    """Sam is LOCKed into lunch until 2:00 pm and must go on the river. Two boats would do.
+
+    They leave at 2:15 pm and 2:16 pm from a dock that is a walk away, so lunch rules both
+    out. Sam is also LOCKed into ``stops`` stops at no stated time.
+    """
+    boats = {"boat": 15, "later-boat": 16}
+    names = [f"stop-{number}" for number in range(stops)]
+    return trip(
+        ["sam"],
+        PLACES,
+        [
+            stays("lunch", "hotel"),
+            *(stays(boat, "dock") for boat in boats),
+            *(stays(name, PLACES[1 + number % 3]) for number, name in enumerate(names)),
+        ],
+        [
+            starts_at("lunch", 12, 30),
+            lasts("lunch", "PT1H30M"),
+            *(
+                fact
+                for boat, minute in boats.items()
+                for fact in (
+                    starts_at(boat, 14, minute),
+                    lasts(boat, "PT1H"),
+                    cutoff(boat, "PT15M"),
+                    satisfies(boat, "the-river"),
+                )
+            ),
+            every("the-river"),
+            takes("walk", "PT20M"),
+            takes("stroll", "PT10M"),
+            takes("bus", "PT15M"),
+            complete(None, None),
+            *(lasts(name, "PT30M") for name in names),
+        ],
+        [lock("lunch", "sam"), *(lock(name, "sam") for name in names)],
+        ways=[
+            way_between("walk", "hotel", "dock"),
+            way_between("stroll", "hotel", "museum"),
+            way_between("bus", "dock", "pier"),
+        ],
+        wants=[must("the-river", "sam")],
+    )
+
+
+def test_the_model_rules_out_what_is_apart_from_what_a_person_has_to_take(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two boats can meet the must, so Sam has to take neither, and a model is built.
+
+    The model says outright that Sam takes no boat: each is apart from the lunch. Without
+    that, the solver tries the stops with no stated time in every order between the lunch
+    and a boat.
+    """
+    file = lunch_and_two_boats(5)
+    solves = solves_counted(monkeypatch)
+    assert not compiler.can_work(Remaining(file))
+    assert len(solves) == 1
+    assert searched(solves) < 10
+    solves.clear()
+    monkeypatch.setattr(compiler._Search, "_take_one_of_two_apart", nothing)  # pyright: ignore[reportPrivateUsage]
+    assert not compiler.can_work(Remaining(file))
+    assert searched(solves) > 1000

@@ -18,7 +18,7 @@ need more than that. The reference checker's own search then answers for the who
 search tries everything, so it is meant for small TRIPs.
 """
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import replace
 from hashlib import sha256
 from itertools import combinations
@@ -193,22 +193,41 @@ def _has_to_take_two_apart(
     """Whether some PERSON has to take part in two OPTIONs that nobody can take part in both.
 
     ``reference.NoTimeBetween`` says which two OPTIONs those are in this world: both start at
-    fixed times, and neither leaves the time to do the other after it.
-
-    A PERSON has to take part in an OPTION that a LOCK names them in. They also have to take
-    part in the one OPTION that can meet a must of theirs, where only one can: one that
-    SATISFIES the WANT in this world, or one of the ``open_pairs``, which may. That holds
-    unless this world has another OPTION for the WANT and the PERSON. A WANT to end the TRIP
-    at a PLACE asks for no OPTION.
+    fixed times, and neither leaves the time to do the other after it. ``_have_to_take`` says
+    which OPTIONs a PERSON has to take part in.
 
     Where a PERSON has to take part in two such OPTIONs, nothing works in this world, and no
     model is needed to see it.
     """
+    have_to = _have_to_take(file, world, open_pairs)
+    if all(len(theirs) < 2 for theirs in have_to.values()):
+        return False
+    no_time = reference.NoTimeBetween(file, world)
+    return any(
+        no_time.apart(one, other)
+        for theirs in have_to.values()
+        for one, other in combinations(sorted(theirs), 2)
+    )
+
+
+def _have_to_take(
+    file: File, world: World, open_pairs: Iterable[tuple[str, str]] = ()
+) -> dict[str, set[int]]:
+    """The OPTIONs each PERSON has to take part in, in every ITINERARY that works in this world.
+
+    They are given by position in the FILE. A PERSON has to take part in an OPTION that a
+    LOCK names them in. They also have to take part in the one OPTION that can meet a must of
+    theirs, where only one can: one that SATISFIES the WANT in this world, or one of the
+    ``open_pairs``, which may. That holds unless this world has another OPTION for the WANT
+    and the PERSON. A WANT to end the TRIP at a PLACE asks for no OPTION.
+
+    A PERSON can have to take part in more than these. Nothing here says that they do not.
+    """
     position = {option.id: index for index, option in enumerate(file.options)}
-    has_to: dict[str, set[int]] = {}
+    have_to: dict[str, set[int]] = {}
     for lock in file.locks:
         for person in lock.persons:
-            has_to.setdefault(person, set()).add(position[lock.option])
+            have_to.setdefault(person, set()).add(position[lock.option])
     might = world.satisfies | frozenset(open_pairs)
     for want in file.wants:
         if want.ends_at is not None or not want.musts:
@@ -217,15 +236,8 @@ def _has_to_take_two_apart(
         if len(able) == 1:
             for person in want.musts:
                 if (want.id, person) not in world.another_option:
-                    has_to.setdefault(person, set()).add(able[0])
-    if all(len(theirs) < 2 for theirs in has_to.values()):
-        return False
-    no_time = reference.NoTimeBetween(file, world)
-    return any(
-        no_time.apart(one, other)
-        for theirs in has_to.values()
-        for one, other in combinations(sorted(theirs), 2)
-    )
+                    have_to.setdefault(person, set()).add(able[0])
+    return have_to
 
 
 def _plan(search: _Search, asked: _Asked | None) -> _Choice | None:
@@ -377,6 +389,7 @@ class _Search:
         file, world = self.file, self.world
         self.terms = [world.terms[option.id] for option in file.options]
         self.no_time = reference.NoTimeBetween(file, world)
+        self.have_to = _have_to_take(file, world, self.does)
         self.usable = [each.fixed_start is not None or each.free_start for each in self.terms]
         self.endless = [each.longest is None for each in self.terms]
         self.moves = [option.origin != option.destination for option in file.options]
@@ -636,25 +649,31 @@ class _Search:
         self.routes.append(between)
 
     def _take_one_of_two_apart(self, number: int) -> None:
-        """This PERSON takes part in one at most of two OPTIONs that nobody can take both of.
+        """This PERSON takes part in no OPTION that is apart from one they have to take part in.
 
-        ``reference.NoTimeBetween`` says which two those are: both start at fixed times in
-        this world, and neither leaves the time to do the other after it, with the travel
-        between them. The path says so too, but only route by route. Said outright, the
-        solver sees at once that a PERSON who has to be in one of the two is in no plan with
-        the other, however many OPTIONs with no fixed time could lie between them on a path.
+        ``reference.NoTimeBetween`` says which two OPTIONs are apart: both start at fixed
+        times in this world, and neither leaves the time to do the other after it, with the
+        travel between them. ``_have_to_take`` says which OPTIONs the PERSON has to take
+        part in. The path rules the other OPTION out too, but only route by route. Said
+        outright, the solver sees at once that the PERSON is in no plan with it, however
+        many OPTIONs with no fixed time could lie between the two on a path.
+
+        Only the pairs with an OPTION that the PERSON has to take part in are stated. Stating
+        every pair made a day of many rides slower to check, and gained nothing there.
 
         Like ``_keep_apart``, this is only in the model of a plain question.
         """
         takes = self.takes[number]
+        theirs = self.have_to.get(self.file.persons[number].id, ())
         fixed = [
             index
             for index, terms in enumerate(self.terms)
             if terms.fixed_start is not None and (number, index) not in self.left_out
         ]
-        for one, other in combinations(fixed, 2):
-            if self.no_time.apart(one, other):
-                self.model.add_bool_or([takes[one].negated(), takes[other].negated()])
+        for one in sorted(theirs):
+            for other in fixed:
+                if self.no_time.apart(one, other):
+                    self.model.add(takes[other] == 0)
 
     def _keep_apart(self, number: int) -> None:
         """No two OPTIONs that this PERSON takes part in overlap.

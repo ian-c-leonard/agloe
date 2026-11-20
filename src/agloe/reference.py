@@ -1622,9 +1622,13 @@ class NoTimeBetween:
 
     An unlisted WAY counts wherever this world has one and it could start at some time
     between the two OPTIONs. One COMPLETE FACT whose span holds that whole time rules it out.
-    Where an unlisted WAY might join any two PLACEs, only a FACT about all travel does that,
-    and otherwise this says nothing about the pair: the timing decides. An access cutoff with
-    no limit is left to the timing as well.
+    Where an unlisted WAY might join any two PLACEs, this sees only a FACT about all travel
+    between all PLACEs. With no such FACT it says nothing about the pair. An access cutoff
+    with no limit is not looked at either.
+
+    So ``apart`` says yes only with a proof. Where it says no, the two OPTIONs can still be
+    apart: FACTs about travel from one PLACE can close every way out of it, and the timing
+    finds that.
     """
 
     def __init__(self, file: File, world: World) -> None:
