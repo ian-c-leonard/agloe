@@ -27,6 +27,7 @@ from tests.stories import (
     Document,
     complete,
     cutoff,
+    ends_at,
     lasts,
     lock,
     moves,
@@ -36,9 +37,12 @@ from tests.stories import (
     takes,
     takes_between,
     trip,
+    trip_ends,
+    trip_starts,
     way,
     way_between,
 )
+from tests.test_cross_check import random_trip
 from tests.test_where_a_path_ends import checked, has_no_record_to_spare
 
 
@@ -400,6 +404,90 @@ def test_leaving_out_routes_that_do_not_fit_changes_no_report(
         return True
 
     monkeypatch.setattr(reference, "_fits", every_route_fits)
+    seen: set[Answer] = set()
+    for file, (slow, fast) in zip(files, found, strict=True):
+        every_route = answers.check(file)
+        assert slow == every_route
+        assert fast == every_route
+        seen.add(every_route.answer)
+    assert seen == set(Answer)
+
+
+# ------------------------------- Routes at the two ends of a path ------------------------------
+
+
+def a_group_from_the_hotel(count: int, minutes: Sequence[int], back: bool = False) -> File:
+    """A group starts at the hotel when the TRIP starts, at 08:30, for a visit at 09:00.
+
+    Each transfer is a WAY, in the order given. With ``back``, the visit ends at 17:00, the
+    TRIP ends at 17:30, the group has to end it at the hotel, and the WAYs lead back there.
+    """
+    people = [f"person-{number}" for number in range(count)]
+    facts: list[Document] = [starts_at("visit", 16 if back else 9), lasts("visit", "PT1H")]
+    facts.append(cutoff("visit", "PT0S"))
+    ends = ("museum", "hotel") if back else ("hotel", "museum")
+    ways = [way(f"transfer-{number}", *ends) for number in range(len(minutes))]
+    facts += [takes(each["id"], f"PT{length}M") for each, length in zip(ways, minutes, strict=True)]
+    decisions = [lock("visit", *people)]
+    wants: list[Document] = []
+    if back:
+        decisions.append(trip_ends(17, 30))
+        wants.append(ends_at("hotel", *people))
+    else:
+        decisions.append(trip_starts(8, 30))
+        facts += [starts_from(person, "hotel") for person in people]
+    options = [stays("visit", "museum")]
+    return trip(people, ["hotel", "museum"], options, facts, decisions, ways=ways, wants=wants)
+
+
+@pytest.mark.parametrize("back", [False, True])
+def test_a_transfer_the_times_of_the_trip_leave_no_time_for_is_tried_for_nobody(
+    monkeypatch: pytest.MonkeyPatch, back: bool
+) -> None:
+    """Eight travelers have half an hour at one end of the TRIP, and one transfer of five fits."""
+    file = a_group_from_the_hotel(8, [36, 35, 34, 33, 30], back)
+    tried = 0
+    timings = reference._timings  # pyright: ignore[reportPrivateUsage]
+
+    def counted(*given: Any, **named: Any) -> Any:
+        nonlocal tried
+        tried += 1
+        return timings(*given, **named)
+
+    monkeypatch.setattr(reference, "_timings", counted)
+    found = compiler.check(file)
+    assert found.answer is Answer.FEASIBLE
+    assert {step.way for step in found.itinerary if step.way} == {"transfer-4"}
+    assert tried < 20
+    small = a_group_from_the_hotel(2, [31, 30], back)
+    assert compiler.check(small) == answers.check(small)
+
+
+def test_leaving_out_routes_with_no_time_at_the_ends_changes_no_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reference checker and the solver give the report of the search without these cuts."""
+    rng = Random(8181)
+    files = [
+        random_trip(rng, 0.3, with_ways=0.9, with_ends=0.7, with_times=0.7) for _ in range(250)
+    ]
+    cut = 0
+    in_time = reference._in_time  # pyright: ignore[reportPrivateUsage]
+
+    def counted(*given: Any) -> bool:
+        nonlocal cut
+        fits = in_time(*given)
+        cut += not fits
+        return fits
+
+    monkeypatch.setattr(reference, "_in_time", counted)
+    found = [(answers.check(file), compiler.check(file)) for file in files]
+    assert cut > 50
+
+    def every_route_is_in_time(*_: object) -> bool:
+        return True
+
+    monkeypatch.setattr(reference, "_in_time", every_route_is_in_time)
     seen: set[Answer] = set()
     for file, (slow, fast) in zip(files, found, strict=True):
         every_route = answers.check(file)
