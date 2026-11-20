@@ -6,6 +6,7 @@
 import argparse
 import json
 import os
+import signal
 import sys
 import webbrowser
 from collections.abc import Sequence
@@ -54,7 +55,10 @@ def main(arguments: Sequence[str] | None = None) -> int:
     )
     view.add_argument("file", type=Path, help="the trip, as a JSON FILE")
     view.add_argument(
-        "--port", type=int, default=0, help="the port to serve on, or any free port if not given"
+        "--port",
+        type=int,
+        default=0,
+        help="the port to serve on, from 1024 to 65535, or any free port if not given",
     )
     view.add_argument("--no-browser", action="store_true", help="do not open the page in a browser")
     chosen = parser.parse_args(arguments)
@@ -102,6 +106,9 @@ def _view(path: Path, port: int, in_a_browser: bool) -> int:
     if not path.is_file():
         print(f"{path}: there is no such FILE", file=sys.stderr)
         return 2
+    if port != 0 and not 1024 <= port <= 65535:
+        print(f"{port} is no port for the view: give one from 1024 to 65535", file=sys.stderr)
+        return 2
     # The view needs sockets and processes, so it is loaded only where it is asked for.
     from agloe.view import View
 
@@ -113,11 +120,20 @@ def _view(path: Path, port: int, in_a_browser: bool) -> int:
     print(f"The view of {path} is at {view.address}", flush=True)
     if in_a_browser:
         webbrowser.open(view.address)
+    # However the command is stopped, the check that is running is ended with it.
+    signal.signal(signal.SIGTERM, _stopped)
     try:
         view.serve()
     except KeyboardInterrupt:
+        pass
+    finally:
         view.close()
     return 0
+
+
+def _stopped(signal_number: int, frame: object) -> None:
+    """The command was told to end. It ends the way Ctrl-C ends it."""
+    raise KeyboardInterrupt
 
 
 def _in_print(file: File, found: Answer | Report, as_json: bool, on_one_line: bool) -> str:

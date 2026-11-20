@@ -20,10 +20,10 @@ The COMPILER answers a weekend for four PERSONs in about a second where the TRIP
 
 The view is a page that the command `agloe view FILE` serves on the person's own machine.
 
-- The command watches the FILE. Each time the FILE changes, it runs the COMPILER on it in a process of its own. It tells the page that there is a FILE to check, then sends the answer as soon as it is proved, then the report in words and as JSON. A check that is still running when the FILE changes again is stopped.
+- The command watches the FILE. A state of the FILE is its content at one look, and each new state gets a number, its revision. For each state the command tells the page that there is a FILE to check, runs the COMPILER on that content in a process of its own, and sends the answer as soon as it is proved, then the report in words and as JSON. A check that is still running when the FILE changes again is ended.
 - Nothing in the view judges a TRIP. Every mark on the page comes from the FILE or from the COMPILER's report on that FILE.
-- The page shows no answer on a FILE until the COMPILER has answered on that FILE. While a check runs, the page marks what it still shows of the report on the FILE as it was before.
-- A FILE that does not follow the format has no report. The page shows the problems that the format names.
+- Everything that the page is sent names the revision it is about. The page shows no answer on a state of the FILE until the COMPILER has answered on that state. While a check runs, the page marks what it still shows of the report on the FILE as it was before.
+- A FILE with no report gets the reason instead. The page shows the problems that the format names, or says that the FILE cannot be read, or that a check stopped before its report came. It says each of these in its own words, and never as an answer.
 - The command serves the person's own machine only, and the page asks no other host for anything.
 - The view lives in [`src/agloe/view/`](../../src/agloe/view/), so it is installed with Agloe: the program that serves, and the page as files beside it. The page is plain HTML, CSS and JavaScript, with nothing to build.
 - The view has its own part of the [roadmap](../ROADMAP.md), beside the releases. It grows in steps of its own and holds no release up.
@@ -31,7 +31,8 @@ The view is a page that the command `agloe view FILE` serves on the person's own
 ## Consequences
 
 - A person needs Agloe on their machine to use the view. A view for people without it needs the first or the second option, by a decision of its own.
-- The view shows what a report holds. A report gives a plan only for a FEASIBLE TRIP.
+- The view shows what a report holds. A report shows an ITINERARY that the travelers can use only for a FEASIBLE TRIP.
 - A check that takes long shows its answer first, and the page says that the report is on its way.
 - The words the page shows for each state are worked out in [`src/agloe/view/static/state.js`](../../src/agloe/view/static/state.js), which has no page in it. A test runs it with Node on what the command sends for the examples.
-- A test starts the command's server on an example, changes the FILE, and reads what the page is sent.
+- The tests start the view on an example, change the FILE, and read what a page is sent. They also stop the command while a page listens, and put a program that never ends in the place of a check.
+- The view serves ports from 1024 to 65535. It refuses a request that names another host, or that says it comes from another site, and it tells the browser to show the page in no other page.

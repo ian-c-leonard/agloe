@@ -1,13 +1,15 @@
 """The view: ``agloe view FILE`` serves a page on this machine and keeps it up to date.
 
-The command watches the FILE. Each time the FILE changes, it runs the COMPILER on it in a
-process of its own. It tells the page that there is a FILE to check, then sends the answer as
-soon as it is proved, then the report in words and as JSON. A FILE that does not follow the
-format gets no report: the page is sent the problems that the format names.
+The command watches the FILE. A state of the FILE is its content at one look, and each new
+state gets a number, its revision. For each state the view tells the page that there is a FILE
+to check, runs the COMPILER on that content in a process of its own, and sends the answer as
+soon as it is proved, then the report in words and as JSON. Every event names the revision it
+is about. A FILE with no report gets the reason instead: the problems that the format names,
+or why it cannot be read.
 
-Nothing in the page judges a TRIP, and the page shows no answer on a FILE until the COMPILER has
-answered on that FILE. ``src/agloe/view/static/state.js`` works out what the page says in each
-state. It has no page in it, so Node runs it here, through ``view_page.mjs``.
+Nothing in the page judges a TRIP, and the page shows no answer on a state of the FILE until
+the COMPILER has answered on that state. ``src/agloe/view/static/state.js`` works out what the
+page says in each state. It has no page in it, so Node runs it here, through ``view_page.mjs``.
 """
 
 import http.client
@@ -16,9 +18,11 @@ import os
 import re
 import select
 import shutil
+import signal
 import subprocess
 import sys
 import threading
+import time
 import urllib.request
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -30,8 +34,8 @@ import pytest
 from agloe.cli import main
 from agloe.file import FileError, read
 from agloe.view import View
-from agloe.view.check import events
-from tests.stories import EXAMPLES
+from agloe.view.check import checked
+from tests.stories import EXAMPLES, lasts, lock, needs_no_right, stays
 
 STORY = EXAMPLES / "flight-home"
 STATIC = Path(__file__).parent.parent / "src" / "agloe" / "view" / "static"
@@ -40,9 +44,22 @@ FILES = sorted(
 )
 ANSWERS = ("FEASIBLE", "INFEASIBLE", "UNDETERMINED")
 
+type Events = list[dict[str, Any]]
+
 
 def beside(path: Path, ending: str) -> Path:
     return path.with_name(path.stem + ending)
+
+
+def kinds(events: Events) -> list[str]:
+    return [event["kind"] for event in events]
+
+
+def put(path: Path, content: bytes | Path) -> None:
+    """Put a FILE in the place of the old one in one step, so that no half of it is ever seen."""
+    new = path.with_name(f"{path.name}.new")
+    new.write_bytes(content if isinstance(content, bytes) else content.read_bytes())
+    os.replace(new, path)
 
 
 @contextmanager
@@ -60,35 +77,71 @@ def serving(path: Path, python: str = sys.executable) -> Generator[View]:
 
 
 class Sent:
-    """What the view sends a page, read one event at a time."""
+    """What the view sends a page, read one event at a time, each within a time limit."""
 
     def __init__(self, view: View) -> None:
-        self.reply = urllib.request.urlopen(f"{view.address}events", timeout=60)
+        self.reply = urllib.request.urlopen(f"{view.address}events", timeout=30)
 
-    def next(self) -> dict[str, Any]:
+    def next(self, within: float = 60) -> dict[str, Any]:
+        late = time.monotonic() + within
         for raw in self.reply:
-            line = raw.decode().rstrip("\n")
-            if line.startswith("data: "):
-                event: dict[str, Any] = json.loads(line.removeprefix("data: "))
+            if raw.startswith(b"data: "):
+                event: dict[str, Any] = json.loads(raw.removeprefix(b"data: "))
                 return event
+            # The view says now and then that it is still there. That is no event.
+            assert time.monotonic() < late, "the view sent no event in time"
         raise AssertionError("the view stopped sending")
 
-    def until(self, kind: str) -> list[dict[str, Any]]:
+    def until(self, kind: str, within: float = 60) -> Events:
         """Every event up to the first of this kind."""
-        seen = [self.next()]
+        late = time.monotonic() + within
+        seen = [self.next(within)]
         while seen[-1]["kind"] != kind:
-            seen.append(self.next())
+            seen.append(self.next(max(1.0, late - time.monotonic())))
         return seen
 
 
-def asked(view: View, path: str, host: str | None = None) -> tuple[int, str, bytes]:
-    """The status, the kind of content and the content that the view gives for one path."""
-    port = int(view.address.rstrip("/").rsplit(":", 1)[1])
-    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=20)
+def stand_in(folder: Path, does: str) -> str:
+    """A program that runs in the place of the Python that checks, and does this instead."""
+    program = folder / "python"
+    program.write_text(f"#!/bin/sh\ncat > /dev/null\n{does}\n")
+    program.chmod(0o755)
+    return str(program)
+
+
+def running(pid: int) -> bool:
     try:
-        connection.request("GET", path, headers={"Host": host or f"127.0.0.1:{port}"})
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def gone(pid: int, within: float = 10) -> bool:
+    """Whether this process ends within the time."""
+    late = time.monotonic() + within
+    while running(pid) and time.monotonic() < late:
+        time.sleep(0.05)
+    return not running(pid)
+
+
+def port_of(view: View) -> int:
+    return int(view.address.rstrip("/").rsplit(":", 1)[1])
+
+
+def asked(view: View, path: str, **headers: str) -> tuple[int, http.client.HTTPMessage, bytes]:
+    """The status, the headers and the content that the view gives for one path.
+
+    The content of the events is left unread: it never ends.
+    """
+    named = {"Host": f"127.0.0.1:{port_of(view)}"}
+    named.update({name.replace("_", "-"): value for name, value in headers.items()})
+    connection = http.client.HTTPConnection("127.0.0.1", port_of(view), timeout=20)
+    try:
+        connection.request("GET", path, headers=named)
         reply = connection.getresponse()
-        return reply.status, reply.headers.get("Content-Type", ""), reply.read()
+        content = b"" if path == "/events" and reply.status == 200 else reply.read()
+        return reply.status, reply.headers, content
     finally:
         connection.close()
 
@@ -100,13 +153,14 @@ def test_a_page_is_sent_the_file_then_the_answer_then_the_report(name: str, tmp_
     expected = json.loads((STORY / f"{name}.expected.json").read_text())
     with serving(path) as view:
         file, answer, report = Sent(view).until("report")
-    assert file == {"kind": "file", "name": "trip.json"}
-    assert answer["kind"] == "answer"
-    assert answer["answer"] == expected["answer"]
+    assert file == {"kind": "file", "name": "trip.json", "revision": 1}
+    assert (answer["kind"], answer["answer"]) == ("answer", expected["answer"])
     assert report["answer"] == expected["answer"]
     assert report["json"] == expected
     assert report["text"] == (STORY / f"{name}.expected.txt").read_text()
     assert 0 <= answer["seconds"] <= report["seconds"]
+    # Each event names the state of the FILE that it is about.
+    assert answer["revision"] == report["revision"] == 1
 
 
 def test_a_file_that_changes_is_checked_again(tmp_path: Path) -> None:
@@ -115,10 +169,47 @@ def test_a_file_that_changes_is_checked_again(tmp_path: Path) -> None:
     with serving(path) as view:
         sent = Sent(view)
         assert sent.until("report")[-1]["answer"] == "FEASIBLE"
-        shutil.copy(STORY / "cannot-work.json", path)
+        put(path, STORY / "cannot-work.json")
         again = sent.until("report")
-    assert [event["kind"] for event in again] == ["file", "answer", "report"]
+    assert kinds(again) == ["file", "answer", "report"]
+    assert {event["revision"] for event in again} == {2}
     assert again[-1]["json"] == json.loads((STORY / "cannot-work.expected.json").read_text())
+
+
+def test_a_change_that_keeps_the_size_and_the_time_of_the_file_is_seen(tmp_path: Path) -> None:
+    """The view tells one state of the FILE from another by its content."""
+    path = tmp_path / "trip.json"
+    before = (STORY / "works.json").read_bytes()
+    after = before.replace(b'"duration": "PT1H"', b'"duration": "PT3H"', 1)
+    assert len(after) == len(before)
+    assert after != before
+    path.write_bytes(before)
+    written = path.stat()
+    with serving(path) as view:
+        sent = Sent(view)
+        assert sent.until("report")[-1]["answer"] == "FEASIBLE"
+        with path.open("r+b") as file:
+            file.write(after)
+        os.utime(path, ns=(written.st_atime_ns, written.st_mtime_ns))
+        again = sent.until("report")
+    assert again[0]["kind"] == "file"
+    assert again[-1]["answer"] != "FEASIBLE"
+
+
+def test_a_file_that_is_written_in_two_steps_is_checked_at_each(tmp_path: Path) -> None:
+    """Half a FILE has no report. The whole FILE gets one, and the page is told which is which."""
+    path = tmp_path / "trip.json"
+    whole = (STORY / "works.json").read_bytes()
+    path.write_bytes(whole[: len(whole) // 2])
+    with serving(path) as view:
+        sent = Sent(view)
+        half = sent.until("refused")
+        put(path, whole)
+        done = sent.until("report")
+    assert kinds(half) == ["file", "refused"]
+    assert half[-1]["problems"][0].startswith("not readable as JSON")
+    assert kinds(done) == ["file", "answer", "report"]
+    assert done[0]["revision"] > half[0]["revision"]
 
 
 def test_a_file_that_breaks_the_format_has_no_report(tmp_path: Path) -> None:
@@ -132,15 +223,27 @@ def test_a_file_that_breaks_the_format_has_no_report(tmp_path: Path) -> None:
     with serving(path) as view:
         sent = Sent(view)
         first = sent.until("refused")
-        assert [event["kind"] for event in first] == ["file", "refused"]
-        assert first[-1]["problems"] == list(refused.value.problems)
-        path.write_text("{ this is not JSON")
-        unreadable = sent.until("refused")
-        assert [event["kind"] for event in unreadable] == ["file", "refused"]
-        assert unreadable[-1]["problems"][0].startswith("not readable as JSON")
-        shutil.copy(STORY / "works.json", path)
+        put(path, STORY / "works.json")
         mended = sent.until("report")
-    assert [event["kind"] for event in mended] == ["file", "answer", "report"]
+    assert kinds(first) == ["file", "refused"]
+    assert first[-1]["problems"] == list(refused.value.problems)
+    assert kinds(mended) == ["file", "answer", "report"]
+
+
+def test_a_file_that_cannot_be_read_has_no_report(tmp_path: Path) -> None:
+    """A FILE that is taken away is no FILE that breaks the format: the page is told why."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    with serving(path) as view:
+        sent = Sent(view)
+        sent.until("report")
+        path.unlink()
+        away = sent.until("unreadable")
+        put(path, STORY / "works.json")
+        back = sent.until("report")
+    assert kinds(away) == ["file", "unreadable"]
+    assert away[-1]["problem"] == "No such file or directory"
+    assert kinds(back) == ["file", "answer", "report"]
 
 
 def test_a_page_that_comes_late_is_sent_the_same(tmp_path: Path) -> None:
@@ -152,61 +255,114 @@ def test_a_page_that_comes_late_is_sent_the_same(tmp_path: Path) -> None:
     assert late == first
 
 
-def test_a_file_that_is_taken_away_has_no_report(tmp_path: Path) -> None:
+def test_the_answer_reaches_a_page_while_the_check_goes_on(tmp_path: Path) -> None:
+    """And a check that the FILE has moved on from is ended, as is the last one at the end."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    says = '{"kind": "answer", "answer": "FEASIBLE", "seconds": 0.1}'
+    # The stand-in notes which process it is, gives an answer, and then never ends by itself.
+    held = stand_in(tmp_path, f"echo $$ > \"$0.$$\"\nprintf '%s\\n' '{says}'\nexec sleep 600")
+
+    def checks() -> list[int]:
+        return sorted(int(noted.suffix[1:]) for noted in tmp_path.glob("python.*"))
+
+    with serving(path, python=held) as view:
+        sent = Sent(view)
+        early = sent.until("answer", within=20)
+        (first,) = checks()
+        assert running(first)
+        put(path, STORY / "cannot-work.json")
+        again = sent.until("answer", within=20)
+        assert gone(first), "the check of the FILE as it was is still running"
+        (second,) = [check for check in checks() if check != first]
+        assert running(second)
+    assert kinds(early) == kinds(again) == ["file", "answer"]
+    assert again[0]["revision"] > early[0]["revision"]
+    assert gone(second), "a check is still running after the view has stopped"
+
+
+@pytest.mark.parametrize(
+    "does", ["exit 3", "echo this is no event", "echo '[1, 2]'", "printf '\\377\\376\\n'", None]
+)
+def test_a_check_that_ends_without_a_report_has_stopped(does: str | None, tmp_path: Path) -> None:
+    """The page is told, so it never waits for a report that will not come.
+
+    The check fails, or says something that is no event, or there is nothing to run it with.
+    """
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    python = str(tmp_path / "nothing") if does is None else stand_in(tmp_path, does)
+    with serving(path, python=python) as view:
+        stopped = Sent(view).until("stopped", within=20)
+    assert stopped == [
+        {"kind": "file", "name": "trip.json", "revision": 1},
+        {"kind": "stopped", "revision": 1},
+    ]
+
+
+def test_the_view_stops_while_a_page_listens(tmp_path: Path) -> None:
     path = tmp_path / "trip.json"
     shutil.copy(STORY / "works.json", path)
     with serving(path) as view:
         sent = Sent(view)
         sent.until("report")
-        path.unlink()
-        gone = sent.until("refused")
-    assert [event["kind"] for event in gone] == ["file", "refused"]
-    assert len(gone[-1]["problems"]) == 1
-
-
-def test_a_check_that_ends_without_a_report_has_stopped(tmp_path: Path) -> None:
-    """The page is told, so it never waits for a report that will not come."""
-    path = tmp_path / "trip.json"
-    shutil.copy(STORY / "works.json", path)
-    broken = tmp_path / "python"
-    broken.write_text("#!/bin/sh\nexit 3\n")
-    broken.chmod(0o755)
-    with serving(path, python=str(broken)) as view:
-        assert Sent(view).until("stopped") == [{"kind": "stopped"}]
-    with serving(path, python=str(tmp_path / "nothing")) as view:
-        assert Sent(view).until("stopped") == [{"kind": "stopped"}]
+    # The view has stopped, and it has let the page go: the page reads the end of the last
+    # event, and then the end of what the view sends.
+    assert sent.reply.read().strip() == b""
 
 
 def test_the_view_serves_its_page_and_nothing_else(tmp_path: Path) -> None:
     path = tmp_path / "trip.json"
     shutil.copy(STORY / "works.json", path)
     with serving(path) as view:
-        status, kind, page = asked(view, "/")
+        status, headers, page = asked(view, "/")
         assert status == 200
-        assert kind.startswith("text/html")
+        assert headers.get_content_type() == "text/html"
         # Every file that the page names is served, with a kind of content a browser accepts.
         named = re.findall(r'(?:src|href)="([^"]+)"', page.decode())
         assert named, "the page names no script and no style sheet"
-        for name in named:
-            status, kind, _ = asked(view, f"/{name}")
+        for name in [*named, "state.js"]:
+            status, headers, _ = asked(view, f"/{name}")
             assert status == 200, name
-            assert kind.split(";")[0] in {"text/javascript", "text/css"}, name
+            assert headers.get_content_type() in {"text/javascript", "text/css"}, name
         # Nothing else is: not the FILE, not a file beside the page, not a file above it.
         for other in ["/trip.json", "/serve.py", "/../cli.py", "/static/view.js", "/nothing"]:
             assert asked(view, other)[0] == 404, other
 
 
+def test_the_view_tells_a_browser_to_keep_the_page_to_itself(tmp_path: Path) -> None:
+    """The page loads from no other host, sits in no other page, and is kept nowhere."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    with serving(path) as view:
+        for part in ["/", "/view.js", "/events"]:
+            status, headers, _ = asked(view, part)
+            assert status == 200, part
+            policy = headers["Content-Security-Policy"]
+            assert "default-src 'self'" in policy, part
+            assert "frame-ancestors 'none'" in policy, part
+            assert headers["Cache-Control"] == "no-store", part
+            assert headers["X-Content-Type-Options"] == "nosniff", part
+            assert headers["Cross-Origin-Resource-Policy"] == "same-origin", part
+
+
 def test_the_view_serves_this_machine_only(tmp_path: Path) -> None:
-    """A page on another site cannot reach the view under a name of its own."""
+    """A page on another site cannot reach the view under a name of its own, or as itself."""
     path = tmp_path / "trip.json"
     shutil.copy(STORY / "works.json", path)
     with serving(path) as view:
         assert view.address.startswith("http://127.0.0.1:")
-        port = view.address.rstrip("/").rsplit(":", 1)[1]
-        assert asked(view, "/", host=f"localhost:{port}")[0] == 200
-        for host in ["example.com", f"example.com:{port}", "127.0.0.1:1"]:
-            assert asked(view, "/", host=host)[0] == 403, host
-            assert asked(view, "/events", host=host)[0] == 403, host
+        port = port_of(view)
+        own = f"http://127.0.0.1:{port}"
+        for part in ["/", "/events"]:
+            assert asked(view, part, Host=f"localhost:{port}")[0] == 200
+            assert asked(view, part, Origin=own, Sec_Fetch_Site="same-origin")[0] == 200
+            for host in ["example.com", f"example.com:{port}", "127.0.0.1:1", "127.0.0.1"]:
+                assert asked(view, part, Host=host)[0] == 403, host
+            assert asked(view, part, Origin="http://example.com")[0] == 403
+            assert asked(view, part, Origin="null")[0] == 403
+            for site in ["cross-site", "same-site"]:
+                assert asked(view, part, Sec_Fetch_Site=site)[0] == 403, site
 
 
 def test_the_page_asks_no_other_host_for_anything() -> None:
@@ -215,42 +371,60 @@ def test_the_page_asks_no_other_host_for_anything() -> None:
         assert not re.search(r"https?://|//[a-z]", part.read_text()), part.name
 
 
-def test_the_command_serves_the_view(tmp_path: Path) -> None:
-    path = tmp_path / "trip.json"
-    shutil.copy(STORY / "works.json", path)
-    command = subprocess.Popen(
+def test_what_the_page_hides_stays_hidden() -> None:
+    """A rule that lays a part out must not bring it back once the page has hidden it."""
+    assert "[hidden] { display: none !important; }" in (STATIC / "view.css").read_text()
+
+
+def command(path: Path) -> tuple[subprocess.Popen[str], str]:
+    """The command as a process of its own, and the address of the view that it prints."""
+    started = subprocess.Popen(
         [
             sys.executable,
             "-c",
             "import sys; from agloe.cli import main; sys.exit(main())",
             "view",
             str(path),
-            "--port",
-            "0",
             "--no-browser",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
+    assert started.stdout is not None
+    ready, _, _ = select.select([started.stdout], [], [], 60)
+    assert ready, "the command said nothing"
+    address = started.stdout.readline().split()[-1]
+    assert address.startswith("http://127.0.0.1:")
+    return started, address
+
+
+@pytest.mark.parametrize("stop", [signal.SIGINT, signal.SIGTERM], ids=["Ctrl-C", "ended"])
+def test_the_command_serves_the_view_until_it_is_stopped(
+    stop: signal.Signals, tmp_path: Path
+) -> None:
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    started, address = command(path)
     try:
-        assert command.stdout is not None
-        ready, _, _ = select.select([command.stdout], [], [], 60)
-        assert ready, "the command said nothing"
-        address = command.stdout.readline().split()[-1]
-        assert address.startswith("http://127.0.0.1:")
         with urllib.request.urlopen(address, timeout=20) as reply:
             assert reply.status == 200
-        with urllib.request.urlopen(f"{address}events", timeout=60) as reply:
+        seen: list[str] = []
+        with urllib.request.urlopen(f"{address}events", timeout=30) as reply:
             for raw in reply:
-                if raw.startswith(b"data: ") and json.loads(raw[6:])["kind"] == "report":
+                if raw.startswith(b"data: "):
+                    seen.append(json.loads(raw.removeprefix(b"data: "))["kind"])
+                if seen[-1:] == ["report"]:
                     break
+        assert seen == ["file", "answer", "report"]
+        started.send_signal(stop)
+        assert started.wait(timeout=20) == 0
     finally:
-        command.terminate()
-        command.wait(timeout=20)
+        started.kill()
+        started.wait(timeout=20)
     # The check ran in a process of its own, and neither process had anything to complain of.
-    assert command.stderr is not None
-    assert command.stderr.read() == ""
+    assert started.stderr is not None
+    assert started.stderr.read() == ""
 
 
 def test_the_command_needs_a_file_that_is_there(
@@ -260,8 +434,18 @@ def test_the_command_needs_a_file_that_is_there(
     assert "nothing.json" in capsys.readouterr().err
 
 
-def page_says(trips: list[list[dict[str, Any]]]) -> list[list[dict[str, Any]]]:
-    """What the page says after each event of each series, worked out by the page's own code."""
+@pytest.mark.parametrize("port", ["80", "1023", "65536", "-1"])
+def test_the_command_needs_a_port_that_it_can_serve_on(
+    port: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    assert main(["view", str(path), "--no-browser", f"--port={port}"]) == 2
+    assert port in capsys.readouterr().err
+
+
+def page_says(trips: list[Events]) -> list[Events]:
+    """What the page says before any event and after each one, by the page's own code."""
     node = shutil.which("node")
     if node is None:
         if os.environ.get("CI"):
@@ -275,28 +459,34 @@ def page_says(trips: list[list[dict[str, Any]]]) -> list[list[dict[str, Any]]]:
         check=False,
     )
     assert done.returncode == 0, done.stderr
-    said: list[list[dict[str, Any]]] = json.loads(done.stdout)
+    said: list[Events] = json.loads(done.stdout)
     return said
+
+
+def sent_for(content: bytes, revision: int = 1, name: str = "trip.json") -> Events:
+    """What the view sends a page about one state of a FILE, as ``serve`` puts it together."""
+    file: dict[str, Any] = {"kind": "file", "name": name, "revision": revision}
+    return [file, *({**event, "revision": revision} for event in checked(content))]
 
 
 def kind_of(report: dict[str, Any]) -> str:
     """How the page marks a report: the answer, or a warning where the plan has one."""
     if report["answer"] != "FEASIBLE":
-        return report["answer"].lower()
+        return str(report["answer"]).lower()
     return "warning" if report["robust"] is False or "to_buy" in report else "feasible"
 
 
 def test_the_page_says_what_the_report_says() -> None:
     """For every example: the page's first line is the report's, and its mark is the answer's."""
-    series = [list(events(path)) for path in FILES]
+    series = [sent_for(path.read_bytes()) for path in FILES]
     for path, sent, said in zip(FILES, series, page_says(series), strict=True):
         name = f"{path.parent.name}/{path.stem}"
-        assert [event["kind"] for event in sent] == ["file", "answer", "report"], name
+        assert kinds(sent) == ["file", "answer", "report"], name
         at_first, on_file, on_answer, on_report = said
         assert at_first["mark"] == "waiting", name
         expected = json.loads(beside(path, ".expected.json").read_text())
         words = beside(path, ".expected.txt").read_text()
-        # The FILE is there, and the COMPILER has not answered: the page shows no answer.
+        # There is a FILE, and the COMPILER has not answered: the page shows no answer.
         assert on_file["mark"] == "checking", name
         assert not any(answer in on_file["line"] for answer in ANSWERS), name
         assert on_file["report"] is None, name
@@ -312,10 +502,14 @@ def test_the_page_says_what_the_report_says() -> None:
 
 def test_the_page_marks_a_report_on_the_file_as_it_was() -> None:
     """After a change the page shows no answer on the new FILE until the COMPILER gives one."""
-    first = list(events(STORY / "works.json"))
-    second = list(events(STORY / "cannot-work.json"))
-    refused = [{"kind": "refused", "problems": ["/facts/0: fits no known shape"]}]
-    (said,) = page_says([[*first, *second, *refused, *first]])
+    first = sent_for((STORY / "works.json").read_bytes(), 1)
+    second = sent_for((STORY / "cannot-work.json").read_bytes(), 2)
+    refused: Events = [
+        {"kind": "file", "name": "trip.json", "revision": 3},
+        {"kind": "refused", "problems": ["/facts/0: fits no known shape"], "revision": 3},
+    ]
+    last = sent_for((STORY / "works.json").read_bytes(), 4)
+    (said,) = page_says([[*first, *second, *refused, *last]])
     words = (STORY / "works.expected.txt").read_text()
     changed, answered, reported = said[4:7]
     # The FILE changed: the report on the page is on the FILE as it was, and the page says so.
@@ -327,7 +521,7 @@ def test_the_page_marks_a_report_on_the_file_as_it_was() -> None:
     assert reported["line"] == "INFEASIBLE: this trip cannot work."
     assert reported["old"] is False
     # A FILE that breaks the format has no report: the page shows the problems, and no answer.
-    broken = said[7]
+    broken = said[8]
     assert broken["mark"] == "refused"
     assert broken["problems"] == ["/facts/0: fits no known shape"]
     assert not any(answer in broken["line"] for answer in ANSWERS)
@@ -336,19 +530,88 @@ def test_the_page_marks_a_report_on_the_file_as_it_was() -> None:
     assert said[-1]["problems"] is None
 
 
+def test_the_page_takes_no_answer_for_another_state_of_the_file() -> None:
+    """An event that names another revision than the page was last told of is passed over."""
+    file, answer, report = sent_for((STORY / "cannot-work.json").read_bytes(), 1)
+    newer: dict[str, Any] = {"kind": "file", "name": "trip.json", "revision": 2}
+    (said,) = page_says([[file, newer, answer, report, {"kind": "stopped", "revision": 1}]])
+    for after_it in said[2:]:
+        assert after_it["mark"] == "checking"
+        assert after_it["report"] is None
+        assert not any(word in after_it["line"] for word in ANSWERS)
+
+
 def test_the_page_says_when_a_check_has_stopped() -> None:
     """An answer that came before the check stopped was proved, so it stays on the page."""
-    file, answer, report = events(STORY / "cannot-work.json")
-    stopped = {"kind": "stopped"}
-    early, late, again = page_says(
-        [[file, stopped], [file, answer, stopped], [file, stopped, file, answer, report]]
-    )
+    file, answer, report = sent_for((STORY / "cannot-work.json").read_bytes(), 1)
+    stopped = {"kind": "stopped", "revision": 1}
+    early, late = page_says([[file, stopped], [file, answer, stopped]])
     assert early[-1]["mark"] == "stopped"
     assert not any(word in early[-1]["line"] for word in ANSWERS)
     assert late[-1]["mark"] == "stopped"
     assert late[-1]["line"].startswith("INFEASIBLE")
     assert late[-1]["report"] is None
-    assert again[-1]["line"] == "INFEASIBLE: this trip cannot work."
+    # The next state of the FILE starts afresh.
+    again = sent_for((STORY / "cannot-work.json").read_bytes(), 2)
+    (said,) = page_says([[file, answer, stopped, *again]])
+    assert said[-1]["line"] == report["text"].split("\n")[0]
+
+
+def test_the_page_says_why_a_file_has_no_report() -> None:
+    """A FILE that cannot be read is not said to break the format."""
+    file: dict[str, Any] = {"kind": "file", "name": "trip.json", "revision": 1}
+    unreadable = {"kind": "unreadable", "problem": "No such file or directory", "revision": 1}
+    ((_, _, away),) = page_says([[file, unreadable]])
+    assert away["mark"] == "unreadable"
+    assert "format" not in away["line"]
+    assert "No such file or directory" in away["note"]
+    assert away["problems"] is None
+
+
+def test_the_page_keeps_the_answer_of_a_report_that_cannot_be_written() -> None:
+    """The stay starts in the last second of the year 9999 and ends one second later."""
+    document = {
+        "persons": [{"id": "alex", "name": "Alex"}],
+        "places": [{"id": "pier", "name": "Navy Pier"}],
+        "options": [stays("fireworks", "pier")],
+        "ways": [],
+        "wants": [],
+        "facts": [
+            {
+                "id": "fireworks-time",
+                "option": "fireworks",
+                "starts_at": "9999-12-31T23:59:59+00:00[UTC]",
+            },
+            lasts("fireworks", "PT1S"),
+            needs_no_right("fireworks"),
+        ],
+        "decisions": [lock("fireworks", "alex")],
+    }
+    sent = sent_for(json.dumps(document).encode())
+    assert kinds(sent) == ["file", "answer", "unwritable"]
+    (said,) = page_says([sent])
+    assert said[-1]["mark"] == "feasible"
+    assert said[-1]["line"].startswith("FEASIBLE")
+    assert "format" not in said[-1]["line"]
+    assert "0001 to 9999" in said[-1]["note"]
+    assert said[-1]["problems"] is None
+
+
+def test_the_page_says_when_it_no_longer_hears_the_view() -> None:
+    """What it shows stays, marked as on the FILE as it was, until the view speaks again."""
+    first = sent_for((STORY / "works.json").read_bytes(), 1)
+    again = sent_for((STORY / "works.json").read_bytes(), 1)
+    (said,) = page_says([[*first, {"kind": "lost"}, *again]])
+    lost = said[4]
+    assert lost["mark"] == "lost"
+    assert not any(word in lost["line"] for word in ANSWERS)
+    assert lost["old"] is True
+    assert lost["report"] == (STORY / "works.expected.txt").read_text()
+    # The view speaks again: the page starts afresh on the FILE that the view tells it of.
+    assert said[5]["mark"] == "checking"
+    assert said[5]["old"] is True
+    assert said[-1]["line"] == "FEASIBLE: this trip works."
+    assert said[-1]["old"] is False
 
 
 def test_the_page_knows_every_event_it_is_sent() -> None:
@@ -356,9 +619,10 @@ def test_the_page_knows_every_event_it_is_sent() -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("needs Node")
+    file = {"kind": "file", "name": "trip.json", "revision": 1}
     done = subprocess.run(
         [node, str(Path(__file__).parent / "view_page.mjs")],
-        input=json.dumps([[{"kind": "something else"}]]),
+        input=json.dumps([[file, {"kind": "something else", "revision": 1}]]),
         capture_output=True,
         text=True,
         check=False,

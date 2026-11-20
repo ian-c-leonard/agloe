@@ -18,12 +18,13 @@ function show() {
   part("report-part").classList.toggle("old", said.old);
 }
 
-const view = new EventSource("events");
-view.onmessage = (message) => {
-  state = after(state, JSON.parse(message.data));
+function hear(event) {
+  state = after(state, event);
   show();
-};
-// The command that serves the view has ended, or has started again.
-view.onerror = () => (part("stopped").hidden = false);
-view.onopen = () => (part("stopped").hidden = true);
+}
+
+const view = new EventSource("events");
+view.onmessage = (message) => hear(JSON.parse(message.data));
+// The page no longer hears the view. What it shows stays, marked, until the view speaks again.
+view.onerror = () => hear({ kind: "lost" });
 show();

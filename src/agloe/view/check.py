@@ -1,16 +1,20 @@
-"""What the view tells a page about one FILE as it is now, one event after another.
+"""What the COMPILER says about one state of a FILE, one event after another.
 
-First that there is a FILE to check. Then the answer as soon as it is proved, and then the
-report in words and as JSON. A FILE that cannot be read, or that does not follow the format,
-has no report: the page is told the problems instead. The view adds ``stopped`` where a check
-ends with neither.
+A state of a FILE is its content at one moment. ``checked`` takes that content, so every event
+is about exactly those bytes, whatever happens to the FILE on disk in the meantime.
 
-``python -m agloe.view.check FILE`` prints each event as one line of JSON. The view runs that
-in a process of its own, because a check can only be stopped by ending its process.
+The events: ``answer`` as soon as the answer is proved, then ``report`` with the report in words
+and as JSON. A FILE that does not follow the format has no report, and gets ``refused`` with
+the problems. A report that cannot be written gets ``unwritable``, after its answer.
+
+``python -m agloe.view.check`` reads the content from its input and prints each event as one
+line of JSON, in UTF-8. The view runs that in a process of its own, because a check can only
+be stopped by ending its process.
 """
 
 import json
 import sys
+import tempfile
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -22,17 +26,17 @@ from agloe.file import FileError, Unwritable, read
 type Event = dict[str, object]
 
 
-def events(path: Path) -> Iterator[Event]:
-    """The events for this FILE: ``file``, then ``refused``, or ``answer`` and ``report``."""
-    yield {"kind": "file", "name": path.name}
-    try:
-        file = read(path)
-    except OSError as problem:
-        yield {"kind": "refused", "problems": [f"not readable: {problem.strerror or problem}"]}
-        return
-    except FileError as refused:
-        yield {"kind": "refused", "problems": list(refused.problems)}
-        return
+def checked(content: bytes) -> Iterator[Event]:
+    """The events for a FILE with this content: ``refused``, or ``answer`` and what follows it."""
+    # The FILE is read as the command ``agloe check`` reads it, from a copy that nothing changes.
+    with tempfile.TemporaryDirectory() as folder:
+        copy = Path(folder) / "FILE.json"
+        copy.write_bytes(content)
+        try:
+            file = read(copy)
+        except FileError as refused:
+            yield {"kind": "refused", "problems": list(refused.problems)}
+            return
     started = time.perf_counter()
     for found in compiler.reports(file):
         seconds = round(time.perf_counter() - started, 3)
@@ -48,12 +52,12 @@ def events(path: Path) -> Iterator[Event]:
                 "seconds": seconds,
             }
         except Unwritable:
-            problem = "the report holds a time outside the years 0001 to 9999"
-            yield {"kind": "refused", "problems": [f"{problem}, so it cannot be written"]}
+            yield {"kind": "unwritable"}
             return
         yield shown
 
 
 if __name__ == "__main__":
-    for event in events(Path(sys.argv[1])):
-        print(json.dumps(event, ensure_ascii=False), flush=True)
+    for event in checked(sys.stdin.buffer.read()):
+        sys.stdout.buffer.write(json.dumps(event, ensure_ascii=False).encode() + b"\n")
+        sys.stdout.buffer.flush()
