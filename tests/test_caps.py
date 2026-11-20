@@ -48,6 +48,7 @@ from tests.stories import (
     trip,
     way_between,
 )
+from tests.test_conflict import solves_counted
 from tests.test_where_a_path_ends import checked, has_no_record_to_spare, ruled_out
 
 EVERYONE = ["alex", "sam", "jo"]
@@ -1023,7 +1024,9 @@ def test_bookings_that_pass_a_cap_are_seen_before_a_model_is_built(
     assert compiler.shown(file, worst_case(file)) is None
     assert not compiler.works(file, worst_case(file))
     assert not compiler.can_work(Remaining(file))
-    assert not compiler.can_work(Remaining(file).without("ride-right"))
+    still = Remaining(file).without("ride-needs-right")
+    assert still != Remaining(file)
+    assert not compiler.can_work(still)
 
 
 def a_weekend(limit: str, sold: bool = False) -> File:
@@ -1079,6 +1082,64 @@ def test_a_weekend_over_its_cap_cannot_work_where_the_tickets_listed_are_all_the
 
 
 def test_a_weekend_over_its_cap_depends_on_what_the_file_does_not_say() -> None:
-    """Nothing says that the tickets listed are all there are, so another right might be found."""
-    ahead, *_ = compiler.reports(a_weekend("110.00 USD"))
-    assert ahead is Answer.UNDETERMINED
+    """Nothing says that the tickets listed are all there are, so another right might be found.
+
+    The cap is 10 USD short, so one right for anybody to any visit they need is enough. The
+    answer comes before any of those is looked for.
+    """
+    file = a_weekend("110.00 USD")
+    assert next(compiler.reports(file)) is Answer.UNDETERMINED
+    found = compiler.check(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert len(found.missing) == 22
+    assert {needed.unknown.what for (needed,) in found.missing} == {"another right"}
+    assert len(found.plans) == 22
+
+
+def test_a_purchase_counts_against_the_cap_in_its_own_currency() -> None:
+    """Sam's ticket costs 1 EUR. The BUDGET has a cap of nothing in USD, and of 1 EUR.
+
+    The cap in USD is listed first, and the purchase does not touch it.
+    """
+    pot = budget("wallet", "sam", holds=["USD", "EUR"])
+    caps = [cap("wallet", "0 USD", id="usd-cap"), cap("wallet", "1 EUR", id="eur-cap")]
+    place = offer("tour", 1, price="1 EUR")
+    file = a_tour(
+        place, every_right("tour", "tour-offer"), budgets=[pot], caps=caps, persons=["sam"]
+    )
+    for found in (compiler.check(file), answers.check(file)):
+        assert found.answer is Answer.FEASIBLE
+        dollars, euros = found.caps
+        assert (dollars.cap, dollars.to_buy, dollars.left) == ("usd-cap", 0, 0)
+        assert (euros.cap, euros.to_buy, euros.left) == ("eur-cap", 10_000, 0)
+        assert [(cover.person, cover.budget) for cover in found.rights] == [("sam", "wallet")]
+
+
+def a_group_on_one_tour(count: int, limit: str) -> File:
+    """A group is LOCKed into one boat tour at 10 USD each, with a cap on the money they share."""
+    people = [f"p{number}" for number in range(count)]
+    pot = budget("kitty", *people)
+    place = offer("tour", count, price="10 USD")
+    return a_tour(place, locked=people, budgets=[pot], caps=[cap("kitty", limit)], persons=people)
+
+
+def test_a_group_with_nothing_to_choose_is_asked_about_no_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Six are LOCKed into the one tour, and the cap has room for four tickets.
+
+    The report names each two of them who could find another right. Each plan takes one
+    question to the solver: nobody has an order to choose, and the tour has to happen.
+    """
+    file = a_group_on_one_tour(6, "40 USD")
+    found = compiler.check(file)
+    assert found == answers.check(file)
+    assert len(found.missing) == 15
+    solves = solves_counted(monkeypatch)
+    assert compiler.shown(file, reference.best_case(file)) is not None
+    assert len(solves) == 1
+    solves.clear()
+    monkeypatch.setattr(compiler._Search, "_only_order", lambda self, number: None)  # pyright: ignore[reportPrivateUsage, reportUnknownLambdaType, reportUnknownArgumentType]
+    assert compiler.shown(file, reference.best_case(file)) is not None
+    assert len(solves) > 10
+    assert compiler.check(file) == found

@@ -1067,12 +1067,18 @@ class _Search:
         if fewest is None:
             return None
         model.add(taking_part * (count + 1) + sum(self.used) == fewest)
-        self._settle(self.used)
+        # An OPTION that somebody has to take part in happens: that is not left to choose.
+        happens = {index for theirs in self.have_to.values() for index in theirs}
+        self._settle([used for index, used in enumerate(self.used) if index not in happens])
 
         # Each PERSON in turn: the OPTION listed first that can come next, or nothing more.
         ends = count  # the two ends of a path, as one point of its circuit
         orders: list[tuple[int, ...]] = []
         for number in range(len(file.persons)):
+            only = self._only_order(number)
+            if only is not None:
+                orders.append(only)
+                continue
             follows = self.follows[number]
             order: list[int] = []
             here = ends
@@ -1094,6 +1100,19 @@ class _Search:
                 here = found
             orders.append(tuple(order))
         return self._who(orders), tuple(orders), None, None
+
+    def _only_order(self, number: int) -> tuple[int, ...] | None:
+        """The OPTIONs this PERSON does, where they have nothing to choose, or None.
+
+        A PERSON can take part in one OPTION at most, and has to take part in it:
+        ``_have_to_take`` says so. Or they can take part in none. Something works in this
+        model, so they do just that, and no question about their order is put to the solver.
+        """
+        can = [
+            index for index in range(len(self.file.options)) if (number, index) not in self.left_out
+        ]
+        theirs = self.have_to.get(self.file.persons[number].id, set())
+        return tuple(can) if len(can) < 2 and theirs.issuperset(can) else None
 
     def _who(self, orders: Sequence[tuple[int, ...]]) -> tuple[tuple[str, ...], ...]:
         """The PERSONs in each OPTION, given the OPTIONs each PERSON does."""
