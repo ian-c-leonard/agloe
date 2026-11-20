@@ -107,6 +107,7 @@ def reports(file: File, ahead: bool = True) -> Iterator[Answer | Report]:
 
 def shown(file: File, world: World) -> Itinerary | None:
     """The ITINERARY that "Which ITINERARY is shown" puts first in this world, or None."""
+    world = _with_the_ways_that_can_start(file, world)
     if _locked_twice_at_once(file, world) or _has_to_take_two_apart(file, world):
         return None
     search = _Search(file, world)
@@ -116,6 +117,7 @@ def shown(file: File, world: World) -> Itinerary | None:
 
 def works(file: File, world: World, asked: _Asked | None = None) -> bool:
     """Whether any ITINERARY works in this world. ``asked`` is as for ``can_work``."""
+    world = _with_the_ways_that_can_start(file, world)
     if _locked_twice_at_once(file, world) or _has_to_take_two_apart(file, world):
         return False
     choice = _plan(_Search(file, world, plain=True), asked)
@@ -143,6 +145,7 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
     """
     file = remaining.file
     world, open_pairs = reference.best_case_left(remaining)
+    world = _with_the_ways_that_can_start(file, world)
     if _locked_twice_at_once(file, world) or _has_to_take_two_apart(file, world, open_pairs):
         return False
     search = _Search(file, world, open_pairs, plain=True)
@@ -155,6 +158,34 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
     )
     _checked(file, chosen, choice)
     return True
+
+
+def _with_the_ways_that_can_start(file: File, world: World) -> World:
+    """This world with no unlisted WAY, where none of them can ever be taken.
+
+    Every WAY starts within the TRIP: no earlier than the TRIP starts, and no later than it
+    ends. Where one FACT says that the ways between all PLACEs are COMPLETE, for a span that
+    holds the whole TRIP, no unlisted WAY can start at any time a WAY can start. So the same
+    ITINERARIES work with no unlisted WAY in the world, and they are the only ones. The model
+    is much smaller without the routes that nobody can take.
+
+    This needs both times of the TRIP and the FACT in the FILE as it is asked about. A FILE
+    with one of them taken out is left as it is.
+    """
+    if world.unlisted is not None and not world.unlisted:
+        return world
+    opens, closes = file.trip_start(), file.trip_end()
+    if opens is None or closes is None:
+        return world
+    whole = any(
+        isinstance(fact, Complete)
+        and fact.origin is None
+        and fact.destination is None
+        and fact.earliest <= opens.at
+        and closes.at <= fact.latest
+        for fact in file.facts
+    )
+    return replace(world, unlisted=frozenset()) if whole else world
 
 
 def _locked_twice_at_once(file: File, world: World) -> bool:
