@@ -1599,6 +1599,135 @@ class Routes:
         return self._at_the_ends[key]
 
 
+class NoTimeBetween:
+    """Which two OPTIONs no PERSON takes part in both, in one world, for lack of time.
+
+    Both OPTIONs start at fixed times. A PERSON does their OPTIONs one after another, so one of
+    the two comes first, and the other has to be able to follow it. ``apart`` says that
+    neither can follow the other. Then no ITINERARY that works in this world has a PERSON in
+    both, whatever else is in it.
+
+    One OPTION cannot follow another:
+
+    - where the first has no limit to how long it takes: nobody does anything after it;
+    - where it starts before the first is over at the earliest;
+    - where it starts at another PLACE than the first ends at, and the PERSON cannot be there
+      its access cutoff before it starts. They travel between the two, so the cutoff counts.
+      Whatever they do on the way, each thing starts where the one before it ended. So the
+      things that move them lead from the one PLACE to the other: listed WAYs, unlisted WAYs
+      and OPTIONs that move. Together these take at least as long as the quickest chain of
+      them does, with each at its shortest in this world and no waiting. A WAY or an OPTION
+      with no limit to how long it takes is in no chain: nothing follows it. Where even the
+      quickest chain is too slow, or there is none, the second OPTION cannot follow.
+
+    An unlisted WAY counts wherever this world has one and it could start at some time
+    between the two OPTIONs. One COMPLETE FACT whose span holds that whole time rules it out.
+    Where an unlisted WAY might join any two PLACEs, this sees only a FACT about all travel
+    between all PLACEs. With no such FACT it says nothing about the pair. An access cutoff
+    with no limit is not looked at either.
+
+    So ``apart`` says yes only with a proof. Where it says no, the two OPTIONs can still be
+    apart: FACTs about travel from one PLACE can close every way out of it, and the timing
+    finds that.
+    """
+
+    def __init__(self, file: File, world: World) -> None:
+        self._file, self._world = file, world
+        self._complete = [fact for fact in file.facts if isinstance(fact, Complete)]
+        # From each PLACE: where a listed WAY or an OPTION that moves leads, and how long it
+        # takes at the least.
+        self._leaving: dict[str, list[tuple[str, int]]] = {}
+        for way in file.ways:
+            shortest, longest = world.takes[way.id]
+            if longest is None:
+                continue
+            self._leaving.setdefault(way.origin, []).append((way.destination, shortest))
+            if way.both_ways:
+                self._leaving.setdefault(way.destination, []).append((way.origin, shortest))
+        for option in file.options:
+            terms = world.terms[option.id]
+            if option.origin != option.destination and terms.longest is not None:
+                self._leaving.setdefault(option.origin, []).append(
+                    (option.destination, terms.shortest)
+                )
+        self._unlisted: dict[tuple[int, ...], tuple[tuple[str, str], ...] | None] = {}
+        self._soonest: dict[tuple[str, tuple[int, ...]], dict[str, int]] = {}
+        self._apart: dict[tuple[int, int], bool] = {}
+
+    def apart(self, one: int, other: int) -> bool:
+        """Whether no PERSON takes part in both of these OPTIONs, by position in the FILE."""
+        pair = (min(one, other), max(one, other))
+        if pair not in self._apart:
+            self._apart[pair] = (
+                one != other and self._cannot_follow(one, other) and self._cannot_follow(other, one)
+            )
+        return self._apart[pair]
+
+    def _cannot_follow(self, first: int, then: int) -> bool:
+        """Whether no PERSON does the second OPTION after the first. Both start at fixed times."""
+        options, terms = self._file.options, self._world.terms
+        before, after = terms[options[first].id], terms[options[then].id]
+        if before.fixed_start is None or after.fixed_start is None:
+            return False
+        over = before.fixed_start + before.shortest
+        if before.longest is None or over > after.fixed_start:
+            return True
+        here, there = options[first].destination, options[then].origin
+        if here == there or after.margin is None:
+            return False
+        there_by = after.fixed_start - after.margin
+        if over > there_by:
+            return True
+        ruling = tuple(
+            number
+            for number, fact in enumerate(self._complete)
+            if fact.earliest <= over and there_by <= fact.latest
+        )
+        if self._joined(ruling) is None:
+            return False
+        takes = self._reached(here, ruling).get(there)
+        return takes is None or over + takes > there_by
+
+    def _joined(self, ruling: tuple[int, ...]) -> tuple[tuple[str, str], ...] | None:
+        """The PLACEs an unlisted WAY can join while these COMPLETE FACTs rule, or None for any.
+
+        ``ruling`` holds the FACTs whose span holds the whole time between two OPTIONs.
+        """
+        if ruling not in self._unlisted:
+            facts = [self._complete[number] for number in ruling]
+            pairs = self._world.unlisted
+            if pairs is None:
+                everywhere = any(fact.origin is None and fact.destination is None for fact in facts)
+                self._unlisted[ruling] = () if everywhere else None
+            else:
+                self._unlisted[ruling] = tuple(
+                    sorted(pair for pair in pairs if not any(fact.covers(*pair) for fact in facts))
+                )
+        return self._unlisted[ruling]
+
+    def _reached(self, here: str, ruling: tuple[int, ...]) -> dict[str, int]:
+        """The least time from one PLACE to each PLACE that anything leads to from it."""
+        if (here, ruling) not in self._soonest:
+            leaving = self._leaving
+            unlisted = self._joined(ruling)
+            if unlisted:
+                leaving = {origin: list(exits) for origin, exits in leaving.items()}
+                for origin, destination in unlisted:
+                    leaving.setdefault(origin, []).append((destination, self._world.unlisted_takes))
+            least: dict[str, int] = {}
+            ahead = [(0, here)]
+            while ahead:
+                takes, place = heappop(ahead)
+                if place in least:
+                    continue
+                least[place] = takes
+                for onward, more in leaving.get(place, ()):
+                    if onward not in least:
+                        heappush(ahead, (takes + more, onward))
+            self._soonest[here, ruling] = least
+        return self._soonest[here, ruling]
+
+
 def _legs_in_file_order(file: File, route: Route) -> list[tuple[int, int, int]]:
     """The WAYs listed first come first, then the PLACEs listed first. Unlisted WAYs come last."""
     ways = [way.id for way in file.ways]
