@@ -9,8 +9,9 @@ Only the search is different. The three answers, ROBUST and the evidence are wor
 ``answers.check``, with this module's search in place of the reference checker's.
 
 For INFEASIBLE, the search for the conflict asks whether anything can still work once records
-are taken out. The solver answers each such question with one model. Where taking FACTs out
-leaves it open whether an OPTION SATISFIES a WANT, the solver chooses that too.
+are taken out. Each such question takes one model at most. Where taking FACTs out leaves it
+open whether an OPTION SATISFIES a WANT, the solver chooses that too. Where LOCKs put a PERSON
+into two OPTIONs at once, no model is needed.
 
 The solver counts in 64-bit numbers. A TRIP with very long durations and very many routes can
 need more than that. The reference checker's own search then answers for the whole TRIP. That
@@ -20,6 +21,7 @@ search tries everything, so it is meant for small TRIPs.
 from collections.abc import Sequence
 from dataclasses import replace
 from hashlib import sha256
+from itertools import combinations
 from math import inf
 
 from ortools.sat.python import cp_model
@@ -80,6 +82,8 @@ def check(file: File) -> Report:
 
 def shown(file: File, world: World) -> Itinerary | None:
     """The ITINERARY that "Which ITINERARY is shown" puts first in this world, or None."""
+    if _locked_twice_at_once(file, world):
+        return None
     search = _Search(file, world)
     choice = search.first_in_file_order()
     return None if choice is None else _checked(file, world, choice, search.known)
@@ -87,6 +91,8 @@ def shown(file: File, world: World) -> Itinerary | None:
 
 def works(file: File, world: World, asked: _Asked | None = None) -> bool:
     """Whether any ITINERARY works in this world. ``asked`` is as for ``can_work``."""
+    if _locked_twice_at_once(file, world):
+        return False
     choice = _plan(_Search(file, world, plain=True), asked)
     if choice is not None:
         _checked(file, world, choice)
@@ -98,8 +104,9 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
 
     The best cases differ only in the pairs that are left open: whether an OPTION SATISFIES a
     WANT that is a must for one PERSON and a must-not for another. The solver chooses that
-    for each pair, with the plan. So one question takes one model, however many pairs are
-    open. The reference checker then checks the plan in the best case the solver chose.
+    for each pair, with the plan. So one question takes one model at most, however many
+    pairs are open. The reference checker then checks the plan in the best case the solver
+    chose.
 
     ``asked`` holds what the solver answered for each model it was given before in the same
     check. A FACT that is taken out often changes nothing in the model: it said what the best
@@ -111,6 +118,8 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
     """
     file = remaining.file
     world, open_pairs = reference.best_case_left(remaining)
+    if _locked_twice_at_once(file, world):
+        return False
     search = _Search(file, world, open_pairs, plain=True)
     choice = _plan(search, asked)
     if choice is None:
@@ -121,6 +130,36 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
     )
     _checked(file, chosen, choice)
     return True
+
+
+def _locked_twice_at_once(file: File, world: World) -> bool:
+    """Whether LOCKs put some PERSON into two OPTIONs whose times rule each other out.
+
+    A PERSON does one OPTION after another, so the later one starts no earlier than the
+    first one ends. Two OPTIONs that both start at fixed times in this world can be done in
+    an order only where that holds for it, and nothing follows an OPTION with no known end.
+    Where neither order holds, no ITINERARY that works in this world has the PERSON in both,
+    and the LOCKs ask for both. So nothing works, and no model is needed to see it.
+
+    Several LOCKs can name one OPTION for a PERSON. That is one OPTION, taken once.
+    """
+    locked: dict[str, dict[str, reference.Terms]] = {}
+    for lock in file.locks:
+        terms = world.terms[lock.option]
+        if terms.fixed_start is not None:
+            for person in lock.persons:
+                locked.setdefault(person, {})[lock.option] = terms
+
+    def follows(first: reference.Terms, then: reference.Terms) -> bool:
+        if first.fixed_start is None or then.fixed_start is None or first.longest is None:
+            return False
+        return then.fixed_start >= first.fixed_start + first.shortest
+
+    return any(
+        not follows(one, other) and not follows(other, one)
+        for theirs in locked.values()
+        for one, other in combinations(theirs.values(), 2)
+    )
 
 
 def _plan(search: _Search, asked: _Asked | None) -> _Choice | None:
