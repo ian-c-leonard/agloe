@@ -37,14 +37,16 @@ export function written(minutes) {
 
 /** 870 as "2:30 pm". */
 export function clock(minutes) {
-  const hour = Math.floor(minutes / 60);
-  return `${((hour + 11) % 12) + 1}:${String(minutes % 60).padStart(2, "0")} ${hour < 12 ? "am" : "pm"}`;
+  const whole = Math.round(minutes);
+  const hour = Math.floor(whole / 60);
+  return `${((hour + 11) % 12) + 1}:${String(whole % 60).padStart(2, "0")} ${hour < 12 ? "am" : "pm"}`;
 }
 
 /** 80 as "1 h 20 min". */
 export function span(minutes) {
-  const hours = Math.floor(minutes / 60);
-  return [hours ? `${hours} h` : "", minutes % 60 ? `${minutes % 60} min` : ""].filter(Boolean).join(" ") || "0 min";
+  const whole = Math.round(minutes);
+  const hours = Math.floor(whole / 60);
+  return [hours ? `${hours} h` : "", whole % 60 ? `${whole % 60} min` : ""].filter(Boolean).join(" ") || "0 min";
 }
 
 const snap = (minutes) => Math.round(minutes / STEP) * STEP;
@@ -61,6 +63,36 @@ export function answerOf(report) {
   if (found.answer === "INFEASIBLE") return "infeasible";
   if (found.answer === "UNDETERMINED") return "undetermined";
   return "refused";
+}
+
+/**
+ * The lines of a report that go under the day: the answer, and every line that says what the
+ * answer turns on. Each is a whole line of the report. `inset` marks a line that hangs from the
+ * line above it: one case of several, or what would go wrong at a step.
+ *
+ * - UNDETERMINED: the whole report. It says what the FILE would have to say, as one condition or
+ *   as every case of several, and then what else has to be true for that to help.
+ * - FEASIBLE with a WARNING: each step that may go wrong, and what would go wrong at it.
+ * - INFEASIBLE: the answer alone. The day and the FILE mark the records that the report lists.
+ * - Words of the page's own, where the checker gave no answer: all of them.
+ */
+export function said(report, answer = answerOf(report)) {
+  const lines = report.text.split("\n");
+  const under = [];
+  if (answer === "risky") {
+    lines.forEach((line, at) => {
+      if (!line.trim().startsWith("!")) return;
+      // A line marked "!" is about the step above it, so the step is shown with it.
+      const step = lines.slice(0, at).reverse().find((before) => before.trim() && !before.trim().startsWith("!"));
+      if (step && !under.includes(step)) under.push(step);
+      under.push(line);
+    });
+  } else if (answer !== "feasible" && answer !== "infeasible") {
+    under.push(...lines.slice(1).filter((line) => line.trim()));
+  }
+  // A line that hangs from the one above it: a case of several, or what would go wrong at a step.
+  const hangs = (line) => (answer === "risky" ? line.trim().startsWith("!") : /^\s/.test(line));
+  return [lines[0], ...under].map((line) => ({ words: line.trim(), inset: line !== lines[0] && hangs(line) }));
 }
 
 /**
@@ -95,8 +127,9 @@ export function scene(file, report) {
       items.push(event);
     } else if (time) {
       items.push({
-        kind: "departure", id: option.id, name: option.name, place: option.from,
-        start: minutesOf(time.starts_at), cutoff: cutoff ? lengthOf(cutoff.arrive_before_start) : null,
+        kind: "departure", id: option.id, name: option.name, place: option.from, lands: option.to,
+        start: minutesOf(time.starts_at), length: length ? lengthOf(length.duration) : null,
+        cutoff: cutoff ? lengthOf(cutoff.arrive_before_start) : null,
         clash: clashes(time, lock(option.id)), clashCutoff: clashes(cutoff),
       });
     } else {
@@ -108,17 +141,25 @@ export function scene(file, report) {
       });
     }
   }
-  // The time by which people must be at each PLACE: the earliest cutoff of what leaves from it.
-  const deadline = {};
-  for (const item of items) {
-    if (item.kind !== "departure" || item.cutoff === null) continue;
-    deadline[item.place] = Math.min(deadline[item.place] ?? Infinity, item.start - item.cutoff);
-  }
   // A ride that can start at any time is drawn where the plan puts it. Without a plan it is drawn
-  // leaving when the last thing at its PLACE ends. That is a place to draw it, and no claim.
+  // leaving when the last thing at its PLACE ends, or when the last thing that lands there lands.
+  // That is a place to draw it, and no claim.
   const leaving = (place) => {
-    const ends = events.filter((event) => event.place === place).map((event) => event.start + event.length);
+    const ends = [
+      ...events.filter((event) => event.place === place).map((event) => event.start + event.length),
+      ...items.filter((item) => item.kind === "departure" && item.lands === place && item.length !== null).map((item) => item.start + item.length),
+    ];
     return ends.length ? Math.max(...ends) : FIRST + 30;
+  };
+  // When people must next be at a PLACE: the earliest start there, less the time to be there before it.
+  const due = (place, after) => {
+    const times = items.filter((item) => item.place === place).map((item) => item.start - (item.cutoff ?? 0)).filter((time) => time >= after);
+    return times.length ? Math.min(...times) : null;
+  };
+  // A length to draw a ride with when nobody gives one: as far as the next thing at the PLACE it goes to.
+  const asFarAs = (place, leaves) => {
+    const by = due(place, leaves);
+    return by === null ? 45 : Math.max(STEP, by - leaves);
   };
   // What the report asks for. It may ask for several things together, or offer several cases, so
   // the day shows a length it asks for and leaves the rest to the report's own words.
@@ -129,21 +170,39 @@ export function scene(file, report) {
     ride.taken = !found.itinerary || Boolean(step);
     const asked = missing.find((need) => need.what === "duration" && need.option === ride.id);
     ride.atMost = asked ? lengthOf(asked.at_most) : null;
-    // The length the ride is drawn with: its own, or the one the report asks for, or as far as the cutoff.
-    const by = deadline[ride.to] ?? null;
-    ride.shown = ride.length ?? ride.atMost ?? (by !== null ? Math.max(15, by - ride.leaves) : 45);
+    // The length the ride is drawn with: its own, or the one the report asks for.
+    ride.shown = ride.length ?? ride.atMost ?? asFarAs(ride.to, ride.leaves);
   }
-  const other = missing.find((need) => need.what === "other ways" && need.from && need.to);
-  if (other) {
+  // The gaps in the day that travel has to fill: something ends at one PLACE, and the next thing
+  // is at another. Each has the time people can leave and the time by which they must be there.
+  const timed = items.filter((item) => item.kind !== "ride").sort((one, other) => one.start - other.start);
+  const gaps = [];
+  timed.slice(0, -1).forEach((first, at) => {
+    const next = timed[at + 1];
+    if (first.length === null) return;
+    gaps.push({ from: first.kind === "departure" ? first.lands : first.place, to: next.place, leaves: first.start + first.length, by: next.start - (next.cutoff ?? 0) });
+  });
+  // Each other way that the report asks about, once for each pair of PLACEs. It is drawn in the
+  // tightest gap between those PLACEs, because that is where another way is needed most. That is
+  // a place to draw it, and no claim.
+  for (const other of missing.filter((need) => need.what === "other ways" && need.from && need.to)) {
+    const id = `another-way-${other.from}-${other.to}`;
+    if (items.some((item) => item.id === id)) continue;
     const atMost = lengthOf(other.at_most);
-    items.push({ kind: "ghost", id: "another-way", from: other.from, to: other.to, leaves: leaving(other.from), atMost, shown: atMost ?? 45 });
+    const gap = gaps.filter((each) => each.from === other.from && each.to === other.to).sort((one, two) => one.by - one.leaves - (two.by - two.leaves))[0];
+    const leaves = gap ? gap.leaves : leaving(other.from);
+    const room = gap ? Math.max(STEP, gap.by - gap.leaves) : asFarAs(other.to, leaves);
+    items.push({ kind: "ghost", id, from: other.from, to: other.to, leaves, atMost, shown: atMost ?? room });
   }
   // How late people would be at worst, where the report on a trip that may not hold says so.
+  // Too late to arrive is counted from the time to be there. Still busy is counted from the start.
   const late = [];
   for (const worst of found.at_worst || []) {
     const item = items.find((each) => each.id === worst.option && each.place);
     const minutes = lengthOf(worst.late);
-    if (item && minutes) late.push({ place: item.place, from: item.start - (item.cutoff ?? 0), minutes });
+    if (!item || !minutes) continue;
+    if (worst.constraint === "Each PERSON arrives in time") late.push({ place: item.place, from: item.start - (item.cutoff ?? 0), minutes });
+    else if (worst.constraint === "Each PERSON is in one place at a time") late.push({ place: item.place, from: item.start, minutes });
   }
   // A lane for each PLACE where something on the day happens, leaves or lands.
   const places = file.places.filter((place) => items.some((item) => [item.place, item.from, item.to].includes(place.id)));
@@ -200,15 +259,19 @@ export const holds = (file, piece) =>
  * and `by` is how far the gesture has gone, in minutes. Says whether the FILE changed.
  */
 export function gesture(file, act, item, by) {
-  if (act === "move") {
-    change.move(file, item.id, within(FIRST, snap(item.start + by), LAST - (item.length || 15)));
+  // Everything stays inside the day as drawn: 12:30 pm to 6:00 pm.
+  if (act === "move" && item.kind === "departure") {
+    // What leaves keeps the time to be there inside the day too.
+    change.move(file, item.id, within(FIRST + (item.cutoff ?? 0), snap(item.start + by), LAST - 15));
+  } else if (act === "move") {
+    change.move(file, item.id, within(FIRST, snap(item.start + by), LAST - item.length));
   } else if (act === "stretch" && item.kind === "event") {
-    change.stretch(file, item.id, within(15, snap(item.length + by), 240));
+    change.stretch(file, item.id, within(15, snap(item.length + by), Math.min(240, LAST - item.start)));
   } else if (act === "cutoff" && item.cutoff !== null) {
-    change.cutoff(file, item.id, within(0, snap(item.cutoff - by), 180));
+    change.cutoff(file, item.id, within(0, snap(item.cutoff - by), Math.min(180, item.start - FIRST)));
   } else if (act === "ride" && item.kind === "ride") {
     // A ride of unknown length starts from the length it is drawn with.
-    const length = within(10, snap(item.shown + by), 240);
+    const length = within(0, snap(item.shown + by), 240);
     const range = item.length !== null && item.longest !== null ? item.longest - item.length : 0;
     change.ride(file, item.id, length, length + range);
   } else if (act === "late" && item.kind === "ride" && item.length !== null) {

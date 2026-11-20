@@ -5,10 +5,15 @@
 //   node website_gestures.mjs draw < [{ name, file, report }]
 //     reads each FILE with its report as the page does, and prints the FILEs that a further
 //     change would write
+//   node website_gestures.mjs said < [{ name, report }]
+//     prints the lines of each report that the page puts under the day
+//   node website_gestures.mjs scene < [{ name, file, report }]
+//     prints what the day shows from each report: the other ways it asks about, and how late
+//     people would be at worst
 //
 // A change that the page's code cannot make, or a report that it cannot read, ends this with an error.
 import { readFileSync } from "node:fs";
-import { answerOf, change, gesture, holds, scene, text } from "../pages/trip-file.js";
+import { answerOf, change, gesture, holds, said, scene, text } from "../pages/trip-file.js";
 
 const given = JSON.parse(readFileSync(0, "utf8"));
 const copy = (value) => structuredClone(value);
@@ -51,7 +56,29 @@ if (process.argv[2] === "files") {
   change.add(odd, given.additions.coffee);
   gesture(odd, "move", scene(odd, null).items.find((item) => item.id === "coffee"), -170);
   made.push({ name: "cannot-work: the ways are not all listed, and coffee is at 1:30 pm", file: odd });
+  // A trip whose report offers several cases, any one of which is enough.
+  const either = copy(given.stories["depends-on-the-cab"]);
+  change.remove(either, given.additions.complete);
+  made.push({ name: "depends-on-the-cab: the ways are not all listed", file: either });
+  // A trip where the flight comes first: people land somewhere else, and the visit is after that.
+  const back = copy(given.stories.works);
+  gesture(back, "move", scene(back, null).items.find((item) => item.id === "flight"), -400);
+  gesture(back, "move", scene(back, null).items.find((item) => item.id === "museum-visit"), 120);
+  made.push({ name: "works: the flight leaves at 1:15 pm, and the visit starts at 4:00 pm", file: back });
+  // A trip with a tight gap early in the day: lunch ends as coffee starts somewhere else.
+  const tight = copy(given.stories.works);
+  change.add(tight, given.additions.lunch);
+  change.add(tight, given.additions.coffee);
+  gesture(tight, "move", scene(tight, null).items.find((item) => item.id === "coffee"), -170);
+  made.push({ name: "works: lunch, and coffee at 1:30 pm", file: tight });
   console.log(JSON.stringify(made));
+} else if (process.argv[2] === "said") {
+  console.log(JSON.stringify(given.map(({ name, report }) => ({ name, said: said(report) }))));
+} else if (process.argv[2] === "scene") {
+  console.log(JSON.stringify(given.map(({ name, file, report }) => {
+    const view = scene(file, report);
+    return { name, ways: view.items.filter((item) => item.kind === "ghost"), late: view.late };
+  })));
 } else {
   const made = [];
   for (const { name, file, report } of given) {
