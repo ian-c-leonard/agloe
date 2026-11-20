@@ -299,3 +299,64 @@ def test_the_looks_change_no_report(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(compiler, "_has_to_take_two_apart", never)
     monkeypatch.setattr(compiler._Search, "_take_one_of_two_apart", nothing)  # pyright: ignore[reportPrivateUsage]
     assert [compiler.check(file) for file in trips] == with_them
+
+
+def test_another_boat_might_be_found_where_the_set_is_not_complete() -> None:
+    """With no FACT that the FILE lists every boat, Sam does not have to take this one."""
+    file = lunch_and_a_boat()
+    open_ = replace(file, facts=tuple(fact for fact in file.facts if fact.id != "every-the-river"))
+    report = compiler.check(open_)
+    assert report == answers.check(open_)
+    assert report.answer is Answer.UNDETERMINED
+
+
+def test_an_option_that_might_meet_a_must_leaves_the_other_one_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sam must go on the river and Jo must not. A ferry at 4:00 pm would do for Sam.
+
+    Jo is LOCKed into two talks at 6:00 pm, so the TRIP is INFEASIBLE. The search for the
+    conflict first takes out the FACT that the ferry SATISFIES the WANT: then nobody knows
+    whether it does. Sam still does not have to take the boat, which lunch rules out. So the
+    talks stay the whole conflict, as they are with no look at all.
+    """
+    file = trip(
+        ["sam", "jo"],
+        PLACES,
+        [
+            stays("lunch", "hotel"),
+            stays("boat", "dock"),
+            stays("ferry", "dock"),
+            stays("talk-a", "museum"),
+            stays("talk-b", "museum"),
+        ],
+        [
+            satisfies("ferry", "the-river"),
+            starts_at("talk-a", 18),
+            lasts("talk-a", "PT1H"),
+            starts_at("talk-b", 18),
+            lasts("talk-b", "PT1H"),
+            starts_at("lunch", 12, 30),
+            lasts("lunch", "PT1H30M"),
+            starts_at("boat", 14, 15),
+            lasts("boat", "PT1H"),
+            cutoff("boat", "PT15M"),
+            satisfies("boat", "the-river"),
+            starts_at("ferry", 16),
+            lasts("ferry", "PT1H"),
+            cutoff("ferry", "PT15M"),
+            every("the-river"),
+            takes("walk", "PT20M"),
+            complete(None, None),
+        ],
+        [lock("lunch", "sam"), lock("talk-a", "jo"), lock("talk-b", "jo")],
+        ways=[way_between("walk", "hotel", "dock")],
+        wants=[must("the-river", "sam", never=["jo"])],
+    )
+    report = compiler.check(file)
+    assert report.answer is Answer.INFEASIBLE
+    talks = {"talk-a-time", "talk-a-length", "talk-b-time", "talk-b-length"}
+    assert set(report.conflict) == talks | {"lock-talk-a", "lock-talk-b"}
+    monkeypatch.setattr(compiler, "_has_to_take_two_apart", never)
+    monkeypatch.setattr(compiler._Search, "_take_one_of_two_apart", nothing)  # pyright: ignore[reportPrivateUsage]
+    assert compiler.check(file) == report
