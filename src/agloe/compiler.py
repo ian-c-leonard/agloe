@@ -20,6 +20,7 @@ search tries everything, so it is meant for small TRIPs.
 from collections.abc import Sequence
 from dataclasses import replace
 from hashlib import sha256
+from itertools import combinations
 from math import inf
 
 from ortools.sat.python import cp_model
@@ -80,6 +81,8 @@ def check(file: File) -> Report:
 
 def shown(file: File, world: World) -> Itinerary | None:
     """The ITINERARY that "Which ITINERARY is shown" puts first in this world, or None."""
+    if _locked_twice_at_once(file, world):
+        return None
     search = _Search(file, world)
     choice = search.first_in_file_order()
     return None if choice is None else _checked(file, world, choice, search.known)
@@ -87,6 +90,8 @@ def shown(file: File, world: World) -> Itinerary | None:
 
 def works(file: File, world: World, asked: _Asked | None = None) -> bool:
     """Whether any ITINERARY works in this world. ``asked`` is as for ``can_work``."""
+    if _locked_twice_at_once(file, world):
+        return False
     choice = _plan(_Search(file, world, plain=True), asked)
     if choice is not None:
         _checked(file, world, choice)
@@ -111,6 +116,8 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
     """
     file = remaining.file
     world, open_pairs = reference.best_case_left(remaining)
+    if _locked_twice_at_once(file, world):
+        return False
     search = _Search(file, world, open_pairs, plain=True)
     choice = _plan(search, asked)
     if choice is None:
@@ -121,6 +128,35 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
     )
     _checked(file, chosen, choice)
     return True
+
+
+def _locked_twice_at_once(file: File, world: World) -> bool:
+    """Whether LOCKs put some PERSON into two OPTIONs whose times rule each other out.
+
+    A PERSON does one OPTION after another, so the later one starts no earlier than the
+    first one ends. Two OPTIONs that both start at fixed times in this world can be done in
+    an order only where that holds for it, and nothing follows an OPTION with no known end.
+    Where neither order holds, no ITINERARY has the PERSON in both, and the LOCKs ask for
+    both. So nothing works, and no model is needed to see it.
+    """
+    index = {option.id: number for number, option in enumerate(file.options)}
+    locked: dict[str, list[reference.Terms]] = {}
+    for lock in file.locks:
+        terms = world.terms[file.options[index[lock.option]].id]
+        if terms.fixed_start is not None:
+            for person in lock.persons:
+                locked.setdefault(person, []).append(terms)
+
+    def follows(first: reference.Terms, then: reference.Terms) -> bool:
+        if first.fixed_start is None or then.fixed_start is None or first.longest is None:
+            return False
+        return then.fixed_start >= first.fixed_start + first.shortest
+
+    return any(
+        not follows(one, other) and not follows(other, one)
+        for theirs in locked.values()
+        for one, other in combinations(theirs, 2)
+    )
 
 
 def _plan(search: _Search, asked: _Asked | None) -> _Choice | None:

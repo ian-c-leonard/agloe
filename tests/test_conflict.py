@@ -1,5 +1,7 @@
 """The search for a conflict: one yes-or-no question for each record, in the FILE's order."""
 
+from random import Random
+
 import pytest
 from ortools.sat.python import cp_model
 
@@ -26,6 +28,7 @@ from tests.stories import (
     trip_ends,
     trip_starts,
     way,
+    way_between,
 )
 
 
@@ -334,3 +337,96 @@ def test_rides_that_two_persons_are_locked_into_are_asked_about_one_lock_at_a_ti
     could = [left for left in asked if compiler.can_work(left)]
     assert len(could) == 2
     assert all(len(left.file.locks) == 18 for left in could)
+
+
+# ------------------------------- Two LOCKed OPTIONs at once ------------------------------------
+
+
+def a_busy_day(rng: Random) -> File:
+    """One or two PERSONs, and stays at one or two PLACEs on a half-hour grid, mostly LOCKed.
+
+    A stay lasts no time, half an hour or an hour, or nobody knows how long. Some stays have
+    no stated start.
+    """
+    people = ["alex", "sam"][: rng.choice([1, 2])]
+    places = ["a", "b"][: rng.choice([1, 2])]
+    names = [f"stay-{number}" for number in range(rng.choice([2, 3, 4]))]
+    options = [stays(name, rng.choice(places)) for name in names]
+    facts: list[Document] = []
+    for name in names:
+        if rng.random() < 0.85:
+            facts.append(starts_at(name, 9 + rng.randrange(3), rng.choice([0, 30])))
+        if rng.random() < 0.85:
+            facts.append(lasts(name, rng.choice(["PT0S", "PT30M", "PT1H"])))
+    ways = [way_between("walk", "a", "b")] if len(places) == 2 else []
+    facts += [takes("walk", "PT10M")] if ways and rng.random() < 0.8 else []
+    locks = [
+        lock(name, *[person for person in people if rng.random() < 0.8] or people[:1])
+        for name in names
+        if rng.random() < 0.8
+    ]
+    return trip(people, places, options, facts, locks, ways=ways)
+
+
+def test_two_locked_options_at_once_rule_out_every_plan() -> None:
+    """Where the solver sees a PERSON LOCKed twice at once, the reference checker finds no plan."""
+    rng = Random(9090)
+    seen = 0
+    twice = compiler._locked_twice_at_once  # pyright: ignore[reportPrivateUsage]
+    for _ in range(400):
+        file = a_busy_day(rng)
+        for world in (reference.worst_case(file), reference.best_case(file)):
+            if twice(file, world):
+                seen += 1
+                assert not reference.any_works(file, world)
+    assert seen > 100
+
+
+def test_seeing_a_person_locked_twice_at_once_changes_no_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The solver's search gives the same report without that look, and so does the reference."""
+    rng = Random(9191)
+    files = [a_busy_day(rng) for _ in range(300)]
+    found = [compiler.check(file) for file in files]
+
+    def never(*_: object) -> bool:
+        return False
+
+    monkeypatch.setattr(compiler, "_locked_twice_at_once", never)
+    seen: set[Answer] = set()
+    for file, with_the_look in zip(files, found, strict=True):
+        assert compiler.check(file) == with_the_look
+        assert check(file) == with_the_look
+        seen.add(with_the_look.answer)
+    assert seen == set(Answer)
+
+
+def test_a_double_booking_among_many_sailings_needs_few_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Six travelers have breakfast until 08:45 and are LOCKed onto the sailing at 08:30.
+
+    The FILE lists 24 sailings. While both LOCKs and their times are there, no model is
+    built: the two cannot both be done. The solver is asked only once one of them is gone.
+    """
+    people = [f"traveler-{number}" for number in range(6)]
+    options = [stays("breakfast", "port")]
+    facts: list[Document] = [starts_at("breakfast", 8), lasts("breakfast", "PT45M")]
+    for number in range(24):
+        name = f"sailing-{number}"
+        options.append(moves(name, "port", "island"))
+        minutes = min(8 * 60 + 30 * number, 23 * 60 + 59)
+        facts += [starts_at(name, minutes // 60, minutes % 60), lasts(name, "PT20M")]
+    decisions = [lock("breakfast", *people), lock("sailing-1", *people)]
+    file = trip(people, ["port", "island"], options, facts, decisions)
+    solves = solves_counted(monkeypatch)
+    found = compiler.check(file)
+    assert found.conflict == (
+        "breakfast-time",
+        "breakfast-length",
+        "sailing-1-time",
+        "lock-breakfast",
+        "lock-sailing-1",
+    )
+    assert len(solves) <= len(found.conflict)
