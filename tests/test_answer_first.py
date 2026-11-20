@@ -19,11 +19,15 @@ from agloe.file import File, read
 from agloe.reference import Itinerary, Remaining, World, worst_case
 from tests.stories import (
     EXAMPLES,
+    Document,
     cutoff,
     lasts,
+    lasts_between,
     lock,
     must,
     needs_no_right,
+    needs_right,
+    offer,
     satisfies,
     starts_at,
     stays,
@@ -90,19 +94,24 @@ class Asked:
         return answers.check(file, self.shown, self.works, self.can_work)
 
 
-def two_shows() -> File:
-    """Sam must see a show. The matinee and the evening show would both do."""
+def two_shows(*lasting: Document) -> File:
+    """Sam must see a show. The matinee and the evening show would both do.
+
+    Each show lasts two hours, unless ``lasting`` says how long one of them lasts.
+    """
     shows = {"matinee": 14, "evening": 19}
+    stated = {fact["option"] for fact in lasting}
     facts = [
         fact
         for show, hour in shows.items()
         for fact in (
             starts_at(show, hour),
-            lasts(show, "PT2H"),
+            *([] if show in stated else [lasts(show, "PT2H")]),
             cutoff(show, "PT0S"),
             satisfies(show, "a-show"),
         )
     ]
+    facts += lasting
     return trip(
         ["sam"],
         ["theater"],
@@ -122,9 +131,55 @@ def test_feasible_is_given_before_the_plan_to_show_is_looked_for(program: str) -
     assert asked.questions == ["does anything work"]
     full = next(series)
     assert isinstance(full, Report)
-    assert asked.questions[1:] == ["which plan is shown"] * 2
+    assert asked.questions[1:] == ["which plan is shown"]
     assert [step.option for step in full.itinerary] == ["matinee"]
     assert list(series) == []
+
+
+@pytest.mark.parametrize("program", PROGRAMS)
+def test_the_plan_to_show_is_looked_for_once_in_the_same_world(program: str) -> None:
+    """With no CONTINGENT duration, the longest case is the worst case.
+
+    The plan found in the worst case is the plan for the longest case, so the report is ROBUST
+    with no second search. A show that can run long makes the two cases differ, and then each
+    is searched.
+    """
+    asked = Asked(PROGRAMS[program])
+    assert asked.check(two_shows()).robust
+    assert asked.questions == ["which plan is shown"]
+    asked = Asked(PROGRAMS[program])
+    report = asked.check(two_shows(lasts_between("evening", "PT2H", "PT3H")))
+    assert report.robust
+    assert asked.questions == ["which plan is shown"] * 2
+
+
+@pytest.mark.parametrize("program", PROGRAMS)
+def test_a_plan_that_buys_a_place_is_looked_for_once_in_each_world(program: str) -> None:
+    """Sam still has to buy a place for the show, and no duration is CONTINGENT.
+
+    First comes a search for a plan that takes no place of an OFFER, and there is none. The
+    plan of the worst case then stands for the longest case: two searches, where each world
+    has one.
+    """
+    file = trip(
+        ["sam"],
+        ["theater"],
+        [stays("show", "theater")],
+        [
+            starts_at("show", 19),
+            lasts("show", "PT2H"),
+            cutoff("show", "PT0S"),
+            needs_right("show"),
+            offer("show", 1, price="20.00 USD"),
+        ],
+        [lock("show", "sam")],
+        tickets=True,
+    )
+    asked = Asked(PROGRAMS[program])
+    report = asked.check(file)
+    assert (report.answer, report.robust) == (Answer.FEASIBLE, True)
+    assert [cover.to_buy for cover in report.rights] == [True]
+    assert asked.questions == ["which plan is shown"] * 2
 
 
 def found_by(works: Works, file: File, monkeypatch: pytest.MonkeyPatch) -> list[Itinerary]:

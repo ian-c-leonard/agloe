@@ -211,7 +211,9 @@ def reports(
             better = [(with_no_offer(longest), True), *better, (with_no_offer(worst), False)]
         chosen, robust = plain, False
         for world, holds in better:
-            found = shown(file, world)
+            # With no CONTINGENT duration the longest case is the worst case, and the plan
+            # found there is the plan for it: the same world has the same plan.
+            found = plain if world == worst else shown(file, world)
             if found is not None:
                 chosen, robust = found, holds
                 break
