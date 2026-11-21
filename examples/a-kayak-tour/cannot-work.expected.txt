@@ -1,0 +1,6 @@
+INFEASIBLE: this trip cannot work.
+
+These FACTs and DECISIONs rule out every plan by themselves. Take any one away and they no longer do. A FACT that is taken away leaves what it said unknown. Times are in America/Chicago.
+  tour-needs-swimmers: Kayak tour requires swimming of each PERSON who takes part
+  jo-does-not-swim: Jo does not have the CAPABILITY swimming
+  lock-kayak-tour: Alex, Sam and Jo take part in Kayak tour

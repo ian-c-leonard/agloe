@@ -47,6 +47,11 @@ class Person(TypedDict):
     name: Name
 
 
+class Capability(TypedDict):
+    id: Id
+    name: Name
+
+
 class Place(TypedDict):
     id: Id
     name: Name
@@ -233,6 +238,33 @@ class StartsFrom(TypedDict):
     starts_from: Id
 
 
+class HasCapability(TypedDict):
+    id: Id
+    person: Id
+    capability: Id
+    has: bool
+
+
+class Requirement(TypedDict):
+    capability: Id
+    of: Literal["none", "one", "each"]
+
+
+class RequiresCapability(TypedDict):
+    id: Id
+    option: Id
+    requires: Requirement
+
+
+class Requiring(TypedDict):
+    requires: Id
+
+
+class CompleteForACapability(TypedDict):
+    id: Id
+    complete: Requiring
+
+
 class TripStart(TypedDict):
     id: Id
     trip_starts_at: Time
@@ -259,6 +291,7 @@ class File(TypedDict):
     persons: list[Person]
     places: list[Place]
     budgets: NotRequired[list[Budget]]
+    capabilities: NotRequired[list[Capability]]
     options: list[OptionAtAPlace | OptionBetweenPlaces]
     ways: list[WayOneWay | WayBothWays]
     wants: list[Want]
@@ -278,5 +311,8 @@ class File(TypedDict):
         | BookingFact
         | OfferFact
         | CompleteRights
+        | HasCapability
+        | RequiresCapability
+        | CompleteForACapability
     ]
     decisions: list[Lock | TripStart | TripEnd | Cap]

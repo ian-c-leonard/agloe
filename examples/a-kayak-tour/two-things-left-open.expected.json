@@ -1,0 +1,22 @@
+{
+  "answer": "UNDETERMINED",
+  "missing": [
+    [
+      {
+        "what": "requires nothing",
+        "option": "kayak-tour",
+        "capability": "swimming",
+        "of_at_most": "one",
+        "at_most": null
+      }
+    ],
+    [
+      {
+        "what": "has",
+        "person": "jo",
+        "capability": "swimming",
+        "at_most": null
+      }
+    ]
+  ]
+}

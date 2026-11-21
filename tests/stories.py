@@ -202,6 +202,27 @@ def every_right(option: str, *offers: str) -> Document:
     return {"id": f"every-right-to-{option}", "complete": whole}
 
 
+def can(person: str, capability: str, has: bool = True) -> Document:
+    """A FACT that a PERSON has a CAPABILITY, or with ``has`` False that they do not."""
+    return {"id": f"{person}-{capability}", "person": person, "capability": capability, "has": has}
+
+
+def cannot(person: str, capability: str) -> Document:
+    """A FACT that a PERSON does not have a CAPABILITY."""
+    return can(person, capability, False)
+
+
+def requires(option: str, capability: str, of: str = "one") -> Document:
+    """A FACT about what an OPTION requires of a CAPABILITY: "one", "each" or "none"."""
+    asked = {"capability": capability, "of": of}
+    return {"id": f"{option}-requires-{capability}", "option": option, "requires": asked}
+
+
+def every_requirement(capability: str) -> Document:
+    """A FACT that the FILE states every OPTION that requires this CAPABILITY."""
+    return {"id": f"every-{capability}", "complete": {"requires": capability}}
+
+
 def trip(
     persons: list[str],
     places: list[str],
@@ -212,6 +233,7 @@ def trip(
     wants: Sequence[Document] = (),
     rights: bool = False,
     budgets: Sequence[Document] | None = None,
+    capabilities: Sequence[str] = (),
 ) -> File:
     """A FILE. None of its OPTIONs needs a right, unless the story is about rights.
 
@@ -219,7 +241,8 @@ def trip(
     ``rights``, the FILE says about rights only what ``facts`` says.
 
     Unless the story is about money, one BUDGET called money pays for everybody, in USD.
-    ``budgets`` are the BUDGETs of a story that is.
+    ``budgets`` are the BUDGETs of a story that is. ``capabilities`` are the CAPABILITIES of a
+    story about what the PERSONs can do.
     """
     if budgets is None:
         budgets = [budget("money", *persons)]
@@ -229,6 +252,7 @@ def trip(
             "persons": named(*persons),
             "places": named(*places),
             "budgets": list(budgets),
+            "capabilities": named(*capabilities),
             "options": options,
             "ways": list(ways),
             "wants": list(wants),

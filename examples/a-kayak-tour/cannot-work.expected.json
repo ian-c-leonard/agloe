@@ -1,0 +1,8 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "tour-needs-swimmers",
+    "jo-does-not-swim",
+    "lock-kayak-tour"
+  ]
+}

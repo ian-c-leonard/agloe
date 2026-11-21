@@ -17,12 +17,15 @@ from agloe.file import (
     Cap,
     Complete,
     CompleteFor,
+    CompleteRequires,
     CompleteRights,
     Fact,
     File,
+    Has,
     Lock,
     Money,
     Offer,
+    Requires,
     Start,
     StartsFrom,
 )
@@ -44,6 +47,7 @@ from agloe.reference import (
     unknowns,
     way_to_pay,
     with_no_offer,
+    with_one_required,
     with_these_at_best,
     with_this_long,
     worst_case,
@@ -81,11 +85,16 @@ class Missing:
     comes with a FACT about money, and says who buys which place in one plan that works when
     the FACT's set turns out well. For a price, they are the places of its OFFER. For a
     BUDGET that can pay for a PERSON, they are the places that PERSON has to pay for.
+
+    ``of`` comes with what an OPTION requires of a CAPABILITY, where that is the only FACT of
+    its set. It is the most the OPTION can require for a FEASIBLE TRIP: "one" where it can
+    require it of one PERSON, and "none" where it can require nothing.
     """
 
     unknown: Unknown
     at_most: int | None
     buys: tuple[Cover, ...] = ()
+    of: str | None = None
 
 
 @dataclass(frozen=True)
@@ -109,6 +118,22 @@ class CapRow:
     to_buy: int
     if_needed: int
     left: int
+
+
+@dataclass(frozen=True)
+class Supply:
+    """Who meets one requirement of an OPTION in the plan shown.
+
+    ``of`` is "one" or "each", as the FILE states it, and None where the FILE does not say
+    what the OPTION requires of the CAPABILITY. ``persons`` have the CAPABILITY by a FACT:
+    the first of those who take part, in the FILE's order, where one PERSON is enough, and
+    everybody who takes part otherwise.
+    """
+
+    option: str
+    capability: str
+    of: str | None
+    persons: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -136,6 +161,9 @@ class Report:
 
     In a FILE with a cap, a FEASIBLE Report has a row for each cap in ``caps``, and an
     UNDETERMINED one has a plan for each set of ``missing`` in ``plans``, in the same order.
+
+    A FEASIBLE Report says in ``supplies`` who meets each requirement of an OPTION in the
+    ITINERARY shown.
     """
 
     answer: Answer
@@ -149,6 +177,7 @@ class Report:
     missing: tuple[tuple[Missing, ...], ...] = ()
     caps: tuple[CapRow, ...] = ()
     plans: tuple[Plan, ...] = ()
+    supplies: tuple[Supply, ...] = ()
 
 
 type Shown = Callable[[File, World], Itinerary | None]
@@ -218,7 +247,8 @@ def reports(
                 chosen, robust = found, holds
                 break
         rights = _covers(file, worst, chosen)
-        used = {cover.by for cover in rights}
+        supplies, brought = _supplied(file, chosen)
+        used = {cover.by for cover in rights} | brought
         relies_on = [fact.id for fact in file.facts if _relied_on(file, chosen, fact, used)]
         relies_on += [want.id for want in file.wants if want.musts or want.must_nots]
         # Every LOCK and every cap, and the times of the TRIP where the plan has anything.
@@ -228,7 +258,16 @@ def reports(
             # The steps keep the order the ITINERARY lists them in: that is the plan shown.
             at_worst = tuple(broken_as_listed(file, longest, in_world(longest, chosen)))
         caps = _cap_rows(file, rights, ())
-        yield Report(Answer.FEASIBLE, chosen, tuple(relies_on), robust, at_worst, rights, caps=caps)
+        yield Report(
+            Answer.FEASIBLE,
+            chosen,
+            tuple(relies_on),
+            robust,
+            at_worst,
+            rights,
+            caps=caps,
+            supplies=supplies,
+        )
         return
     if sure:
         raise AssertionError("an ITINERARY works in the worst case, and the rule shows none")
@@ -257,6 +296,8 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> 
     charged, and that is how each cap is known to hold. It relies on no FACT that the rights
     to an OPTION are COMPLETE.
     """
+    if isinstance(fact, Has | Requires | CompleteRequires):
+        return fact.id in used
     if isinstance(fact, CompleteFor):
         return _settles(file, itinerary, fact)
     if isinstance(fact, Booking) and file.caps:
@@ -300,6 +341,45 @@ def _covers(file: File, world: World, itinerary: Itinerary) -> tuple[Cover, ...]
                 offer, budget = paying[step.option, person]
                 covers.append(Cover(step.option, person, offer, True, offers[offer].price, budget))
     return tuple(covers)
+
+
+def _supplied(file: File, itinerary: Itinerary) -> tuple[tuple[Supply, ...], set[str]]:
+    """Who meets each requirement in a plan, and the FACTs about CAPABILITIES it relies on.
+
+    For each OPTION in the plan and each CAPABILITY, the plan relies on the FACT about what
+    the OPTION requires, where the FILE states one. Where the FILE states none and the
+    CAPABILITY's set is COMPLETE, it relies on that FACT: only it says that the OPTION
+    requires nothing. Where the OPTION requires the CAPABILITY of one PERSON, the plan relies
+    on the FACT that the first PERSON in it who has the CAPABILITY has it, in the FILE's
+    order. Where it requires it of each PERSON, or the FILE does not say what it requires,
+    the plan relies on that FACT for everybody in the OPTION.
+
+    The plan works in the worst case, so those FACTs are there.
+    """
+    order = {person.id: number for number, person in enumerate(file.persons)}
+    taking_part = {step.option: step.persons for step in itinerary if step.option is not None}
+    supplies: list[Supply] = []
+    relied: set[str] = set()
+    for option, persons in taking_part.items():
+        for capability in file.capabilities:
+            stated = file.requirement(option, capability.id)
+            of = file.requires(option, capability.id)
+            if stated is not None:
+                relied.add(stated.id)
+            if of == "none":
+                whole = file.requires_complete(capability.id)
+                if stated is None and whole is not None:
+                    relied.add(whole.id)
+                continue
+            able = [person for person in persons if file.has(person, capability.id)]
+            able.sort(key=order.__getitem__)
+            chosen = able[:1] if of == "one" else able
+            for person in chosen:
+                known = file.ability(person, capability.id)
+                if known is not None:
+                    relied.add(known.id)
+            supplies.append(Supply(option, capability.id, of, tuple(chosen)))
+    return tuple(supplies), relied
 
 
 def _settles(file: File, itinerary: Itinerary, whole: CompleteFor) -> bool:
@@ -411,7 +491,12 @@ def _missing(file: File, works: Works, shown: Shown) -> tuple[tuple[Missing, ...
                 alone = count + size == 1
                 return tuple(
                     tuple(
-                        Missing(u, _limit(file, u, works) if alone else None, bought)
+                        Missing(
+                            u,
+                            _limit(file, u, works) if alone else None,
+                            bought,
+                            _most_required(file, u, works) if alone else None,
+                        )
                         for u, bought in zip(some, _bought(file, some, shown), strict=True)
                     )
                     for some in enough
@@ -476,6 +561,9 @@ def _plan(file: File, enough: Sequence[Missing], shown: Shown) -> Plan:
     if len(enough) == 1 and unknowns[0].what in ("duration", "cutoff", "other ways"):
         longest = enough[0].at_most
         world = with_this_long(file, unknowns[0], _beyond(file) if longest is None else longest)
+    if len(enough) == 1 and enough[0].of == "one":
+        # The plan is one that works at the most the OPTION can require.
+        world = with_one_required(file, unknowns[0])
     buys = _purchases(file, unknowns, shown, world)
     asked = [unknown.about or "" for unknown in unknowns if unknown.what == "charged"]
     return Plan(tuple(buys), _cap_rows(file, buys, asked))
@@ -604,12 +692,25 @@ def _beyond(file: File) -> int:
     return max(fixed) - min(fixed) + 1 if fixed else 1
 
 
+def _most_required(file: File, unknown: Unknown, works: Works) -> str | None:
+    """The most that one OPTION can require of a CAPABILITY for the TRIP to work.
+
+    "one" where the TRIP works with the OPTION requiring it of one PERSON and every other
+    unknown FACT at its worst, and "none" where it works only if the OPTION requires nothing.
+    None for an unknown that is not what an OPTION requires.
+    """
+    if unknown.what != "requires nothing":
+        return None
+    return "one" if works(file, with_one_required(file, unknown)) else "none"
+
+
 def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
     """The most seconds this one unknown can be for the TRIP to work.
 
     None for an unknown that is not a length of time, and None when any length would do.
     """
     no_length = ("start", "satisfies", "does not satisfy", "another option")
+    no_length += ("requires nothing", "has")
     about_rights = ("needs no right", "another right", "price", "funding", "charged")
     if unknown.what in (*no_length, *about_rights):
         return None

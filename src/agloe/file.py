@@ -87,6 +87,14 @@ class Budget:
 
 
 @dataclass(frozen=True)
+class Capability:
+    """Something a PERSON can do, such as driving a manual car or swimming."""
+
+    id: str
+    name: str
+
+
+@dataclass(frozen=True)
 class Place:
     id: str
     name: str
@@ -314,6 +322,42 @@ class CompleteRights:
     offers: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class Has:
+    """A FACT: whether a PERSON has a CAPABILITY."""
+
+    id: str
+    person: str
+    capability: str
+    has: bool
+
+
+@dataclass(frozen=True)
+class Requires:
+    """A FACT: whether an OPTION requires a CAPABILITY, and of whom.
+
+    ``of`` is "one" where a PERSON who takes part has to have it, "each" where every PERSON
+    who takes part has to, and "none" where the OPTION does not require it.
+    """
+
+    id: str
+    option: str
+    capability: str
+    of: str
+
+
+@dataclass(frozen=True)
+class CompleteRequires:
+    """A FACT: the FILE states every one of its OPTIONs that requires this CAPABILITY.
+
+    Each has a FACT that it does. So an OPTION of the FILE with no FACT about the CAPABILITY
+    does not require it.
+    """
+
+    id: str
+    capability: str
+
+
 type Fact = (
     Start
     | Duration
@@ -326,6 +370,9 @@ type Fact = (
     | Booking
     | Offer
     | CompleteRights
+    | Has
+    | Requires
+    | CompleteRequires
 )
 type Decision = Lock | TripStart | TripEnd | Cap
 
@@ -343,6 +390,7 @@ class File:
     decisions: tuple[Decision, ...]
     zone: str = "UTC"  # the time zone of the first time in the FILE; reports show times in it
     budgets: tuple[Budget, ...] = ()
+    capabilities: tuple[Capability, ...] = ()
 
     @property
     def locks(self) -> tuple[Lock, ...]:
@@ -539,6 +587,56 @@ class File:
         if want in self._about_the_end:
             return False
         return None if self.complete_for(want) is None else False
+
+    def has(self, person: str, capability: str) -> bool | None:
+        """Whether this PERSON has this CAPABILITY. None: the FILE does not say."""
+        return self._has.get((person, capability))
+
+    def ability(self, person: str, capability: str) -> Has | None:
+        """The FACT about whether this PERSON has this CAPABILITY, if there is one."""
+        return self._abilities.get((person, capability))
+
+    def requirement(self, option: str, capability: str) -> Requires | None:
+        """The FACT about whether this OPTION requires this CAPABILITY, if there is one."""
+        return self._requirements.get((option, capability))
+
+    def requires(self, option: str, capability: str) -> str | None:
+        """What this OPTION requires of this CAPABILITY, as far as the FILE says.
+
+        "none", "one" or "each", and None where the FILE does not say. A FACT about the two
+        settles it. Without one, a FACT that the CAPABILITY's set is COMPLETE settles it too:
+        the OPTION does not require it.
+        """
+        stated = self._requirements.get((option, capability))
+        if stated is not None:
+            return stated.of
+        return None if self.requires_complete(capability) is None else "none"
+
+    def requires_complete(self, capability: str) -> CompleteRequires | None:
+        """The FACT that the FILE states every OPTION that requires this CAPABILITY, if any."""
+        return self._requires_complete.get(capability)
+
+    @cached_property
+    def _abilities(self) -> dict[tuple[str, str], Has]:
+        return {
+            (fact.person, fact.capability): fact for fact in self.facts if isinstance(fact, Has)
+        }
+
+    @cached_property
+    def _has(self) -> dict[tuple[str, str], bool]:
+        return {pair: fact.has for pair, fact in self._abilities.items()}
+
+    @cached_property
+    def _requirements(self) -> dict[tuple[str, str], Requires]:
+        return {
+            (fact.option, fact.capability): fact
+            for fact in self.facts
+            if isinstance(fact, Requires)
+        }
+
+    @cached_property
+    def _requires_complete(self) -> dict[str, CompleteRequires]:
+        return {fact.capability: fact for fact in self.facts if isinstance(fact, CompleteRequires)}
 
     def without(self, record: str) -> File:
         """The same FILE with one FACT, WANT or DECISION left out.
@@ -815,6 +913,10 @@ def load(document: object) -> File:
 
     held = {budget.id: budget.currencies for budget in budgets}
     budget_ids = set(held)
+    capabilities = tuple(Capability(c["id"], c["name"]) for c in raw.get("capabilities", ()))
+    for index, capability in enumerate(capabilities):
+        claim(f"/capabilities/{index}", capability.id)
+    capability_ids = {capability.id for capability in capabilities}
     options: list[Option] = []
     for index, option in enumerate(raw["options"]):
         where = f"/options/{index}"
@@ -864,6 +966,8 @@ def load(document: object) -> File:
     stated: set[tuple[str, type]] = set()
     complete: set[tuple[str | None, str | None, int, int]] = set()
     satisfied: set[tuple[str, str]] = set()
+    able: set[tuple[str, str]] = set()  # each PERSON and CAPABILITY that a FACT is about
+    required: set[tuple[str, str]] = set()  # each OPTION and CAPABILITY that a FACT is about
     offered: list[tuple[str, str, str]] = []  # where an OFFER is, its id and its OPTION
     closures: list[tuple[str, str, tuple[str, ...]]] = []  # the same for a COMPLETE set of rights
     for index, fact in enumerate(raw["facts"]):
@@ -880,6 +984,14 @@ def load(document: object) -> File:
                     problems.append(f"{where}: another FACT already states this about {about}")
                 stated.add((whole["satisfies"], CompleteFor))
                 facts.append(CompleteFor(fact["id"], whole["satisfies"]))
+                continue
+            if "requires" in whole:
+                about = whole["requires"]
+                known(where, about, "CAPABILITY", capability_ids)
+                if (about, CompleteRequires) in stated:
+                    problems.append(f"{where}: another FACT already states this about {about}")
+                stated.add((about, CompleteRequires))
+                facts.append(CompleteRequires(fact["id"], about))
                 continue
             if "rights_to" in whole:
                 about = whole["rights_to"]
@@ -940,6 +1052,15 @@ def load(document: object) -> File:
             price = next(iter(quoted), None)
             facts.append(Offer(fact["id"], fact["offer"]["option"], on_offer, price))
             continue
+        if "has" in fact:
+            known(where, fact["person"], "PERSON", person_ids)
+            known(where, fact["capability"], "CAPABILITY", capability_ids)
+            if (fact["person"], fact["capability"]) in able:
+                both = f"{fact['person']} and {fact['capability']}"
+                problems.append(f"{where}: another FACT already states this about {both}")
+            able.add((fact["person"], fact["capability"]))
+            facts.append(Has(fact["id"], fact["person"], fact["capability"], fact["has"]))
+            continue
         if "person" in fact:
             known(where, fact["person"], "PERSON", person_ids)
             known(where, fact["starts_from"], "PLACE", place_ids)
@@ -976,6 +1097,15 @@ def load(document: object) -> File:
                 problems.append(f"{where}: another FACT already states this about {both}")
             satisfied.add((fact["option"], about["want"]))
             facts.append(Satisfies(fact["id"], fact["option"], about["want"], int(about["degree"])))
+            continue
+        if "requires" in fact:
+            asked = fact["requires"]
+            known(where, asked["capability"], "CAPABILITY", capability_ids)
+            if (fact["option"], asked["capability"]) in required:
+                both = f"{fact['option']} and {asked['capability']}"
+                problems.append(f"{where}: another FACT already states this about {both}")
+            required.add((fact["option"], asked["capability"]))
+            facts.append(Requires(fact["id"], fact["option"], asked["capability"], asked["of"]))
             continue
         if "starts_at" in fact:
             made = Start(fact["id"], fact["option"], when(where, fact["starts_at"]))
@@ -1062,6 +1192,7 @@ def load(document: object) -> File:
         tuple(decisions),
         zone,
         tuple(budgets),
+        capabilities,
     )
 
 

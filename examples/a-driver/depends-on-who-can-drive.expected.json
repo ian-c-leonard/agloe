@@ -1,0 +1,21 @@
+{
+  "answer": "UNDETERMINED",
+  "missing": [
+    [
+      {
+        "what": "has",
+        "person": "alex",
+        "capability": "drive-manual",
+        "at_most": null
+      }
+    ],
+    [
+      {
+        "what": "has",
+        "person": "sam",
+        "capability": "drive-manual",
+        "at_most": null
+      }
+    ]
+  ]
+}

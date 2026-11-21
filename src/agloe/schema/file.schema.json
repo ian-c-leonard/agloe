@@ -9,6 +9,7 @@
     "persons": { "type": "array", "items": { "$ref": "#/$defs/person" } },
     "places": { "type": "array", "items": { "$ref": "#/$defs/place" } },
     "budgets": { "type": "array", "items": { "$ref": "#/$defs/budget" } },
+    "capabilities": { "type": "array", "items": { "$ref": "#/$defs/capability" } },
     "options": {
       "type": "array",
       "items": { "oneOf": [{ "$ref": "#/$defs/option_at_a_place" }, { "$ref": "#/$defs/option_between_places" }] }
@@ -36,7 +37,10 @@
           { "$ref": "#/$defs/needs_right" },
           { "$ref": "#/$defs/booking" },
           { "$ref": "#/$defs/offer" },
-          { "$ref": "#/$defs/complete_rights" }
+          { "$ref": "#/$defs/complete_rights" },
+          { "$ref": "#/$defs/has_capability" },
+          { "$ref": "#/$defs/requires_capability" },
+          { "$ref": "#/$defs/complete_for_a_capability" }
         ]
       }
     },
@@ -133,6 +137,17 @@
     },
     "person": {
       "title": "Person",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "$ref": "#/$defs/name" }
+      }
+    },
+    "capability": {
+      "title": "Capability",
+      "description": "A CAPABILITY: something a PERSON can do, such as driving a manual car or swimming.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "name"],
@@ -525,6 +540,63 @@
         "id": { "$ref": "#/$defs/id" },
         "person": { "$ref": "#/$defs/id" },
         "starts_from": { "$ref": "#/$defs/id" }
+      }
+    },
+    "has_capability": {
+      "title": "HasCapability",
+      "description": "A FACT: whether a PERSON has a CAPABILITY.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "person", "capability", "has"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "person": { "$ref": "#/$defs/id" },
+        "capability": { "$ref": "#/$defs/id" },
+        "has": {
+          "description": "True: the PERSON can do it. False: the PERSON cannot.",
+          "type": "boolean"
+        }
+      }
+    },
+    "requires_capability": {
+      "title": "RequiresCapability",
+      "description": "A FACT: whether an OPTION requires a CAPABILITY, and of whom.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "option", "requires"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "option": { "$ref": "#/$defs/id" },
+        "requires": {
+          "title": "Requirement",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["capability", "of"],
+          "properties": {
+            "capability": { "$ref": "#/$defs/id" },
+            "of": {
+              "description": "`one`: a PERSON who takes part in the OPTION has the CAPABILITY. `each`: every PERSON who takes part has it. `none`: the OPTION does not require it.",
+              "enum": ["none", "one", "each"]
+            }
+          }
+        }
+      }
+    },
+    "complete_for_a_capability": {
+      "title": "CompleteForACapability",
+      "description": "A FACT: the FILE states every one of its OPTIONs that requires the CAPABILITY. Each has a FACT that it does. So an OPTION of the FILE with no FACT about the CAPABILITY does not require it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "complete"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "complete": {
+          "title": "Requiring",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requires"],
+          "properties": { "requires": { "$ref": "#/$defs/id" } }
+        }
       }
     },
     "trip_start": {

@@ -79,6 +79,10 @@ def reports(file: File, ahead: bool = True) -> Iterator[Answer | Report]:
     are exact, so its answer is the one the solver proved. What was given before is not given
     again.
     """
+    if file.capabilities:
+        # The solver's model has no CAPABILITIES, so the reference checker answers.
+        yield from answers.reports(file, ahead=ahead)
+        return
     given: list[Answer | Report] = []
     try:
         asked: _Asked = {}

@@ -1,0 +1,44 @@
+{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "kayak-tour",
+      "persons": [
+        "alex",
+        "sam",
+        "jo"
+      ],
+      "start": "2027-07-18T15:00:00-05:00[America/Chicago]",
+      "end": "2027-07-18T17:00:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "tour-booking",
+        "sam": "tour-booking",
+        "jo": "tour-booking"
+      }
+    }
+  ],
+  "relies_on": [
+    "tour-time",
+    "tour-length",
+    "tour-needs-a-booking",
+    "tour-booking",
+    "tour-needs-swimmers",
+    "alex-swims",
+    "sam-swims",
+    "jo-swims",
+    "lock-kayak-tour"
+  ],
+  "robust": true,
+  "requirements": [
+    {
+      "option": "kayak-tour",
+      "capability": "swimming",
+      "of": "each",
+      "persons": [
+        "alex",
+        "sam",
+        "jo"
+      ]
+    }
+  ]
+}

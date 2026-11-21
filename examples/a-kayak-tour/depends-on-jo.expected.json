@@ -1,0 +1,13 @@
+{
+  "answer": "UNDETERMINED",
+  "missing": [
+    [
+      {
+        "what": "has",
+        "person": "jo",
+        "capability": "swimming",
+        "at_most": null
+      }
+    ]
+  ]
+}

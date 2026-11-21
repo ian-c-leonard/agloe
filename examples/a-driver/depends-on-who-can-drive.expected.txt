@@ -1,0 +1,5 @@
+UNDETERMINED: the FILE does not say enough to tell.
+
+The trip works in any of these cases:
+  1. Alex has the CAPABILITY driving a manual car.
+  2. Sam has the CAPABILITY driving a manual car.
