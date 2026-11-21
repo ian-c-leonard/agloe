@@ -1,10 +1,11 @@
 // The lines of a report in words, and what on the calendar each line is about. There is no page
 // in here, so the tests run this as it is.
 //
-// A report in words shows the plan one step to a line, and under a step what it warns of. It
-// shows each FACT, WANT and DECISION that it names on a line that starts with its id. The view
-// sends the steps of the plan in the same order, and the report as JSON lists the ids it names.
-// So a line can be tied to the step it shows, or to the record it names, and to nothing else.
+// A report in words shows the plan one step to a line, and under a step what it warns of. Where
+// it names FACTs, WANTs and DECISIONs, it shows them one to a line, each line starting with the
+// id, in the order in which the report as JSON lists them. The view sends the steps of the plan
+// in the report's order. So a line can be tied to the step it shows, or to the record it names,
+// and to nothing else.
 //
 // Nothing here judges a TRIP. It finds what the report already says, line by line.
 
@@ -13,13 +14,10 @@ const STEP = /^ {2}\d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+, .+$/;
 /** A line under a step that says what the report warns of there. */
 const WARNING = /^ {4}! /;
 
-/** The ids of the FACTs, WANTs and DECISIONs that a report as JSON names. */
-function named(report) {
-  const ids = new Set();
-  for (const list of [report?.relies_on, report?.conflict]) {
-    if (Array.isArray(list)) for (const id of list) if (typeof id === "string") ids.add(id);
-  }
-  return ids;
+/** The lists of ids that a report as JSON names one after another in its words. */
+function listsOf(report) {
+  const paid = Array.isArray(report?.money?.paid) ? report.money.paid.map((each) => each?.booking) : null;
+  return [report?.relies_on, report?.conflict, paid].filter((list) => Array.isArray(list) && list.length && list.every((id) => typeof id === "string"));
 }
 
 /**
@@ -28,16 +26,17 @@ function named(report) {
  * says that the line is a warning under its step.
  *
  * The lines of a plan are tied to steps only where there is one line for each step that the
- * view sent, in the same order: then the two are the same plan.
+ * view sent, in the same order: then the two are the same plan. Lines are tied to records only
+ * where they name a whole list of the report as JSON, one id after another. So a line that
+ * only starts like an id, such as the total in a currency, is tied to nothing.
  */
 export function lines(text, report, trip) {
-  const ids = named(report);
   const all = text.split("\n");
   const plan = all.filter((line) => STEP.test(line)).length;
   const tied = trip !== null && trip.itinerary && plan === trip.steps.length;
   let step = -1;
   let under = false; // whether this line can still be a warning under the step above it
-  return all.map((line) => {
+  const found = all.map((line) => {
     if (tied && STEP.test(line)) {
       step += 1;
       under = true;
@@ -45,9 +44,15 @@ export function lines(text, report, trip) {
     }
     if (under && WARNING.test(line)) return { text: line, step, warns: true, record: null };
     under = false;
-    const id = line.startsWith("  ") && line.includes(": ") ? line.slice(2, line.indexOf(": ")) : null;
-    return { text: line, step: null, warns: false, record: id !== null && ids.has(id) ? id : null };
+    return { text: line, step: null, warns: false, record: null };
   });
+  for (const ids of listsOf(report)) {
+    // The first place where the lines name these ids one after another.
+    const names = (at) => ids.every((id, n) => at + n < found.length && found[at + n].step === null && found[at + n].record === null && found[at + n].text.startsWith(`  ${id}: `));
+    const at = found.findIndex((_, n) => names(n));
+    if (at >= 0) ids.forEach((id, n) => (found[at + n].record = id));
+  }
+  return found;
 }
 
 /**

@@ -41,6 +41,7 @@ PAGE = (
     "calendar.js",
     "lines.js",
 )  # the page and its files
+NEEDED = PAGE[:4]  # those that the answer and the report need: the page shows them without the rest
 KINDS = {".html": "text/html", ".css": "text/css", ".js": "text/javascript"}
 LOOK = 0.1  # seconds between two looks at the FILE, and at whether the view is closed
 QUIET = 15.0  # seconds after which a page with nothing new is told that the view is still there
@@ -65,11 +66,20 @@ POLICY = "default-src 'self'; frame-ancestors 'none'"
 
 
 def _static() -> dict[str, tuple[str, bytes]]:
-    """The page and its files, each by the path a browser asks for: its kind and its content."""
+    """The page and its files, each by the path a browser asks for: its kind and its content.
+
+    A file that the answer and the report do not need is left out where it cannot be read. The
+    page then shows them without the calendar, or with no line tied, and says so.
+    """
     parts: dict[str, tuple[str, bytes]] = {}
     folder = resources.files("agloe.view").joinpath("static")
     for name in PAGE:
-        content = folder.joinpath(name).read_bytes()
+        try:
+            content = folder.joinpath(name).read_bytes()
+        except OSError:
+            if name in NEEDED:
+                raise
+            continue
         parts[f"/{name}"] = (f"{KINDS[Path(name).suffix]}; charset=utf-8", content)
     parts["/"] = parts.pop("/index.html")
     return parts

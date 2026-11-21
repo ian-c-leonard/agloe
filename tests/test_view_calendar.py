@@ -337,7 +337,7 @@ def test_a_report_that_names_nothing_the_page_can_read_marks_nothing() -> None:
     assert other["clash"] is False
 
 
-WARNS = " A yellow edge marks each step at which the report warns of something."
+WARNS = " A yellow edge marks each step shown at which the report warns of something."
 
 
 def in_words(path: Path) -> tuple[Trip, dict[str, Any], str]:
@@ -366,6 +366,45 @@ def test_the_calendar_marks_the_steps_at_which_the_report_warns_of_something() -
     bare = calendar(sent, found)
     assert all(mark["warns"] == [] for mark in bare["days"][0]["marks"])
     assert (bare["warned"], WARNS in bare["says"]) == (False, False)
+
+
+def test_the_calendar_says_what_the_report_warns_of_after_the_days_shown() -> None:
+    """Two concerts three months apart, each with a ticket still to buy. Only the first is shown."""
+    file = trip(
+        ["alex"],
+        ["hall"],
+        [stays("first", "hall"), stays("last", "hall")],
+        [starts_at("first", 10)],
+        [],
+    )
+    day = 86400
+    plan = (
+        Step("first", "hall", "hall", ("alex",), seconds(10), seconds(11)),
+        Step("last", "hall", "hall", ("alex",), seconds(10) + 99 * day, seconds(11) + 99 * day),
+    )
+    sent = sent_for(file, Report(Answer.FEASIBLE, itinerary=plan))
+    assert [len(step["parts"]) for step in sent["steps"]] == [1, 0]
+    words = "\n".join(
+        [
+            "FEASIBLE, with a WARNING: this trip works, but not everything is booked yet.",
+            "",
+            "Saturday 15 May 2027 (times in America/Chicago)",
+            "  10:00 am to 11:00 am: first, alex",
+            "    ! alex still has to buy a right to this.",
+            "",
+            "Sunday 22 August 2027 (times in America/Chicago)",
+            "  10:00 am to 11:00 am: last, alex",
+            "    ! alex still has to buy a right to this.",
+            "",
+        ]
+    )
+    laid = calendar(sent, {"answer": "FEASIBLE"}, words)
+    assert [mark["warns"] for mark in laid["days"][0]["marks"]] == [
+        ["alex still has to buy a right to this."]
+    ]
+    assert laid["says"].endswith(
+        f"{WARNS} The report also warns of something at 1 step after the days shown."
+    )
 
 
 def test_the_calendar_warns_only_of_what_the_report_warns_of() -> None:

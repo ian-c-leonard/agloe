@@ -16,7 +16,7 @@ let state = start();
 let lay = null; // what lays a calendar out, once the page has loaded it: false where it cannot
 let tie = null; // what ties the lines of a report to steps and records, once the page has loaded it
 let drawn; // the TRIP that the calendar on the page is of
-let written; // the report in words that is on the page, and whether its lines are tied
+let written = []; // what the report on the page was written from: its words, and what its lines are tied to
 
 function made(tag, className, text = "") {
   return Object.assign(document.createElement(tag), { className, textContent: text });
@@ -73,7 +73,9 @@ function put(body, mark, people, open, ticks) {
   box.append(block);
   body.append(box);
   if (mark.kind === "option" || !mark.named) return;
-  const name = made("span", "way-name", mark.name);
+  // The name is part of the mark: pointing at it is pointing at the WAY.
+  const name = Object.assign(made("span", "way-name", mark.name), { title: box.title });
+  Object.assign(name.dataset, box.dataset);
   name.style.left = `calc(${((mark.first + 0.5) / people) * 100}% + 6px)`;
   name.style.top = `${(mark.top + mark.height / 2) * PER_MINUTE}px`;
   body.append(name);
@@ -164,7 +166,7 @@ function write(text, tied) {
   }
   report.replaceChildren();
   tied.forEach((line, n) => {
-    const words = made("span", line.warns ? "line warns" : "line", line.text);
+    const words = made("span", line.warns ? "row warns" : "row", line.text);
     if (line.step !== null) words.dataset.step = line.step;
     if (line.record !== null) words.dataset.record = line.record;
     report.append(words, n + 1 < tied.length ? "\n" : "");
@@ -172,18 +174,26 @@ function write(text, tied) {
 }
 
 /**
- * Pointing at a step, or at a line of the report, lights up what is about the same thing: the
- * marks of that step, its line in the plan, what the report warns of there, and the lines of
- * the records that are about it. Pointing at a record's line lights up what it is about.
+ * Pointing at a step lights up that step and what the report says of it: its marks, its line
+ * in the plan, what the report warns of there, and the lines of the records that are about it.
+ * It lights up no other step, though a record may be about both. Pointing at the line of a
+ * record, or at a time of the TRIP, lights up everything that the record is about.
  */
 function light(target) {
   const from = target instanceof Element ? target.closest("[data-step], [data-record], [data-records]") : null;
   const ids = (each) => [each.dataset.record, ...(each.dataset.records ?? "").split(" ")].filter(Boolean);
   const records = new Set(from ? ids(from) : []);
+  const step = from?.dataset.step;
   for (const each of document.querySelectorAll("[data-step], [data-record], [data-records]")) {
-    const same = from !== null && ((from.dataset.step !== undefined && each.dataset.step === from.dataset.step) || ids(each).some((id) => records.has(id)));
+    const shares = ids(each).some((id) => records.has(id));
+    const same = from !== null && (step === undefined ? shares : each.dataset.step === step || (each.dataset.step === undefined && shares));
     each.classList.toggle("lit", same);
   }
+}
+
+/** What is under the pointer is lit again, after the page has written or drawn anew. */
+function lightAgain() {
+  requestAnimationFrame(() => light([...document.querySelectorAll(":hover")].pop() ?? null));
 }
 
 function show() {
@@ -198,9 +208,11 @@ function show() {
   // The lines of the report, each tied to the step or the record that it is about, once the
   // page can tie them. Until then, and where it cannot, the report is on the page as it is.
   const tied = tie && said.report !== null ? tie.lines(said.report, said.calendar.report, said.calendar.trip) : null;
-  if (written !== said.report + (tied ? " tied" : "")) {
-    written = said.report + (tied ? " tied" : "");
+  const from = [said.report, said.calendar?.report, said.calendar?.trip, tie];
+  if (from.some((each, n) => each !== written[n])) {
+    written = from;
     write(said.report, tied);
+    lightAgain();
   }
   part("report-part").hidden = said.report === null;
   part("report-part").classList.toggle("old", said.old);
@@ -214,6 +226,7 @@ function show() {
   drawn = said.calendar.trip;
   try {
     draw(lay(drawn, said.calendar.report, tied ? tie.warningsOf(tied) : []));
+    lightAgain();
   } catch (problem) {
     // Half a calendar is no calendar. The report below is whole.
     noCalendar("The page could not draw the calendar of this TRIP.");

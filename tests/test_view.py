@@ -612,6 +612,32 @@ def test_the_page_has_every_part_that_its_code_fills() -> None:
     assert filled <= there
 
 
+def test_the_view_serves_the_answer_and_the_report_without_what_they_do_not_need(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file of the page that only the calendar needs cannot be read. The view still starts."""
+    shutil.copytree(STATIC, tmp_path / "static")
+    (tmp_path / "static" / "lines.js").unlink()
+    (tmp_path / "static" / "calendar.js").unlink()
+
+    def beside(package: str) -> Path:
+        return tmp_path
+
+    monkeypatch.setattr("agloe.view.serve.resources.files", beside)
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    with serving(path) as view:
+        assert asked(view, "/")[0] == 200
+        assert asked(view, "/state.js")[0] == 200
+        assert asked(view, "/lines.js")[0] == 404
+        assert asked(view, "/calendar.js")[0] == 404
+        assert kinds(Sent(view).until("report")) == ["file", "answer", "report"]
+    # Without a file that the answer and the report need, there is no view.
+    (tmp_path / "static" / "state.js").unlink()
+    with pytest.raises(OSError, match=r"state\.js"):
+        View(path)
+
+
 def test_the_answer_and_the_report_need_no_calendar() -> None:
     """The page's code loads the calendar beside them, so that they show without it."""
     code = (STATIC / "view.js").read_text()

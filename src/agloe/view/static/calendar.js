@@ -193,8 +193,12 @@ export function calendar(trip, report = null, warnings = []) {
   // on its days, the steps with no time that it names beside them, and the times of the TRIP.
   const marked = new Set(steps.filter((step) => step.parts.length || step.when === null).flatMap((step) => step.clash));
   for (const bound of [trip.starts, trip.ends]) if (bound !== null && bound.day !== null && ruled.has(bound.record)) marked.add(bound.record);
+  // A step that the report warns about is marked where the calendar shows it. A step after
+  // the days shown has no mark, and the calendar says how many of those the report warns about.
   const warned = steps.some((step) => step.warns.length && step.parts.length);
-  const says = saysOf(trip, steps.length - untimed.length) + rulesOut(ruled.size, marked.size) + (warned ? " A yellow edge marks each step at which the report warns of something." : "");
+  const after = steps.filter((step) => step.warns.length && !step.parts.length).length;
+  const warns = (warned ? " A yellow edge marks each step shown at which the report warns of something." : "") + (after ? ` The report also warns of something at ${after === 1 ? "1 step" : `${after} steps`} after the days shown.` : "");
+  const says = saysOf(trip, steps.length - untimed.length) + rulesOut(ruled.size, marked.size) + warns;
   if (!trip.days.length) return { ...none, says, zone: trip.zone, itinerary: trip.itinerary, persons: trip.persons, untimed };
 
   // ---- the hours that every day shows: from the earliest start of a step on any day to the

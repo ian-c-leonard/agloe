@@ -18,7 +18,7 @@ from typing import Any, cast
 import pytest
 
 from agloe import compiler, report
-from agloe.file import read
+from agloe.file import parse, read
 from agloe.view.trip import shown
 from tests.stories import EXAMPLES
 
@@ -131,6 +131,30 @@ def test_lines_are_tied_to_steps_only_where_the_plan_is_the_one_that_the_view_se
         assert sum(1 for line in found if line["record"] is not None) == len(
             asked["report"]["relies_on"]
         )
+
+
+def test_a_line_that_only_starts_like_a_record_is_tied_to_none() -> None:
+    """The money is in a currency called miles, and a BOOKING has the id miles too.
+
+    The report says what that BOOKING paid on a line that starts with its id, and it gives the
+    total in the currency on a line that starts the same way. Only the first names the record.
+    """
+    written = (EXAMPLES / "a-ticket" / "within-the-cap.json").read_text()
+    assert "alex-skydeck-ticket" in written
+    file = parse(written.replace("USD", "miles").replace("alex-skydeck-ticket", "miles"))
+    found = compiler.check(file)
+    as_json = report.as_json(file, found)
+    assert "miles" in cast("list[str]", as_json["relies_on"])
+    asked = {"text": report.as_text(file, found), "report": as_json, "trip": shown(file, found)}
+    (tied,) = lines_of([asked])
+    starts_so = [line for line in tied if line["text"].startswith("  miles: ")]
+    assert len(starts_so) >= 3
+    total = [
+        line for line in starts_so if "still to buy" in line["text"] or " paid; " in line["text"]
+    ]
+    assert total
+    assert all(line["record"] is None for line in total)
+    assert sum(1 for line in starts_so if line["record"] == "miles") == len(starts_so) - len(total)
 
 
 def test_a_report_that_names_nothing_the_page_can_read_ties_no_record() -> None:
