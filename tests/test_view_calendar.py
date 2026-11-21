@@ -91,11 +91,20 @@ def drawn(path: Path) -> Trip:
 
 
 def calendars(
-    trips: list[Trip | None], reports: list[dict[str, Any] | None] | None = None
+    trips: list[Trip | None],
+    reports: list[dict[str, Any] | None] | None = None,
+    texts: list[str | None] | None = None,
 ) -> list[Calendar]:
-    """The calendar of each TRIP, by the page's own code, with the report that it came with."""
+    """The calendar of each TRIP, by the page's own code, with the report that it came with.
+
+    The report is as JSON, and in words where the calendar is to mark what it warns of.
+    """
     with_them = reports if reports is not None else [None] * len(trips)
-    asked = [{"trip": sent, "report": found} for sent, found in zip(trips, with_them, strict=True)]
+    in_words = texts if texts is not None else [None] * len(trips)
+    asked = [
+        {"trip": sent, "report": found, "text": words}
+        for sent, found, words in zip(trips, with_them, in_words, strict=True)
+    ]
     node = shutil.which("node")
     if node is None:
         if os.environ.get("CI"):
@@ -113,8 +122,10 @@ def calendars(
     return laid
 
 
-def calendar(sent: Trip | None, found: dict[str, Any] | None = None) -> Calendar:
-    return calendars([sent], [found])[0]
+def calendar(
+    sent: Trip | None, found: dict[str, Any] | None = None, words: str | None = None
+) -> Calendar:
+    return calendars([sent], [found], [words])[0]
 
 
 def with_its_report(path: Path) -> tuple[Trip, dict[str, Any]]:
@@ -324,6 +335,107 @@ def test_a_report_that_names_nothing_the_page_can_read_marks_nothing() -> None:
         " None of them is about what the calendar shows."
     )
     assert other["clash"] is False
+
+
+WARNS = " A yellow edge marks each step shown at which the report warns of something."
+
+
+def in_words(path: Path) -> tuple[Trip, dict[str, Any], str]:
+    """What is sent of the TRIP in this FILE, and the report on it as JSON and in words."""
+    file = read(path)
+    found = compiler.check(file)
+    return sent_for(file, found), report.as_json(file, found), report.as_text(file, found)
+
+
+def test_the_calendar_marks_the_steps_at_which_the_report_warns_of_something() -> None:
+    """In the report's own words: the lines that the report puts under a step of the plan."""
+    sent, found, words = in_words(STORY / "works-but-risky.json")
+    laid = calendar(sent, found, words)
+    by_name = {mark["name"]: mark for mark in laid["days"][0]["marks"]}
+    assert by_name["Flight home"]["warns"] == ["Alex and Sam would be 5 min too late for this."]
+    assert by_name["Museum visit"]["warns"] == []
+    assert laid["says"] == f"The ITINERARY of the report.{CHICAGO}{WARNS}"
+    assert laid["warned"] is True
+    # A right that is not bought yet is a warning too.
+    sent, found, words = in_words(EXAMPLES / "a-ticket" / "not-bought-yet.json")
+    laid = calendar(sent, found, words)
+    warned = {mark["name"]: mark["warns"] for mark in laid["days"][0]["marks"] if mark["warns"]}
+    assert list(warned) == ["Skydeck visit"]
+    assert warned["Skydeck visit"][0].startswith("Sam still has to buy a right to this")
+    # Without the report in words, the calendar marks nothing of it.
+    bare = calendar(sent, found)
+    assert all(mark["warns"] == [] for mark in bare["days"][0]["marks"])
+    assert (bare["warned"], WARNS in bare["says"]) == (False, False)
+
+
+def test_the_calendar_says_what_the_report_warns_of_after_the_days_shown() -> None:
+    """Two concerts three months apart, each with a ticket still to buy. Only the first is shown."""
+    file = trip(
+        ["alex"],
+        ["hall"],
+        [stays("first", "hall"), stays("last", "hall")],
+        [starts_at("first", 10)],
+        [],
+    )
+    day = 86400
+    plan = (
+        Step("first", "hall", "hall", ("alex",), seconds(10), seconds(11)),
+        Step("last", "hall", "hall", ("alex",), seconds(10) + 99 * day, seconds(11) + 99 * day),
+    )
+    sent = sent_for(file, Report(Answer.FEASIBLE, itinerary=plan))
+    assert [len(step["parts"]) for step in sent["steps"]] == [1, 0]
+    words = "\n".join(
+        [
+            "FEASIBLE, with a WARNING: this trip works, but not everything is booked yet.",
+            "",
+            "Saturday 15 May 2027 (times in America/Chicago)",
+            "  10:00 am to 11:00 am: first, alex",
+            "    ! alex still has to buy a right to this.",
+            "",
+            "Sunday 22 August 2027 (times in America/Chicago)",
+            "  10:00 am to 11:00 am: last, alex",
+            "    ! alex still has to buy a right to this.",
+            "",
+        ]
+    )
+    laid = calendar(sent, {"answer": "FEASIBLE"}, words)
+    assert [mark["warns"] for mark in laid["days"][0]["marks"]] == [
+        ["alex still has to buy a right to this."]
+    ]
+    assert laid["says"].endswith(
+        f"{WARNS} The report also warns of something at 1 step after the days shown."
+    )
+
+
+def test_the_calendar_warns_only_of_what_the_report_warns_of() -> None:
+    """For every example: the words on each step are the lines that the report puts under it."""
+    asked = [in_words(path) for path in FILES]
+    laid = calendars(
+        [sent for sent, _, _ in asked],
+        [found for _, found, _ in asked],
+        [words for _, _, words in asked],
+    )
+    seen = 0
+    for path, (sent, _, words), calendar_of in zip(FILES, asked, laid, strict=True):
+        name = f"{path.parent.name}/{path.stem}"
+        # The lines of the report that start with "!", each under the line of its step.
+        under: dict[int, list[str]] = {}
+        step = -1
+        for line in words.split("\n"):
+            if LINE.match(line):
+                step += 1
+            elif line.startswith("    ! ") and step >= 0:
+                under.setdefault(step, []).append(line.removeprefix("    ! "))
+        for day in calendar_of["days"]:
+            for mark in day["marks"]:
+                assert mark["warns"] == under.get(mark["step"], []), name
+                assert mark["records"] == sent["steps"][mark["step"]]["records"], name
+            for bound in day["bounds"]:
+                assert bound["record"] in {"trip-start", "trip-end"}, name
+        assert calendar_of["warned"] is bool(under), name
+        assert (WARNS in calendar_of["says"]) is bool(under), name
+        seen += bool(under)
+    assert seen > 3
 
 
 def group() -> File:
@@ -669,9 +781,21 @@ def test_the_calendar_shows_when_the_trip_starts_and_ends() -> None:
     laid = calendar(framed(at(13, 30), at(16, 15)))
     assert laid["hours"] == {"from": 13 * 60, "to": 16 * 60}
     assert laid["days"][0]["bounds"] == [
-        {"says": "The TRIP starts at 1:30 pm", "edge": "starts", "top": 30, "clash": False},
+        {
+            "says": "The TRIP starts at 1:30 pm",
+            "edge": "starts",
+            "top": 30,
+            "clash": False,
+            "record": "trip-start",
+        },
         # 4:15 pm is after the hours that the calendar shows, so the line is at their edge.
-        {"says": "The TRIP ends at 4:15 pm", "edge": "ends", "top": 180, "clash": False},
+        {
+            "says": "The TRIP ends at 4:15 pm",
+            "edge": "ends",
+            "top": 180,
+            "clash": False,
+            "record": "trip-end",
+        },
     ]
     laid = calendar(framed(at(17, day=14), at(20, 30, day=17)))
     assert names(laid) == [
@@ -695,14 +819,38 @@ def test_the_start_and_the_end_of_the_trip_each_have_their_line_and_their_words(
     laid = calendar(framed(at(9), at(10)))
     assert laid["hours"] == {"from": 13 * 60, "to": 16 * 60}
     assert laid["days"][0]["bounds"] == [
-        {"says": "The TRIP starts at 9:00 am", "edge": "starts", "top": 0, "clash": False},
-        {"says": "The TRIP ends at 10:00 am", "edge": "ends", "top": 0, "clash": False},
+        {
+            "says": "The TRIP starts at 9:00 am",
+            "edge": "starts",
+            "top": 0,
+            "clash": False,
+            "record": "trip-start",
+        },
+        {
+            "says": "The TRIP ends at 10:00 am",
+            "edge": "ends",
+            "top": 0,
+            "clash": False,
+            "record": "trip-end",
+        },
     ]
     # A TRIP of one minute.
     laid = calendar(framed(at(0), at(0, 1), visit=False))
     assert laid["days"][0]["bounds"] == [
-        {"says": "The TRIP starts at 12:00 am", "edge": "starts", "top": 0, "clash": False},
-        {"says": "The TRIP ends at 12:01 am", "edge": "ends", "top": 1, "clash": False},
+        {
+            "says": "The TRIP starts at 12:00 am",
+            "edge": "starts",
+            "top": 0,
+            "clash": False,
+            "record": "trip-start",
+        },
+        {
+            "says": "The TRIP ends at 12:01 am",
+            "edge": "ends",
+            "top": 1,
+            "clash": False,
+            "record": "trip-end",
+        },
     ]
 
 
@@ -796,8 +944,20 @@ def test_a_calendar_with_no_step_shows_the_hours_of_the_trip() -> None:
     assert laid["hours"] == {"from": 0, "to": 6 * 60}
     assert laid["days"][0]["marks"] == []
     assert laid["days"][0]["bounds"] == [
-        {"says": "The TRIP starts at 1:00 am", "edge": "starts", "top": 60, "clash": False},
-        {"says": "The TRIP ends at 5:00 am", "edge": "ends", "top": 300, "clash": False},
+        {
+            "says": "The TRIP starts at 1:00 am",
+            "edge": "starts",
+            "top": 60,
+            "clash": False,
+            "record": "trip-start",
+        },
+        {
+            "says": "The TRIP ends at 5:00 am",
+            "edge": "ends",
+            "top": 300,
+            "clash": False,
+            "record": "trip-end",
+        },
     ]
     # A TRIP from one afternoon to the next covers the night between: the days show all hours.
     laid = calendar(framed(at(14), at(14, day=16), visit=False))
@@ -820,7 +980,13 @@ def test_a_step_with_no_time_is_named_beside_the_calendar() -> None:
     )
     laid = calendar(sent_for(file, Report(Answer.UNDETERMINED)))
     assert laid["untimed"] == [
-        {"name": "fireworks", "who": "alex and sam", "clash": [], "finds": None}
+        {
+            "name": "fireworks",
+            "who": "alex and sam",
+            "records": ["fireworks-time", "fireworks-open", "lock-fireworks"],
+            "clash": [],
+            "finds": None,
+        }
     ]
     assert marks(laid) == [(0, "locked", 0, 0, 60, 60, True, True)]
     assert laid["says"] == ONLY_LOCKS + CHICAGO
@@ -847,7 +1013,15 @@ def test_a_calendar_with_nothing_on_it_says_why() -> None:
         "The report shows no ITINERARY, and the FILE gives no time to the OPTIONs that a LOCK"
         " names. So the calendar is empty."
     )
-    assert untimed["untimed"] == [{"name": "fireworks", "who": "alex", "clash": [], "finds": None}]
+    assert untimed["untimed"] == [
+        {
+            "name": "fireworks",
+            "who": "alex",
+            "records": ["fireworks-open", "lock-fireworks"],
+            "clash": [],
+            "finds": None,
+        }
+    ]
     assert idle["says"] == "The ITINERARY of the report is empty: nobody has to do anything."
     # Where the view sends no TRIP, the page says that there is no calendar.
     assert none["says"] == "There is no calendar of this TRIP: the view could not make one."

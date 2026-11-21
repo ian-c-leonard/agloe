@@ -2,6 +2,7 @@
 //
 // The answer and the report need nothing but state.js. The calendar is loaded beside them, so
 // that a calendar that fails to load or to draw leaves the answer and the report on the page.
+// So is what ties each line of the report to the step or the record that it is about.
 import { after, says, start } from "./state.js";
 
 const PER_MINUTE = 0.8; // pixels down the calendar for each minute
@@ -13,7 +14,9 @@ const BESIDE = 18; // pixels from one tick to the next where several are at one 
 const part = (id) => document.getElementById(id);
 let state = start();
 let lay = null; // what lays a calendar out, once the page has loaded it: false where it cannot
+let tie = null; // what ties the lines of a report to steps and records, once the page has loaded it
 let drawn; // the TRIP that the calendar on the page is of
+let written = []; // what the report on the page was written from: its words, and what its lines are tied to
 
 function made(tag, className, text = "") {
   return Object.assign(document.createElement(tag), { className, textContent: text });
@@ -31,7 +34,8 @@ function hourName(minute) {
  * as far as its day has room.
  */
 function put(body, mark, people, open, ticks) {
-  const box = made("div", `mark ${mark.state}${mark.begins ? "" : " goes-on"}${mark.ends ? "" : " no-end"}${mark.brief ? " brief" : ""}${mark.clash.length ? " clash" : ""}`);
+  const box = made("div", `mark ${mark.state}${mark.begins ? "" : " goes-on"}${mark.ends ? "" : " no-end"}${mark.brief ? " brief" : ""}${mark.clash.length ? " clash" : ""}${mark.warns.length ? " warned" : ""}`);
+  Object.assign(box.dataset, { step: mark.step, records: mark.records.join(" ") });
   const columns = mark.last - mark.first + 1;
   const when = mark.late ? `${mark.when}, ${mark.late}` : mark.when;
   // A mark is never smaller than the eye can find, and never outside the hours of its column.
@@ -44,7 +48,7 @@ function put(body, mark, people, open, ticks) {
   box.style.width = `${(columns / mark.lanes / people) * 100}%`;
   box.style.top = `${top}px`;
   box.style.height = `${height}px`;
-  box.title = [mark.name, when, mark.where, mark.who, mark.lock ?? "A WAY in the plan of the report.", ...(mark.finds ? [mark.finds] : [])].join("\n");
+  box.title = [mark.name, when, mark.where, mark.who, mark.lock ?? "A WAY in the plan of the report.", ...(mark.finds ? [mark.finds] : []), ...mark.warns].join("\n");
   const block = made("div", "block");
   const stripes = made("div", "stripes");
   for (let column = mark.first; column <= mark.last; column += 1) {
@@ -69,7 +73,9 @@ function put(body, mark, people, open, ticks) {
   box.append(block);
   body.append(box);
   if (mark.kind === "option" || !mark.named) return;
-  const name = made("span", "way-name", mark.name);
+  // The name is part of the mark: pointing at it is pointing at the WAY.
+  const name = Object.assign(made("span", "way-name", mark.name), { title: box.title });
+  Object.assign(name.dataset, box.dataset);
   name.style.left = `calc(${((mark.first + 0.5) / people) * 100}% + 6px)`;
   name.style.top = `${(mark.top + mark.height / 2) * PER_MINUTE}px`;
   body.append(name);
@@ -117,6 +123,7 @@ function draw(laid) {
     for (const bound of day.bounds) {
       const line = made("div", bound.clash ? "bound clash" : "bound");
       line.style.top = `${bound.top * PER_MINUTE}px`;
+      line.dataset.record = words[bound.edge].dataset.record = bound.record;
       body.append(line);
       Object.assign(words[bound.edge], { textContent: bound.says, title: bound.says });
       words[bound.edge].classList.toggle("clash", bound.clash);
@@ -132,10 +139,12 @@ function draw(laid) {
   // A calendar of what is LOCKed holds nothing that is only in a plan, and no WAY.
   part("calendar-key").classList.toggle("only-locks", !laid.itinerary);
   part("calendar-key").classList.toggle("with-clash", laid.clash);
+  part("calendar-key").classList.toggle("with-warnings", laid.warned);
   part("calendar-says").textContent = laid.says;
   // The steps with no time, each marked where the report names what is about it.
   const untimed = laid.untimed.flatMap((step, n) => {
     const name = Object.assign(made("span", step.clash.length ? "clash" : "", `${step.name} (${step.who})`), { title: step.finds ?? "" });
+    name.dataset.records = step.records.join(" ");
     return n ? [", ", name] : [name];
   });
   part("calendar-untimed").replaceChildren("The FILE gives no time for these LOCKed OPTIONs: ", ...untimed, ".");
@@ -148,6 +157,45 @@ function noCalendar(words) {
   part("calendar-says").textContent = words;
 }
 
+/** The report in words on the page: line by line where its lines are tied, and whole where not. */
+function write(text, tied) {
+  const report = part("report");
+  if (tied === null) {
+    report.textContent = text || "";
+    return;
+  }
+  report.replaceChildren();
+  tied.forEach((line, n) => {
+    const words = made("span", line.warns ? "row warns" : "row", line.text);
+    if (line.step !== null) words.dataset.step = line.step;
+    if (line.record !== null) words.dataset.record = line.record;
+    report.append(words, n + 1 < tied.length ? "\n" : "");
+  });
+}
+
+/**
+ * Pointing at a step lights up that step and what the report says of it: its marks, its line
+ * in the plan, what the report warns of there, and the lines of the records that are about it.
+ * It lights up no other step, though a record may be about both. Pointing at the line of a
+ * record, or at a time of the TRIP, lights up everything that the record is about.
+ */
+function light(target) {
+  const from = target instanceof Element ? target.closest("[data-step], [data-record], [data-records]") : null;
+  const ids = (each) => [each.dataset.record, ...(each.dataset.records ?? "").split(" ")].filter(Boolean);
+  const records = new Set(from ? ids(from) : []);
+  const step = from?.dataset.step;
+  for (const each of document.querySelectorAll("[data-step], [data-record], [data-records]")) {
+    const shares = ids(each).some((id) => records.has(id));
+    const same = from !== null && (step === undefined ? shares : each.dataset.step === step || (each.dataset.step === undefined && shares));
+    each.classList.toggle("lit", same);
+  }
+}
+
+/** What is under the pointer is lit again, after the page has written or drawn anew. */
+function lightAgain() {
+  requestAnimationFrame(() => light([...document.querySelectorAll(":hover")].pop() ?? null));
+}
+
 function show() {
   const said = says(state);
   document.title = said.name ? `${said.name}: Agloe` : "Agloe";
@@ -157,7 +205,15 @@ function show() {
   part("note").textContent = said.note;
   part("problems").replaceChildren(...(said.problems || []).map((problem) => Object.assign(document.createElement("li"), { textContent: problem })));
   part("problems").hidden = !said.problems;
-  part("report").textContent = said.report || "";
+  // The lines of the report, each tied to the step or the record that it is about, once the
+  // page can tie them. Until then, and where it cannot, the report is on the page as it is.
+  const tied = tie && said.report !== null ? tie.lines(said.report, said.calendar.report, said.calendar.trip) : null;
+  const from = [said.report, said.calendar?.report, said.calendar?.trip, tie];
+  if (from.some((each, n) => each !== written[n])) {
+    written = from;
+    write(said.report, tied);
+    lightAgain();
+  }
   part("report-part").hidden = said.report === null;
   part("report-part").classList.toggle("old", said.old);
   // The answer and the report are on the page before the calendar is drawn. The calendar is
@@ -169,7 +225,8 @@ function show() {
   if (said.calendar.trip === drawn) return;
   drawn = said.calendar.trip;
   try {
-    draw(lay(drawn, said.calendar.report));
+    draw(lay(drawn, said.calendar.report, tied ? tie.warningsOf(tied) : []));
+    lightAgain();
   } catch (problem) {
     // Half a calendar is no calendar. The report below is whole.
     noCalendar("The page could not draw the calendar of this TRIP.");
@@ -186,6 +243,8 @@ const view = new EventSource("events");
 view.onmessage = (message) => hear(JSON.parse(message.data));
 // The page no longer hears the view. What it shows stays, marked, until the view speaks again.
 view.onerror = () => hear({ kind: "lost" });
+document.querySelector("main").addEventListener("mouseover", (event) => light(event.target));
+document.querySelector("main").addEventListener("mouseleave", () => light(null));
 show();
 import("./calendar.js").then(
   (loaded) => {
@@ -197,4 +256,14 @@ import("./calendar.js").then(
     lay = false;
     show();
   },
+);
+import("./lines.js").then(
+  (loaded) => {
+    // The report is written again with its lines tied, and the calendar is drawn with what
+    // the report warns of.
+    tie = loaded;
+    drawn = undefined;
+    show();
+  },
+  () => {}, // The report stays on the page as it is, and nothing lights up.
 );

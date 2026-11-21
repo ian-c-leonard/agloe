@@ -2,6 +2,7 @@
 :root {
   --ground: #FBFAF8; --surface: #FFFFFF; --ink: #1C1A17; --ink2: #4B463E; --muted: #766F62; --line: #E2DFD8;
   --stop: #B8431A; --stop-wash: #FFF8F4; --ask: #6E5D1C; --ask-rim: #9A8330; --ask-wash: #FFFDF4;
+  --warn: #C99A00; --lit: #ECE8DF;
   --text: system-ui, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -69,7 +70,7 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .mark.way.brief { z-index: 3; pointer-events: none; }
 .way.brief .stripe { display: flex; align-items: center; background: none; }
 .tick { flex: none; width: 14px; height: 5px; border-radius: 3px; background: var(--hue); box-shadow: 0 0 0 1.5px var(--surface); pointer-events: auto; }
-.way-name { position: absolute; right: 0; transform: translateY(-50%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; font: 500 10.5px/1.4 var(--mono); color: var(--ink2); text-shadow: 0 0 2px var(--surface), 0 0 2px var(--surface), 0 0 3px var(--surface); }
+.way-name { position: absolute; right: 0; transform: translateY(-50%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 10.5px/1.4 var(--mono); color: var(--ink2); text-shadow: 0 0 2px var(--surface), 0 0 2px var(--surface), 0 0 3px var(--surface); }
 
 /* Where the TRIP starts and where it ends: a dotted line across the day. */
 .bound { position: absolute; left: 0; right: 0; z-index: 2; border-top: 1.5px dotted var(--ink2); pointer-events: none; }
@@ -82,8 +83,20 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .key { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 12px; }
 .key span { display: inline-flex; align-items: center; gap: 6px; }
 .key.only-locks .in-a-plan { display: none; }
-.key .in-a-clash { display: none; }
-.key.with-clash .in-a-clash { display: inline-flex; }
+.key .in-a-clash, .key .in-a-warning { display: none; }
+.key.with-clash .in-a-clash, .key.with-warnings .in-a-warning { display: inline-flex; }
+/* What a report warns of at a step has a yellow edge. Yellow is kept for what a report says. */
+.warned .block, .key-box.warned { border-color: var(--warn); box-shadow: 0 0 0 1.5px var(--warn); }
+/* Pointing at a step or at a line of the report lights up what is about the same thing. */
+.mark.lit .block { outline: 2.5px solid var(--ink); outline-offset: 2px; }
+.mark.way.lit .block { outline-width: 1.5px; }
+/* A WAY that is a tick has its edge on the tick, so that two ticks side by side stay apart. */
+.way.brief.warned .block { box-shadow: none; }
+.way.brief.warned .tick { box-shadow: 0 0 0 2.5px var(--warn); }
+.mark.way.brief.lit .block { outline: 0; }
+.way.brief.lit .tick { outline: 2px solid var(--ink); outline-offset: 2.5px; }
+.bound.lit { border-top-width: 3px; }
+.row.lit, .bound-says.lit, .says .lit, .way-name.lit { background: var(--lit); box-shadow: -3px 0 0 var(--lit), 3px 0 0 var(--lit); }
 /* What a report names as ruling out every plan has a red edge. Red is kept for what a report says. */
 .clash .block, .key-box.clash { border-color: var(--stop); box-shadow: 0 0 0 1.5px var(--stop); }
 .bound.clash { border-top-color: var(--stop); }
