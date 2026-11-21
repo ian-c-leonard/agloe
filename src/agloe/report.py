@@ -407,7 +407,7 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
 
 
 @dataclass(frozen=True)
-class _Clock:
+class Clock:
     """How times are put in words: on the clocks of one time zone.
 
     With ``offsets``, each time also gives its offset from UTC, because the clocks change during
@@ -435,7 +435,7 @@ class _Clock:
         half = "am" if there.hour < 12 else "pm"
         clock = f"{there.hour % 12 or 12}:{there.minute:02d}{seconds} {half}"
         if self.offsets:
-            clock += f" ({_offset(there.utcoffset() or timedelta())})"
+            clock += f" ({offset_from_utc(there.utcoffset() or timedelta())})"
         if day is None or there.date() == day:
             return clock
         year = "" if there.year == day.year else f" {there.year}"
@@ -446,7 +446,7 @@ class _Clock:
         return f"{self.time(moment)} on {self.day_name(moment)}"
 
 
-def _offset(ahead: timedelta) -> str:
+def offset_from_utc(ahead: timedelta) -> str:
     """An offset from UTC, to the second where it has seconds: UTC-5, UTC+5:30, UTC+0:09:21."""
     seconds = round(ahead.total_seconds())
     hours, rest = divmod(abs(seconds), 3600)
@@ -472,18 +472,18 @@ def _times_stated(file: File, records: tuple[str, ...]) -> list[int]:
     return times
 
 
-def _clock_for(file: File, report: Report) -> _Clock:
+def clock_for(file: File, report: Report) -> Clock:
     """The clock for one report: with offsets if the times it shows have more than one."""
     moments = [step.start for step in report.itinerary]
     moments += [step.end for step in report.itinerary if step.end is not None]
     moments += _times_stated(file, (*report.relies_on, *report.conflict))
     offsets = {local(moment, file.zone).utcoffset() for moment in moments}
-    return _Clock(file.zone, len(offsets) > 1)
+    return Clock(file.zone, len(offsets) > 1)
 
 
 def as_text(file: File, report: Report) -> str:
     """The Report in plain words, ending with a line break."""
-    clock = _clock_for(file, report)
+    clock = clock_for(file, report)
     if report.answer is Answer.FEASIBLE:
         lines = _feasible(file, clock, report)
     elif report.answer is Answer.INFEASIBLE:
@@ -607,7 +607,7 @@ def _budgets(file: File, first: str = "") -> list[str]:
     return lines
 
 
-def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
+def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
     to_buy = _to_buy(report)
     if not report.robust:
         lines = ["FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold."]
@@ -927,7 +927,7 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
     return _OwnWords(f"people need not be at {place} long before {name} starts")
 
 
-def _record(file: File, clock: _Clock, record: str) -> str:
+def _record(file: File, clock: Clock, record: str) -> str:
     """One FACT, WANT or DECISION in words."""
     records = (*file.facts, *file.wants, *file.decisions)
     found = next(each for each in records if each.id == record)
