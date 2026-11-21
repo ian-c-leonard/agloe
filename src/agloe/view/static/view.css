@@ -81,7 +81,7 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .shut { position: absolute; left: 0; right: 0; background: repeating-linear-gradient(-45deg, transparent 0 5px, var(--line) 5px 6px); }
 
 /* The strip above the calendar: all its days, with a row for each PERSON. Time runs from left to right. */
-.strip { display: grid; grid-template-columns: 58px minmax(0, 1fr); background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 8px 14px 10px 6px; }
+.strip { display: grid; grid-template-columns: 58px minmax(0, 1fr); overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 8px 14px 10px 6px; }
 .strip-days { position: relative; height: 18px; }
 .strip-day { position: absolute; top: 0; padding-left: 5px; overflow: hidden; white-space: nowrap; font: 600 10.5px/18px var(--text); color: var(--ink2); }
 .strip-people { display: grid; grid-auto-rows: var(--row); }
@@ -104,13 +104,17 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .bar.way { z-index: 0; display: flex; flex-direction: column; padding: 0; }
 .bar-line { flex: 1; background: linear-gradient(var(--hue), var(--hue)) center / 100% 2px no-repeat; }
 .bar.way.no-end .bar-line { background-image: linear-gradient(to right, var(--hue) 60%, transparent); }
-/* A WAY that takes next to no time is a tick across its moment, on top of what is beside it.
-   Ticks that would lie on each other in one row each have a place of their own in it. */
-.bar.way.brief { z-index: 3; pointer-events: none; }
-.bar.way.brief .bar-line { position: relative; background: none; }
-.strip-tick { position: absolute; left: 0; right: 0; top: 35%; height: 30%; border-radius: 2px; background: var(--hue); box-shadow: 0 0 0 1px var(--surface); pointer-events: auto; cursor: pointer; }
-.strip-tick.at1 { top: 3%; }
-.strip-tick.at2 { top: 67%; }
+/* A mark too short to draw at this width is on top of what is beside it. A WAY is a tick then,
+   and it fades where it may not end there. Marks too close together to show apart are one
+   mark: two ticks, one above the other. Only a tick itself answers the pointer, so that what
+   it sits on can be reached too. */
+.bar.small { z-index: 3; }
+.bar.way.small, .bar.several { display: block; padding: 0; pointer-events: none; }
+.bar-tick, .bar-several { position: absolute; left: 0; right: 0; border-radius: 2px; box-shadow: 0 0 0 1px var(--surface); pointer-events: auto; cursor: pointer; }
+.bar-tick { top: 35%; height: 30%; background: var(--hue); }
+.bar.no-end .bar-tick { background: linear-gradient(to right, var(--hue) 40%, transparent); box-shadow: none; }
+.bar-several { top: 15%; height: 70%; background: linear-gradient(var(--hue) 0 40%, var(--surface) 40% 60%, var(--hue) 60% 100%); }
+.bar.no-end .bar-several { box-shadow: none; mask-image: linear-gradient(to right, #000 40%, transparent); }
 .bar.warned .bar-block, .bar.way.warned { box-shadow: 0 0 0 1.5px var(--warn); }
 .bar.warned .bar-block { border-color: var(--warn); }
 .bar.clash .bar-block, .bar.way.clash { box-shadow: 0 0 0 1.5px var(--stop); }
@@ -118,11 +122,11 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .bar.lit .bar-block { outline: 2px solid var(--ink); outline-offset: 1.5px; }
 .bar.way.lit { outline: 1.5px solid var(--ink); outline-offset: 1px; }
 /* A tick has its edge and its light on the tick itself. */
-.bar.way.brief.warned, .bar.way.brief.clash { box-shadow: none; }
-.bar.way.brief.warned .strip-tick { box-shadow: 0 0 0 2px var(--warn); }
-.bar.way.brief.clash .strip-tick { box-shadow: 0 0 0 2px var(--stop); }
-.bar.way.brief.lit { outline: 0; }
-.bar.way.brief.lit .strip-tick { outline: 1.5px solid var(--ink); outline-offset: 2px; }
+.bar.way.small.warned, .bar.way.small.clash { box-shadow: none; }
+.bar.warned .bar-tick, .bar.warned .bar-several { box-shadow: 0 0 0 2px var(--warn); }
+.bar.clash .bar-tick, .bar.clash .bar-several { box-shadow: 0 0 0 2px var(--stop); }
+.bar.way.small.lit { outline: 0; }
+.bar.lit .bar-tick, .bar.lit .bar-several { outline: 1.5px solid var(--ink); outline-offset: 2px; }
 /* Where the TRIP starts and where it ends: a dotted line down the strip. */
 .strip-bound { position: absolute; top: -3px; bottom: -3px; z-index: 2; border-left: 1.5px dotted var(--ink2); }
 .strip-bound.clash { border-left-color: var(--stop); }
