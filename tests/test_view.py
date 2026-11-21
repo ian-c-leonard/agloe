@@ -365,6 +365,9 @@ def test_the_answer_reaches_a_page_while_the_check_goes_on(tmp_path: Path) -> No
             """echo '{"kind": "report", "answer": "FEASIBLE", "json": {}, "text": "", """
             """"trip": null, "seconds": 1}'"""
         ),
+        # An answer with a TRIP, which only a report has, and one that is no number at that.
+        """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": 1, "trip": NaN}'""",
+        """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": 1, "trip": null}'""",
         # A report with one thing more than a report holds.
         (
             """echo '{"kind": "report", "answer": "FEASIBLE", "json": {"answer": "FEASIBLE"}, """

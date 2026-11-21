@@ -21,6 +21,7 @@ const ROOM = 20 * 60; // seconds of room above the first step of a day and below
 const NO_END = 30 * 60; // seconds drawn for a step whose end nobody knows
 const NAMED = 20 * 60; // seconds that a WAY takes before its name has room beside it
 const SMALLEST = 4 * 60; // seconds that the smallest mark covers on the page
+const APART = 40; // minutes between the start and the end of the TRIP before each has room for its words
 
 /** The number of a day, counted from 1 January 1970, in the calendar that a FILE writes dates in. */
 function dayNumber(year, month, day) {
@@ -111,7 +112,7 @@ function lanesOf(marks) {
 /** What the calendar holds, in words. */
 function saysOf(trip, timed) {
   const clocks = ` Times are on the clocks of ${trip.zone}.`;
-  const changes = trip.days.some((day) => day.offset !== null) ? " A column that names its offset from UTC is part of a day on which those clocks change." : "";
+  const changes = trip.days.some((day) => day.offset !== null) ? " A column that names its offset from UTC starts or ends with a change of those clocks." : "";
   const cut = trip.until === null ? "" : ` The calendar shows the first ${trip.days.length} columns. It leaves out what comes after them, up to ${dateName(trip.until)}.`;
   const more = clocks + changes + cut;
   if (trip.itinerary) {
@@ -164,25 +165,27 @@ export function calendar(trip) {
 
   // ---- the hours that every day shows: from the earliest start of a step on any day to the
   // latest end of a part of one. A step that runs past midnight counts to midnight on the day
-  // it starts on. The day after shows it from the first hour that the calendar shows. A step
-  // with no known end is drawn half an hour long, and no longer than its day has left.
+  // it starts on. The day after shows it from the first hour that the calendar shows. A part
+  // that goes on in a column which opens later than midnight, after a change of the clocks,
+  // counts from where it goes on. A step with no known end is drawn half an hour long, and no
+  // longer than its day has left.
   const reach = (step, part) => (step.end === null ? Math.min(part.from + NO_END, trip.days[part.day].closes) : part.to);
   const bounds = [[trip.starts, "starts"], [trip.ends, "ends"]].filter(([bound]) => bound !== null && bound.day !== null);
   let low = DAY, high = 0;
   for (const step of steps) {
     for (const part of step.parts) {
-      if (part.begins) low = Math.min(low, part.from);
+      if (part.begins || part.from > 0) low = Math.min(low, part.from);
       high = Math.max(high, reach(step, part));
     }
   }
   if (low > high) {
     // No step is on any day. The hours are those that the TRIP itself covers: from its start
-    // to its end where both are in one column, and whole days where they are not. With
-    // neither, they are those of a working day.
-    const [first, last] = bounds.map(([bound]) => bound);
-    if (!first) [low, high] = [9 * 3600 + ROOM, 17 * 3600 - ROOM];
-    else if (!last || first.day === last.day) [low, high] = [Math.min(first.second, (last ?? first).second), Math.max(first.second, (last ?? first).second)];
-    else [low, high] = [0, DAY];
+    // to its end where both are in one column, and whole days where they are not, or where
+    // one of them is on none of the days shown. A TRIP that says only one of the two shows
+    // the hour of that one. With neither, the hours are those of a working day.
+    const one = trip.starts ?? trip.ends;
+    if (trip.starts && trip.ends) [low, high] = trip.starts.day !== null && trip.starts.day === trip.ends.day ? [Math.min(trip.starts.second, trip.ends.second), Math.max(trip.starts.second, trip.ends.second)] : [0, DAY];
+    else [low, high] = one && one.day !== null ? [one.second, one.second] : [9 * 3600 + ROOM, 17 * 3600 - ROOM];
   }
   const from = Math.max(0, Math.floor((low - ROOM) / 3600) * 3600);
   const to = Math.min(DAY, Math.ceil((high + ROOM) / 3600) * 3600);
@@ -238,23 +241,15 @@ export function calendar(trip) {
       }
     }
     delete day.shown;
-    // Ticks at one moment in the same columns stand beside each other.
-    const ticks = new Map();
-    for (const mark of day.marks) {
-      if (!mark.brief) continue;
-      const place = `${mark.first} ${mark.last} ${mark.top}`;
-      mark.beside = ticks.get(place) ?? 0;
-      ticks.set(place, mark.beside + 1);
-    }
   }
-  // ---- when the TRIP starts and ends. A time outside the hours shown is at their edge. Where
-  // both are close together on one day, they share their words. A time says its date where
-  // that is not the date of its column.
+  // ---- when the TRIP starts and ends: a line for each. A time outside the hours shown is at
+  // their edge. Where both are close together on one day, the first line has the words of
+  // both, and the second has none. A time says its date where that is not the date of its column.
   for (const [bound, word] of bounds) {
     const time = clock(bound, { at: trip.days[bound.day].date });
-    const beside = days[bound.day].bounds.find((other) => Math.abs(other.top - down(bound.second)) < NAMED / 60);
+    const beside = days[bound.day].bounds.find((other) => Math.abs(other.top - down(bound.second)) < APART);
     if (beside) Object.assign(beside, { says: `${beside.says}, and ends at ${time}`, edge: "both" });
-    else days[bound.day].bounds.push({ says: `The TRIP ${word} at ${time}`, edge: word, top: down(bound.second) });
+    days[bound.day].bounds.push({ says: beside ? null : `The TRIP ${word} at ${time}`, edge: word, top: down(bound.second) });
   }
   return { says, zone: trip.zone, itinerary: trip.itinerary, persons: trip.persons, hours: { from: from / 60, to: to / 60 }, days, untimed };
 }

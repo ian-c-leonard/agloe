@@ -9,6 +9,7 @@ const HUES = 6; // the colours that tell the PERSONs apart, in view.css
 const EDGE = 14; // pixels that the words at a start or an end of the TRIP need
 const SMALLEST = 3; // pixels: the least height of a mark
 const TICK = 7; // pixels: the height of the tick for a WAY that takes next to no time
+const BESIDE = 18; // pixels from one tick to the next where several are at one place
 
 const part = (id) => document.getElementById(id);
 let state = start();
@@ -30,7 +31,7 @@ function hourName(minute) {
  * column for a WAY. The name of a WAY stands beside the line of the first PERSON who takes it,
  * as far as its day has room.
  */
-function put(body, mark, people, open) {
+function put(body, mark, people, open, ticks) {
   const box = made("div", `mark ${mark.state}${mark.begins ? "" : " goes-on"}${mark.ends ? "" : " no-end"}${mark.brief ? " brief" : ""}`);
   const columns = mark.last - mark.first + 1;
   const when = mark.late ? `${mark.when}, ${mark.late}` : mark.when;
@@ -51,8 +52,15 @@ function put(body, mark, people, open) {
     const stripe = made("i", `stripe p${column % HUES}`);
     if (mark.brief) {
       // Only the tick itself answers the pointer, so that what it sits on can be reached too.
+      // Ticks that would lie on each other in one PERSON's column stand beside each other,
+      // as far as the column has room.
+      const there = ticks.get(column) ?? ticks.set(column, []).get(column);
+      const taken = new Set(there.filter((other) => Math.abs(other.top - top) < TICK).map((other) => other.place));
+      let place = 0;
+      while (taken.has(place)) place += 1;
+      there.push({ top, place });
       const tick = Object.assign(made("b", "tick"), { title: box.title });
-      tick.style.marginLeft = `${mark.beside * 36}px`;
+      tick.style.marginLeft = `${4 + Math.min(place, 2) * BESIDE}px`;
       stripe.append(tick);
     }
     stripes.append(stripe);
@@ -98,15 +106,17 @@ function draw(laid) {
       band.style.height = `${shut.height * PER_MINUTE}px`;
       body.append(band);
     }
-    for (const mark of day.marks) put(body, mark, people, day.open);
+    const ticks = new Map();
+    for (const mark of day.marks) put(body, mark, people, day.open, ticks);
     for (const bound of day.bounds) {
       const line = made("div", "bound");
       const down = bound.top * PER_MINUTE;
       line.style.top = `${down}px`;
       // The words stand outside the TRIP, where no step is, unless the edge of the day is too
-      // near. Words for the start and the end at once stand where there is room.
+      // near. Words for the start and the end at once stand where there is room. A line that
+      // shares the words of the one before it has none of its own.
       const above = bound.edge === "ends" ? tall - down < EDGE : down >= EDGE;
-      line.append(made("span", above ? "above" : "below", bound.says));
+      if (bound.says !== null) line.append(made("span", above ? "above" : "below", bound.says));
       body.append(line);
     }
     column.append(Object.assign(made("h3", "day-name", day.name), { title: day.name }), heads, body);
@@ -117,7 +127,7 @@ function draw(laid) {
   // A calendar of what is LOCKed holds nothing that is only in a plan, and no WAY.
   part("calendar-key").classList.toggle("only-locks", !laid.itinerary);
   part("calendar-says").textContent = laid.says;
-  part("calendar-untimed").textContent = `A LOCK names these, and the FILE gives them no time: ${laid.untimed.map((step) => `${step.name} (${step.who})`).join(", ")}.`;
+  part("calendar-untimed").textContent = `The FILE gives no time for these LOCKed OPTIONs: ${laid.untimed.map((step) => `${step.name} (${step.who})`).join(", ")}.`;
   part("calendar-untimed").hidden = !laid.untimed.length;
 }
 

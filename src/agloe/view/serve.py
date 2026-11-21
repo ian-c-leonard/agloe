@@ -87,7 +87,7 @@ def _without_its_trip(line: bytes) -> object:
     read again as strictly as any event. Raises ValueError where the rest is no event either.
     """
     loose: object = json.loads(line.decode())
-    if not isinstance(loose, dict) or "trip" not in loose:
+    if not isinstance(loose, dict) or cast("Event", loose).get("kind") != "report":
         raise ValueError("a check printed something that is no event")
     rest = {name: held for name, held in cast("Event", loose).items() if name != "trip"}
     again = json.dumps(rest, allow_nan=False)
