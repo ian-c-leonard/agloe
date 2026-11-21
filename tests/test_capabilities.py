@@ -1603,6 +1603,38 @@ def test_the_two_searches_agree_on_what_is_left_of_a_file_with_capabilities() ->
     assert answers_seen == {True, False}
 
 
+def test_a_helper_is_held_to_a_must_not_where_nobody_knows_what_the_stay_delivers() -> None:
+    """Paddling is a must for Alex and a must-not for Jo, and its set is COMPLETE.
+
+    The tour requires one swimmer, and Alex cannot swim. With the FACT that the tour does not
+    SATISFY paddling taken out, nobody knows whether it does. Sam can come along to swim. Jo
+    cannot: where the tour SATISFIES paddling for Alex, it does for Jo.
+    """
+
+    def left(swimmer: str) -> Remaining:
+        people = [
+            can(person, "swimming") if person == swimmer else cannot(person, "swimming")
+            for person in ("alex", "sam", "jo")
+        ]
+        file = a_tour(
+            requires("tour", "swimming", "one"),
+            satisfies("tour", "paddling", 0),
+            every("paddling"),
+            *people,
+            locked=(),
+            wants=[must("paddling", "alex", never=["jo"])],
+        )
+        return Remaining(file).without("tour-gives-paddling")
+
+    with_sam = left("sam")
+    assert len(list(best_cases(with_sam))) == 2
+    assert reference.can_work(with_sam)
+    assert compiler.can_work(with_sam)
+    with_jo = left("jo")
+    assert not reference.can_work(with_jo)
+    assert not compiler.can_work(with_jo)
+
+
 def test_a_lock_into_an_option_that_everybody_has_to_qualify_for_takes_few_questions() -> None:
     """Eight PERSONs are LOCKed into a tour that requires swimming of each PERSON.
 

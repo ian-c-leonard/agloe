@@ -505,13 +505,16 @@ class _Search:
         self._hold_to_the_rights()
 
     def _could_supply(self, meets: Sequence[set[int]]) -> set[tuple[int, int]]:
-        """Each PERSON and OPTION where the PERSON may have to come to meet a requirement.
+        """Each PERSON and stay where the PERSON may have to come to meet a requirement.
 
-        The OPTION requires a CAPABILITY of one PERSON, and the PERSON has it. Two cases are
+        The stay requires a CAPABILITY of one PERSON, and the PERSON has it. Two cases are
         left out. Nobody comes where nobody else has a reason to be there: a LOCK, or a must
-        that the OPTION could meet, as ``meets`` says for each PERSON. Without them the OPTION
+        that the stay could meet, as ``meets`` says for each PERSON. Without them the stay
         need not happen at all. And nobody comes for a CAPABILITY that a PERSON whom a LOCK
-        names in the OPTION has: that requirement is met whenever the OPTION happens.
+        names in the stay has: that requirement is met whenever the stay happens.
+
+        An OPTION that moves is in the result too, and nothing reads it there: the model
+        leaves nobody out of one.
         """
         file, world = self.file, self.world
         position = {option.id: index for index, option in enumerate(file.options)}
