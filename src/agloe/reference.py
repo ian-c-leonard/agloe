@@ -42,6 +42,7 @@ class Constraint(Enum):
     RIGHT = "Each PERSON has the rights they need"
     PAID = "Each place is paid for"
     CAP = "No cap is passed"
+    REQUIRED = "Each requirement of an OPTION is met"
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,10 @@ class Broken:
     A cap that is passed happens at no step and names no PERSON. ``cap`` names the DECISION
     where what the BOOKINGs charged passes it by itself. It is None where every way to pay
     for the places of the ITINERARY passes some cap: no single cap is the one.
+
+    A requirement that is not met names the OPTION and the ``capability``. Where the OPTION
+    requires it of one PERSON, ``persons`` holds everybody who takes part: none of them has
+    it. Where it requires it of each PERSON, ``persons`` holds those who lack it.
     """
 
     constraint: Constraint
@@ -89,6 +94,7 @@ class Broken:
     step: int | None = None
     want: str | None = None
     cap: str | None = None
+    capability: str | None = None
 
 
 @dataclass(frozen=True)
@@ -137,6 +143,10 @@ class World:
     ``spent`` says, for each cap by its BUDGET and currency, the most that the BOOKINGs might
     have charged to it in ten-thousandths. None: no upper bound. Each cap has its own sum, so
     the sums of the worst case need not be true together.
+
+    ``requires`` says what an OPTION requires of a CAPABILITY: "one" where a PERSON who takes
+    part has to have it, and "each" where every PERSON who takes part has to. A pair that is
+    not in it requires nothing. ``has`` holds each PERSON and CAPABILITY where the PERSON has it.
     """
 
     terms: Mapping[str, Terms]
@@ -155,6 +165,8 @@ class World:
     spent: Mapping[tuple[str, str], int | None] = field(
         default_factory=dict[tuple[str, str], int | None]
     )
+    requires: Mapping[tuple[str, str], str] = field(default_factory=dict[tuple[str, str], str])
+    has: frozenset[tuple[str, str]] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -169,6 +181,9 @@ class Unknown:
     is "another option" for a WANT and a PERSON: an OPTION outside the FILE
     that SATISFIES the WANT, and that the PERSON can take part in. That is one condition for one
     WANT and one PERSON, whichever OPTION meets it.
+
+    For an OPTION and a CAPABILITY it is "requirement": what the OPTION requires of it. For a
+    PERSON and a CAPABILITY it is "has". ``about`` names the CAPABILITY.
     """
 
     what: str
@@ -190,6 +205,7 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
     That an OPTION SATISFIES a WANT can help only where the WANT is a must for some PERSON,
     and that it does not only where the WANT is a must-not for some PERSON. So only those are
     listed. Where a FACT says a WANT's set is COMPLETE, nothing about the WANT is unknown.
+    That a PERSON has a CAPABILITY can help only where some OPTION requires it or might.
     A price and who pays can help only where somebody might have to pay for a place. So a
     price is listed only for an OFFER that ``for_sale`` gives, and who pays only for a PERSON
     with no BOOKING for the OPTION of one of those.
@@ -216,6 +232,9 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
             out.append(Unknown("cutoff", option.id))
         if file.needs_right(option.id) is None:
             out.append(Unknown("needs no right", option.id))
+        for capability in file.capabilities:
+            if file.requires(option.id, capability.id) is None:
+                out.append(Unknown("requirement", option.id, about=capability.id))
         if file.needs_right(option.id) is True and file.rights_complete(option.id) is None:
             for person in file.persons:
                 if file.booking(option.id, person.id) is None:
@@ -239,6 +258,15 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
         for destination in file.places:
             if origin != destination:
                 out.append(Unknown("other ways", origin=origin.id, destination=destination.id))
+    asked_for = [
+        capability.id
+        for capability in file.capabilities
+        if any(file.requires(option.id, capability.id) != "none" for option in file.options)
+    ]
+    for person in file.persons:
+        for capability in asked_for:
+            if file.has(person.id, capability) is None:
+                out.append(Unknown("has", person=person.id, about=capability))
     for person in buyers:
         if not file.listed(person):
             out.append(Unknown("funding", person=person))
@@ -288,6 +316,10 @@ class Remaining:
     so it might cover anybody. ``open_to_all`` holds the OPTION of each such BOOKING. Both
     belong to the search for a conflict: no FILE that is read has them, and no answer is ever
     given for what is left.
+
+    What an OPTION requires of a CAPABILITY needs nothing of the kind. Only best cases are
+    asked about what is left, and the best an unknown requirement can be is nothing: what a
+    COMPLETE set says of an OPTION with no FACT.
     """
 
     file: File
@@ -428,6 +460,17 @@ def no_better_than(file: File, found: Iterable[Unknown]) -> World:
         if each.want is not None and each.person is not None
     )
     return replace(best, satisfies=best.satisfies | unknown, another_option=conditions)
+
+
+def with_one_required(file: File, unknown: Unknown) -> World:
+    """The worst case, except that one OPTION requires one CAPABILITY of one PERSON only.
+
+    ``unknown`` is a "requirement" that the FILE does not state.
+    """
+    if unknown.what != "requirement" or unknown.option is None or unknown.about is None:
+        raise ValueError("only what an OPTION requires can be of one PERSON")
+    worst = worst_case(file)
+    return replace(worst, requires={**worst.requires, (unknown.option, unknown.about): "one"})
 
 
 def with_this_long(file: File, unknown: Unknown, seconds: int) -> World:
@@ -586,6 +629,24 @@ def _world(
                 anywhere[currency] = anywhere.get(currency, 0) + fact.paid.money.units
         for key, known in stated.items():
             spent[key] = None if no_bound else known + anywhere.get(key[1], 0)
+    # What each OPTION requires of each CAPABILITY, and who has it. A FACT settles either, and
+    # a COMPLETE set settles what an OPTION with no FACT requires: nothing. Otherwise the FILE
+    # does not say. At best the OPTION requires nothing and the PERSON has the CAPABILITY. At
+    # worst the OPTION requires it of each PERSON, and the PERSON does not have it.
+    requires: dict[tuple[str, str], str] = {}
+    has: set[tuple[str, str]] = set()
+    for capability in file.capabilities:
+        for option in file.options:
+            of = file.requires(option.id, capability.id)
+            if of is None:
+                nothing = well(Unknown("requirement", option.id, about=capability.id))
+                of = "none" if nothing else "each"
+            if of != "none":
+                requires[option.id, capability.id] = of
+        for person in file.persons:
+            can = file.has(person.id, capability.id)
+            if can or (can is None and well(Unknown("has", person=person.id, about=capability.id))):
+                has.add((person.id, capability.id))
     return World(
         terms,
         unlisted,
@@ -599,6 +660,8 @@ def _world(
         {option.id: file.places_on_offer(option.id) for option in file.options},
         frozenset(payable),
         spent,
+        requires,
+        frozenset(has),
     )
 
 
@@ -670,6 +733,7 @@ def _each_alone(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
         *_durations(world, itinerary),
         *_musts(file, world, taking_part),
         *_must_nots(file, world, taking_part),
+        *_requirements(file, world, taking_part),
         *_within(file, itinerary),
         *_rights(file, world, taking_part),
     ]
@@ -1107,6 +1171,30 @@ def _must_nots(
     return out
 
 
+def _requirements(
+    file: File, world: World, taking_part: Mapping[str, tuple[str, ...]]
+) -> list[Broken]:
+    """Each requirement of an OPTION is met by the PERSONs who take part in it.
+
+    Where an OPTION requires a CAPABILITY of one PERSON, somebody in it has the CAPABILITY.
+    Where it requires it of each PERSON, everybody in it has. Only who takes part counts:
+    no time and no order changes it. One Broken for each OPTION and CAPABILITY, naming the
+    PERSONs in the FILE's order: everybody in the OPTION where none of them has it, and
+    those who lack it where each of them has to have it.
+    """
+    out: list[Broken] = []
+    for option, persons in taking_part.items():
+        for capability in file.capabilities:
+            of = world.requires.get((option, capability.id))
+            if of is None or not persons:
+                continue
+            lacking = [person for person in persons if (person, capability.id) not in world.has]
+            if lacking and (of == "each" or len(lacking) == len(persons)):
+                named = _in_file_order_of_persons(file, lacking)
+                out.append(Broken(Constraint.REQUIRED, option, named, capability=capability.id))
+    return out
+
+
 def _starts(world: World, itinerary: Itinerary) -> list[Broken]:
     """Each OPTION starts when it can: at its fixed start, or at any time if a FACT says so."""
     out: list[Broken] = []
@@ -1382,7 +1470,7 @@ def _that_work(
             option.id: persons for option, persons in zip(file.options, who, strict=True) if persons
         }
         wanted = _musts(file, world, happening) or _must_nots(file, world, happening)
-        if wanted or _rights(file, world, happening):
+        if wanted or _requirements(file, world, happening) or _rights(file, world, happening):
             continue  # no order and no timing changes these: only who takes part counts
         mine = [
             [i for i, persons in enumerate(who) if person.id in persons] for person in file.persons

@@ -1,0 +1,15 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "drive-out-time",
+    "drive-out-length",
+    "drive-out-needs-a-driver",
+    "second-car-time",
+    "second-car-length",
+    "second-car-needs-a-driver",
+    "alex-does-not-drive-manual",
+    "jo-does-not-drive-manual",
+    "lock-drive-out",
+    "lock-second-car"
+  ]
+}

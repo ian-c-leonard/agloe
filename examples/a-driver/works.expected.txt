@@ -1,0 +1,23 @@
+FEASIBLE: this trip works.
+
+Saturday 17 July 2027 (times in America/Chicago)
+  8:00 am to 9:00 am: Drive to the dunes, Alex and Sam
+  11:00 am to 12:00 pm: Drive back to the hotel, Alex and Sam
+
+The plan relies on these FACTs and DECISIONs:
+  drive-out-time: Drive to the dunes starts at 8:00 am on Saturday 17 July 2027
+  drive-out-length: Drive to the dunes takes 1 h
+  drive-out-is-open: nobody needs a right to take part in Drive to the dunes
+  drive-out-needs-a-driver: Drive to the dunes requires driving a manual car of one PERSON who takes part
+  drive-back-time: Drive back to the hotel starts at 11:00 am on Saturday 17 July 2027
+  drive-back-length: Drive back to the hotel takes 1 h
+  drive-back-arrival: nobody has to be at the Indiana Dunes before Drive back to the hotel starts
+  drive-back-is-open: nobody needs a right to take part in Drive back to the hotel
+  drive-back-needs-a-driver: Drive back to the hotel requires driving a manual car of one PERSON who takes part
+  sam-drives-manual: Sam has the CAPABILITY driving a manual car
+  lock-drive-out: Alex and Sam take part in Drive to the dunes
+  lock-drive-back: Alex and Sam take part in Drive back to the hotel
+
+Who meets the requirements:
+  Drive to the dunes requires driving a manual car of one PERSON. Sam meets that requirement.
+  Drive back to the hotel requires driving a manual car of one PERSON. Sam meets that requirement.

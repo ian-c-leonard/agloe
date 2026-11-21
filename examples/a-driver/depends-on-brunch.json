@@ -1,0 +1,43 @@
+{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" },
+    { "id": "jo", "name": "Jo" }
+  ],
+  "places": [
+    { "id": "hotel", "name": "the hotel" },
+    { "id": "dunes", "name": "the Indiana Dunes" }
+  ],
+  "capabilities": [
+    { "id": "drive-manual", "name": "driving a manual car" }
+  ],
+  "options": [
+    { "id": "drive-out", "name": "Drive to the dunes", "from": "hotel", "to": "dunes" },
+    { "id": "drive-back", "name": "Drive back to the hotel", "from": "dunes", "to": "hotel" },
+    { "id": "brunch", "name": "Brunch at the hotel", "place": "hotel" }
+  ],
+  "ways": [],
+  "wants": [],
+  "facts": [
+    { "id": "drive-out-time", "option": "drive-out", "starts_at": "2027-07-17T08:00:00-05:00[America/Chicago]" },
+    { "id": "drive-out-length", "option": "drive-out", "duration": "PT1H" },
+    { "id": "drive-out-is-open", "option": "drive-out", "needs_right": false },
+    { "id": "drive-out-needs-a-driver", "option": "drive-out", "requires": { "capability": "drive-manual", "of": "one" } },
+    { "id": "drive-back-time", "option": "drive-back", "starts_at": "2027-07-17T11:00:00-05:00[America/Chicago]" },
+    { "id": "drive-back-length", "option": "drive-back", "duration": "PT1H" },
+    { "id": "drive-back-arrival", "option": "drive-back", "arrive_before_start": "PT0S" },
+    { "id": "drive-back-is-open", "option": "drive-back", "needs_right": false },
+    { "id": "drive-back-needs-a-driver", "option": "drive-back", "requires": { "capability": "drive-manual", "of": "one" } },
+    { "id": "brunch-time", "option": "brunch", "starts_at": "2027-07-17T10:00:00-05:00[America/Chicago]" },
+    { "id": "brunch-length", "option": "brunch", "duration": "PT1H" },
+    { "id": "brunch-is-walk-up", "option": "brunch", "needs_right": false },
+    { "id": "alex-does-not-drive-manual", "person": "alex", "capability": "drive-manual", "has": false },
+    { "id": "sam-drives-manual", "person": "sam", "capability": "drive-manual", "has": true },
+    { "id": "jo-does-not-drive-manual", "person": "jo", "capability": "drive-manual", "has": false }
+  ],
+  "decisions": [
+    { "id": "lock-drive-out", "lock": "drive-out", "persons": ["alex", "sam"] },
+    { "id": "lock-drive-back", "lock": "drive-back", "persons": ["alex", "sam"] },
+    { "id": "lock-brunch", "lock": "brunch", "persons": ["jo"] }
+  ]
+}

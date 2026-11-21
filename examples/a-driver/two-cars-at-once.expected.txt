@@ -1,0 +1,15 @@
+INFEASIBLE: this trip cannot work.
+
+These FACTs and DECISIONs rule out every plan by themselves. Take any one away and they no longer do. A FACT that is taken away leaves what it said unknown. Times are in America/Chicago.
+  drive-out-time: Drive to the dunes starts at 8:00 am on Saturday 17 July 2027
+  drive-out-length: Drive to the dunes takes 1 h
+  drive-out-needs-a-driver: Drive to the dunes requires driving a manual car of one PERSON who takes part
+  second-car-time: Second car to the dunes starts at 8:00 am on Saturday 17 July 2027
+  second-car-length: Second car to the dunes takes 1 h
+  second-car-needs-a-driver: Second car to the dunes requires driving a manual car of one PERSON who takes part
+  alex-does-not-drive-manual: Alex does not have the CAPABILITY driving a manual car
+  jo-does-not-drive-manual: Jo does not have the CAPABILITY driving a manual car
+  lock-drive-out: Alex takes part in Drive to the dunes
+  lock-second-car: Jo takes part in Second car to the dunes
+
+Only a PERSON of this FILE can meet a requirement of one PERSON. The FILE lists Alex, Sam and Jo.

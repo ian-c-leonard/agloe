@@ -1,0 +1,30 @@
+{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" },
+    { "id": "jo", "name": "Jo" }
+  ],
+  "places": [
+    { "id": "dock", "name": "the kayak dock" }
+  ],
+  "capabilities": [
+    { "id": "swimming", "name": "swimming" }
+  ],
+  "options": [
+    { "id": "kayak-tour", "name": "Kayak tour", "place": "dock" }
+  ],
+  "ways": [],
+  "wants": [],
+  "facts": [
+    { "id": "tour-time", "option": "kayak-tour", "starts_at": "2027-07-18T15:00:00-05:00[America/Chicago]" },
+    { "id": "tour-length", "option": "kayak-tour", "duration": "PT2H" },
+    { "id": "tour-needs-a-booking", "option": "kayak-tour", "needs_right": true },
+    { "id": "tour-booking", "booking": { "option": "kayak-tour", "covers": ["alex", "sam", "jo"] } },
+    { "id": "tour-needs-swimmers", "option": "kayak-tour", "requires": { "capability": "swimming", "of": "each" } },
+    { "id": "alex-swims", "person": "alex", "capability": "swimming", "has": true },
+    { "id": "sam-swims", "person": "sam", "capability": "swimming", "has": true }
+  ],
+  "decisions": [
+    { "id": "lock-kayak-tour", "lock": "kayak-tour", "persons": ["alex", "sam", "jo"] }
+  ]
+}

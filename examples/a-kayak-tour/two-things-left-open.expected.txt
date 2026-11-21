@@ -1,0 +1,5 @@
+UNDETERMINED: the FILE does not say enough to tell.
+
+The trip works in any of these cases:
+  1. Kayak tour requires swimming of one PERSON who takes part, or does not require it.
+  2. Jo has the CAPABILITY swimming.

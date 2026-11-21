@@ -1,0 +1,19 @@
+{
+  "answer": "UNDETERMINED",
+  "missing": [
+    [
+      {
+        "what": "requirement",
+        "option": "drive-out",
+        "capability": "drive-manual",
+        "of": "none"
+      },
+      {
+        "what": "requirement",
+        "option": "drive-back",
+        "capability": "drive-manual",
+        "of": "none"
+      }
+    ]
+  ]
+}

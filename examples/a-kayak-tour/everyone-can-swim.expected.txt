@@ -1,0 +1,17 @@
+FEASIBLE: this trip works.
+
+Sunday 18 July 2027 (times in America/Chicago)
+  3:00 pm to 5:00 pm: Kayak tour, Alex, Sam and Jo
+
+The plan relies on these FACTs and DECISIONs:
+  tour-time: Kayak tour starts at 3:00 pm on Sunday 18 July 2027
+  tour-length: Kayak tour takes 2 h
+  tour-needs-a-booking: people need a right to take part in Kayak tour
+  tour-booking: a BOOKING for Kayak tour covers Alex, Sam and Jo
+  alex-swims: Alex has the CAPABILITY swimming
+  sam-swims: Sam has the CAPABILITY swimming
+  jo-swims: Jo has the CAPABILITY swimming
+  lock-kayak-tour: Alex, Sam and Jo take part in Kayak tour
+
+Who meets the requirements:
+  The FILE does not say whether Kayak tour requires swimming. Alex, Sam and Jo have that CAPABILITY, so the plan holds if it does.

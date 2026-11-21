@@ -1,0 +1,69 @@
+{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "drive-out",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-07-17T08:00:00-05:00[America/Chicago]",
+      "end": "2027-07-17T09:00:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "brunch",
+      "persons": [
+        "jo"
+      ],
+      "start": "2027-07-17T10:00:00-05:00[America/Chicago]",
+      "end": "2027-07-17T11:00:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "drive-back",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-07-17T11:00:00-05:00[America/Chicago]",
+      "end": "2027-07-17T12:00:00-05:00[America/Chicago]"
+    }
+  ],
+  "relies_on": [
+    "drive-out-time",
+    "drive-out-length",
+    "drive-out-is-open",
+    "drive-out-needs-a-driver",
+    "drive-back-time",
+    "drive-back-length",
+    "drive-back-arrival",
+    "drive-back-is-open",
+    "drive-back-needs-a-driver",
+    "brunch-time",
+    "brunch-length",
+    "brunch-is-walk-up",
+    "every-drive-that-needs-a-driver",
+    "sam-drives-manual",
+    "lock-drive-out",
+    "lock-drive-back",
+    "lock-brunch"
+  ],
+  "robust": true,
+  "requirements": [
+    {
+      "option": "drive-out",
+      "capability": "drive-manual",
+      "of": "one",
+      "persons": [
+        "sam"
+      ]
+    },
+    {
+      "option": "drive-back",
+      "capability": "drive-manual",
+      "of": "one",
+      "persons": [
+        "sam"
+      ]
+    }
+  ]
+}

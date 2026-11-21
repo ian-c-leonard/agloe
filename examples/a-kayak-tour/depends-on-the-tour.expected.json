@@ -1,0 +1,13 @@
+{
+  "answer": "UNDETERMINED",
+  "missing": [
+    [
+      {
+        "what": "requirement",
+        "option": "kayak-tour",
+        "capability": "swimming",
+        "of_at_most": "one"
+      }
+    ]
+  ]
+}
