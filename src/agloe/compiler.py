@@ -79,10 +79,6 @@ def reports(file: File, ahead: bool = True) -> Iterator[Answer | Report]:
     are exact, so its answer is the one the solver proved. What was given before is not given
     again.
     """
-    if file.capabilities:
-        # The solver's model has no CAPABILITIES, so the reference checker answers.
-        yield from answers.reports(file, ahead=ahead)
-        return
     given: list[Answer | Report] = []
     try:
         asked: _Asked = {}
@@ -478,6 +474,7 @@ class _Search:
         self.used = [model.new_bool_var(f"used {option.id}") for option in file.options]
         self.left_out: set[tuple[int, int]] = set()  # each PERSON and OPTION that is ruled out
         meets = self._hold_to_the_wants()
+        supplies = self._could_supply()
         for index, option in enumerate(file.options):
             model.add_max_equality(self.used[index], [0, *(row[index] for row in self.takes)])
             for number, person in enumerate(file.persons):
@@ -487,14 +484,50 @@ class _Search:
                 )
                 if asked:
                     model.add(takes == 1)
-                # A PERSON gains nothing by staying somewhere unless a LOCK asks them to, or
-                # the stay could meet a must of theirs. Without the stay they are in the same
-                # PLACE at the same times, and every CONSTRAINT is as easy to meet or easier.
-                # So the model leaves such stays out.
-                wanted = index in meets[number]
+                # A PERSON gains nothing by staying somewhere unless a LOCK asks them to, the
+                # stay could meet a must of theirs, or they have a CAPABILITY that the stay
+                # requires of one PERSON. Without the stay they are in the same PLACE at the
+                # same times, and every CONSTRAINT is as easy to meet or easier. So the model
+                # leaves such stays out.
+                wanted = index in meets[number] or (number, index) in supplies
                 if not self.usable[index] or (not self.moves[index] and not asked and not wanted):
                     self._rule_out(number, index)
+        self._hold_to_the_requirements()
         self._hold_to_the_rights()
+
+    def _could_supply(self) -> set[tuple[int, int]]:
+        """Each PERSON and OPTION where the PERSON has a CAPABILITY it requires of one PERSON."""
+        file, world = self.file, self.world
+        position = {option.id: index for index, option in enumerate(file.options)}
+        return {
+            (number, position[option])
+            for (option, capability), of in world.requires.items()
+            if of == "one"
+            for number, person in enumerate(file.persons)
+            if (person.id, capability) in world.has
+        }
+
+    def _hold_to_the_requirements(self) -> None:
+        """Each requirement of an OPTION is met by the PERSONs who take part in it.
+
+        Where an OPTION requires a CAPABILITY of each PERSON, nobody without it takes part.
+        Where it requires it of one PERSON, it happens only with a PERSON who has it.
+        """
+        model, file, world = self.model, self.file, self.world
+        position = {option.id: index for index, option in enumerate(file.options)}
+        for (option, capability), of in world.requires.items():
+            index = position[option]
+            able = [
+                n for n, person in enumerate(file.persons) if (person.id, capability) in world.has
+            ]
+            if of == "one":
+                model.add_bool_or(
+                    [self.used[index].negated(), *(self.takes[n][index] for n in able)]
+                )
+                continue
+            for number in range(len(file.persons)):
+                if number not in able and (number, index) not in self.left_out:
+                    self._rule_out(number, index)
 
     def _rule_out(self, number: int, index: int) -> None:
         """This PERSON takes no part in this OPTION, whatever else is chosen.

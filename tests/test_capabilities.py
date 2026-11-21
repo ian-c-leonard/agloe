@@ -8,7 +8,7 @@ from random import Random
 
 import pytest
 
-from agloe import answers, compiler, report
+from agloe import answers, compiler, reference, report
 from agloe.answers import Answer, Missing, Report, Supply
 from agloe.file import Capability, CompleteRequires, File, FileError, Has, Requires, load
 from agloe.reference import (
@@ -39,6 +39,7 @@ from tests.stories import (
     cap,
     complete,
     cutoff,
+    every,
     every_requirement,
     every_right,
     lasts,
@@ -58,6 +59,7 @@ from tests.stories import (
     trip,
     way,
 )
+from tests.test_caps import a_capped_tour, two_capped_visits
 from tests.test_cross_check import any_choice, possible_world, random_trip
 
 TOUR = Step("tour", "dock", "dock", ("alex", "sam", "jo"), seconds(15), seconds(17))
@@ -1309,3 +1311,202 @@ def test_other_ways_help_only_if_whoever_takes_them_meets_what_they_require() ->
         "Other WAYs help only if they can be taken when the plan needs them, with a right where"
         " they need one."
     )
+
+
+# The solver.
+
+
+def test_the_solver_brings_a_person_into_a_stay_to_meet_a_requirement() -> None:
+    """Alex is LOCKed into the tour and cannot swim. The tour requires one swimmer.
+
+    Sam can swim. No LOCK names Sam and no must of Sam's is met there: Sam is in the tour only
+    for what it requires.
+    """
+    file = a_tour(
+        requires("tour", "swimming", "one"),
+        cannot("alex", "swimming"),
+        can("sam", "swimming"),
+        persons=("alex", "sam"),
+        locked=("alex",),
+    )
+    with_sam = (replace(TOUR, persons=("alex", "sam")),)
+    assert reference.first_shown(file, worst_case(file)) == with_sam
+    assert compiler.shown(file, worst_case(file)) == with_sam
+    assert compiler.works(file, worst_case(file))
+    found = answers.check(file, compiler.shown, compiler.works, compiler.can_work)
+    assert found == answers.check(file)
+    assert found.supplies == (Supply("tour", "swimming", "one", ("sam",)),)
+
+
+def test_the_solver_keeps_everybody_out_who_lacks_what_each_person_has_to_have() -> None:
+    """Deep-dish pizza is a must for Jo, and only the tour SATISFIES it. Jo cannot swim."""
+    file = a_tour(
+        requires("tour", "swimming", "each"),
+        satisfies("tour", "deep-dish"),
+        every("deep-dish"),
+        can("alex", "swimming"),
+        cannot("jo", "swimming"),
+        persons=("alex", "jo"),
+        locked=(),
+        wants=[must("deep-dish", "jo")],
+    )
+    assert not compiler.works(file, best_case(file))
+    found = answers.check(file, compiler.shown, compiler.works, compiler.can_work)
+    assert found == answers.check(file)
+    assert found.answer is Answer.INFEASIBLE
+
+
+def a_trip_that_needs_a_helper(rng: Random) -> File:
+    """Each LOCKed OPTION requires driving of one PERSON, and nobody its LOCK names can drive.
+
+    Somebody else may be able to, and has to come along then.
+    """
+    file = random_trip(rng, 0.05, persons=["alex", "sam", "jo"], count=2, with_ways=0.5)
+    locked = {person for lock in file.locks for person in lock.persons}
+    facts: list[Has | Requires | CompleteRequires] = [
+        Requires(f"{option}-driving", option, "driving", "one")
+        for option in dict.fromkeys(lock.option for lock in file.locks)
+    ]
+    facts.append(CompleteRequires("every-driving", "driving"))
+    for person in file.persons:
+        can_drive = person.id not in locked and rng.random() < 0.7
+        facts.append(Has(f"{person.id}-driving", person.id, "driving", can_drive))
+    listed = (Capability("driving", "driving"),)
+    return replace(file, capabilities=listed, facts=(*file.facts, *facts))
+
+
+def trips_with_capabilities(rng: Random) -> list[File]:
+    """Random trips of every kind the other tests build, each with CAPABILITIES."""
+    trips = [a_trip_with_capabilities(rng, leave_out=0.15) for _ in range(100)]
+    trips += [a_trip_that_needs_a_helper(rng) for _ in range(100)]
+    trips += [
+        a_trip_with_capabilities(rng, leave_out=0.1, with_ways=0.8, with_complete=0.3)
+        for _ in range(80)
+    ]
+    trips += [
+        a_trip_with_capabilities(rng, leave_out=0.15, with_wants=0.8, must_nots=0.3, whole_sets=0.4)
+        for _ in range(80)
+    ]
+    trips += [a_trip_with_capabilities(rng, leave_out=0.15, with_rights=0.4) for _ in range(80)]
+    trips += [
+        a_trip_with_capabilities(rng, leave_out=0.1, with_ends=0.5, with_ways=0.8, with_times=0.5)
+        for _ in range(60)
+    ]
+    trips += [with_capabilities(rng, two_capped_visits(rng)) for _ in range(60)]
+    trips += [with_capabilities(rng, a_capped_tour(rng)) for _ in range(40)]
+    return trips
+
+
+def test_the_compiler_and_the_reference_checker_agree_on_trips_with_capabilities() -> None:
+    """The same answer ahead and the same Report for every TRIP."""
+    rng = Random(6060)
+    seen: set[Answer] = set()
+    brought = met = capped = 0
+    for file in trips_with_capabilities(rng):
+        series = list(answers.reports(file))
+        assert list(compiler.reports(file)) == series
+        found = series[-1]
+        assert isinstance(found, Report)
+        seen.add(found.answer)
+        locked = {(lock.option, person) for lock in file.locks for person in lock.persons}
+        brought += any(
+            (step.option, person) not in locked
+            for step in found.itinerary
+            if step.option is not None
+            for person in step.persons
+        )
+        met += bool(found.supplies)
+        capped += bool(file.caps and found.plans)
+    assert seen == set(Answer)
+    assert brought > 25
+    assert met > 50
+    assert capped > 15
+
+
+def test_the_two_searches_agree_in_every_kind_of_world_with_capabilities() -> None:
+    """The same ITINERARY first, or none, in the worlds the answers and the evidence are built on.
+
+    Those are the worst case, the best case, the worst case with one OPTION requiring a
+    CAPABILITY of one PERSON, worlds in which a few unknown FACTs turn out well, and possible
+    worlds chosen at random.
+    """
+    rng = Random(7070)
+    found: set[bool] = set()
+    of_one = 0
+    for file in trips_with_capabilities(rng)[::3]:
+        every = unknowns(file)
+        worlds = [worst_case(file), best_case(file)]
+        asked = [unknown for unknown in every if unknown.what == "requirement"]
+        worlds += [with_one_required(file, unknown) for unknown in asked[:2]]
+        of_one += bool(asked)
+        for _ in range(2):
+            some = rng.sample(every, min(len(every), rng.randrange(1, 4)))
+            if one_way_each(some):
+                worlds.append(with_these_at_best(file, some))
+            if not file.caps:
+                worlds.append(a_world_with_capabilities(rng, file))
+        for world in worlds:
+            first = reference.first_shown(file, world)
+            assert compiler.shown(file, world) == first
+            assert compiler.works(file, world) == (first is not None)
+            found.add(first is not None)
+    assert found == {True, False}
+    assert of_one > 30
+
+
+def test_the_two_searches_agree_on_what_is_left_of_a_file_with_capabilities() -> None:
+    """With records taken out one after another, as the search for a conflict takes them."""
+    rng = Random(8080)
+    answers_seen: set[bool] = set()
+    for file in trips_with_capabilities(rng)[::4]:
+        records = [*(fact.id for fact in file.facts), *(each.id for each in file.decisions)]
+        left = Remaining(file)
+        for record in rng.sample(records, min(len(records), 5)):
+            left = left.without(record)
+            can = reference.can_work(left)
+            assert compiler.can_work(left) == can
+            answers_seen.add(can)
+    assert answers_seen == {True, False}
+
+
+def test_a_lock_into_an_option_that_everybody_has_to_qualify_for_takes_few_questions() -> None:
+    """Eight PERSONs are LOCKed into a tour that requires swimming of each PERSON.
+
+    Nobody has recorded whether any of them can swim. One set is enough: all eight can. Every
+    set holds each of those FACTs, so the search asks about that one set and about nothing
+    smaller.
+    """
+    persons = tuple(f"person-{number}" for number in range(8))
+    file = a_tour(requires("tour", "swimming", "each"), persons=persons)
+    questions = 0
+
+    def works(left: File, world: World) -> bool:
+        nonlocal questions
+        questions += 1
+        return compiler.works(left, world)
+
+    found = answers.check(file, compiler.shown, works, compiler.can_work)
+    assert found == answers.check(file)
+    assert [len(enough) for enough in found.missing] == [8]
+    assert questions < 12
+
+
+def test_a_lock_on_somebody_who_lacks_a_capability_asks_what_the_option_requires() -> None:
+    """Jo is LOCKed into four tours and cannot swim. Nobody has recorded what they require."""
+    options = [stays(f"tour-{number}", "dock") for number in range(4)]
+    facts = [cannot("jo", "swimming")]
+    for number in range(4):
+        facts += [starts_at(f"tour-{number}", 9 + 2 * number), lasts(f"tour-{number}", "PT1H")]
+    locks = [lock(option["id"], "jo") for option in options]
+    file = trip(["jo"], ["dock"], options, facts, locks, capabilities=["swimming"])
+    questions = 0
+
+    def works(left: File, world: World) -> bool:
+        nonlocal questions
+        questions += 1
+        return compiler.works(left, world)
+
+    found = answers.check(file, compiler.shown, works, compiler.can_work)
+    assert found == answers.check(file)
+    assert [len(enough) for enough in found.missing] == [4]
+    assert questions < 8
