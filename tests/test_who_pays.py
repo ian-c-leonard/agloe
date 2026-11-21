@@ -74,7 +74,7 @@ def a_boat_tour(
     decisions = [lock("tour", *locked)] if locked else []
     facts = [*at_ten("tour"), needs_right("tour"), booking("tour", "alex"), *more]
     options = [stays("tour", "dock")]
-    return trip(EVERYONE, ["dock"], options, facts, decisions, tickets=True, budgets=budgets)
+    return trip(EVERYONE, ["dock"], options, facts, decisions, rights=True, budgets=budgets)
 
 
 def on_the_tour(*persons: str) -> Itinerary:
@@ -222,7 +222,7 @@ def test_the_only_person_who_can_pay_for_the_only_place_is_not_the_one_left_out(
     facts = [*at_ten("tour"), needs_right("tour"), offer("tour", 1)]
     options = [stays("tour", "dock")]
     locked = [lock("tour", "alex", "sam")]
-    file = trip(["alex", "sam"], ["dock"], options, facts, locked, tickets=True, budgets=pots)
+    file = trip(["alex", "sam"], ["dock"], options, facts, locked, rights=True, budgets=pots)
     worst = worst_case(file)
     assert placed(file, worst, "tour", ["alex", "sam"]) == {"sam": "tour-offer"}
     no_right = [Broken(Constraint.RIGHT, "tour", ("alex",))]
@@ -238,7 +238,7 @@ def some_places(*places: int) -> File:
     offers = [offer("tour", count, id=f"o{number}") for number, count in enumerate(places)]
     facts = [*at_ten("tour"), needs_right("tour"), *offers]
     persons = ["p0", "p1", "p2", "p3"]
-    return trip(persons, ["dock"], [stays("tour", "dock")], facts, [], tickets=True)
+    return trip(persons, ["dock"], [stays("tour", "dock")], facts, [], rights=True)
 
 
 def by_trying_every_way(
@@ -318,7 +318,7 @@ def a_chain(many: int) -> File:
     facts = [*at_ten("tour"), needs_right("tour"), *offers]
     options = [stays("tour", "dock")]
     locked = [lock("tour", *persons)]
-    return trip(persons, ["dock"], options, facts, locked, tickets=True, budgets=pots)
+    return trip(persons, ["dock"], options, facts, locked, rights=True, budgets=pots)
 
 
 def test_a_thousand_persons_who_each_have_to_move_along_all_get_a_place() -> None:
@@ -345,15 +345,15 @@ def test_a_place_that_none_of_them_can_pay_for_changes_nothing() -> None:
     facts = [*at_ten("tour"), needs_right("tour"), offer("tour", 40)]
     options = [stays("tour", "dock")]
     locked = [lock("tour", *persons)]
-    plain = trip(persons, ["dock"], options, facts, locked, tickets=True)
+    plain = trip(persons, ["dock"], options, facts, locked, rights=True)
     in_euros = offer("tour", 1, id="euro", price="1 EUR")
-    more = trip(persons, ["dock"], options, [*facts, in_euros], locked, tickets=True)
+    more = trip(persons, ["dock"], options, [*facts, in_euros], locked, rights=True)
     for file in (plain, more):
         taken = placed(file, worst_case(file), "tour", persons)
         assert taken == dict.fromkeys(persons, "tour-offer")
     assert compiler.check(more).rights == compiler.check(plain).rights
     too_few = [*facts[:-1], offer("tour", 39), in_euros]
-    short = trip(persons, ["dock"], options, too_few, locked, tickets=True)
+    short = trip(persons, ["dock"], options, too_few, locked, rights=True)
     assert len(placed(short, worst_case(short), "tour", persons)) == 39
     assert compiler.check(short).answer is Answer.UNDETERMINED
 
@@ -365,7 +365,7 @@ def test_a_person_who_can_pay_for_no_place_changes_nothing_for_the_others() -> N
     options = [stays("tour", "dock")]
     locked = [lock("tour", *buyers)]
     pots = [budget("money", *buyers)]
-    file = trip([*buyers, "idle"], ["dock"], options, facts, locked, tickets=True, budgets=pots)
+    file = trip([*buyers, "idle"], ["dock"], options, facts, locked, rights=True, budgets=pots)
     worst = worst_case(file)
     assert placed(file, worst, "tour", [*buyers, "idle"]) == dict.fromkeys(buyers, "tour-offer")
     found = compiler.check(file)
@@ -379,7 +379,7 @@ def test_a_person_who_can_pay_for_no_place_changes_nothing_for_the_others() -> N
     pots.append(budget("euros", "idle", holds=["EUR"]))
     in_euros = offer("tour", 1, id="euro", price="1 EUR")
     people = [*buyers, "idle"]
-    own = trip(people, ["dock"], options, [*facts, in_euros], locked, tickets=True, budgets=pots)
+    own = trip(people, ["dock"], options, [*facts, in_euros], locked, rights=True, budgets=pots)
     model = compiler._Search(own, worst_case(own)).model  # pyright: ignore[reportPrivateUsage]
     assert "takes a place of" not in str(model.proto)
     assert compiler.check(own).rights == found.rights
@@ -391,7 +391,7 @@ def test_each_person_takes_the_first_place_that_leaves_a_way_for_the_rest() -> N
     pots = [budget("sams", "sam"), budget("alexs", "alex", holds=["USD", "EUR"])]
     options = [stays("tour", "dock")]
     facts = [*at_ten("tour"), needs_right("tour"), *offers]
-    file = trip(EVERYONE, ["dock"], options, facts, [], tickets=True, budgets=pots)
+    file = trip(EVERYONE, ["dock"], options, facts, [], rights=True, budgets=pots)
     worst = worst_case(file)
     assert placed(file, worst, "tour", ["alex", "sam"]) == {"alex": "euro", "sam": "dollar"}
     assert placed(file, worst, "tour", ["alex"]) == {"alex": "dollar"}
@@ -513,7 +513,7 @@ def test_a_missing_price_names_the_person_whose_budget_it_has_to_fit() -> None:
     options = [stays("tour", "dock")]
     for who in ("alex", "sam"):
         locked = [lock("tour", who)]
-        file = trip(["alex", "sam"], ["dock"], options, facts, locked, tickets=True, budgets=pots)
+        file = trip(["alex", "sam"], ["dock"], options, facts, locked, rights=True, budgets=pots)
         for found in (checked(file), compiler.check(file)):
             assert asked(found) == [[price_of("tour-offer")]]
             assert found.missing[0][0].buys == (Cover("tour", who, "tour-offer", True),)
@@ -526,7 +526,7 @@ def test_a_missing_price_names_the_person_whose_budget_it_has_to_fit() -> None:
         ]
     both = [lock("tour", "alex", "sam")]
     two_places = [*facts[:-2], offer("tour", 2, price=None), facts[-1]]
-    file = trip(["alex", "sam"], ["dock"], options, two_places, both, tickets=True, budgets=pots)
+    file = trip(["alex", "sam"], ["dock"], options, two_places, both, rights=True, budgets=pots)
     assert in_words(file)[2] == (
         "The trip works if a place from tour-offer has a price that alex and sam can each pay."
     )
@@ -567,7 +567,7 @@ def test_a_place_whose_price_the_set_asks_for_goes_with_the_price() -> None:
     facts += [offer("tour", 3, price=None), offer("cruise", 1, price="1 EUR")]
     facts += [every_right("tour", "tour-offer"), every_right("cruise", "cruise-offer")]
     locked = [lock("tour", *EVERYONE), lock("cruise", "sam")]
-    file = trip(EVERYONE, ["dock"], options, facts, locked, tickets=True, budgets=pots)
+    file = trip(EVERYONE, ["dock"], options, facts, locked, rights=True, budgets=pots)
     one_euro = Money(Decimal(1), "EUR")
     for found in (checked(file), compiler.check(file)):
         assert asked(found) == [[price_of("tour-offer"), can_pay("sam")]]
@@ -582,7 +582,7 @@ def test_a_place_whose_price_the_set_asks_for_goes_with_the_price() -> None:
     # With the shared place at no cost and a BUDGET in euros for Sam, the TRIP works.
     free = [offer("tour", 3, price="0 X") if fact["id"] == "tour-offer" else fact for fact in facts]
     pots.append(budget("sams", "sam", holds=["EUR"]))
-    settled = trip(EVERYONE, ["dock"], options, free, locked, tickets=True, budgets=pots)
+    settled = trip(EVERYONE, ["dock"], options, free, locked, rights=True, budgets=pots)
     assert checked(settled).answer is Answer.FEASIBLE
 
 
@@ -597,22 +597,22 @@ def test_a_missing_payer_is_told_only_what_is_left_to_buy() -> None:
     left = {"tour": "one from cruise-offer for 1 EUR", "cruise": "one from tour-offer for 1 USD"}
     for booked, to_buy in left.items():
         stated = [*facts, booking(booked, "sam")]
-        file = trip(["sam"], ["dock"], options, stated, locked, tickets=True, budgets=[])
+        file = trip(["sam"], ["dock"], options, stated, locked, rights=True, budgets=[])
         assert asked(checked(file)) == [[can_pay("sam")]]
         assert in_words(file)[2].endswith(f"a BUDGET that lists sam ({to_buy}).")
-    neither = trip(["sam"], ["dock"], options, facts, locked, tickets=True, budgets=[])
+    neither = trip(["sam"], ["dock"], options, facts, locked, rights=True, budgets=[])
     assert in_words(neither)[2].endswith(
         "(one from tour-offer for 1 USD, one from cruise-offer for 1 EUR)."
     )
     free = [
         offer("tour", 1, price="0 USD") if fact["id"] == "tour-offer" else fact for fact in facts
     ]
-    one_free = trip(["sam"], ["dock"], options, free, locked, tickets=True, budgets=[])
+    one_free = trip(["sam"], ["dock"], options, free, locked, rights=True, budgets=[])
     assert in_words(one_free)[2].endswith(
         "a BUDGET that lists sam (one from cruise-offer for 1 EUR)."
     )
     two_pots = [budget("dollars", "sam"), budget("euros", "sam", holds=["EUR"])]
-    paid = trip(["sam"], ["dock"], options, facts, locked, tickets=True, budgets=two_pots)
+    paid = trip(["sam"], ["dock"], options, facts, locked, rights=True, budgets=two_pots)
     assert [cover.budget for cover in checked(paid).rights] == ["dollars", "euros"]
 
 
@@ -625,7 +625,7 @@ def test_who_buys_which_place_follows_the_places_that_are_left() -> None:
         offers = [offer("tour", euros, id="eur", price="1 EUR")]
         offers.append(offer("tour", pounds, id="gbp", price="1 GBP"))
         facts = [*at_ten("tour"), needs_right("tour"), *offers, every_right("tour", "eur", "gbp")]
-        file = trip(EVERYONE, ["dock"], options, facts, locked, tickets=True, budgets=pots)
+        file = trip(EVERYONE, ["dock"], options, facts, locked, rights=True, budgets=pots)
         for found in (checked(file), compiler.check(file)):
             assert asked(found) == [[can_pay("sam")]]
         assert in_words(file)[2].endswith(f"a BUDGET that lists sam ({sams}).")
@@ -639,7 +639,7 @@ def test_a_budget_that_turns_out_to_pay_pays_for_a_place_with_no_stated_price() 
     facts += [offer("tour", 1, price=None), offer("cruise", 1, price=None)]
     facts += [every_right("tour", "tour-offer"), every_right("cruise", "cruise-offer")]
     locked = [lock("tour", "sam"), lock("cruise", "sam")]
-    file = trip(["sam"], ["dock"], options, facts, locked, tickets=True, budgets=[])
+    file = trip(["sam"], ["dock"], options, facts, locked, rights=True, budgets=[])
     assert with_these_at_best(file, [can_pay("sam")]).payable == {
         ("tour-offer", "sam"),
         ("cruise-offer", "sam"),
@@ -684,7 +684,7 @@ def test_a_conflict_that_turns_on_who_can_pay_says_so_and_shows_the_budgets() ->
     locked = [lock("tour", "sam")]
 
     def with_budgets(*pots: Document) -> File:
-        return trip(["sam"], ["dock"], options, facts, locked, tickets=True, budgets=pots)
+        return trip(["sam"], ["dock"], options, facts, locked, rights=True, budgets=pots)
 
     file = with_budgets(budget("pot", "sam"))
     for found in (checked(file), compiler.check(file)):
@@ -737,7 +737,7 @@ def test_a_conflict_that_no_budget_bears_on_shows_none() -> None:
         [stays("tour", "dock")],
         [*at_ten("tour"), needs_right("tour"), offer("tour", 1), every_right("tour", "tour-offer")],
         [lock("tour", "alex", "sam")],
-        tickets=True,
+        rights=True,
         budgets=pots,
     )
     for found in (checked(two_buyers), compiler.check(two_buyers)):
@@ -751,7 +751,7 @@ def test_a_set_names_those_who_cannot_all_have_a_place_they_can_pay_for() -> Non
     facts = [*at_ten("tour"), needs_right("tour"), *offers]
     options = [stays("tour", "dock")]
     locked = [lock("tour", *EVERYONE)]
-    file = trip(EVERYONE, ["dock"], options, facts, locked, tickets=True, budgets=pots)
+    file = trip(EVERYONE, ["dock"], options, facts, locked, rights=True, budgets=pots)
     for found in (checked(file), compiler.check(file)):
         assert asked(found) == [[right("tour", "alex")], [right("tour", "sam")]]
     assert "budgets" not in report.as_json(file, checked(file))
@@ -816,24 +816,24 @@ def test_nothing_about_money_is_unknown_where_nobody_has_to_pay() -> None:
     unpriced = offer("tour", 1, price=None)
     needs_none = trip(["sam"], ["dock"], options, [*timed, unpriced], [], budgets=[])
     assert unknowns(needs_none) == ()
-    might = trip(["sam"], ["dock"], options, [*timed, unpriced], [], tickets=True, budgets=[])
+    might = trip(["sam"], ["dock"], options, [*timed, unpriced], [], rights=True, budgets=[])
     assert [unknown.what for unknown in unknowns(might)] == ["needs no right", "price", "funding"]
     free = [*timed, needs_right("tour"), offer("tour", 1, price="0 USD")]
-    costs_nothing = trip(["sam"], ["dock"], options, free, [], tickets=True, budgets=[])
+    costs_nothing = trip(["sam"], ["dock"], options, free, [], rights=True, budgets=[])
     assert [unknown.what for unknown in unknowns(costs_nothing)] == ["another right"]
     booked = [*timed, needs_right("tour"), unpriced, booking("tour", "sam")]
-    has_a_right = trip(["sam"], ["dock"], options, booked, [], tickets=True, budgets=[])
+    has_a_right = trip(["sam"], ["dock"], options, booked, [], rights=True, budgets=[])
     assert unknowns(has_a_right) == ()
-    only_jo = trip(["sam", "jo"], ["dock"], options, booked, [], tickets=True, budgets=[])
+    only_jo = trip(["sam", "jo"], ["dock"], options, booked, [], rights=True, budgets=[])
     assert unknowns(only_jo) == (right("tour", "jo"), price_of("tour-offer"), can_pay("jo"))
     a_free_place = [*booked, offer("tour", 1, id="free", price="0 USD")]
-    for_jo = trip(["sam", "jo"], ["dock"], options, a_free_place, [], tickets=True, budgets=[])
+    for_jo = trip(["sam", "jo"], ["dock"], options, a_free_place, [], rights=True, budgets=[])
     assert unknowns(for_jo) == (right("tour", "jo"),)
     only_free = [*timed, needs_right("tour"), offer("tour", 1, price="0 USD")]
-    for_both = trip(["sam", "jo"], ["dock"], options, only_free, [], tickets=True, budgets=[])
+    for_both = trip(["sam", "jo"], ["dock"], options, only_free, [], rights=True, budgets=[])
     assert [unknown.what for unknown in unknowns(for_both)] == ["another right"] * 2
     too_few = [*timed, needs_right("tour"), unpriced, offer("tour", 1, id="free", price="0 USD")]
-    for_two = trip(["sam", "jo"], ["dock"], options, too_few, [], tickets=True, budgets=[])
+    for_two = trip(["sam", "jo"], ["dock"], options, too_few, [], rights=True, budgets=[])
     assert [unknown.what for unknown in unknowns(for_two)] == [
         "another right",
         "another right",
@@ -867,7 +867,7 @@ def test_offers_that_nobody_can_need_cost_the_search_nothing(booked: bool) -> No
     counts: list[int] = []
     for more in ([], unpriced):
         calls.clear()
-        file = trip(["sam"], ["dock"], options, [*facts, *more], locked, tickets=booked)
+        file = trip(["sam"], ["dock"], options, [*facts, *more], locked, rights=booked)
         found = answers.check(file, works=counted)
         assert [unknown.what for unknown in asked(found)[0]] == ["duration"] * 2
         counts.append(len(calls))
@@ -924,7 +924,7 @@ def two_views(first: str = "9.00 EUR") -> File:
     facts += [offer("deck", 1, price=first), offer("tower", 1)]
     facts += [every_right("deck", "deck-offer"), every_right("tower", "tower-offer")]
     wants = [must("view", "alex")]
-    return trip(["alex"], ["loop"], options, facts, [], wants=wants, tickets=True)
+    return trip(["alex"], ["loop"], options, facts, [], wants=wants, rights=True)
 
 
 def test_a_visit_that_cannot_be_paid_for_is_not_the_plan_shown() -> None:
@@ -970,7 +970,7 @@ def two_tours_with_money(rng: Random) -> File:
             [budget("dollars", *some), budget("euros", *persons, holds=["EUR"])],
         ]
     )
-    return trip(persons, ["dock"], options, facts, decisions, tickets=True, budgets=pots)
+    return trip(persons, ["dock"], options, facts, decisions, rights=True, budgets=pots)
 
 
 def every_world_of_money(file: File) -> list[World]:

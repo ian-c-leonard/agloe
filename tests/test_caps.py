@@ -77,7 +77,7 @@ def a_tour(
     decisions = [*([lock("tour", *locked)] if locked else []), *caps]
     facts = [*at("tour", 10), needs_right("tour"), *more]
     options = [stays("tour", "dock")]
-    return trip(list(persons), ["dock"], options, facts, decisions, tickets=True, budgets=budgets)
+    return trip(list(persons), ["dock"], options, facts, decisions, rights=True, budgets=budgets)
 
 
 def charged(ticket: str, option: str = "tour") -> Unknown:
@@ -296,7 +296,7 @@ def two_visits(*more: Document, budgets: Sequence[Document], caps: Sequence[Docu
     facts = [*at("tour", 10), *at("talk", 12), needs_right("tour"), needs_right("talk")]
     facts += [offer("tour", 1, price="10 USD"), offer("talk", 1, price="10 USD"), *more]
     decisions = [lock("tour", "sam"), lock("talk", "jo"), *caps]
-    return trip(["sam", "jo"], ["dock"], options, facts, decisions, tickets=True, budgets=budgets)
+    return trip(["sam", "jo"], ["dock"], options, facts, decisions, rights=True, budgets=budgets)
 
 
 def test_an_earlier_purchase_leaves_the_only_budget_a_later_one_can_use() -> None:
@@ -411,13 +411,13 @@ def test_what_a_report_asks_for_says_that_it_has_to_fit_the_caps() -> None:
     """Sam is in a tour that might need a right. The trip money may spend nothing."""
     options = [stays("tour", "dock")]
     decisions = [lock("tour", "sam"), cap("money", "0 USD")]
-    might = trip(["sam"], ["dock"], options, at("tour", 10), decisions, tickets=True)
+    might = trip(["sam"], ["dock"], options, at("tour", 10), decisions, rights=True)
     assert (
         "If tour does need a right, a BOOKING for each PERSON who takes part in it is enough"
         " instead, if what those BOOKINGs paid fits the caps."
     ) in in_words(might)
     needs = trip(
-        ["sam"], ["dock"], options, [*at("tour", 10), needs_right("tour")], decisions, tickets=True
+        ["sam"], ["dock"], options, [*at("tour", 10), needs_right("tour")], decisions, rights=True
     )
     assert in_words(needs)[2] == (
         "The trip works if a right to tour is found for sam, at a cost that fits the caps."
@@ -472,7 +472,7 @@ def test_a_place_bought_only_if_needed_is_counted_as_if_it_were() -> None:
             options,
             [*facts, *tickets],
             decisions,
-            tickets=True,
+            rights=True,
             budgets=pots,
         )
 
@@ -604,7 +604,7 @@ def test_the_plan_for_a_length_of_time_works_at_the_limit_the_report_gives() -> 
     facts += [satisfies("early", "show"), satisfies("late", "show"), every("show")]
     decisions = [lock("visit", "sam"), cap("money", "1 USD")]
     file = trip(
-        ["sam"], ["hall"], options, facts, decisions, wants=[must("show", "sam")], tickets=True
+        ["sam"], ["hall"], options, facts, decisions, wants=[must("show", "sam")], rights=True
     )
     found = checked(file)
     assert [needed.at_most for needed in found.missing[0]] == [seconds(2) - seconds(0)]
@@ -679,7 +679,7 @@ def test_the_plan_for_any_length_of_time_works_however_long_it_is() -> None:
     decisions = [lock("bus", "sam"), cap("money", "1 USD")]
     places = ["home", "hall"]
     file = trip(
-        ["sam"], places, options, facts, decisions, wants=[must("show", "sam")], tickets=True
+        ["sam"], places, options, facts, decisions, wants=[must("show", "sam")], rights=True
     )
     found = checked(file)
     assert [needed.unknown.what for needed in found.missing[0]] == ["duration"]
@@ -933,7 +933,7 @@ def two_capped_visits(rng: Random) -> File:
     decisions += [
         cap(pot, f"{rng.randrange(0, 5)} USD") for pot in ("a", "b") if rng.random() < 0.8
     ]
-    return trip(persons, ["dock"], options, facts, decisions, tickets=True, budgets=pots)
+    return trip(persons, ["dock"], options, facts, decisions, rights=True, budgets=pots)
 
 
 def test_the_solver_gives_the_reference_checkers_report_for_trips_with_caps() -> None:
@@ -1011,7 +1011,7 @@ def test_bookings_that_pass_a_cap_are_seen_before_a_model_is_built(
     facts = [starts_from("sam", "home"), needs_right("ride")]
     facts.append(booking("ride", "sam", paid="2 USD", budget="money"))
     options = [moves("ride", "stop", "home")]
-    file = trip(["sam"], ["home", "stop"], options, facts, [cap("money", "1 USD")], tickets=True)
+    file = trip(["sam"], ["home", "stop"], options, facts, [cap("money", "1 USD")], rights=True)
     found = compiler.check(file)
     assert found == checked(file)
     assert found.answer is Answer.INFEASIBLE

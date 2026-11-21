@@ -173,7 +173,7 @@ def test_a_plan_that_buys_a_place_is_looked_for_once_in_each_world(program: str)
             offer("show", 1, price="20.00 USD"),
         ],
         [lock("show", "sam")],
-        tickets=True,
+        rights=True,
     )
     asked = Asked(PROGRAMS[program])
     report = asked.check(file)
