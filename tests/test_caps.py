@@ -1179,8 +1179,9 @@ def a_festival(sessions: int, classes: int = 1) -> File:
 def looks_ahead_counted(monkeypatch: pytest.MonkeyPatch, skip_nothing: bool = False) -> list[bool]:
     """A list that gains an entry each time the search for the way to pay looks ahead.
 
-    With ``skip_nothing`` the look ahead always says that the rest can follow, so the search
-    tries everything, as the rule says it in words.
+    With ``skip_nothing`` the look ahead always says that the rest can follow, and the search
+    never finds that it has been somewhere before. So it tries everything, as the rule says
+    it in words.
     """
     looks: list[bool] = []
     can_follow = reference._can_follow  # pyright: ignore[reportPrivateUsage]
@@ -1190,7 +1191,13 @@ def looks_ahead_counted(monkeypatch: pytest.MonkeyPatch, skip_nothing: bool = Fa
         looks.append(said)
         return said
 
+    def never_the_same(*given: object) -> tuple[int, tuple[int, ...], tuple[int, ...]]:
+        return len(looks), (len(seen),), (seen.append(None) or 0,)
+
+    seen: list[None] = []
     monkeypatch.setattr(reference, "_can_follow", counted)
+    if skip_nothing:
+        monkeypatch.setattr(reference, "_tried", never_the_same)
     return looks
 
 
@@ -1408,3 +1415,63 @@ def test_the_look_ahead_keeps_two_caps_of_one_budget_apart(
     }
     assert looks
     assert compiler.check(file) == answers.check(file)
+
+
+def a_registration(sessions: int) -> File:
+    """Alex pays a registration of 5 USD. All four then go to some sessions at 10 USD each.
+
+    Two BUDGETs cover everyone. The first may spend what half the session places cost, and
+    the second 5 USD more. So the registration has to come from the second BUDGET: charged to
+    the first, it leaves each BUDGET one place short. The sessions can be shared out between
+    the two in very many ways, and each way ends one place short.
+    """
+    people = ["alex", "sam", "jo", "max"]
+    names = [f"session-{number}" for number in range(sessions)]
+    facts = [*at("registration", 8), needs_right("registration")]
+    facts.append(offer("registration", 1, price="5 USD"))
+    for number, name in enumerate(names):
+        facts += [*at(name, 9 + number), needs_right(name), offer(name, 4, price="10 USD")]
+    decisions = [lock("registration", "alex"), *(lock(name, *people) for name in names)]
+    decisions += [cap("first", f"{20 * sessions} USD"), cap("second", f"{20 * sessions + 5} USD")]
+    pots = [budget("first", *people), budget("second", *people)]
+    options = [stays(name, "tent") for name in ["registration", *names]]
+    return trip(people, ["tent"], options, facts, decisions, rights=True, budgets=pots)
+
+
+def test_the_search_for_the_way_to_pay_remembers_where_it_has_been(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Six sessions for four after the registration: 24 places, twelve from each BUDGET.
+
+    With the registration on the first BUDGET, more than two million ways to share out the
+    places end one place short. They leave only a few hundred different amounts in the two
+    BUDGETs, and each of those is tried once.
+    """
+    file = a_registration(6)
+    looks = looks_ahead_counted(monkeypatch)
+    found = compiler.check(file)
+    assert found.answer is Answer.FEASIBLE
+    paid_from = [(cover.option, cover.budget) for cover in found.rights]
+    assert ("registration", "second") in paid_from
+    assert sum(budget == "first" for _, budget in paid_from) == 12
+    first, second = found.caps
+    assert (first.left, second.left) == (0, 0)
+    assert len(looks) < 5000
+
+
+def test_remembering_changes_no_way_to_pay_on_a_small_registration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Three sessions: few enough to try everything. The same way to pay, in far fewer steps."""
+    file = a_registration(3)
+    world = worst_case(file)
+    taking_part = {found.option: found.persons for found in file.locks}
+    looks = looks_ahead_counted(monkeypatch)
+    quick = way_to_pay(file, world, taking_part)
+    with_it = len(looks)
+    monkeypatch.undo()
+    looks = looks_ahead_counted(monkeypatch, skip_nothing=True)
+    assert way_to_pay(file, world, taking_part) == quick
+    assert quick is not None
+    assert quick["registration", "alex"] == ("registration-offer", "second")
+    assert with_it * 5 < len(looks)

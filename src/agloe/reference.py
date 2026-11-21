@@ -765,6 +765,11 @@ def way_to_pay(
     takes the pair: see ``_can_follow``. A pair that they cannot follow is passed over at
     once. The search would give it up anyway, after trying everything behind it, so the way
     to pay is the same. Where the first pairs all fit, nothing is looked at.
+
+    From then on it also remembers where it has been: see ``_tried``. Different pairs for
+    the purchases so far can leave the same places and the same room for the same purchases
+    to come. Where those had no way to pay once, they have none now, and the pair that leads
+    there is passed over too.
     """
     buyers: list[tuple[str, str]] = []
     for option, persons in taking_part.items():
@@ -797,6 +802,7 @@ def way_to_pay(
     picked: list[int] = []
     start = 0
     looks_ahead = False
+    no_way: set[_Tried] = set()  # where the purchases to come were found to have no way to pay
     while len(picked) < len(buyers):
         able = pairs[len(picked)]
         found = None
@@ -807,7 +813,10 @@ def way_to_pay(
             left[offer] -= 1
             if key is not None:
                 room[key] -= units
-            if not looks_ahead or _can_follow(pairs, len(picked) + 1, left, room):
+            ahead = len(picked) + 1
+            if not looks_ahead or (
+                _tried(ahead, left, room) not in no_way and _can_follow(pairs, ahead, left, room)
+            ):
                 found = number
                 break
             left[offer] += 1
@@ -816,6 +825,9 @@ def way_to_pay(
         if found is None:
             if not picked:
                 return None
+            # Every pair of this purchase has been tried from here, now or before the search
+            # last came back to it.
+            no_way.add(_tried(len(picked), left, room))
             looks_ahead = True
             start = picked.pop() + 1
             offer, _, key, units = pairs[len(picked)][start - 1]
@@ -829,6 +841,19 @@ def way_to_pay(
         buyer: (able[number][0], able[number][1])
         for buyer, able, number in zip(buyers, pairs, picked, strict=True)
     }
+
+
+type _Tried = tuple[int, tuple[int, ...], tuple[int, ...]]
+
+
+def _tried(first: int, left: Mapping[str, int], room: Mapping[tuple[str, str], int]) -> _Tried:
+    """What decides whether the purchases from this one on have a way to pay.
+
+    It is the purchases themselves, the places each OFFER still has and the room each cap
+    still has. Which pairs the purchases before them took plays no part beyond that. So the
+    search for the rest goes the same way each time these three are the same.
+    """
+    return first, tuple(left.values()), tuple(room.values())
 
 
 def _can_follow(
