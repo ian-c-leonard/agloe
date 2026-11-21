@@ -25,6 +25,10 @@ jobs:
           python-version: "3.14"
           enable-cache: true
       - run: uv sync --locked
+      # Some tests of the view drive its page in a real browser. They run on Linux, and are
+      # skipped where no browser is installed.
+      - if: runner.os == 'Linux'
+        run: uv run playwright install --with-deps --only-shell chromium
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run pyright
