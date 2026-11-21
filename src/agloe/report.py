@@ -534,7 +534,7 @@ def as_text(file: File, report: Report) -> str:
                     " who takes them."
                 )
             if file.capabilities:
-                lines[-1] += " The PERSONs who take them have to have whatever they require."
+                lines[-1] += " The PERSONs who take them have to meet whatever they require."
         if report.plans:
             lines += [
                 "",
@@ -559,9 +559,9 @@ def as_text(file: File, report: Report) -> str:
                 lines[-1] += " One OPTION can be found for several PERSONs and several WANTs."
             if file.capabilities:
                 lines[-1] += (
-                    " The PERSONs who take part in it have to meet whatever it requires: a"
-                    " PERSON it requires something of has it, and anybody who comes to supply"
-                    " a CAPABILITY can take part for the whole OPTION."
+                    " Whatever it requires has to be met: the PERSON has each CAPABILITY that"
+                    " it requires of each PERSON, and somebody who takes part in it from its"
+                    " start to its end has each CAPABILITY that it requires of one PERSON."
                 )
     return "\n".join(lines) + "\n"
 
