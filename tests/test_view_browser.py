@@ -60,7 +60,8 @@ FITTED = """() => {
   return Math.abs(rows.getBoundingClientRect().width - room) < 1;
 }"""
 # What is lit on the page: the steps of the calendar, the steps with no time beside it, the
-# marks of the strip, the lines of the report, and the WANTs with the OPTIONs under them.
+# marks of the strip, the lines of the report, the WANTs with the OPTIONs under them, and
+# the OPTIONs of the FILE.
 LIT = """() => {
   const first = (each) => each.title.split("\\n")[0];
   const all = (which) => [...document.querySelectorAll(which)];
@@ -70,6 +71,7 @@ LIT = """() => {
     bars: [...new Set(all("#strip .bar.lit").map(first))],
     rows: all("#report .row.lit").map((row) => row.textContent),
     wants: all("#wants .lit").map((each) => each.querySelector("h3, b").textContent),
+    options: all("#options .option.lit").map((each) => each.querySelector("h3").textContent),
   };
 }"""
 # For each mark of the strip, how many of 15 by 9 points of it answer the pointer for it.
@@ -267,7 +269,7 @@ def test_pointing_at_a_step_lights_up_what_the_report_says_of_it(chromium: Brows
         assert ids_of(found["rows"]) == ["lock-visit"]
         # With the pointer off the parts of the page, nothing is lit.
         page.mouse.move(2, 2)
-        lit(page, marks=[], rows=[], bars=[], untimed=[], wants=[])
+        lit(page, marks=[], rows=[], bars=[], untimed=[], wants=[], options=[])
         assert page.locator(".lit").count() == 0
 
 
@@ -328,6 +330,48 @@ def test_a_want_has_the_red_edge_of_what_the_report_names(chromium: Browser) -> 
         page.locator("#report .row").first.wait_for()
         page.locator("#calendar .mark").first.wait_for()
         assert page.locator("#wants-part").is_hidden()
+
+
+def test_pointing_ties_an_option_to_the_calendar_and_the_report(chromium: Browser) -> None:
+    """The trip depends on how long the cab takes. No LOCK names the cab.
+
+    So the calendar has no step for the cab, and the page still shows it: it is in the FILE.
+    """
+    with opened(chromium, EXAMPLES / "flight-home" / "depends-on-the-cab.json") as page:
+        case = page.locator("#report .row[data-record='case:0']")
+        case.wait_for()
+        said = case.text_content()
+        assert said == "The trip works if Cab to O'Hare takes 45 min or less."
+        rows = page.locator("#options .option")
+        rows.first.wait_for()
+        assert rows.count() == 4
+        cab = page.locator("#options .option.asked")
+        assert cab.count() == 1
+        assert cab.locator(".option-name").text_content() == "Cab to O'Hare"
+        assert cab.locator(".option-said p").all_text_contents() == [
+            "Can start at any time.",
+            "The FILE does not say how long it takes.",
+            "No LOCK names it.",
+        ]
+        assert page.locator("#calendar .mark").count() == 2
+        # Pointing at the cab lights up the line of the case that names it, and the other way.
+        cab.hover()
+        lit(page, options=["Cab to O'Hare"], marks=[], rows=[said])
+        case.hover()
+        lit(page, options=["Cab to O'Hare"], marks=[], rows=[said])
+        # An OPTION that the calendar holds is its step: pointing at either lights up both.
+        rows.first.hover()
+        lit(page, options=["Museum visit"], marks=["Museum visit"])
+        page.locator("#calendar .mark").first.hover()
+        lit(page, options=["Museum visit"], marks=["Museum visit"])
+    # In a plan, an OPTION is its step: pointing at it lights up its line in the plan too.
+    with opened(chromium, EXAMPLES / "flight-home" / "works.json") as page:
+        page.locator("#report .row").first.wait_for()
+        train = page.locator("#options .option").nth(1)
+        assert train.locator(".option-name").text_content() == "Blue Line to O'Hare"
+        train.hover()
+        found = lit(page, options=["Blue Line to O'Hare"], marks=["Blue Line to O'Hare"])
+        assert found["rows"][0].endswith(": Blue Line to O'Hare, Alex and Sam")
 
 
 def test_a_long_name_under_a_want_lies_on_nothing(chromium: Browser, tmp_path: Path) -> None:
@@ -575,6 +619,12 @@ def test_the_page_shows_what_it_can_without_a_part_that_cannot_load(chromium: Br
         page.locator("#calendar .mark").first.wait_for()
         assert page.locator("#wants-part").is_hidden()
         assert page.text_content("#report") == expected
+    # Without the OPTIONs: the same, and the WANTs are there.
+    with opened(chromium, path, without=("options.js",)) as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#wants .want").first.wait_for()
+        assert page.locator("#options-part").is_hidden()
+        assert page.text_content("#report") == expected
     # With a fault in the WANTs: the same, and the fault is not swallowed.
     faults: list[str] = []
     code = 'export function wants() { throw new Error("a fault in the WANTs"); }'
@@ -584,6 +634,7 @@ def test_the_page_shows_what_it_can_without_a_part_that_cannot_load(chromium: Br
         page.wait_for_function("() => window.faults > 0")
         assert page.locator("#wants-part").is_hidden()
         assert page.locator("#calendar .mark").count() == 3
+        assert page.locator("#options .option").count() == 2
         assert page.text_content("#report") == expected
     assert faults and all("a fault in the WANTs" in fault for fault in faults)
     path = EXAMPLES / "several-days" / "works-but-risky.json"

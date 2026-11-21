@@ -7,7 +7,9 @@ TRIP the report shows no ITINERARY, and the steps are the OPTIONs that a LOCK na
 times the FILE states.
 
 It also sends the WANTs of the FILE: for whom each is a must or a must-not, and each OPTION
-that a FACT says SATISFIES it or does not.
+that a FACT says SATISFIES it or does not. And it sends every OPTION of the FILE with what the
+FILE says of it: where it is, when it starts, how long it takes, how early people must be
+there, and whom a LOCK names for it.
 
 A day is sent as the stretch of it in which the clocks run on without a change, and each step
 says which part of it lies in which stretch. So the page works out no time for itself, on any
@@ -70,6 +72,7 @@ MONTHS = [
     "December",
 ]
 HOUR = 3600
+CHICAGO = "[America/Chicago]"
 
 type Trip = dict[str, Any]
 
@@ -146,6 +149,22 @@ def test_every_example_is_sent_as_a_trip_that_a_page_can_draw(path: Path) -> Non
     assert sent["until"] is None
     in_the_file = json.loads(path.read_text()).get("wants", [])
     assert [want["id"] for want in sent["wants"]] == [want["id"] for want in in_the_file]
+    # Every OPTION of the FILE is sent, in the FILE's order, with what the FILE says of it.
+    assert [option["id"] for option in sent["options"]] == [each.id for each in file.options]
+    for option, each in zip(sent["options"], file.options, strict=True):
+        assert (option["from"], option["to"]) == (each.origin, each.destination)
+        stated, length, margin = file.start(each.id), file.duration(each.id), file.cutoff(each.id)
+        assert (option["start"] is not None) is (stated is not None and stated.at is not None)
+        assert option["any_time"] is (stated is not None and stated.at is None)
+        assert option["length"] == (
+            None if length is None else {"shortest": length.shortest, "longest": length.longest}
+        )
+        assert option["margin"] == (None if margin is None else margin.margin)
+        named = {person for lock in file.locks if lock.option == each.id for person in lock.persons}
+        assert option["locked"] == [person.id for person in file.persons if person.id in named]
+    # Each step that is an OPTION is one of them.
+    ids = {option["id"] for option in sent["options"]}
+    assert {step["option"] for step in sent["steps"]} - {None} <= ids
     # In the examples the clocks do not change: every day is whole, and no time needs its offset.
     for each in sent["days"]:
         assert (each["offset"], each["opens"], each["closes"]) == (None, 0, 24 * HOUR)
@@ -530,6 +549,61 @@ def test_names_that_look_the_same_on_a_page_come_with_their_ids() -> None:
     assert [each["name"] for each in sent["persons"]] == ["Alex", "Sam", "alex"]
 
 
+def test_every_option_of_the_file_is_sent_with_what_the_file_says_of_it() -> None:
+    """A visit, a train, a flight and a cab. No LOCK names the train or the cab."""
+    sent = drawn(STORY / "depends-on-the-cab.json")
+    visit, train, flight, cab = sent["options"]
+    assert visit == {
+        "id": "museum-visit",
+        "name": "Museum visit",
+        "from": "art-institute",
+        "to": "art-institute",
+        "start": time("2027-05-15T14:30:00"),
+        "any_time": False,
+        "length": {"shortest": HOUR, "longest": HOUR},
+        "margin": None,
+        "locked": ["alex", "sam"],
+        # The FACTs and DECISIONs of the FILE that are about it, in the FILE's order.
+        "records": [
+            "visit-time",
+            "visit-length",
+            "visit-needs-a-ticket",
+            "museum-tickets",
+            "lock-visit",
+        ],
+    }
+    # The train can start at any time. The FILE says so, and that is not a time.
+    assert (train["start"], train["any_time"], train["locked"]) == (None, True, [])
+    assert (train["from"], train["to"]) == ("art-institute", "ohare")
+    # People must be at the airport 45 minutes before the flight.
+    assert (flight["margin"], flight["length"]) == (
+        45 * 60,
+        {"shortest": 9000, "longest": 9000},
+    )
+    # The FILE does not say how long the cab takes.
+    assert (cab["name"], cab["any_time"], cab["length"], cab["locked"]) == (
+        "Cab to O'Hare",
+        True,
+        None,
+        [],
+    )
+    assert cab["records"] == ["cab-time", "cab-is-walk-up"]
+
+
+def test_an_option_with_no_word_about_its_start_has_none() -> None:
+    sent = sent_for(locked_only(), Report(Answer.UNDETERMINED))
+    by_id = {option["id"]: option for option in sent["options"]}
+    assert len(by_id) == 7
+    # The FILE says nothing of when this one starts, and of this one that it can start any time.
+    assert (by_id["no-word"]["start"], by_id["no-word"]["any_time"]) == (None, False)
+    assert (by_id["some-time"]["start"], by_id["some-time"]["any_time"]) == (None, True)
+    # A length that the FILE gives as a range.
+    assert by_id["ride"]["length"] == {"shortest": 20 * 60, "longest": 50 * 60}
+    # Several LOCKs name the visit. Each PERSON they name is there once, in the FILE's order.
+    assert by_id["visit"]["locked"] == ["alex", "jo"]
+    assert by_id["open"]["locked"] == []
+
+
 def test_a_trip_with_no_itinerary_is_sent_with_the_options_that_a_lock_names() -> None:
     sent = drawn(STORY / "cannot-work.json")
     assert sent["itinerary"] is False
@@ -708,12 +782,34 @@ def around_a_change(*locked: str) -> File:
 
 
 def test_a_time_gives_its_offset_where_the_report_gives_offsets() -> None:
-    file = around_a_change("dinner")
-    # This report names the times of dinner and of brunch, which are at two offsets from UTC.
-    # So it gives each time with its offset. The calendar holds dinner only, and does the same.
-    found = Report(Answer.INFEASIBLE, conflict=("dinner-time", "brunch-time"))
+    """A dinner before Chicago's clocks go back, and a FACT about WAYs that covers the day after.
+
+    The view sends the times of the dinner, which are at one offset from UTC. The FACT has a
+    time at another. A report that names the FACT gives each time with its offset, and then
+    the view does the same.
+    """
+    span = {
+        "earliest": f"2027-11-06T12:00:00-05:00{CHICAGO}",
+        "latest": f"2027-11-07T12:00:00-06:00{CHICAGO}",
+    }
+    file = trip(
+        ["alex"],
+        ["hotel", "pier"],
+        [stays("dinner", "hotel")],
+        [
+            {
+                "id": "dinner-time",
+                "option": "dinner",
+                "starts_at": f"2027-11-06T19:00:00-05:00{CHICAGO}",
+            },
+            lasts("dinner", "PT1H"),
+            {"id": "every-way", "complete": {"to": "pier", "leaving": span}},
+        ],
+        [lock("dinner", "alex")],
+    )
+    found = Report(Answer.INFEASIBLE, conflict=("every-way",))
     assert reports.clock_for(file, found).offsets
-    assert "7:00 pm (UTC-5)" in reports.as_text(file, found)
+    assert "(UTC-6)" in reports.as_text(file, found)
     (step,) = sent_for(file, found)["steps"]
     assert (step["start"], step["end"]) == (
         time("2027-11-06T19:00:00", "UTC-5"),
@@ -722,14 +818,24 @@ def test_a_time_gives_its_offset_where_the_report_gives_offsets() -> None:
     # A report that names no time gives no offset. The times sent are all at one, so none has it.
     quiet = Report(Answer.UNDETERMINED)
     assert not reports.clock_for(file, quiet).offsets
-    (step,) = sent_for(file, quiet)["steps"]
+    sent = sent_for(file, quiet)
+    (step,) = sent["steps"]
     assert (step["start"], step["end"]) == (
         time("2027-11-06T19:00:00"),
         time("2027-11-06T20:00:00"),
     )
+    assert sent["options"][0]["start"] == time("2027-11-06T19:00:00")
 
 
 def test_times_at_two_offsets_each_give_theirs_whatever_the_report_names() -> None:
+    """The time of an OPTION that no LOCK names is sent too, and counts."""
+    sent = sent_for(around_a_change("dinner"), Report(Answer.UNDETERMINED))
+    (dinner,) = sent["steps"]
+    assert dinner["start"] == time("2027-11-06T19:00:00", "UTC-5")
+    assert [option["start"] for option in sent["options"]] == [
+        time("2027-11-06T19:00:00", "UTC-5"),
+        time("2027-11-07T10:00:00", "UTC-6"),
+    ]
     file = around_a_change("dinner", "brunch")
     quiet = Report(Answer.UNDETERMINED)
     assert not reports.clock_for(file, quiet).offsets
@@ -1259,6 +1365,53 @@ WANT: dict[str, Any] = {
 }
 
 
+OPTION: dict[str, Any] = {
+    "id": "dinner",
+    "name": "dinner",
+    "from": "hotel",
+    "to": "hotel",
+    "start": {"at": "2027-05-15T19:00:00", "offset": None},
+    "any_time": False,
+    "length": {"shortest": 3600, "longest": 5400},
+    "margin": 600,
+    "locked": ["alex"],
+    "records": ["dinner-time", "lock-dinner"],
+}
+
+
+def _option(**other: object) -> Callable[[Trip], None]:
+    """The TRIP gets one more OPTION, which is good but for these parts."""
+
+    def change(sent: Trip) -> None:
+        sent["options"] = [*sent["options"], {**OPTION, **other}]
+
+    return change
+
+
+def _option_is(other: object) -> Callable[[Trip], None]:
+    """The TRIP gets this in the place of one more OPTION."""
+
+    def change(sent: Trip) -> None:
+        sent["options"] = [*sent["options"], other]
+
+    return change
+
+
+def test_a_trip_with_one_more_option_is_a_trip() -> None:
+    sent = good()
+    assert [option["id"] for option in sent["options"]] == ["night"]
+    _option()(sent)
+    assert holds(sent)
+    # An OPTION of which the FILE says next to nothing.
+    sent = good()
+    _option(start=None, length=None, margin=None, locked=[], records=[])(sent)
+    assert holds(sent)
+    # One that can start at any time, and takes no time.
+    sent = good()
+    _option(start=None, any_time=True, length={"shortest": 0, "longest": 0}, margin=0)(sent)
+    assert holds(sent)
+
+
 def _want(**other: object) -> Callable[[Trip], None]:
     """The TRIP gets one WANT, which is good but for these parts."""
     return _set("wants", to=[{**WANT, **other}])
@@ -1287,6 +1440,28 @@ def test_a_trip_with_a_want_is_a_trip() -> None:
 
 
 BROKEN: dict[str, Callable[[Trip], None]] = {
+    "no options": _drop("options"),
+    "options that are no list": _set("options", to={}),
+    "a step that is none of the options": _set("options", to=[]),
+    "an option that is no record": _option_is("dinner"),
+    "an option with one thing more": _option(more=1),
+    "an option with a blank name": _option(name=" "),
+    "two options with one id": _option(id="night"),
+    "an option at a place the trip does not have": _option(to="denver"),
+    "an option with a start that is no time": _option(start="19:00"),
+    "an option with a time that can start at any time": _option(any_time=True),
+    "an option whose any time is no yes or no": _option(start=None, any_time=1),
+    "an option with a length that is a number": _option(length=3600),
+    "an option that takes less than no time": _option(length={"shortest": -1, "longest": 60}),
+    "an option whose longest is under its shortest": _option(
+        length={"shortest": 90, "longest": 60}
+    ),
+    "an option with a length in words": _option(length={"shortest": "1 h", "longest": "1 h"}),
+    "an option with a margin below nothing": _option(margin=-1),
+    "an option with a margin that is a yes": _option(margin=True),
+    "an option that a lock names for a person the trip does not have": _option(locked=["jo"]),
+    "an option that names a person twice": _option(locked=["alex", "alex"]),
+    "an option that names a record twice": _option(records=["dinner-time", "dinner-time"]),
     "no wants": _drop("wants"),
     "wants that are no list": _set("wants", to={}),
     "a want that is no record": _set("wants", to=["a-bed"]),
