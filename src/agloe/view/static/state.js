@@ -56,11 +56,12 @@ function markOf(json) {
  * What the page shows: a mark, a line, a note under it, the report in words, whether that
  * report is on the FILE as it was before, and the problems of a FILE that the format refuses.
  *
- * `calendar` holds the TRIP that came with the report on the page, for the calendar to draw.
- * It is null where the page shows no report. The TRIP in it is null where the view sent none.
+ * `calendar` holds the TRIP that came with the report on the page, for the calendar to draw,
+ * and that report as JSON, for what the calendar marks. It is null where the page shows no
+ * report. The TRIP in it is null where the view sent none.
  */
 export function says(state) {
-  const calendar = state.report ? { trip: state.report.trip } : null;
+  const calendar = state.report ? { trip: state.report.trip, report: state.report.json } : null;
   const shown = { name: state.name, report: state.report ? state.report.text : null, calendar, old: state.old, problems: state.problems };
   const with_old = (note) => `${note} ${state.old ? OLD : ""}`.trim();
   if (state.lost) {

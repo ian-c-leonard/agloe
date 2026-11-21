@@ -6,7 +6,6 @@ import { after, says, start } from "./state.js";
 
 const PER_MINUTE = 0.8; // pixels down the calendar for each minute
 const HUES = 6; // the colours that tell the PERSONs apart, in view.css
-const EDGE = 14; // pixels that the words at a start or an end of the TRIP need
 const SMALLEST = 3; // pixels: the least height of a mark
 const TICK = 7; // pixels: the height of the tick for a WAY that takes next to no time
 const BESIDE = 18; // pixels from one tick to the next where several are at one place
@@ -32,7 +31,7 @@ function hourName(minute) {
  * as far as its day has room.
  */
 function put(body, mark, people, open, ticks) {
-  const box = made("div", `mark ${mark.state}${mark.begins ? "" : " goes-on"}${mark.ends ? "" : " no-end"}${mark.brief ? " brief" : ""}`);
+  const box = made("div", `mark ${mark.state}${mark.begins ? "" : " goes-on"}${mark.ends ? "" : " no-end"}${mark.brief ? " brief" : ""}${mark.clash.length ? " clash" : ""}`);
   const columns = mark.last - mark.first + 1;
   const when = mark.late ? `${mark.when}, ${mark.late}` : mark.when;
   // A mark is never smaller than the eye can find, and never outside the hours of its column.
@@ -45,7 +44,7 @@ function put(body, mark, people, open, ticks) {
   box.style.width = `${(columns / mark.lanes / people) * 100}%`;
   box.style.top = `${top}px`;
   box.style.height = `${height}px`;
-  box.title = [mark.name, when, mark.where, mark.who, mark.lock ?? "A WAY in the plan of the report."].join("\n");
+  box.title = [mark.name, when, mark.where, mark.who, mark.lock ?? "A WAY in the plan of the report.", ...(mark.finds ? [mark.finds] : [])].join("\n");
   const block = made("div", "block");
   const stripes = made("div", "stripes");
   for (let column = mark.first; column <= mark.last; column += 1) {
@@ -92,6 +91,10 @@ function draw(laid) {
     }
     grid.append(hours);
   }
+  // The days are level with each other: where one has words above or below it, all have room.
+  const above = laid.days.some((day) => day.bounds.some((bound) => bound.edge === "starts"));
+  const below = laid.days.some((day) => day.bounds.some((bound) => bound.edge === "ends"));
+  grid.classList.toggle("with-starts", above);
   for (const day of laid.days) {
     const column = made("div", "day");
     column.style.setProperty("--people", Math.max(people, 1));
@@ -108,26 +111,34 @@ function draw(laid) {
     }
     const ticks = new Map();
     for (const mark of day.marks) put(body, mark, people, day.open, ticks);
+    // Where the TRIP starts and where it ends: a line across the day. Its words stand above
+    // the day for the start and below it for the end, so that they cover no step.
+    const words = { starts: made("div", "bound-says"), ends: made("div", "bound-says") };
     for (const bound of day.bounds) {
-      const line = made("div", "bound");
-      const down = bound.top * PER_MINUTE;
-      line.style.top = `${down}px`;
-      // The words stand outside the TRIP, where no step is, unless the edge of the day is too
-      // near. Words for the start and the end at once stand where there is room. A line that
-      // shares the words of the one before it has none of its own.
-      const above = bound.edge === "ends" ? tall - down < EDGE : down >= EDGE;
-      if (bound.says !== null) line.append(made("span", above ? "above" : "below", bound.says));
+      const line = made("div", bound.clash ? "bound clash" : "bound");
+      line.style.top = `${bound.top * PER_MINUTE}px`;
       body.append(line);
+      Object.assign(words[bound.edge], { textContent: bound.says, title: bound.says });
+      words[bound.edge].classList.toggle("clash", bound.clash);
     }
-    column.append(Object.assign(made("h3", "day-name", day.name), { title: day.name }), heads, body);
+    column.append(Object.assign(made("h3", "day-name", day.name), { title: day.name }), heads);
+    if (above) column.append(words.starts);
+    column.append(body);
+    if (below) column.append(words.ends);
     grid.append(column);
   }
   grid.hidden = !laid.days.length;
   part("calendar-key").hidden = !laid.days.length;
   // A calendar of what is LOCKed holds nothing that is only in a plan, and no WAY.
   part("calendar-key").classList.toggle("only-locks", !laid.itinerary);
+  part("calendar-key").classList.toggle("with-clash", laid.clash);
   part("calendar-says").textContent = laid.says;
-  part("calendar-untimed").textContent = `The FILE gives no time for these LOCKed OPTIONs: ${laid.untimed.map((step) => `${step.name} (${step.who})`).join(", ")}.`;
+  // The steps with no time, each marked where the report names what is about it.
+  const untimed = laid.untimed.flatMap((step, n) => {
+    const name = Object.assign(made("span", step.clash.length ? "clash" : "", `${step.name} (${step.who})`), { title: step.finds ?? "" });
+    return n ? [", ", name] : [name];
+  });
+  part("calendar-untimed").replaceChildren("The FILE gives no time for these LOCKed OPTIONs: ", ...untimed, ".");
   part("calendar-untimed").hidden = !laid.untimed.length;
 }
 
@@ -158,7 +169,7 @@ function show() {
   if (said.calendar.trip === drawn) return;
   drawn = said.calendar.trip;
   try {
-    draw(lay(drawn));
+    draw(lay(drawn, said.calendar.report));
   } catch (problem) {
     // Half a calendar is no calendar. The report below is whole.
     noCalendar("The page could not draw the calendar of this TRIP.");

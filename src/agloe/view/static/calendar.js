@@ -10,6 +10,10 @@
 // A day is sent as the stretch of it in which the clocks run on without a change. Most days are
 // one stretch. A day on which the clocks change is two, each a column of its own.
 //
+// Each step names the FACTs and DECISIONs of the FILE that are about it. A report on a TRIP that
+// cannot work names the FACTs, WANTs and DECISIONs that rule out every plan. So the calendar
+// marks the steps that the report is about, and the start and the end of the TRIP likewise.
+//
 // Nothing here judges a TRIP, nothing here reads a FILE, and nothing here works out which day a
 // moment is on: the view says. This lays out what it is sent: how far down its day a part
 // starts, how tall it is, whose columns it spans, and what its words are.
@@ -21,7 +25,6 @@ const ROOM = 20 * 60; // seconds of room above the first step of a day and below
 const NO_END = 30 * 60; // seconds drawn for a step whose end nobody knows
 const NAMED = 20 * 60; // seconds that a WAY takes before its name has room beside it
 const SMALLEST = 4 * 60; // seconds that the smallest mark covers on the page
-const APART = 40; // minutes between the start and the end of the TRIP before each has room for its words
 
 /** The number of a day, counted from 1 January 1970, in the calendar that a FILE writes dates in. */
 function dayNumber(year, month, day) {
@@ -109,6 +112,15 @@ function lanesOf(marks) {
   return placed;
 }
 
+/** What the calendar says of the records that a report names as ruling out every plan. */
+function rulesOut(named, marked) {
+  if (!named) return "";
+  const names = ` The report names ${named === 1 ? "1 record that rules" : `${named} records that rule`} out every plan.`;
+  if (!marked) return `${names} ${named === 1 ? "It is not" : "None of them is"} about what the calendar shows.`;
+  if (named === 1) return `${names} A red edge marks what it is about.`;
+  return `${names} A red edge marks what ${marked} of them ${marked === 1 ? "is" : "are"} about.`;
+}
+
 /** What the calendar holds, in words. */
 function saysOf(trip, timed) {
   const clocks = ` Times are on the clocks of ${trip.zone}.`;
@@ -136,13 +148,20 @@ function saysOf(trip, timed) {
  * say whether the part holds the start and the end of its step. A bound is where the TRIP starts
  * or ends. `untimed` names the steps that have no time. `itinerary` says whether the steps are
  * the ITINERARY of the report.
+ *
+ * `report` is the report as JSON, where the page has one. `clash` on a mark holds the records
+ * that are about its step and that the report names as ruling out every plan. `clash` on a
+ * bound says that the report names the DECISION about it. `clash` on the calendar says that
+ * something on it is marked so.
  */
-export function calendar(trip) {
-  const none = { says: "", zone: null, itinerary: false, persons: [], hours: { from: 9 * 60, to: 17 * 60 }, days: [], untimed: [] };
+export function calendar(trip, report = null) {
+  const none = { says: "", zone: null, itinerary: false, clash: false, persons: [], hours: { from: 9 * 60, to: 17 * 60 }, days: [], untimed: [] };
   if (trip === null) return { ...none, says: "There is no calendar of this TRIP: the view could not make one." };
   const column = new Map(trip.persons.map((person, n) => [person.id, n]));
   const place = new Map(trip.places.map((each) => [each.id, each.name]));
   const names = (columns) => listed(columns.map((n) => trip.persons[n].name));
+  // The FACTs, WANTs and DECISIONs that the report names as ruling out every plan.
+  const ruled = new Set(report !== null && report.answer === "INFEASIBLE" && Array.isArray(report.conflict) ? report.conflict.filter((id) => typeof id === "string") : []);
 
   // ---- each step in words
   const steps = trip.steps.map((step, n) => {
@@ -150,6 +169,10 @@ export function calendar(trip) {
     const locked = new Set(step.locked.map((id) => column.get(id)));
     return {
       n, columns, parts: step.parts, end: step.end,
+      clash: step.records.filter((id) => ruled.has(id)),
+      get finds() {
+        return this.clash.length ? `The report names ${listed(this.clash)} among what rules out every plan.` : null;
+      },
       kind: step.option === null ? "way" : "option",
       name: step.name ?? "another WAY",
       who: names(columns),
@@ -159,8 +182,12 @@ export function calendar(trip) {
       stateOf: (at) => (step.option === null ? "way" : locked.has(at) ? "locked" : "planned"),
     };
   });
-  const untimed = steps.filter((step) => step.when === null).map((step) => ({ name: step.name, who: step.who }));
-  const says = saysOf(trip, steps.length - untimed.length);
+  const untimed = steps.filter((step) => step.when === null).map((step) => ({ name: step.name, who: step.who, clash: step.clash, finds: step.finds }));
+  // What the report names, and how much of it is about what the calendar shows: the steps
+  // on its days, the steps with no time that it names beside them, and the times of the TRIP.
+  const marked = new Set(steps.filter((step) => step.parts.length || step.when === null).flatMap((step) => step.clash));
+  for (const bound of [trip.starts, trip.ends]) if (bound !== null && bound.day !== null && ruled.has(bound.record)) marked.add(bound.record);
+  const says = saysOf(trip, steps.length - untimed.length) + rulesOut(ruled.size, marked.size);
   if (!trip.days.length) return { ...none, says, zone: trip.zone, itinerary: trip.itinerary, persons: trip.persons, untimed };
 
   // ---- the hours that every day shows: from the earliest start of a step on any day to the
@@ -237,19 +264,19 @@ export function calendar(trip) {
           named: step.kind === "option" || bottom - top >= NAMED,
           // A WAY that takes next to no time is a tick on top of what is beside it, so that it shows.
           brief: step.kind === "way" && bottom - top < SMALLEST,
+          clash: step.clash,
+          finds: step.finds,
         });
       }
     }
     delete day.shown;
   }
-  // ---- when the TRIP starts and ends: a line for each. A time outside the hours shown is at
-  // their edge. Where both are close together on one day, the first line has the words of
-  // both, and the second has none. A time says its date where that is not the date of its column.
+  // ---- when the TRIP starts and ends: a line for each, with its words. A time outside the
+  // hours shown is at their edge. A time says its date where that is not the date of its
+  // column. Each is marked where the report names the DECISION about it, and only there.
   for (const [bound, word] of bounds) {
     const time = clock(bound, { at: trip.days[bound.day].date });
-    const beside = days[bound.day].bounds.find((other) => Math.abs(other.top - down(bound.second)) < APART);
-    if (beside) Object.assign(beside, { says: `${beside.says}, and ends at ${time}`, edge: "both" });
-    days[bound.day].bounds.push({ says: beside ? null : `The TRIP ${word} at ${time}`, edge: word, top: down(bound.second) });
+    days[bound.day].bounds.push({ says: `The TRIP ${word} at ${time}`, edge: word, top: down(bound.second), clash: ruled.has(bound.record) });
   }
-  return { says, zone: trip.zone, itinerary: trip.itinerary, persons: trip.persons, hours: { from: from / 60, to: to / 60 }, days, untimed };
+  return { says, zone: trip.zone, itinerary: trip.itinerary, clash: marked.size > 0, persons: trip.persons, hours: { from: from / 60, to: to / 60 }, days, untimed };
 }

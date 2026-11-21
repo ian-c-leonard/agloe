@@ -21,9 +21,9 @@ from typing import Any, cast
 
 import pytest
 
-from agloe import compiler
+from agloe import compiler, report
 from agloe.answers import Answer, Report
-from agloe.file import File, instant, read
+from agloe.file import File, instant, parse, read
 from agloe.reference import Step
 from agloe.view.trip import holds, shown
 from tests.stories import (
@@ -90,8 +90,12 @@ def drawn(path: Path) -> Trip:
     return sent_for(file, compiler.check(file))
 
 
-def calendars(trips: list[Trip | None]) -> list[Calendar]:
-    """The calendar of each TRIP, by the page's own code."""
+def calendars(
+    trips: list[Trip | None], reports: list[dict[str, Any] | None] | None = None
+) -> list[Calendar]:
+    """The calendar of each TRIP, by the page's own code, with the report that it came with."""
+    with_them = reports if reports is not None else [None] * len(trips)
+    asked = [{"trip": sent, "report": found} for sent, found in zip(trips, with_them, strict=True)]
     node = shutil.which("node")
     if node is None:
         if os.environ.get("CI"):
@@ -99,7 +103,7 @@ def calendars(trips: list[Trip | None]) -> list[Calendar]:
         pytest.skip("needs Node")
     done = subprocess.run(
         [node, str(Path(__file__).parent / "view_calendar.mjs")],
-        input=json.dumps(trips),
+        input=json.dumps(asked),
         capture_output=True,
         text=True,
         check=False,
@@ -109,8 +113,15 @@ def calendars(trips: list[Trip | None]) -> list[Calendar]:
     return laid
 
 
-def calendar(sent: Trip | None) -> Calendar:
-    return calendars([sent])[0]
+def calendar(sent: Trip | None, found: dict[str, Any] | None = None) -> Calendar:
+    return calendars([sent], [found])[0]
+
+
+def with_its_report(path: Path) -> tuple[Trip, dict[str, Any]]:
+    """What is sent of the TRIP in this FILE, and the report on it as JSON."""
+    file = read(path)
+    found = compiler.check(file)
+    return sent_for(file, found), report.as_json(file, found)
 
 
 def marks(laid: Calendar, day: int = 0) -> list[tuple[Any, ...]]:
@@ -204,6 +215,115 @@ def test_a_trip_with_no_itinerary_has_a_calendar_of_what_is_locked() -> None:
         (1, "locked", 0, 1, 180, 150, True, True),
     ]
     assert [mark["name"] for mark in laid["days"][0]["marks"]] == ["Museum visit", "Flight home"]
+
+
+RULES_OUT = (
+    " The report names {} records that rule out every plan."
+    " A red edge marks what {} of them are about."
+)
+
+
+def test_the_calendar_marks_what_the_report_names_as_ruling_out_every_plan() -> None:
+    """The report says which FACTs and DECISIONs cannot all hold. The calendar judges nothing."""
+    sent, found = with_its_report(STORY / "cannot-work.json")
+    assert len(found["conflict"]) == 8
+    laid = calendar(sent, found)
+    visit, flight = laid["days"][0]["marks"]
+    # Each mark names the records about its step that the report names, in the FILE's order.
+    assert visit["clash"] == ["visit-time", "visit-length", "lock-visit"]
+    assert flight["clash"] == ["flight-time", "bag-drop", "lock-flight"]
+    assert visit["finds"] == (
+        "The report names visit-time, visit-length and lock-visit among what rules out every plan."
+    )
+    # Two of the eight are about no step of the calendar: a FACT about the Blue Line, which no
+    # LOCK names, and a FACT about the ways to the airport.
+    assert laid["says"] == ONLY_LOCKS + CHICAGO + RULES_OUT.format(8, 6)
+    assert laid["clash"] is True
+    # Without the report, the calendar marks nothing.
+    bare = calendar(sent)
+    assert [mark["clash"] for mark in bare["days"][0]["marks"]] == [[], []]
+    assert [mark["finds"] for mark in bare["days"][0]["marks"]] == [None, None]
+    assert (bare["says"], bare["clash"]) == (ONLY_LOCKS + CHICAGO, False)
+
+
+def test_the_calendar_marks_the_end_of_the_trip_that_the_report_names() -> None:
+    """The TRIP ends before the flight lands. The report names both the flight and that end."""
+    sent, found = with_its_report(EXAMPLES / "the-times-of-the-trip" / "ends-too-early.json")
+    assert found["conflict"] == ["flight-time", "flight-length", "trip-end", "lock-flight"]
+    laid = calendar(sent, found)
+    by_name = {mark["name"]: mark for mark in laid["days"][0]["marks"]}
+    assert by_name["Flight home"]["clash"] == ["flight-time", "flight-length", "lock-flight"]
+    assert by_name["Museum visit"]["clash"] == []
+    assert [(bound["edge"], bound["clash"]) for bound in laid["days"][0]["bounds"]] == [
+        ("starts", False),
+        ("ends", True),
+    ]
+    assert laid["says"].endswith(RULES_OUT.format(4, 4))
+
+
+def test_the_calendar_marks_only_what_a_report_names() -> None:
+    """For every example: each record that a mark names is one that the report names."""
+    pairs = [with_its_report(path) for path in FILES]
+    laid = calendars([sent for sent, _ in pairs], [found for _, found in pairs])
+    seen = 0
+    for path, (sent, found), calendar_of in zip(FILES, pairs, laid, strict=True):
+        name = f"{path.parent.name}/{path.stem}"
+        conflict = found.get("conflict", [])
+        marked: set[str] = set()
+        for day in calendar_of["days"]:
+            for mark in day["marks"]:
+                records = sent["steps"][mark["step"]]["records"]
+                assert mark["clash"] == [each for each in records if each in conflict], name
+                marked.update(mark["clash"])
+            for bound in day["bounds"]:
+                assert bound["clash"] in (True, False), name
+        for which in ("starts", "ends"):
+            if sent[which] is not None and sent[which]["record"] in conflict:
+                marked.add(sent[which]["record"])
+        for step in sent["steps"]:
+            if step["start"] is None:
+                marked.update(each for each in step["records"] if each in conflict)
+        assert calendar_of["clash"] is bool(marked), name
+        assert ("rule out every plan" in calendar_of["says"]) is bool(conflict), name
+        if conflict:
+            seen += 1
+            assert f"names {len(conflict)} records" in calendar_of["says"], name
+            ending = (
+                f"what {len(marked)} of them {'is' if len(marked) == 1 else 'are'} about."
+                if marked
+                else "None of them is about what the calendar shows."
+            )
+            assert calendar_of["says"].endswith(ending), name
+        else:
+            assert found["answer"] != "INFEASIBLE", name
+    assert seen > 5
+
+
+def test_a_report_that_names_nothing_the_page_can_read_marks_nothing() -> None:
+    """Whatever the report holds where it names what rules out every plan, the calendar is whole."""
+    sent, _ = with_its_report(STORY / "cannot-work.json")
+    odd: list[dict[str, Any] | None] = [
+        {"answer": "INFEASIBLE"},
+        {"answer": "INFEASIBLE", "conflict": "visit-time"},
+        {"answer": "INFEASIBLE", "conflict": [1, None, ["visit-time"], {"id": "visit-time"}]},
+        {"answer": "INFEASIBLE", "conflict": {"visit-time": True}},
+        {},
+        None,
+    ]
+    for laid in calendars([sent] * len(odd), odd):
+        assert [mark["clash"] for mark in laid["days"][0]["marks"]] == [[], []]
+        assert laid["says"] == ONLY_LOCKS + CHICAGO
+    # One record, and none that the calendar shows.
+    one = calendar(sent, {"answer": "INFEASIBLE", "conflict": ["lock-visit"]})
+    assert one["says"].endswith(
+        " The report names 1 record that rules out every plan. A red edge marks what it is about."
+    )
+    other = calendar(sent, {"answer": "INFEASIBLE", "conflict": ["ways-to-ohare", "train-length"]})
+    assert other["says"].endswith(
+        " The report names 2 records that rule out every plan."
+        " None of them is about what the calendar shows."
+    )
+    assert other["clash"] is False
 
 
 def group() -> File:
@@ -465,8 +585,8 @@ def test_a_step_that_can_take_longer_says_so_and_does_not_end() -> None:
         [lock("visit", "alex")],
     )
     least = Step("visit", "museum", "museum", ("alex",), seconds(14, 30), seconds(15, 30))
-    for report in (Report(Answer.INFEASIBLE), Report(Answer.FEASIBLE, itinerary=(least,))):
-        laid = calendar(sent_for(file, report))
+    for found in (Report(Answer.INFEASIBLE), Report(Answer.FEASIBLE, itinerary=(least,))):
+        laid = calendar(sent_for(file, found))
         (mark,) = laid["days"][0]["marks"]
         assert (mark["when"], mark["late"]) == ("2:30 pm to 3:30 pm", "or as late as 4:30 pm")
         assert (mark["height"], mark["begins"], mark["ends"]) == (60, True, False)
@@ -549,9 +669,9 @@ def test_the_calendar_shows_when_the_trip_starts_and_ends() -> None:
     laid = calendar(framed(at(13, 30), at(16, 15)))
     assert laid["hours"] == {"from": 13 * 60, "to": 16 * 60}
     assert laid["days"][0]["bounds"] == [
-        {"says": "The TRIP starts at 1:30 pm", "edge": "starts", "top": 30},
+        {"says": "The TRIP starts at 1:30 pm", "edge": "starts", "top": 30, "clash": False},
         # 4:15 pm is after the hours that the calendar shows, so the line is at their edge.
-        {"says": "The TRIP ends at 4:15 pm", "edge": "ends", "top": 180},
+        {"says": "The TRIP ends at 4:15 pm", "edge": "ends", "top": 180, "clash": False},
     ]
     laid = calendar(framed(at(17, day=14), at(20, 30, day=17)))
     assert names(laid) == [
@@ -569,36 +689,77 @@ def test_the_calendar_shows_when_the_trip_starts_and_ends() -> None:
     ]
 
 
-def test_a_start_and_an_end_of_the_trip_at_one_place_share_their_words() -> None:
-    """Both are before the hours that the calendar shows, so both are at the top of the day."""
+def test_the_start_and_the_end_of_the_trip_each_have_their_line_and_their_words() -> None:
+    """However close together they are. The page puts the words above the day and below it."""
+    # Both are before the hours that the calendar shows, so both lines are at the top of the day.
     laid = calendar(framed(at(9), at(10)))
     assert laid["hours"] == {"from": 13 * 60, "to": 16 * 60}
-    # Each has its line. The first has the words of both, and the second has none.
     assert laid["days"][0]["bounds"] == [
-        {"says": "The TRIP starts at 9:00 am, and ends at 10:00 am", "edge": "both", "top": 0},
-        {"says": None, "edge": "ends", "top": 0},
+        {"says": "The TRIP starts at 9:00 am", "edge": "starts", "top": 0, "clash": False},
+        {"says": "The TRIP ends at 10:00 am", "edge": "ends", "top": 0, "clash": False},
     ]
-
-
-def test_a_start_and_an_end_of_the_trip_close_together_share_their_words() -> None:
-    """The TRIP takes one minute. Two lines of words would lie on each other."""
+    # A TRIP of one minute.
     laid = calendar(framed(at(0), at(0, 1), visit=False))
     assert laid["days"][0]["bounds"] == [
-        {"says": "The TRIP starts at 12:00 am, and ends at 12:01 am", "edge": "both", "top": 0},
-        {"says": None, "edge": "ends", "top": 1},
+        {"says": "The TRIP starts at 12:00 am", "edge": "starts", "top": 0, "clash": False},
+        {"says": "The TRIP ends at 12:01 am", "edge": "ends", "top": 1, "clash": False},
     ]
-    # So it is 19 minutes apart, and 39. From 40 minutes on, each line has room for its words.
-    for minutes in (19, 39):
-        (first, second) = calendar(framed(at(10), at(10, minutes), visit=False))["days"][0][
-            "bounds"
-        ]
-        assert (first["edge"], second["says"]) == ("both", None)
-        assert second["top"] - first["top"] == minutes
-    (first, second) = calendar(framed(at(10), at(10, 40), visit=False))["days"][0]["bounds"]
-    assert (first["says"], second["says"]) == (
-        "The TRIP starts at 10:00 am",
-        "The TRIP ends at 10:40 am",
+
+
+def test_only_the_time_of_the_trip_that_the_report_names_is_marked() -> None:
+    """The TRIP is from 9:00 am to 9:30 am, and a LOCK names a tour that ends at 9:40 am."""
+    file = trip(
+        ["alex"],
+        ["pier"],
+        [stays("tour", "pier")],
+        [starts_at("tour", 9, 20), lasts("tour", "PT20M")],
+        [
+            lock("tour", "alex"),
+            {"id": "trip-start", "trip_starts_at": at(9)},
+            {"id": "trip-end", "trip_ends_at": at(9, 30)},
+        ],
     )
+    found = compiler.check(file)
+    assert found.answer is Answer.INFEASIBLE
+    assert "trip-end" in found.conflict
+    assert "trip-start" not in found.conflict
+    laid = calendar(sent_for(file, found), report.as_json(file, found))
+    assert [(bound["edge"], bound["clash"]) for bound in laid["days"][0]["bounds"]] == [
+        ("starts", False),
+        ("ends", True),
+    ]
+
+
+def test_a_step_with_no_time_is_marked_where_the_report_names_what_is_about_it() -> None:
+    """A LOCK names the Skydeck visit, the FILE gives it no time, and no ticket covers it."""
+    document = json.loads((EXAMPLES / "a-ticket" / "cannot-work.json").read_text())
+    document["facts"] = [fact for fact in document["facts"] if fact["id"] != "skydeck-time"]
+    file = parse(json.dumps(document))
+    found = compiler.check(file)
+    assert found.answer is Answer.INFEASIBLE
+    sent = sent_for(file, found)
+    (visit,) = [step for step in sent["steps"] if step["option"] == "skydeck"]
+    assert visit["start"] is None
+    assert set(found.conflict) <= set(visit["records"])
+    laid = calendar(sent, report.as_json(file, found))
+    (untimed,) = [step for step in laid["untimed"] if step["name"] == "Skydeck visit"]
+    assert untimed["clash"] == [each for each in visit["records"] if each in found.conflict]
+    assert untimed["finds"].startswith("The report names ")
+    count = len(found.conflict)
+    assert laid["says"].endswith(
+        f" The report names {count} records that rule out every plan."
+        f" A red edge marks what {count} of them are about."
+    )
+    assert laid["clash"] is True
+
+
+def test_only_a_report_on_a_trip_that_cannot_work_marks_anything() -> None:
+    """A report on a TRIP that works names nothing that rules out every plan."""
+    sent, found = with_its_report(STORY / "works.json")
+    odd = {**found, "conflict": ["visit-time", "lock-visit", "lock-flight"]}
+    laid = calendar(sent, odd)
+    assert all(mark["clash"] == [] for mark in laid["days"][0]["marks"])
+    assert laid["says"] == f"The ITINERARY of the report.{CHICAGO}"
 
 
 def test_a_time_of_the_trip_says_its_date_where_its_column_has_another() -> None:
@@ -635,8 +796,8 @@ def test_a_calendar_with_no_step_shows_the_hours_of_the_trip() -> None:
     assert laid["hours"] == {"from": 0, "to": 6 * 60}
     assert laid["days"][0]["marks"] == []
     assert laid["days"][0]["bounds"] == [
-        {"says": "The TRIP starts at 1:00 am", "edge": "starts", "top": 60},
-        {"says": "The TRIP ends at 5:00 am", "edge": "ends", "top": 300},
+        {"says": "The TRIP starts at 1:00 am", "edge": "starts", "top": 60, "clash": False},
+        {"says": "The TRIP ends at 5:00 am", "edge": "ends", "top": 300, "clash": False},
     ]
     # A TRIP from one afternoon to the next covers the night between: the days show all hours.
     laid = calendar(framed(at(14), at(14, day=16), visit=False))
@@ -658,7 +819,9 @@ def test_a_step_with_no_time_is_named_beside_the_calendar() -> None:
         [lock("visit", "alex"), lock("fireworks", "alex", "sam")],
     )
     laid = calendar(sent_for(file, Report(Answer.UNDETERMINED)))
-    assert laid["untimed"] == [{"name": "fireworks", "who": "alex and sam"}]
+    assert laid["untimed"] == [
+        {"name": "fireworks", "who": "alex and sam", "clash": [], "finds": None}
+    ]
     assert marks(laid) == [(0, "locked", 0, 0, 60, 60, True, True)]
     assert laid["says"] == ONLY_LOCKS + CHICAGO
 
@@ -684,7 +847,7 @@ def test_a_calendar_with_nothing_on_it_says_why() -> None:
         "The report shows no ITINERARY, and the FILE gives no time to the OPTIONs that a LOCK"
         " names. So the calendar is empty."
     )
-    assert untimed["untimed"] == [{"name": "fireworks", "who": "alex"}]
+    assert untimed["untimed"] == [{"name": "fireworks", "who": "alex", "clash": [], "finds": None}]
     assert idle["says"] == "The ITINERARY of the report is empty: nobody has to do anything."
     # Where the view sends no TRIP, the page says that there is no calendar.
     assert none["says"] == "There is no calendar of this TRIP: the view could not make one."
@@ -788,6 +951,7 @@ def made(times: list[tuple[str, str | None]]) -> Trip:
                 "end": written(end),
                 "latest": None,
                 "parts": parts_of(start, end, days),
+                "records": [],
             }
             for start, end in spans
         ],
@@ -820,6 +984,9 @@ def test_the_calendar_names_days_and_times_as_the_report_does() -> None:
     assert when("2027-05-15T09:05:00", "2027-05-15T13:00:00") == "9:05 am to 1:00 pm"
     late = "10:00 pm to 1:00 am on 1 January 2028"
     assert when("2027-12-31T22:00:00", "2028-01-01T01:00:00") == late
+
+
+RECORDS = ["a-time", "a-length", "a-lock", "another"]
 
 
 def some_trip(chosen: random.Random) -> Trip:
@@ -867,16 +1034,17 @@ def some_trip(chosen: random.Random) -> Trip:
                 "end": written(end),
                 "latest": written(latest),
                 "parts": [] if start is None else parts_of(start, end, days),
+                "records": chosen.sample(RECORDS, chosen.randrange(0, len(RECORDS) + 1)),
             }
         )
 
-    def bound() -> dict[str, Any] | None:
+    def bound(record: str) -> dict[str, Any] | None:
         if not days or chosen.random() < 0.5:
             return None
         day = chosen.randrange(0, len(days))
         second = chosen.choice([0, 86400, chosen.randrange(0, 86401)])
         when = f"{days[day].isoformat()}T12:00:00"
-        return {"at": when, "offset": None, "day": day, "second": second}
+        return {"at": when, "offset": None, "day": day, "second": second, "record": record}
 
     return {
         "zone": "UTC",
@@ -885,8 +1053,8 @@ def some_trip(chosen: random.Random) -> Trip:
         "itinerary": planned,
         "days": [whole(day) for day in days],
         "until": chosen.choice([None, None, "2030-01-01"]),
-        "starts": bound(),
-        "ends": bound(),
+        "starts": bound("trip-start"),
+        "ends": bound("trip-end"),
         "steps": steps,
     }
 
@@ -898,7 +1066,13 @@ def test_whatever_trip_the_view_sends_has_a_calendar() -> None:
     for sent in trips:
         assert holds(sent), sent
     assert sum(1 for sent in trips if sent["steps"]) > 200
-    for sent, laid in zip(trips, calendars(cast("list[Trip | None]", trips)), strict=True):
+    # Each comes with a report that names some records, or with none.
+    named = [chosen.sample([*RECORDS, "trip-end"], chosen.randrange(0, 4)) for _ in trips]
+    reports: list[dict[str, Any] | None] = [
+        {"answer": "INFEASIBLE", "conflict": conflict} if conflict else None for conflict in named
+    ]
+    laid_out = calendars(cast("list[Trip | None]", trips), reports)
+    for sent, conflict, laid in zip(trips, named, laid_out, strict=True):
         tall = laid["hours"]["to"] - laid["hours"]["from"]
         assert 0 <= laid["hours"]["from"] < laid["hours"]["to"] <= 24 * 60
         assert len(laid["days"]) == len(sent["days"])
@@ -917,6 +1091,7 @@ def test_whatever_trip_the_view_sends_has_a_calendar() -> None:
                 assert set(range(mark["first"], mark["last"] + 1)) <= set(columns), (sent, mark)
                 assert mark["kind"] == ("way" if step["option"] is None else "option")
                 assert 0 <= mark["lane"] < mark["lanes"], mark
+                assert mark["clash"] == [each for each in step["records"] if each in conflict]
                 if mark["begins"]:
                     begun.add(mark["step"])
                 if mark["kind"] == "option":

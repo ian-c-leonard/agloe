@@ -8,6 +8,10 @@ For a FEASIBLE TRIP the steps are the ITINERARY of the report, and each says whi
 PERSONs a LOCK names. A report on any other TRIP shows no ITINERARY. Its steps are the OPTIONs
 that a LOCK names, at the times the FILE states.
 
+Each step names the FACTs and DECISIONs of the FILE that are about its OPTION or its WAY. A
+report names FACTs and DECISIONs too. So the page can mark the steps that a report is about,
+and judges nothing by itself.
+
 Every time is on the clocks that the report shows times on: those of the FILE's time zone. A
 time is written as those clocks show it, such as 2027-05-15T14:00:00. Where the times of a TRIP
 are not all at one offset from UTC, each comes with its own, as in the report.
@@ -53,7 +57,7 @@ _TRIP: _Shape = {
 }
 _DAY: _Shape = {"date": str, "offset": (str, _NONE), "opens": int, "closes": int}
 _TIME: _Shape = {"at": str, "offset": (str, _NONE)}
-_BOUND: _Shape = {**_TIME, "day": (int, _NONE), "second": (int, _NONE)}
+_BOUND: _Shape = {**_TIME, "day": (int, _NONE), "second": (int, _NONE), "record": str}
 _STEP: _Shape = {
     "option": (str, _NONE),
     "way": (str, _NONE),
@@ -66,6 +70,7 @@ _STEP: _Shape = {
     "end": (dict, _NONE),
     "latest": (dict, _NONE),
     "parts": list,
+    "records": list,
 }
 _PART: _Shape = {"day": int, "from": int, "to": int, "begins": bool, "ends": bool}
 
@@ -119,6 +124,12 @@ def shown(file: File, report: Report) -> Trip | None:
     for lock in file.locks:
         locked.setdefault(lock.option, set()).update(lock.persons)
     starts, ends = file.trip_start(), file.trip_end()
+    # The FACTs and DECISIONs that name each OPTION or WAY, in the FILE's order.
+    about: dict[str, list[str]] = {}
+    for record in (*file.facts, *file.decisions):
+        named: object = getattr(record, "option", None)
+        if isinstance(named, str):
+            about.setdefault(named, []).append(record.id)
     # Every time that the page is sent, and every moment that its days have to hold.
     times = [
         moment
@@ -164,8 +175,12 @@ def shown(file: File, report: Report) -> Trip | None:
                 for day in days
             ],
             "until": None if until is None else until.isoformat(),
-            "starts": None if starts is None else _bound(file, starts.at, days, False, offsets),
-            "ends": None if ends is None else _bound(file, ends.at, days, closes, offsets),
+            "starts": None
+            if starts is None
+            else {**_bound(file, starts.at, days, False, offsets), "record": starts.id},
+            "ends": None
+            if ends is None
+            else {**_bound(file, ends.at, days, closes, offsets), "record": ends.id},
             "steps": [
                 {
                     "option": step.option,
@@ -184,6 +199,7 @@ def shown(file: File, report: Report) -> Trip | None:
                     "end": time(step.end),
                     "latest": time(step.latest),
                     "parts": _parts(step, days),
+                    "records": about.get(step.option or step.way or "", []),
                 }
                 for step in steps
             ],
@@ -538,6 +554,8 @@ def _is_a_bound(bound: object, days: list[dict[str, object]]) -> bool:
     day, second = said["day"], said["second"]
     if not _is_a_time({"at": said["at"], "offset": said["offset"]}):
         return False
+    if not cast("str", said["record"]):
+        return False
     if isinstance(day, int) and isinstance(second, int):
         if not 0 <= day < len(days):
             return False
@@ -565,6 +583,8 @@ def _is_a_step(
     takers = _all_different(said["persons"])
     locked = _all_different(said["locked"])
     if takers is None or locked is None or not takers or not takers <= persons:
+        return False
+    if _all_different(said["records"]) is None:
         return False
     option, way, name = said["option"], said["way"], said["name"]
     start, end, latest = said["start"], said["end"], said["latest"]
