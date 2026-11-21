@@ -25,7 +25,6 @@ const ROOM = 20 * 60; // seconds of room above the first step of a day and below
 const NO_END = 30 * 60; // seconds drawn for a step whose end nobody knows
 const NAMED = 20 * 60; // seconds that a WAY takes before its name has room beside it
 const SMALLEST = 4 * 60; // seconds that the smallest mark covers on the page
-const APART = 40; // minutes between the start and the end of the TRIP before each has room for its words
 
 /** The number of a day, counted from 1 January 1970, in the calendar that a FILE writes dates in. */
 function dayNumber(year, month, day) {
@@ -162,7 +161,7 @@ export function calendar(trip, report = null) {
   const place = new Map(trip.places.map((each) => [each.id, each.name]));
   const names = (columns) => listed(columns.map((n) => trip.persons[n].name));
   // The FACTs, WANTs and DECISIONs that the report names as ruling out every plan.
-  const ruled = new Set(report !== null && Array.isArray(report.conflict) ? report.conflict.filter((id) => typeof id === "string") : []);
+  const ruled = new Set(report !== null && report.answer === "INFEASIBLE" && Array.isArray(report.conflict) ? report.conflict.filter((id) => typeof id === "string") : []);
 
   // ---- each step in words
   const steps = trip.steps.map((step, n) => {
@@ -171,6 +170,9 @@ export function calendar(trip, report = null) {
     return {
       n, columns, parts: step.parts, end: step.end,
       clash: step.records.filter((id) => ruled.has(id)),
+      get finds() {
+        return this.clash.length ? `The report names ${listed(this.clash)} among what rules out every plan.` : null;
+      },
       kind: step.option === null ? "way" : "option",
       name: step.name ?? "another WAY",
       who: names(columns),
@@ -180,9 +182,10 @@ export function calendar(trip, report = null) {
       stateOf: (at) => (step.option === null ? "way" : locked.has(at) ? "locked" : "planned"),
     };
   });
-  const untimed = steps.filter((step) => step.when === null).map((step) => ({ name: step.name, who: step.who }));
-  // What the report names, and how much of it is about what the calendar shows.
-  const marked = new Set(steps.filter((step) => step.parts.length).flatMap((step) => step.clash));
+  const untimed = steps.filter((step) => step.when === null).map((step) => ({ name: step.name, who: step.who, clash: step.clash, finds: step.finds }));
+  // What the report names, and how much of it is about what the calendar shows: the steps
+  // on its days, the steps with no time that it names beside them, and the times of the TRIP.
+  const marked = new Set(steps.filter((step) => step.parts.length || step.when === null).flatMap((step) => step.clash));
   for (const bound of [trip.starts, trip.ends]) if (bound !== null && bound.day !== null && ruled.has(bound.record)) marked.add(bound.record);
   const says = saysOf(trip, steps.length - untimed.length) + rulesOut(ruled.size, marked.size);
   if (!trip.days.length) return { ...none, says, zone: trip.zone, itinerary: trip.itinerary, persons: trip.persons, untimed };
@@ -262,21 +265,18 @@ export function calendar(trip, report = null) {
           // A WAY that takes next to no time is a tick on top of what is beside it, so that it shows.
           brief: step.kind === "way" && bottom - top < SMALLEST,
           clash: step.clash,
-          finds: step.clash.length ? `The report names ${listed(step.clash)} among what rules out every plan.` : null,
+          finds: step.finds,
         });
       }
     }
     delete day.shown;
   }
-  // ---- when the TRIP starts and ends: a line for each. A time outside the hours shown is at
-  // their edge. Where both are close together on one day, the first line has the words of
-  // both, and the second has none. A time says its date where that is not the date of its column.
+  // ---- when the TRIP starts and ends: a line for each, with its words. A time outside the
+  // hours shown is at their edge. A time says its date where that is not the date of its
+  // column. Each is marked where the report names the DECISION about it, and only there.
   for (const [bound, word] of bounds) {
     const time = clock(bound, { at: trip.days[bound.day].date });
-    const beside = days[bound.day].bounds.find((other) => Math.abs(other.top - down(bound.second)) < APART);
-    const clash = ruled.has(bound.record);
-    if (beside) Object.assign(beside, { says: `${beside.says}, and ends at ${time}`, edge: "both", clash: beside.clash || clash });
-    days[bound.day].bounds.push({ says: beside ? null : `The TRIP ${word} at ${time}`, edge: word, top: down(bound.second), clash });
+    days[bound.day].bounds.push({ says: `The TRIP ${word} at ${time}`, edge: word, top: down(bound.second), clash: ruled.has(bound.record) });
   }
   return { says, zone: trip.zone, itinerary: trip.itinerary, clash: marked.size > 0, persons: trip.persons, hours: { from: from / 60, to: to / 60 }, days, untimed };
 }

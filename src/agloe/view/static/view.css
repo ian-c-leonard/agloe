@@ -71,11 +71,11 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .tick { flex: none; width: 14px; height: 5px; border-radius: 3px; background: var(--hue); box-shadow: 0 0 0 1.5px var(--surface); pointer-events: auto; }
 .way-name { position: absolute; right: 0; transform: translateY(-50%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; font: 500 10.5px/1.4 var(--mono); color: var(--ink2); text-shadow: 0 0 2px var(--surface), 0 0 2px var(--surface), 0 0 3px var(--surface); }
 
-/* Where the TRIP starts and where it ends: a dotted line across the day, with its words outside the TRIP. */
+/* Where the TRIP starts and where it ends: a dotted line across the day. */
 .bound { position: absolute; left: 0; right: 0; z-index: 2; border-top: 1.5px dotted var(--ink2); pointer-events: none; }
-.bound span { position: absolute; right: 2px; max-width: calc(100% - 4px); padding: 0 3px; border-radius: 3px; background: var(--surface); text-align: right; font: 500 10.5px/1.2 var(--mono); color: var(--ink2); }
-.bound .above { bottom: 2px; }
-.bound .below { top: 2px; }
+/* The words of a line stand above the day for the start, and below it for the end. */
+.bound-says { height: 16px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: right; font: 500 10.5px/16px var(--mono); color: var(--ink2); }
+.calendar.with-starts .hours { margin-top: 62px; }
 /* The hours of a column that its clocks do not show, on a day when they change. */
 .shut { position: absolute; left: 0; right: 0; background: repeating-linear-gradient(-45deg, transparent 0 5px, var(--line) 5px 6px); }
 
@@ -87,7 +87,8 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 /* What a report names as ruling out every plan has a red edge. Red is kept for what a report says. */
 .clash .block, .key-box.clash { border-color: var(--stop); box-shadow: 0 0 0 1.5px var(--stop); }
 .bound.clash { border-top-color: var(--stop); }
-.bound.clash span { color: var(--stop); }
+.bound-says.clash, .says .clash { color: var(--stop); }
+.says .clash { border-bottom: 1.5px solid var(--stop); }
 .key-box { display: inline-block; width: 22px; height: 11px; border: 1.4px solid var(--ink); border-radius: 3px; }
 .key-box.locked { background: var(--ink); }
 .key-box.cut { border-bottom-style: dashed; border-radius: 3px 3px 0 0; }

@@ -23,7 +23,7 @@ import pytest
 
 from agloe import compiler, report
 from agloe.answers import Answer, Report
-from agloe.file import File, instant, read
+from agloe.file import File, instant, parse, read
 from agloe.reference import Step
 from agloe.view.trip import holds, shown
 from tests.stories import (
@@ -280,6 +280,9 @@ def test_the_calendar_marks_only_what_a_report_names() -> None:
         for which in ("starts", "ends"):
             if sent[which] is not None and sent[which]["record"] in conflict:
                 marked.add(sent[which]["record"])
+        for step in sent["steps"]:
+            if step["start"] is None:
+                marked.update(each for each in step["records"] if each in conflict)
         assert calendar_of["clash"] is bool(marked), name
         assert ("rule out every plan" in calendar_of["says"]) is bool(conflict), name
         if conflict:
@@ -686,46 +689,77 @@ def test_the_calendar_shows_when_the_trip_starts_and_ends() -> None:
     ]
 
 
-def test_a_start_and_an_end_of_the_trip_at_one_place_share_their_words() -> None:
-    """Both are before the hours that the calendar shows, so both are at the top of the day."""
+def test_the_start_and_the_end_of_the_trip_each_have_their_line_and_their_words() -> None:
+    """However close together they are. The page puts the words above the day and below it."""
+    # Both are before the hours that the calendar shows, so both lines are at the top of the day.
     laid = calendar(framed(at(9), at(10)))
     assert laid["hours"] == {"from": 13 * 60, "to": 16 * 60}
-    # Each has its line. The first has the words of both, and the second has none.
     assert laid["days"][0]["bounds"] == [
-        {
-            "says": "The TRIP starts at 9:00 am, and ends at 10:00 am",
-            "edge": "both",
-            "top": 0,
-            "clash": False,
-        },
-        {"says": None, "edge": "ends", "top": 0, "clash": False},
+        {"says": "The TRIP starts at 9:00 am", "edge": "starts", "top": 0, "clash": False},
+        {"says": "The TRIP ends at 10:00 am", "edge": "ends", "top": 0, "clash": False},
     ]
-
-
-def test_a_start_and_an_end_of_the_trip_close_together_share_their_words() -> None:
-    """The TRIP takes one minute. Two lines of words would lie on each other."""
+    # A TRIP of one minute.
     laid = calendar(framed(at(0), at(0, 1), visit=False))
     assert laid["days"][0]["bounds"] == [
-        {
-            "says": "The TRIP starts at 12:00 am, and ends at 12:01 am",
-            "edge": "both",
-            "top": 0,
-            "clash": False,
-        },
-        {"says": None, "edge": "ends", "top": 1, "clash": False},
+        {"says": "The TRIP starts at 12:00 am", "edge": "starts", "top": 0, "clash": False},
+        {"says": "The TRIP ends at 12:01 am", "edge": "ends", "top": 1, "clash": False},
     ]
-    # So it is 19 minutes apart, and 39. From 40 minutes on, each line has room for its words.
-    for minutes in (19, 39):
-        (first, second) = calendar(framed(at(10), at(10, minutes), visit=False))["days"][0][
-            "bounds"
-        ]
-        assert (first["edge"], second["says"]) == ("both", None)
-        assert second["top"] - first["top"] == minutes
-    (first, second) = calendar(framed(at(10), at(10, 40), visit=False))["days"][0]["bounds"]
-    assert (first["says"], second["says"]) == (
-        "The TRIP starts at 10:00 am",
-        "The TRIP ends at 10:40 am",
+
+
+def test_only_the_time_of_the_trip_that_the_report_names_is_marked() -> None:
+    """The TRIP is from 9:00 am to 9:30 am, and a LOCK names a tour that ends at 9:40 am."""
+    file = trip(
+        ["alex"],
+        ["pier"],
+        [stays("tour", "pier")],
+        [starts_at("tour", 9, 20), lasts("tour", "PT20M")],
+        [
+            lock("tour", "alex"),
+            {"id": "trip-start", "trip_starts_at": at(9)},
+            {"id": "trip-end", "trip_ends_at": at(9, 30)},
+        ],
     )
+    found = compiler.check(file)
+    assert found.answer is Answer.INFEASIBLE
+    assert "trip-end" in found.conflict
+    assert "trip-start" not in found.conflict
+    laid = calendar(sent_for(file, found), report.as_json(file, found))
+    assert [(bound["edge"], bound["clash"]) for bound in laid["days"][0]["bounds"]] == [
+        ("starts", False),
+        ("ends", True),
+    ]
+
+
+def test_a_step_with_no_time_is_marked_where_the_report_names_what_is_about_it() -> None:
+    """A LOCK names the Skydeck visit, the FILE gives it no time, and no ticket covers it."""
+    document = json.loads((EXAMPLES / "a-ticket" / "cannot-work.json").read_text())
+    document["facts"] = [fact for fact in document["facts"] if fact["id"] != "skydeck-time"]
+    file = parse(json.dumps(document))
+    found = compiler.check(file)
+    assert found.answer is Answer.INFEASIBLE
+    sent = sent_for(file, found)
+    (visit,) = [step for step in sent["steps"] if step["option"] == "skydeck"]
+    assert visit["start"] is None
+    assert set(found.conflict) <= set(visit["records"])
+    laid = calendar(sent, report.as_json(file, found))
+    (untimed,) = [step for step in laid["untimed"] if step["name"] == "Skydeck visit"]
+    assert untimed["clash"] == [each for each in visit["records"] if each in found.conflict]
+    assert untimed["finds"].startswith("The report names ")
+    count = len(found.conflict)
+    assert laid["says"].endswith(
+        f" The report names {count} records that rule out every plan."
+        f" A red edge marks what {count} of them are about."
+    )
+    assert laid["clash"] is True
+
+
+def test_only_a_report_on_a_trip_that_cannot_work_marks_anything() -> None:
+    """A report on a TRIP that works names nothing that rules out every plan."""
+    sent, found = with_its_report(STORY / "works.json")
+    odd = {**found, "conflict": ["visit-time", "lock-visit", "lock-flight"]}
+    laid = calendar(sent, odd)
+    assert all(mark["clash"] == [] for mark in laid["days"][0]["marks"])
+    assert laid["says"] == f"The ITINERARY of the report.{CHICAGO}"
 
 
 def test_a_time_of_the_trip_says_its_date_where_its_column_has_another() -> None:
@@ -785,7 +819,9 @@ def test_a_step_with_no_time_is_named_beside_the_calendar() -> None:
         [lock("visit", "alex"), lock("fireworks", "alex", "sam")],
     )
     laid = calendar(sent_for(file, Report(Answer.UNDETERMINED)))
-    assert laid["untimed"] == [{"name": "fireworks", "who": "alex and sam"}]
+    assert laid["untimed"] == [
+        {"name": "fireworks", "who": "alex and sam", "clash": [], "finds": None}
+    ]
     assert marks(laid) == [(0, "locked", 0, 0, 60, 60, True, True)]
     assert laid["says"] == ONLY_LOCKS + CHICAGO
 
@@ -811,7 +847,7 @@ def test_a_calendar_with_nothing_on_it_says_why() -> None:
         "The report shows no ITINERARY, and the FILE gives no time to the OPTIONs that a LOCK"
         " names. So the calendar is empty."
     )
-    assert untimed["untimed"] == [{"name": "fireworks", "who": "alex"}]
+    assert untimed["untimed"] == [{"name": "fireworks", "who": "alex", "clash": [], "finds": None}]
     assert idle["says"] == "The ITINERARY of the report is empty: nobody has to do anything."
     # Where the view sends no TRIP, the page says that there is no calendar.
     assert none["says"] == "There is no calendar of this TRIP: the view could not make one."
