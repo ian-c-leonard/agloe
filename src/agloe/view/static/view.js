@@ -13,6 +13,7 @@ const TICK = 7; // pixels: the height of the tick for a WAY that takes next to n
 const BESIDE = 18; // pixels from one tick to the next where several are at one place
 const ROW = 20; // pixels: the height of the row of one PERSON on the strip
 const EDGES = 80; // pixels of the strip that are not its rows: the names, the padding and the edge
+const NARROWEST = 40; // pixels: the least room for the rows of a strip
 
 const part = (id) => document.getElementById(id);
 let state = start();
@@ -175,9 +176,10 @@ function draw(laid) {
 function bar(mark, people) {
   const [one] = mark.of;
   const several = mark.of.length > 1;
-  // A mark for several has the edges of each of them, and fades where one of them may not end there.
+  // A mark for several has the edges of each of them: it is dashed where one of them does not
+  // start there, and fades where one of them may not end there.
   const any = (holds) => mark.of.some(holds);
-  const looks = several ? `several${any((each) => !each.ends) ? " no-end" : ""}${any((each) => each.clash.length) ? " clash" : ""}${any((each) => each.warns.length) ? " warned" : ""}` : looksOf(one);
+  const looks = several ? `several${any((each) => !each.begins) ? " goes-on" : ""}${any((each) => !each.ends) ? " no-end" : ""}${any((each) => each.clash.length) ? " clash" : ""}${any((each) => each.warns.length) ? " warned" : ""}` : looksOf(one);
   const box = made("div", `bar ${looks}${mark.small ? " small" : ""}`);
   box.title = several ? [`${mark.of.length} steps too close together to show apart at this width:`, ...mark.of.map((each) => `${each.name}, ${each.late ? `${each.when}, ${each.late}` : each.when}`)].join("\n") : wordsOf(one);
   // A click goes to the first of the marks that it stands for.
@@ -212,9 +214,10 @@ function drawStrip(laid) {
   const box = part("strip");
   box.replaceChildren();
   box.hidden = part("strip-says").hidden = true;
-  // The strip is laid out in the pixels that the page has for its rows.
+  // The strip is laid out in the pixels that the page has for its rows. A page with next to
+  // none has no strip.
   stripRoom = part("calendar-part").clientWidth;
-  const strip = turn && laid ? turn(laid, Math.max(stripRoom - EDGES, 120)) : null;
+  const strip = turn && laid && stripRoom - EDGES >= NARROWEST ? turn(laid, stripRoom - EDGES) : null;
   if (strip === null) return;
   box.hidden = part("strip-says").hidden = false;
   const people = Math.max(strip.persons.length, 1);
@@ -240,7 +243,7 @@ function drawStrip(laid) {
   for (const mark of strip.marks) rows.append(bar(mark, people));
   for (const bound of strip.bounds) {
     const line = Object.assign(made("i", bound.clash ? "strip-bound clash" : "strip-bound"), { title: bound.says });
-    line.style.left = `${Math.min(bound.x, strip.wide - 2)}px`;
+    line.style.left = `${bound.x}px`;
     line.dataset.record = bound.record;
     rows.append(line);
   }

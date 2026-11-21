@@ -112,9 +112,12 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .bar.way.small, .bar.several { display: block; padding: 0; pointer-events: none; }
 .bar-tick, .bar-several { position: absolute; left: 0; right: 0; border-radius: 2px; box-shadow: 0 0 0 1px var(--surface); pointer-events: auto; cursor: pointer; }
 .bar-tick { top: 35%; height: 30%; background: var(--hue); }
-.bar.no-end .bar-tick { background: linear-gradient(to right, var(--hue) 40%, transparent); box-shadow: none; }
 .bar-several { top: 15%; height: 70%; background: linear-gradient(var(--hue) 0 40%, var(--surface) 40% 60%, var(--hue) 60% 100%); }
-.bar.no-end .bar-several { box-shadow: none; mask-image: linear-gradient(to right, #000 40%, transparent); }
+/* A tick is dashed on the left where its step does not start there, and fades to the right
+   where it may not end there. Its fill fades, and its edge stays. */
+.bar.goes-on .bar-tick, .bar.goes-on .bar-several { border-left: 1.5px dashed var(--ink); }
+.bar.no-end .bar-tick { background: linear-gradient(to right, transparent 40%, var(--surface)), linear-gradient(var(--hue), var(--hue)); }
+.bar.no-end .bar-several { background: linear-gradient(to right, transparent 40%, var(--surface)), linear-gradient(var(--hue) 0 40%, var(--surface) 40% 60%, var(--hue) 60% 100%); }
 .bar.warned .bar-block, .bar.way.warned { box-shadow: 0 0 0 1.5px var(--warn); }
 .bar.warned .bar-block { border-color: var(--warn); }
 .bar.clash .bar-block, .bar.way.clash { box-shadow: 0 0 0 1.5px var(--stop); }

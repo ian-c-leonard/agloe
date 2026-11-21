@@ -46,6 +46,7 @@ WIDE = 844  # pixels: the room of the strip in a window of the usual width
 TICK = 5  # pixels: the width of the tick of a WAY that is too short for a line
 LEAST = 3  # pixels: the least width of the block of an OPTION, and of the line of a WAY
 STUB = 24  # pixels: the room of a day that shows no hours and holds a time of the TRIP
+A_DAY_AT_LEAST = 6  # pixels: the least room of a day that holds something
 A_DAY = 24 * 3600
 
 type Trip = dict[str, Any]
@@ -199,7 +200,8 @@ def test_time_runs_on_from_one_day_to_the_next() -> None:
     )
     # The strip starts 20 minutes before the first stay, and ends 20 minutes after the last.
     assert days(band) == [("Sat 15", 0, 140), ("Sun 16", 140, 140)]
-    assert (band["wide"], band["per"]) == (280, 1)
+    assert band["wide"] == 280
+    assert [day["per"] for day in band["days"]] == [1, 1]
     # The first stay is in two parts, and the second starts where the first ends.
     assert places(band) == [([0], 0, 20, 120), ([0], 1, 140, 120), ([1], 1, 140, 60)]
     first, second, _ = (mark["of"][0] for mark in band["marks"])
@@ -249,9 +251,10 @@ def test_the_strip_shows_when_the_trip_starts_and_ends() -> None:
     # those hours at their edge. So Friday and Sunday take the least room on the strip.
     assert days(band) == [("Fri 14", 0, 20), ("Sat 15", 20, 180), ("Sun 16", 200, 20)]
     assert places(band) == [([0], 1, 80, 60)]
+    # The line of each is on its own day: the start two pixels before the end of Friday.
     assert [
         (bound["edge"], bound["day"], bound["x"], bound["record"]) for bound in band["bounds"]
-    ] == [("starts", 0, 20, "trip-start"), ("ends", 2, 200, "trip-end")]
+    ] == [("starts", 0, 18, "trip-start"), ("ends", 2, 200, "trip-end")]
     assert band["bounds"][0]["says"] == "The TRIP starts at 6:00 pm"
     assert gaps(band) == [False, True, True]
 
@@ -302,7 +305,7 @@ def test_a_day_that_shows_no_hours_has_a_place_where_it_holds_a_time_of_the_trip
     assert places(band) == [([0], 1, 80, 60)]
     # The end of the TRIP is in the middle of Sunday's place, and not under Saturday.
     assert [(bound["edge"], bound["day"], bound["x"]) for bound in band["bounds"]] == [
-        ("starts", 0, 20),
+        ("starts", 0, 18),
         ("ends", 2, 160 + STUB / 2),
     ]
     # Hours are left out before Saturday and before Sunday.
@@ -418,7 +421,7 @@ def test_marks_too_close_together_to_show_apart_are_one_mark() -> None:
     sent = sent_for(two_doors(), Report(Answer.FEASIBLE, itinerary=plan))
     ((laid, band),) = strips([sent], wide=[580])
     assert band is not None
-    assert band["per"] == 1
+    assert [day["per"] for day in band["days"]] == [1, 1]
     assert [
         ([each["name"] for each in mark["of"]], mark["first"], mark["last"], mark["x"], mark["w"])
         for mark in band["marks"]
@@ -460,6 +463,92 @@ def test_a_mark_at_the_very_end_of_the_strip_stays_on_it() -> None:
     assert band["wide"] == pytest.approx(300)
 
 
+def test_a_mark_that_small_marks_would_cover_joins_them() -> None:
+    """At a hotel just before midnight: show a card, check in, take the key. Brunch is at noon.
+
+    Showing the card and taking the key take half a minute each, and checking in takes three
+    minutes. With a pixel for each minute, the two small marks would lie on each other and
+    cover the check-in between them. So the three are one mark, and the check-in can be reached.
+    """
+    sent = alone(
+        (f"2027-05-15T23:56:00-05:00{CHICAGO}", 30),
+        (f"2027-05-15T23:56:30-05:00{CHICAGO}", 180),
+        (f"2027-05-15T23:59:30-05:00{CHICAGO}", 30),
+        (f"2027-05-16T12:00:00-05:00{CHICAGO}", 7200),
+    )
+    ((laid, band),) = strips([sent], wide=[224])
+    assert band is not None
+    assert days(band) == [("Sat 15", 0, 24), ("Sun 16", 24, 200)]
+    # The names in a mark for several are in the order of the plan.
+    assert [([each["step"] for each in mark["of"]], mark["small"]) for mark in band["marks"]] == [
+        ([3], False),
+        ([0, 1, 2], True),
+    ]
+    covered(laid, band)
+    # With ten pixels for each minute, the check-in has room of its own.
+    ((laid, band),) = strips([sent], wide=[2240])
+    assert band is not None
+    assert [[each["step"] for each in mark["of"]] for mark in band["marks"]] == [[0], [1], [2], [3]]
+
+
+def test_a_day_that_holds_something_has_room_for_it() -> None:
+    """A check-in of one minute on Saturday at 11:59 pm, and a TRIP that ends on Friday at 12:05 am.
+
+    In 224 pixels, Saturday and Friday would each be less than a pixel wide. Each is six
+    pixels wide, so the check-in is on Saturday and the end of the TRIP is on Friday.
+    """
+    file = trip(
+        ["alex"],
+        ["hotel"],
+        [stays("check-in", "hotel"), stays("night", "hotel")],
+        [
+            {
+                "id": "check-in-time",
+                "option": "check-in",
+                "starts_at": f"2027-05-15T23:59:00-05:00{CHICAGO}",
+            },
+            lasts("check-in", "PT1M"),
+            {
+                "id": "night-time",
+                "option": "night",
+                "starts_at": f"2027-05-16T00:00:00-05:00{CHICAGO}",
+            },
+            lasts("night", "PT8H"),
+        ],
+        [
+            lock("check-in", "alex"),
+            lock("night", "alex"),
+            {"id": "trip-end", "trip_ends_at": f"2027-05-21T00:05:00-05:00{CHICAGO}"},
+        ],
+    )
+    ((laid, band),) = strips([sent_for(file, Report(Answer.UNDETERMINED))], wide=[224])
+    assert band is not None
+    assert laid["hours"] == {"from": 0, "to": 24 * 60}
+    saturday, sunday, friday = band["days"][0], band["days"][1], band["days"][-1]
+    assert (saturday["short"], saturday["x"], saturday["w"]) == ("Sat 15", 0, A_DAY_AT_LEAST)
+    assert (friday["short"], friday["w"]) == ("Fri 21", A_DAY_AT_LEAST)
+    assert band["wide"] == pytest.approx(224)
+    check_in, night = band["marks"][1], band["marks"][0]
+    assert [each["name"] for each in check_in["of"]] == ["check-in"]
+    # The check-in is three pixels wide, and ends where Saturday ends.
+    assert (check_in["x"], check_in["w"]) == (pytest.approx(3), LEAST)
+    assert night["x"] == pytest.approx(sunday["x"]) == pytest.approx(6)
+    # The end of the TRIP is on Friday, with room for its line.
+    (end,) = band["bounds"]
+    assert friday["x"] <= end["x"] <= friday["x"] + friday["w"] - 2
+
+
+def clear(mark: dict[str, Any], small: list[dict[str, Any]]) -> float:
+    """The widest stretch of a mark that none of these small marks covers."""
+    at, widest = mark["x"], 0.0
+    for other in sorted(small, key=lambda each: each["x"]):
+        if other["x"] + other["w"] <= mark["x"] or other["x"] >= mark["x"] + mark["w"]:
+            continue
+        widest = max(widest, other["x"] - at)
+        at = max(at, other["x"] + other["w"])
+    return max(widest, mark["x"] + mark["w"] - at)
+
+
 def test_whatever_calendar_the_page_draws_has_a_strip_or_needs_none() -> None:
     """Every mark of the calendar is on the strip, inside its day, whatever the times are."""
     chosen = random.Random(11)
@@ -491,9 +580,12 @@ def test_whatever_calendar_the_page_draws_has_a_strip_or_needs_none() -> None:
         assert len(shown) == len(with_room)
         assert len(band["days"]) == len(laid["days"])
         at = 0.0
-        for day in band["days"]:
+        for day, on_it in zip(band["days"], laid["days"], strict=True):
             assert day["x"] == pytest.approx(at)
             assert day["w"] >= 0
+            # A day that holds something has room for it.
+            if on_it["marks"] or on_it["bounds"]:
+                assert day["w"] >= A_DAY_AT_LEAST - 1e-6, (sent, day)
             at += day["w"]
         assert band["wide"] == pytest.approx(at)
         assert band["wide"] == pytest.approx(wide)
@@ -517,7 +609,7 @@ def test_whatever_calendar_the_page_draws_has_a_strip_or_needs_none() -> None:
                 # A mark that can be drawn is as long as its time, and stands for itself.
                 (one,) = mark["of"]
                 was = laid["days"][one["day"]]["marks"][one["index"]]
-                assert mark["w"] == pytest.approx(was["height"] * band["per"])
+                assert mark["w"] == pytest.approx(was["height"] * day["per"])
                 assert mark["w"] >= LEAST - 1e-6
                 assert (mark["first"], mark["last"]) == (one["first"], one["last"])
                 continue
@@ -530,11 +622,22 @@ def test_whatever_calendar_the_page_draws_has_a_strip_or_needs_none() -> None:
             spans.sort()
             for (_, end), (start, _) in itertools.pairwise(spans):
                 assert end <= start + 1e-6, (sent, spans)
+        # A mark that can be drawn has three pixels that no small mark covers, in the row
+        # of one of its PERSONs at least.
+        for mark in band["marks"]:
+            if mark["small"]:
+                continue
+            rows = range(mark["first"], mark["last"] + 1)
+            in_the_way = [
+                [each for each in band["marks"] if each["small"] and each["first"] == row]
+                for row in rows
+            ]
+            assert any(clear(mark, others) >= LEAST - 1e-6 for others in in_the_way), (sent, mark)
         # Each time of the TRIP is inside its day too.
         bounds = [bound for day in laid["days"] for bound in day["bounds"]]
         assert len(band["bounds"]) == len(bounds)
         for bound in band["bounds"]:
             day = band["days"][bound["day"]]
-            assert day["x"] - 1e-6 <= bound["x"] <= day["x"] + day["w"] + 1e-6
+            assert day["x"] - 1e-6 <= bound["x"] <= day["x"] + day["w"] - 2 + 1e-6
     assert with_a_strip > 100
     assert merged > 10
