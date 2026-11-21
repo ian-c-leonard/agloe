@@ -364,30 +364,10 @@ def test_the_answer_reaches_a_page_while_the_check_goes_on(tmp_path: Path) -> No
             """echo '{"kind": "report", "answer": "FEASIBLE", "json": {}, "text": "", """
             """"trip": null, "seconds": 1}'"""
         ),
-        # A report with no TRIP, with one that a page cannot draw, and with one for another answer.
+        # A report with one thing more than a report holds.
         (
             """echo '{"kind": "report", "answer": "FEASIBLE", "json": {"answer": "FEASIBLE"}, """
-            """"text": "", "seconds": 1}'"""
-        ),
-        (
-            """echo '{"kind": "report", "answer": "FEASIBLE", "json": {"answer": "FEASIBLE"}, """
-            """"text": "", "trip": {}, "seconds": 1}'"""
-        ),
-        (
-            """echo '{"kind": "report", "answer": "FEASIBLE", "json": {"answer": "FEASIBLE"}, """
-            """"text": "", "trip": [], "seconds": 1}'"""
-        ),
-        (
-            """echo '{"kind": "report", "answer": "FEASIBLE", "json": {"answer": "FEASIBLE"}, """
-            """"text": "", "seconds": 1, "trip": {"zone": "UTC", "persons": [], "places": [], """
-            """"itinerary": false, "days": [], "left_out": 0, "starts": null, "ends": null, """
-            """"steps": []}}'"""
-        ),
-        (
-            """echo '{"kind": "report", "answer": "FEASIBLE", "json": {"answer": "FEASIBLE"}, """
-            """"text": "", "seconds": 1, "trip": {"zone": "UTC", "persons": [], "places": [], """
-            """"itinerary": true, "days": [], "left_out": 0, "starts": null, "ends": null, """
-            """"steps": [{}]}}'"""
+            """"text": "", "trip": null, "more": 1, "seconds": 1}'"""
         ),
         """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": true}'""",
         """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": NaN}'""",
@@ -417,27 +397,75 @@ def test_a_check_that_ends_without_a_report_has_stopped(does: str | None, tmp_pa
     ]
 
 
-@pytest.mark.parametrize(
-    "trip",
-    [
-        "null",
-        '{"zone": "UTC", "persons": [], "places": [], "itinerary": true, "days": [], '
-        '"left_out": 0, "starts": null, "ends": null, "steps": []}',
-    ],
-    ids=["no TRIP", "a TRIP"],
+EMPTY = (
+    '{"zone": "UTC", "persons": [], "places": [], "itinerary": true, "days": [], '
+    '"until": null, "starts": null, "ends": null, "steps": []}'
 )
-def test_a_report_reaches_a_page_with_its_trip_or_with_none(trip: str, tmp_path: Path) -> None:
-    """A check sends no TRIP where one of its times cannot be written. The report still comes."""
+
+
+@pytest.mark.parametrize(
+    ("trip", "reaches"),
+    [
+        (f', "trip": {EMPTY}', True),
+        # No TRIP, one that a page cannot draw, and one for another answer than the report's.
+        (', "trip": null', False),
+        ("", False),
+        (', "trip": {}', False),
+        (', "trip": []', False),
+        (', "trip": "none"', False),
+        (', "trip": true', False),
+        (f', "trip": {EMPTY.replace("true", "false")}', False),
+        (f', "trip": {EMPTY.replace('"steps": []', '"steps": [{}]')}', False),
+    ],
+    ids=[
+        "a TRIP",
+        "none",
+        "missing",
+        "empty",
+        "a list",
+        "words",
+        "a yes",
+        "another answer",
+        "half",
+    ],
+)
+def test_a_report_reaches_a_page_whatever_its_trip_is(
+    trip: str, reaches: bool, tmp_path: Path
+) -> None:
+    """A report is whole without the TRIP that the calendar draws.
+
+    So a page is sent the report with its TRIP where that is one it can draw, and with none
+    where it is not. What is wrong with a calendar never costs the reader the report.
+    """
     path = tmp_path / "trip.json"
     shutil.copy(STORY / "works.json", path)
     report = (
         '{"kind": "report", "answer": "FEASIBLE", "json": {"answer": "FEASIBLE"}, '
-        f'"text": "FEASIBLE: this trip works.", "trip": {trip}, "seconds": 1}}'
+        f'"text": "FEASIBLE: this trip works.", "seconds": 1{trip}}}'
     )
     with serving(path, python=stand_in(tmp_path, f"echo '{report}'")) as view:
         sent = Sent(view).until("report", within=20)
     assert kinds(sent) == ["file", "report"]
-    assert sent[-1]["trip"] == json.loads(trip)
+    assert sent[-1]["text"] == "FEASIBLE: this trip works."
+    assert sent[-1]["trip"] == (json.loads(EMPTY) if reaches else None)
+
+
+def test_a_fault_in_what_makes_the_drawing_costs_the_calendar_and_not_the_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fails(*given: object) -> None:
+        raise RuntimeError("a fault in the drawing")
+
+    monkeypatch.setattr("agloe.view.trip.shown", fails)
+    file, answer, report = sent_for((STORY / "works.json").read_bytes())
+    assert kinds([file, answer, report]) == ["file", "answer", "report"]
+    assert report["text"] == (STORY / "works.expected.txt").read_text()
+    assert report["json"] == json.loads((STORY / "works.expected.json").read_text())
+    assert report["trip"] is None
+    # The page shows the answer and the report, and has no TRIP for the calendar.
+    (said,) = page_says([[file, answer, report]])
+    assert said[-1]["line"] == "FEASIBLE: this trip works."
+    assert said[-1]["calendar"] == {"trip": None}
 
 
 def test_a_pipe_in_the_place_of_the_file_cannot_hold_the_view_up(tmp_path: Path) -> None:

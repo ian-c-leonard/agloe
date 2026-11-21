@@ -21,8 +21,8 @@ import time
 from collections.abc import Iterator
 
 from agloe import compiler, report
-from agloe.answers import Answer
-from agloe.file import FileError, Unwritable, parse
+from agloe.answers import Answer, Report
+from agloe.file import File, FileError, Unwritable, parse
 from agloe.view import trip
 
 type Event = dict[str, object]
@@ -52,13 +52,24 @@ def checked(content: bytes) -> Iterator[Event]:
                 "answer": found.answer.value,
                 "json": report.as_json(file, found),
                 "text": report.as_text(file, found),
-                "trip": trip.shown(file, found),
                 "seconds": seconds,
             }
         except Unwritable:
             yield {"kind": "unwritable"}
             return
-        yield event
+        yield {**event, "trip": _to_draw(file, found)}
+
+
+def _to_draw(file: File, found: Report) -> object:
+    """The TRIP as the page draws it, or None where there is none to send.
+
+    The report is whole without it. So a fault in what makes the drawing costs the reader the
+    calendar, and never the report.
+    """
+    try:
+        return trip.shown(file, found)
+    except Exception:  # whatever goes wrong in making the drawing, the report goes out
+        return None
 
 
 if __name__ == "__main__":

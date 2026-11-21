@@ -36,6 +36,7 @@ from tests.stories import (
     seconds,
     starts_at,
     stays,
+    takes,
     trip,
     way_between,
 )
@@ -63,6 +64,7 @@ MONTHS = [
     "December",
 ]
 CHICAGO = " Times are on the clocks of America/Chicago."
+CHANGES = " A column that names its offset from UTC is part of a day on which those clocks change."
 ONLY_LOCKS = (
     "The report shows no ITINERARY. The calendar holds only the OPTIONs that a LOCK names, at"
     " the times the FILE states."
@@ -117,6 +119,10 @@ def marks(laid: Calendar, day: int = 0) -> list[tuple[Any, ...]]:
     return [tuple(mark[each] for each in parts) for mark in laid["days"][day]["marks"]]
 
 
+def names(laid: Calendar) -> list[str]:
+    return [day["name"] for day in laid["days"]]
+
+
 def test_the_calendar_says_what_the_report_says() -> None:
     """For every FEASIBLE example: the same days and the same steps, in the report's own words."""
     feasible = [
@@ -151,9 +157,11 @@ def test_the_calendar_says_what_the_report_says() -> None:
         assert calendar_of["itinerary"] is True, name
         if in_report:
             assert calendar_of["says"] == f"The ITINERARY of the report.{CHICAGO}", name
-        # In a plan nobody is in two places at once, so every mark has its column to itself.
         for each in calendar_of["days"]:
+            # In a plan nobody is in two places at once, so every mark has its column to itself.
             assert all((mark["lane"], mark["lanes"]) == (0, 1) for mark in each["marks"]), name
+            # In the examples the clocks do not change, so every column shows all its hours.
+            assert each["shut"] == [], name
 
 
 def test_the_calendar_of_the_flight_home() -> None:
@@ -162,7 +170,7 @@ def test_the_calendar_of_the_flight_home() -> None:
     assert laid["persons"] == [{"id": "alex", "name": "Alex"}, {"id": "sam", "name": "Sam"}]
     # The day shows whole hours, with room above the first step and below the last.
     assert laid["hours"] == {"from": 13 * 60, "to": 20 * 60}
-    assert [day["name"] for day in laid["days"]] == ["Saturday 15 May 2027"]
+    assert names(laid) == ["Saturday 15 May 2027"]
     assert marks(laid) == [
         # Both columns, an hour down the day, an hour tall. A LOCK names the visit.
         (0, "locked", 0, 1, 60, 60, True, True),
@@ -242,6 +250,7 @@ def test_a_step_spans_the_columns_of_the_persons_who_take_part() -> None:
     assert walk["lock"] is None
     # A WAY has its name beside it where it takes 20 minutes or more.
     assert [mark["named"] for mark in day[4:]] == [True, True, False]
+    assert not any(mark["brief"] for mark in day)
 
 
 def test_a_way_that_the_file_does_not_list_is_named_as_the_report_names_it() -> None:
@@ -251,10 +260,31 @@ def test_a_way_that_the_file_does_not_list_is_named_as_the_report_names_it() -> 
     assert (mark["kind"], mark["name"], mark["state"]) == ("way", "another WAY", "way")
 
 
+def test_a_way_that_takes_next_to_no_time_is_a_tick_that_nothing_covers() -> None:
+    """Alex takes a WAY that takes no time, and at that moment a visit starts."""
+    file = trip(
+        ["alex"],
+        ["hotel", "museum"],
+        [stays("visit", "museum")],
+        [starts_at("visit", 12), lasts("visit", "PT1H"), takes("door", "PT0S")],
+        [],
+        ways=[way_between("door", "hotel", "museum")],
+    )
+    plan = (
+        Step(None, "hotel", "museum", ("alex",), seconds(12), seconds(12), way="door"),
+        Step("visit", "museum", "museum", ("alex",), seconds(12), seconds(13)),
+    )
+    laid = calendar(sent_for(file, Report(Answer.FEASIBLE, itinerary=plan)))
+    door, visit = laid["days"][0]["marks"]
+    assert (door["kind"], door["top"], door["height"]) == ("way", visit["top"], 0)
+    # The page draws a mark that is brief as a tick on top of what is beside it.
+    assert (door["brief"], visit["brief"]) == (True, False)
+
+
 def test_a_step_that_runs_past_midnight_is_on_both_days() -> None:
     """A night at the hotel, in the example of several days."""
     laid = calendar(drawn(EXAMPLES / "several-days" / "works.json"))
-    assert [day["name"] for day in laid["days"]] == ["Friday 14 May 2027", "Saturday 15 May 2027"]
+    assert names(laid) == ["Friday 14 May 2027", "Saturday 15 May 2027"]
     # Breakfast at 8:00 am is the earliest step of a day. The night runs to midnight on its day.
     assert laid["hours"] == {"from": 7 * 60, "to": 24 * 60}
     friday = {mark["name"]: mark for mark in laid["days"][0]["marks"]}
@@ -289,14 +319,22 @@ def test_a_step_that_ends_before_the_hours_shown_has_no_part_on_the_next_day() -
     assert laid["days"][0]["marks"][0]["when"] == "11:00 pm to 5:00 am on 16 May"
 
 
-def stay(start: str, length: int | None) -> Trip:
-    """What is sent of one stay of Alex's, in a plan: from this time, for so many seconds."""
-    when = {"id": "stay-time", "option": "stay", "starts_at": start}
+def alone(*stays_of_alex: tuple[str, int | None]) -> Trip:
+    """What is sent of Alex's stays, in a plan: each from a time, for so many seconds."""
+    when = {"id": "stay-time", "option": "stay", "starts_at": stays_of_alex[0][0]}
     file = trip(["alex"], ["hotel"], [stays("stay", "hotel")], [when], [])
-    begins = instant(start)
-    end = None if length is None else begins + length
-    step = Step("stay", "hotel", "hotel", ("alex",), begins, end)
-    return sent_for(file, Report(Answer.FEASIBLE, itinerary=(step,)))
+    plan = tuple(
+        Step(
+            "stay",
+            "hotel",
+            "hotel",
+            ("alex",),
+            instant(start),
+            None if length is None else instant(start) + length,
+        )
+        for start, length in stays_of_alex
+    )
+    return sent_for(file, Report(Answer.FEASIBLE, itinerary=plan))
 
 
 def test_a_step_with_no_known_end_is_drawn_half_an_hour_tall_and_does_not_end() -> None:
@@ -308,32 +346,51 @@ def test_a_step_with_no_known_end_is_drawn_half_an_hour_tall_and_does_not_end() 
 
 def test_a_step_with_no_known_end_stays_on_the_day_it_starts_on() -> None:
     """Five minutes before midnight, its mark is five minutes tall, and there is no next day."""
-    laid = calendar(stay(at(23, 55), None))
-    assert [day["name"] for day in laid["days"]] == ["Saturday 15 May 2027"]
+    laid = calendar(alone((at(23, 55), None)))
+    assert names(laid) == ["Saturday 15 May 2027"]
     assert laid["hours"] == {"from": 23 * 60, "to": 24 * 60}
     assert marks(laid) == [(0, "planned", 0, 0, 55, 5, True, False)]
+    # One second before midnight, it is one second tall, and ends where the day does.
+    laid = calendar(alone((at(23, 59).replace(":59:00", ":59:59"), None)))
+    (mark,) = laid["days"][0]["marks"]
+    assert mark["top"] + mark["height"] == 60
 
 
-def test_a_step_in_the_hour_that_the_clocks_show_twice_is_as_tall_as_it_is_long() -> None:
-    """In Chicago the clocks go back from 2:00 am to 1:00 am on 7 November 2027."""
-    laid = calendar(stay("2027-11-07T01:30:00-05:00[America/Chicago]", 40 * 60))
-    assert [day["name"] for day in laid["days"]] == ["Sunday 7 November 2027"]
-    # The day shows the hours from 1:00 am on. The stay is half an hour down it, and 40
-    # minutes tall.
-    assert laid["hours"]["from"] == 60
-    assert marks(laid) == [(0, "planned", 0, 0, 30, 40, True, True)]
-    # Its words are the report's: by the clock it ends before it starts.
-    assert laid["days"][0]["marks"][0]["when"] == "1:30 am to 1:10 am"
+def test_a_day_on_which_the_clocks_go_back_has_a_column_before_and_one_after() -> None:
+    """In Chicago the clocks go back from 2:00 am to 1:00 am on 7 November 2027.
+
+    They show 1:10 am twice that night. Two stays, one at each, are an hour apart. So they are
+    in two columns, and never side by side in one.
+    """
+    first, second = "2027-11-07T01:10:00-05:00", "2027-11-07T01:10:00-06:00"
+    laid = calendar(alone((f"{first}[America/Chicago]", 300), (f"{second}[America/Chicago]", 300)))
+    assert names(laid) == ["Sunday 7 November 2027 (UTC-5)", "Sunday 7 November 2027 (UTC-6)"]
+    assert laid["says"] == f"The ITINERARY of the report.{CHICAGO}{CHANGES}"
+    assert laid["hours"] == {"from": 0, "to": 2 * 60}
+    assert marks(laid, 0) == [(0, "planned", 0, 0, 70, 5, True, True)]
+    assert marks(laid, 1) == [(1, "planned", 0, 0, 70, 5, True, True)]
+    # The times of this TRIP are not all at one offset from UTC, so each says its own.
+    assert [day["marks"][0]["when"] for day in laid["days"]] == [
+        "1:10 am (UTC-5) to 1:15 am (UTC-5)",
+        "1:10 am (UTC-6) to 1:15 am (UTC-6)",
+    ]
+    # The first column has every hour that is shown. The second starts at 1:00 am: the hour
+    # before that is not on its clocks.
+    assert laid["days"][0]["shut"] == []
+    assert laid["days"][1]["shut"] == [{"top": 0, "height": 60}]
+    # A stay of 70 minutes from the first 1:05 am: 55 minutes in one column, 15 in the other.
+    laid = calendar(alone(("2027-11-07T01:05:00-05:00[America/Chicago]", 70 * 60)))
+    assert marks(laid, 0) == [(0, "planned", 0, 0, 65, 55, True, False)]
+    assert marks(laid, 1) == [(0, "planned", 0, 0, 60, 15, False, True)]
+    assert laid["days"][0]["marks"][0]["when"] == "1:05 am (UTC-5) to 1:15 am (UTC-6)"
 
 
 def test_a_date_that_a_time_zone_left_out_has_no_column() -> None:
     """Samoa went from 29 December 2011 to 31 December."""
-    laid = calendar(stay("2011-12-29T23:00:00-10:00[Pacific/Apia]", 2 * 3600))
-    assert [day["name"] for day in laid["days"]] == [
-        "Thursday 29 December 2011",
-        "Saturday 31 December 2011",
-    ]
-    assert laid["days"][0]["marks"][0]["when"] == "11:00 pm to 1:00 am on 31 December"
+    laid = calendar(alone(("2011-12-29T23:00:00-10:00[Pacific/Apia]", 2 * 3600)))
+    assert names(laid) == ["Thursday 29 December 2011", "Saturday 31 December 2011"]
+    when = "11:00 pm (UTC-10) to 1:00 am (UTC+14) on 31 December"
+    assert laid["days"][0]["marks"][0]["when"] == when
 
 
 def test_a_step_that_can_take_longer_says_so_and_does_not_end() -> None:
@@ -409,20 +466,20 @@ def test_options_that_one_person_is_in_at_the_same_time_stand_side_by_side() -> 
     assert [(mark["lane"], mark["lanes"]) for mark in laid["days"][0]["marks"]] == [(0, 2), (1, 2)]
 
 
-def framed(starts: str, ends: str) -> Trip:
-    """What is sent of a visit on Saturday at 2:00 pm, in a TRIP with these times for itself."""
+def framed(starts: str, ends: str, visit: bool = True) -> Trip:
+    """What is sent of a TRIP with these times for itself, and a visit on Saturday at 2:00 pm."""
+    times: list[dict[str, Any]] = [
+        {"id": "trip-start", "trip_starts_at": starts},
+        {"id": "trip-end", "trip_ends_at": ends},
+    ]
     file = trip(
         ["alex"],
         ["museum"],
         [stays("visit", "museum")],
         [starts_at("visit", 14), lasts("visit", "PT1H")],
-        [
-            lock("visit", "alex"),
-            {"id": "trip-start", "trip_starts_at": starts},
-            {"id": "trip-end", "trip_ends_at": ends},
-        ],
+        [lock("visit", "alex"), *times] if visit else times,
     )
-    return sent_for(file, Report(Answer.UNDETERMINED))
+    return sent_for(file, Report(Answer.UNDETERMINED if visit else Answer.FEASIBLE))
 
 
 def test_the_calendar_shows_when_the_trip_starts_and_ends() -> None:
@@ -435,7 +492,7 @@ def test_the_calendar_shows_when_the_trip_starts_and_ends() -> None:
         {"says": "The TRIP ends at 4:15 pm", "edge": "ends", "top": 180},
     ]
     laid = calendar(framed(at(17, day=14), at(20, 30, day=17)))
-    assert [day["name"] for day in laid["days"]] == [
+    assert names(laid) == [
         "Friday 14 May 2027",
         "Saturday 15 May 2027",
         "Sunday 16 May 2027",
@@ -447,6 +504,29 @@ def test_the_calendar_shows_when_the_trip_starts_and_ends() -> None:
         [],
         [],
         ["The TRIP ends at 8:30 pm"],
+    ]
+
+
+def test_a_start_and_an_end_of_the_trip_at_one_place_share_their_words() -> None:
+    """Both are before the hours that the calendar shows, so both are at the top of the day."""
+    laid = calendar(framed(at(9), at(10)))
+    assert laid["hours"] == {"from": 13 * 60, "to": 16 * 60}
+    assert laid["days"][0]["bounds"] == [
+        {"says": "The TRIP starts at 9:00 am, and ends at 10:00 am", "edge": "both", "top": 0}
+    ]
+
+
+def test_a_calendar_with_no_step_shows_the_hours_of_the_trip() -> None:
+    """Nobody has to do anything, and the TRIP is from 1:00 am to 5:00 am."""
+    laid = calendar(framed(at(1), at(5), visit=False))
+    assert laid["says"] == (
+        f"The ITINERARY of the report is empty: nobody has to do anything.{CHICAGO}"
+    )
+    assert laid["hours"] == {"from": 0, "to": 6 * 60}
+    assert laid["days"][0]["marks"] == []
+    assert laid["days"][0]["bounds"] == [
+        {"says": "The TRIP starts at 1:00 am", "edge": "starts", "top": 60},
+        {"says": "The TRIP ends at 5:00 am", "edge": "ends", "top": 300},
     ]
 
 
@@ -487,15 +567,13 @@ def test_a_calendar_with_nothing_on_it_says_why() -> None:
     )
     assert untimed["untimed"] == [{"name": "fireworks", "who": "alex"}]
     assert idle["says"] == "The ITINERARY of the report is empty: nobody has to do anything."
-    # The view sends no TRIP where one of its times cannot be written.
-    assert none["says"] == (
-        "This TRIP holds a time outside the years 0001 to 9999, so it has no calendar."
-    )
+    # Where the view sends no TRIP, the page says that there is no calendar.
+    assert none["says"] == "There is no calendar of this TRIP: the view could not make one."
     for laid in (empty, untimed, idle, none):
         assert laid["days"] == []
 
 
-def test_the_calendar_shows_two_months_at_most_and_says_what_it_leaves_out() -> None:
+def test_the_calendar_shows_two_months_at_most_and_says_where_the_trip_ends() -> None:
     # The FILE's first time names Chicago, so the report shows every time on Chicago's clocks.
     file = trip(
         ["alex"],
@@ -511,11 +589,10 @@ def test_the_calendar_shows_two_months_at_most_and_says_what_it_leaves_out() -> 
     )
     laid = calendar(sent_for(file, Report(Answer.FEASIBLE, itinerary=plan)))
     assert len(laid["days"]) == 62
-    assert laid["days"][0]["name"] == "Saturday 15 May 2027"
-    assert laid["days"][-1]["name"] == "Thursday 15 July 2027"
+    assert (names(laid)[0], names(laid)[-1]) == ("Saturday 15 May 2027", "Thursday 15 July 2027")
     assert laid["says"] == (
         f"The ITINERARY of the report.{CHICAGO}"
-        " The calendar shows the first 62 days. The TRIP goes on for 38 more."
+        " The calendar shows the first 62 columns. The TRIP goes on until Sunday 22 August 2027."
     )
     assert [len(each["marks"]) for each in laid["days"]] == [1, *([0] * 61)]
 
@@ -547,6 +624,16 @@ def parts_of(start: datetime, end: datetime | None, days: list[date]) -> list[di
     return parts
 
 
+def written(moment: datetime | None) -> dict[str, Any] | None:
+    """A time as the view sends it, with no offset."""
+    return None if moment is None else {"at": moment.isoformat(timespec="seconds"), "offset": None}
+
+
+def whole(day: date) -> dict[str, Any]:
+    """A day of 24 hours as the view sends it."""
+    return {"date": day.isoformat(), "offset": None, "opens": 0, "closes": 86400}
+
+
 def made(times: list[tuple[str, str | None]]) -> Trip:
     """A TRIP as the view sends it, made by hand: one stay of one PERSON for each pair of times."""
     spans = [
@@ -564,8 +651,8 @@ def made(times: list[tuple[str, str | None]]) -> Trip:
         "persons": [{"id": "p0", "name": "P0"}],
         "places": [{"id": "pier", "name": "the pier"}],
         "itinerary": True,
-        "days": [day.isoformat() for day in days],
-        "left_out": 0,
+        "days": [whole(day) for day in days],
+        "until": None,
         "starts": None,
         "ends": None,
         "steps": [
@@ -577,8 +664,8 @@ def made(times: list[tuple[str, str | None]]) -> Trip:
                 "to": "pier",
                 "persons": ["p0"],
                 "locked": [],
-                "start": start.isoformat(timespec="seconds"),
-                "end": None if end is None else end.isoformat(timespec="seconds"),
+                "start": written(start),
+                "end": written(end),
                 "latest": None,
                 "parts": parts_of(start, end, days),
             }
@@ -603,7 +690,7 @@ def test_the_calendar_names_days_and_times_as_the_report_does() -> None:
     trips = [made([(f"{day.isoformat()}T10:00:00", None)]) for day in days]
     for day, laid in zip(days, calendars(cast("list[Trip | None]", trips)), strict=True):
         name = f"{DAYS[day.weekday()]} {day.day} {MONTHS[day.month - 1]} {day.year}"
-        assert [each["name"] for each in laid["days"]] == [name]
+        assert names(laid) == [name]
 
     def when(start: str, end: str) -> str:
         return str(calendar(made([(start, end)]))["days"][0]["marks"][0]["when"])
@@ -611,10 +698,8 @@ def test_the_calendar_names_days_and_times_as_the_report_does() -> None:
     assert when("2027-05-15T00:00:00", "2027-05-15T12:00:00") == "12:00 am to 12:00 pm"
     assert when("2027-05-15T00:00:05", "2027-05-15T23:59:59") == "12:00:05 am to 11:59:59 pm"
     assert when("2027-05-15T09:05:00", "2027-05-15T13:00:00") == "9:05 am to 1:00 pm"
-    assert (
-        when("2027-12-31T22:00:00", "2028-01-01T01:00:00")
-        == "10:00 pm to 1:00 am on 1 January 2028"
-    )
+    late = "10:00 pm to 1:00 am on 1 January 2028"
+    assert when("2027-12-31T22:00:00", "2028-01-01T01:00:00") == late
 
 
 def some_trip(chosen: random.Random) -> Trip:
@@ -628,9 +713,8 @@ def some_trip(chosen: random.Random) -> Trip:
 
     def moment(after: datetime | None = None) -> datetime:
         early = opens if after is None else after
-        return early + timedelta(
-            seconds=chosen.randrange(0, max(1, int((closes - early).total_seconds())))
-        )
+        room = max(1, int((closes - early).total_seconds()))
+        return early + timedelta(seconds=chosen.randrange(0, room))
 
     # With an ITINERARY, every step has a time, and some are WAYs. With none, every step is an
     # OPTION that a LOCK names for each PERSON who takes part, and it may have no time.
@@ -659,9 +743,9 @@ def some_trip(chosen: random.Random) -> Trip:
                 "locked": chosen.sample(takers, chosen.randrange(0, len(takers) + 1))
                 if planned
                 else takers,
-                "start": None if start is None else start.isoformat(timespec="seconds"),
-                "end": None if end is None else end.isoformat(timespec="seconds"),
-                "latest": None if latest is None else latest.isoformat(timespec="seconds"),
+                "start": written(start),
+                "end": written(end),
+                "latest": written(latest),
                 "parts": [] if start is None else parts_of(start, end, days),
             }
         )
@@ -671,15 +755,16 @@ def some_trip(chosen: random.Random) -> Trip:
             return None
         day = chosen.randrange(0, len(days))
         second = chosen.choice([0, 86400, chosen.randrange(0, 86401)])
-        return {"at": f"{days[day].isoformat()}T12:00:00", "day": day, "second": second}
+        when = f"{days[day].isoformat()}T12:00:00"
+        return {"at": when, "offset": None, "day": day, "second": second}
 
     return {
         "zone": "UTC",
         "persons": [{"id": id, "name": id.upper()} for id in persons],
         "places": [{"id": id, "name": id.upper()} for id in places],
         "itinerary": planned,
-        "days": [day.isoformat() for day in days],
-        "left_out": chosen.choice([0, 0, 3]),
+        "days": [whole(day) for day in days],
+        "until": chosen.choice([None, None, "2030-01-01"]),
         "starts": bound(),
         "ends": bound(),
         "steps": steps,
@@ -726,5 +811,6 @@ def test_whatever_trip_the_view_sends_has_a_calendar() -> None:
                     assert bottom <= top, (sent, spans)
             for bound in day["bounds"]:
                 assert 0 <= bound["top"] <= tall
+            assert day["shut"] == []
         # Every step with a time begins on one of the days.
         assert begun == set(timed), sent

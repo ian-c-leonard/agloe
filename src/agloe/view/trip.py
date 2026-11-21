@@ -9,15 +9,20 @@ PERSONs a LOCK names. A report on any other TRIP shows no ITINERARY. Its steps a
 that a LOCK names, at the times the FILE states.
 
 Every time is on the clocks that the report shows times on: those of the FILE's time zone. A
-time is written as those clocks show it, such as 2027-05-15T14:00:00. The days are the days of
-those clocks, and each step says which part of it lies on which day. So the page works out no
-time for itself, and a night on which the clocks change is drawn as that zone had it.
+time is written as those clocks show it, such as 2027-05-15T14:00:00. Where the times of a TRIP
+are not all at one offset from UTC, each comes with its own, as in the report.
+
+A day is sent as the stretch of it in which the clocks run on without a change. So most days
+are one stretch, from midnight to midnight. A day on which the clocks change is two, and each
+says its offset from UTC. Each step says which part of it lies in which stretch, from when to
+when by the clock. So the page works out no time for itself, and two moments that the clocks
+show as one time of day are never drawn as one.
 """
 
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import cast
 
 from agloe import report as reports
@@ -27,11 +32,13 @@ from agloe.file import File, Unwritable, local
 type Trip = dict[str, object]
 type _Shape = Mapping[str, type | tuple[type, ...]]
 
-MOST_DAYS = 62  # the most days that the page is sent: it is told how many more there are
+MOST_DAYS = 62  # the most stretches of days that the page is sent: it is told where the TRIP ends
 _A_DAY = 24 * 60 * 60  # seconds on the clock of a day
-_TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}")
+_AN_HOUR = 60 * 60
+_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}")
 _DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
-_OR_NONE = (str, type(None))
+_OFFSET = re.compile(r"UTC[+-][0-9]{1,2}(:[0-9]{2}(:[0-9]{2})?)?")
+_NONE = type(None)
 _NAMED: _Shape = {"id": str, "name": str}
 _TRIP: _Shape = {
     "zone": str,
@@ -39,23 +46,25 @@ _TRIP: _Shape = {
     "places": list,
     "itinerary": bool,
     "days": list,
-    "left_out": int,
-    "starts": (dict, type(None)),
-    "ends": (dict, type(None)),
+    "until": (str, _NONE),
+    "starts": (dict, _NONE),
+    "ends": (dict, _NONE),
     "steps": list,
 }
-_BOUND: _Shape = {"at": str, "day": (int, type(None)), "second": (int, type(None))}
+_DAY: _Shape = {"date": str, "offset": (str, _NONE), "opens": int, "closes": int}
+_TIME: _Shape = {"at": str, "offset": (str, _NONE)}
+_BOUND: _Shape = {**_TIME, "day": (int, _NONE), "second": (int, _NONE)}
 _STEP: _Shape = {
-    "option": _OR_NONE,
-    "way": _OR_NONE,
-    "name": _OR_NONE,
+    "option": (str, _NONE),
+    "way": (str, _NONE),
+    "name": (str, _NONE),
     "from": str,
     "to": str,
     "persons": list,
     "locked": list,
-    "start": _OR_NONE,
-    "end": _OR_NONE,
-    "latest": _OR_NONE,
+    "start": (dict, _NONE),
+    "end": (dict, _NONE),
+    "latest": (dict, _NONE),
     "parts": list,
 }
 _PART: _Shape = {"day": int, "from": int, "to": int, "begins": bool, "ends": bool}
@@ -82,15 +91,18 @@ class _Step:
 
 @dataclass(frozen=True)
 class _Day:
-    """One day on the clocks of the FILE's time zone, from one moment up to another.
+    """A stretch of one day in which the clocks of the FILE's time zone run on without a change.
 
-    The first day of a TRIP starts at the first moment that anything is sent of. Every other
-    day starts at its first moment, and each ends at the first moment of the day after.
+    It runs from ``start`` up to ``end``, which is the first moment of the next stretch. At
+    ``start`` the clocks show ``opens`` seconds into the day. ``offset`` is how far they are
+    ahead of UTC.
     """
 
     date: date
+    offset: timedelta
     start: int
     end: int
+    opens: int
 
 
 def shown(file: File, report: Report) -> Trip | None:
@@ -106,39 +118,79 @@ def shown(file: File, report: Report) -> Trip | None:
     for lock in file.locks:
         locked.setdefault(lock.option, set()).update(lock.persons)
     starts, ends = file.trip_start(), file.trip_end()
+    # Every time that the page is sent, and every moment that its days have to hold.
+    times = [
+        moment
+        for step in steps
+        for moment in (step.start, step.end, step.latest)
+        if moment is not None
+    ]
+    times += [bound.at for bound in (starts, ends) if bound is not None]
+    held = [
+        moment
+        for step in steps
+        if step.start is not None
+        for moment in _first_and_last(step.start, step.end)
+    ]
+    held += [] if starts is None else [starts.at]
+    # A TRIP that takes any time ends as its last moment does. One that ends as a day starts
+    # does not reach that day.
+    closes = ends is not None and any(moment < ends.at for moment in held)
+    held += [] if ends is None else [ends.at - 1 if closes else ends.at]
     try:
-        days, left_out = _days(file, steps)
-        sent: list[Trip] = [
-            {
-                "option": step.option,
-                "way": step.way,
-                "name": names.get(step.option or step.way or ""),
-                "from": step.origin,
-                "to": step.destination,
-                # The PERSONs come in the order of the FILE, as they do in the report.
-                "persons": [each.id for each in file.persons if each.id in step.persons],
-                "locked": [
-                    each.id
-                    for each in file.persons
-                    if each.id in step.persons and each.id in locked.get(step.option or "", ())
-                ],
-                "start": None if step.start is None else _on_the_clock(file, step.start),
-                "end": None if step.end is None else _on_the_clock(file, step.end),
-                "latest": None if step.latest is None else _on_the_clock(file, step.latest),
-                "parts": _parts(file, step, days),
-            }
-            for step in steps
-        ]
+        days, until = _days(file, held)
+        offsets = len({local(moment, file.zone).utcoffset() for moment in times}) > 1
+
+        def time(moment: int | None) -> Trip | None:
+            return None if moment is None else _time(file, moment, offsets)
+
+        # A stretch says its offset where it is less than a day from midnight to midnight, or
+        # one of several of its date: that is a day on which the clocks change.
+        in_part = {
+            day
+            for day in days
+            if day.opens > 0
+            or day.opens + (day.end - day.start) < _A_DAY
+            or sum(other.date == day.date for other in days) > 1
+        }
         return {
             "zone": file.zone,
             "persons": [{"id": each.id, "name": each.name} for each in file.persons],
             "places": [{"id": each.id, "name": each.name} for each in file.places],
             "itinerary": planned,
-            "days": [day.date.isoformat() for day in days],
-            "left_out": left_out,
-            "starts": None if starts is None else _bound(file, starts.at, days, last=False),
-            "ends": None if ends is None else _bound(file, ends.at, days, last=True),
-            "steps": sent,
+            "days": [
+                {
+                    "date": day.date.isoformat(),
+                    "offset": _offset(day.offset) if day in in_part else None,
+                    "opens": day.opens,
+                    "closes": day.opens + (day.end - day.start),
+                }
+                for day in days
+            ],
+            "until": None if until is None else until.isoformat(),
+            "starts": None if starts is None else _bound(file, starts.at, days, False, offsets),
+            "ends": None if ends is None else _bound(file, ends.at, days, closes, offsets),
+            "steps": [
+                {
+                    "option": step.option,
+                    "way": step.way,
+                    "name": names.get(step.option or step.way or ""),
+                    "from": step.origin,
+                    "to": step.destination,
+                    # The PERSONs come in the order of the FILE, as they do in the report.
+                    "persons": [each.id for each in file.persons if each.id in step.persons],
+                    "locked": [
+                        each.id
+                        for each in file.persons
+                        if each.id in step.persons and each.id in locked.get(step.option or "", ())
+                    ],
+                    "start": time(step.start),
+                    "end": time(step.end),
+                    "latest": time(step.latest),
+                    "parts": _parts(step, days),
+                }
+                for step in steps
+            ],
         }
     except Unwritable:
         return None
@@ -157,9 +209,8 @@ def _in_the_itinerary(file: File, report: Report) -> list[_Step]:
         length = file.duration(found.option or way or "")
         latest = None
         if length is not None and found.end is not None:
-            latest = (
-                found.start + length.longest if found.start + length.longest > found.end else None
-            )
+            most = found.start + length.longest
+            latest = most if most > found.end else None
         steps.append(
             _Step(
                 found.option,
@@ -202,9 +253,15 @@ def _named_by_a_lock(file: File) -> list[_Step]:
     return sorted(steps, key=lambda step: (step.start is None, step.start or 0))
 
 
-def _on_the_clock(file: File, moment: int) -> str:
-    """A time as the clocks of the FILE's time zone show it. Raises Unwritable where none can."""
-    return local(moment, file.zone).replace(tzinfo=None).isoformat(timespec="seconds")
+def _first_and_last(start: int, end: int | None) -> list[int]:
+    """The first moment of a step and its last. A step that ends as a day starts is not on it."""
+    return [start] if end is None or end <= start else [start, end - 1]
+
+
+def _clocks(file: File, moment: int) -> tuple[date, timedelta]:
+    """What the clocks of the FILE's time zone show at a moment: the date, and their offset."""
+    there = local(moment, file.zone)
+    return there.date(), there.utcoffset() or timedelta()
 
 
 def _seconds_into_the_day(file: File, moment: int) -> int:
@@ -213,71 +270,106 @@ def _seconds_into_the_day(file: File, moment: int) -> int:
     return there.hour * 3600 + there.minute * 60 + there.second
 
 
-def _days(file: File, steps: list[_Step]) -> tuple[list[_Day], int]:
-    """The days to draw, in order, and how many days after those the TRIP still reaches.
+def _offset(ahead: timedelta) -> str:
+    """An offset from UTC as the report writes it: UTC-5, UTC+5:30, UTC+0:09:21."""
+    seconds = round(ahead.total_seconds())
+    hours, rest = divmod(abs(seconds), 3600)
+    minutes, left = divmod(rest, 60)
+    written = f"UTC{'-' if seconds < 0 else '+'}{hours}"
+    if minutes or left:
+        written += f":{minutes:02d}"
+    if left:
+        written += f":{left:02d}"
+    return written
 
-    The days run from the first moment of any step, or of the TRIP, to the last. A step that
-    ends as a day starts does not reach that day, and neither does a TRIP that ends then.
+
+def _time(file: File, moment: int, with_its_offset: bool) -> Trip:
+    """A time as the clocks of the FILE's time zone show it. Raises Unwritable where none can."""
+    there = local(moment, file.zone)
+    return {
+        "at": there.replace(tzinfo=None).isoformat(timespec="seconds"),
+        "offset": _offset(there.utcoffset() or timedelta()) if with_its_offset else None,
+    }
+
+
+def _days(file: File, held: list[int]) -> tuple[list[_Day], date | None]:
+    """The stretches of days that hold these moments, in order, from the first to the last.
+
+    At most ``MOST_DAYS`` of them. Where the last moment is after those, the date it is on
+    comes with them.
     """
-    moments: list[int] = []
-    for step in steps:
-        if step.start is not None:
-            moments.append(step.start)
-            if step.end is not None and step.end > step.start:
-                moments.append(step.end - 1)
-    starts, ends = file.trip_start(), file.trip_end()
-    if starts is not None:
-        moments.append(starts.at)
-    if ends is not None:
-        moments.append(ends.at - 1)
-    if not moments:
-        return [], 0
-    last = max(moments)
+    if not held:
+        return [], None
+    last = max(held)
     days: list[_Day] = []
-    moment = min(moments)
+    start = _where_the_stretch_starts(file, min(held))
     while True:
-        today = local(moment, file.zone).date()
-        after = _the_day_after(file, moment, today)
-        days.append(_Day(today, moment, after))
-        if after > last:
-            return days, 0
+        today, offset = _clocks(file, start)
+        end = _where_the_stretch_ends(file, start)
+        days.append(_Day(today, offset, start, end, _seconds_into_the_day(file, start)))
+        if end > last:
+            return days, None
         if len(days) == MOST_DAYS:
-            return days, (local(last, file.zone).date() - today).days
-        moment = after
+            return days, local(last, file.zone).date()
+        start = end
 
 
-def _the_day_after(file: File, moment: int, today: date) -> int:
-    """The first moment after this one at which the clocks show a later date than today's.
+def _where_the_stretch_ends(file: File, moment: int) -> int:
+    """The first moment after this one at which the clocks show another date, or change.
 
-    The clocks say when that is. A day can be shorter or longer than 24 hours where they
-    change, and a zone can leave a date out altogether.
+    The clocks say when that is. A day can be shorter or longer than 24 hours, a zone can leave
+    a date out, and its clocks can go back over midnight to the day before.
     """
+    now = _clocks(file, moment)
 
-    def later(at: int) -> bool:
+    def other(at: int) -> bool:
         try:
-            return local(at, file.zone).date() > today
+            return _clocks(file, at) != now
         except Unwritable:  # after the last day that can be written
             return True
 
-    early, late = moment, moment + 3 * _A_DAY
-    while late - early > 1:
-        middle = (early + late) // 2
-        if later(middle):
-            late = middle
+    # No stretch comes back within the hour in which it ends. So there is one change between
+    # the last moment that is like this one and the first that is not.
+    same, later = moment, moment + _AN_HOUR
+    while not other(later):
+        same, later = later, later + _AN_HOUR
+    while later - same > 1:
+        middle = (same + later) // 2
+        if other(middle):
+            later = middle
         else:
-            early = middle
-    return late
+            same = middle
+    return later
 
 
-def _parts(file: File, step: _Step, days: list[_Day]) -> list[Trip]:
-    """The part of a step that lies on each day: from when to when by the clock of that day.
+def _where_the_stretch_starts(file: File, moment: int) -> int:
+    """The first moment of the stretch that this moment is in."""
+    now = _clocks(file, moment)
 
-    A part that runs to the end of its day ends at 24 hours. ``begins`` says that the part
-    starts where the step starts, and ``ends`` that it ends where the step is known to end.
-    A step with no known end has one part with no length, at its start.
+    def other(at: int) -> bool:
+        try:
+            return _clocks(file, at) != now
+        except Unwritable:  # before the first day that can be written
+            return True
 
-    Where the clocks go back, a part can end at an earlier time of day than it starts at. It
-    is then as long as it takes, so that it is not lost.
+    same, earlier = moment, moment - _AN_HOUR
+    while not other(earlier):
+        same, earlier = earlier, earlier - _AN_HOUR
+    while same - earlier > 1:
+        middle = (same + earlier) // 2
+        if other(middle):
+            earlier = middle
+        else:
+            same = middle
+    return same
+
+
+def _parts(step: _Step, days: list[_Day]) -> list[Trip]:
+    """The part of a step that lies in each stretch: from when to when by its clock.
+
+    ``begins`` says that the part starts where the step starts, and ``ends`` that it ends where
+    the step is known to end. A step with no known end has one part with no length, at its
+    start. So has a step that takes no time.
     """
     if step.start is None:
         return []
@@ -285,38 +377,35 @@ def _parts(file: File, step: _Step, days: list[_Day]) -> list[Trip]:
     parts: list[Trip] = []
     for index, day in enumerate(days):
         first, last = max(step.start, day.start), min(reach, day.end)
-        # A step with no length is on the day that holds its moment, and on no other.
+        # A step with no length is in the stretch that holds its moment, and in no other.
         on_this_day = first < last if reach > step.start else day.start <= step.start < day.end
-        if not on_this_day:
-            continue
-        start = _seconds_into_the_day(file, first)
-        end = _A_DAY if last == day.end else _seconds_into_the_day(file, last)
-        if end <= start and last > first:
-            end = min(start + (last - first), _A_DAY)
-        parts.append(
-            {
-                "day": index,
-                "from": start,
-                "to": end,
-                "begins": first == step.start,
-                "ends": step.end is not None and last == reach,
-            }
-        )
+        if on_this_day:
+            parts.append(
+                {
+                    "day": index,
+                    "from": day.opens + (first - day.start),
+                    "to": day.opens + (last - day.start),
+                    "begins": first == step.start,
+                    "ends": step.end is not None and last == reach,
+                }
+            )
     return parts
 
 
-def _bound(file: File, at: int, days: list[_Day], last: bool) -> Trip:
-    """When the TRIP starts, or ends where ``last``: the time, its day, and how far into it.
+def _bound(file: File, at: int, days: list[_Day], closes: bool, offsets: bool) -> Trip:
+    """When the TRIP starts or ends: the time, its stretch of a day, and how far into the day.
 
-    A TRIP that ends as a day starts ends at 24 hours of the day before. The day is None where
-    it is none of the days that the page is sent.
+    ``closes`` says that this is the end of a TRIP that takes any time. Such an end, at the
+    moment a stretch starts, is at the end of the stretch before. The day is None where it is
+    none of those that the page is sent.
     """
-    for index, day in enumerate(days):
-        inside = day.start < at <= day.end if last else day.start <= at < day.end
-        if inside:
-            second = _A_DAY if at == day.end else _seconds_into_the_day(file, at)
-            return {"at": _on_the_clock(file, at), "day": index, "second": second}
-    return {"at": _on_the_clock(file, at), "day": None, "second": None}
+    for as_an_end in (True, False) if closes else (False,):
+        for index, day in enumerate(days):
+            inside = day.start < at <= day.end if as_an_end else day.start <= at < day.end
+            if inside:
+                second = day.opens + (at - day.start)
+                return {**_time(file, at, offsets), "day": index, "second": second}
+    return {**_time(file, at, offsets), "day": None, "second": None}
 
 
 def holds(trip: object) -> bool:
@@ -325,17 +414,19 @@ def holds(trip: object) -> bool:
         return False
     sent = cast("dict[str, object]", trip)
     persons, places = _ids(sent["persons"]), _ids(sent["places"])
-    days = cast("list[object]", sent["days"])
-    if persons is None or places is None or not _are_days(days):
+    days = _the_days(sent["days"])
+    until = sent["until"]
+    if (
+        persons is None
+        or places is None
+        or days is None
+        or not (until is None or _is_a_date(until))
+    ):
         return False
     planned = sent["itinerary"] is True
-    return (
-        cast("int", sent["left_out"]) >= 0
-        and all(_is_a_bound(sent[which], len(days)) for which in ("starts", "ends"))
-        and all(
-            _is_a_step(step, persons, places, len(days), planned)
-            for step in cast("list[object]", sent["steps"])
-        )
+    return all(_is_a_bound(sent[which], days) for which in ("starts", "ends")) and all(
+        _is_a_step(step, persons, places, days, planned, until is not None)
+        for step in cast("list[object]", sent["steps"])
     )
 
 
@@ -357,31 +448,68 @@ def _fits(value: object, shape: _Shape) -> bool:
 
 
 def _ids(records: object) -> frozenset[str] | None:
-    """The ids of the PERSONs or of the PLACEs, or None where the records are not such a list."""
+    """The ids of the PERSONs or of the PLACEs, or None where the records are not such a list.
+
+    Each has a name that is more than blank, as the format asks.
+    """
     ids: list[str] = []
     for record in cast("list[object]", records):
         if not _fits(record, _NAMED):
             return None
-        ids.append(cast("dict[str, str]", record)["id"])
+        named = cast("dict[str, str]", record)
+        if not named["name"].strip():
+            return None
+        ids.append(named["id"])
     return frozenset(ids) if len(set(ids)) == len(ids) else None
 
 
-def _are_days(days: list[object]) -> bool:
-    """Whether these are dates of real days, each later than the one before, and not too many."""
-    dates: list[str] = []
-    for day in days:
-        if not isinstance(day, str) or not _DATE.fullmatch(day):
-            return False
-        try:
-            date.fromisoformat(day)
-        except ValueError:
-            return False
-        dates.append(day)
-    in_order = all(dates[at] < dates[at + 1] for at in range(len(dates) - 1))
-    return len(dates) <= MOST_DAYS and in_order
+def _the_days(days: object) -> list[dict[str, object]] | None:
+    """The stretches of days as a page is sent them, or None where they are not that.
+
+    Each has the date of a real day, and opens and closes within the 24 hours of its clock.
+    """
+    found: list[dict[str, object]] = []
+    for day in cast("list[object]", days):
+        if not _fits(day, _DAY):
+            return None
+        said = cast("dict[str, object]", day)
+        opens, closes = cast("int", said["opens"]), cast("int", said["closes"])
+        offset = said["offset"]
+        if not _is_a_date(said["date"]) or not 0 <= opens <= closes <= _A_DAY:
+            return None
+        if not (offset is None or _OFFSET.fullmatch(cast("str", offset))):
+            return None
+        found.append(said)
+    return found if len(found) <= MOST_DAYS else None
 
 
-def _is_a_bound(bound: object, days: int) -> bool:
+def _is_a_date(written: object) -> bool:
+    """Whether this is the date of a real day, written as 2027-05-15."""
+    if not isinstance(written, str) or not _DATE.fullmatch(written):
+        return False
+    try:
+        date.fromisoformat(written)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_a_time(time: object) -> bool:
+    """Whether this is a time of a real day, as ``shown`` writes one, with or without its offset."""
+    if not _fits(time, _TIME):
+        return False
+    said = cast("dict[str, object]", time)
+    written, offset = cast("str", said["at"]), said["offset"]
+    if not _AT.fullmatch(written) or not (offset is None or _OFFSET.fullmatch(cast("str", offset))):
+        return False
+    try:
+        datetime.strptime(written, "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return False
+    return True
+
+
+def _is_a_bound(bound: object, days: list[dict[str, object]]) -> bool:
     """Whether this is when a TRIP starts or ends, or None for a TRIP that does not say."""
     if bound is None:
         return True
@@ -389,15 +517,22 @@ def _is_a_bound(bound: object, days: int) -> bool:
         return False
     said = cast("dict[str, object]", bound)
     day, second = said["day"], said["second"]
-    if not _is_a_time(said["at"]):
+    if not _is_a_time({"at": said["at"], "offset": said["offset"]}):
         return False
     if isinstance(day, int) and isinstance(second, int):
-        return 0 <= day < days and 0 <= second <= _A_DAY
+        if not 0 <= day < len(days):
+            return False
+        return cast("int", days[day]["opens"]) <= second <= cast("int", days[day]["closes"])
     return day is None and second is None
 
 
 def _is_a_step(
-    step: object, persons: frozenset[str], places: frozenset[str], days: int, planned: bool
+    step: object,
+    persons: frozenset[str],
+    places: frozenset[str],
+    days: list[dict[str, object]],
+    planned: bool,
+    cut: bool,
 ) -> bool:
     """Whether this is a step of such a TRIP.
 
@@ -412,11 +547,12 @@ def _is_a_step(
     locked = _all_different(said["locked"])
     if takers is None or locked is None or not takers or not takers <= persons:
         return False
-    option, way = said["option"], said["way"]
+    option, way, name = said["option"], said["way"], said["name"]
     start, end, latest = said["start"], said["end"], said["latest"]
     return (
         (option is None or way is None)
-        and (said["name"] is None) is (option is None and way is None)
+        and (name is None) is (option is None and way is None)
+        and (name is None or bool(cast("str", name).strip()))
         and said["from"] in places
         and said["to"] in places
         and locked <= takers
@@ -424,7 +560,7 @@ def _is_a_step(
         and (start is None or _is_a_time(start))
         and (end is None or (start is not None and _is_a_time(end)))
         and (latest is None or (end is not None and _is_a_time(latest)))
-        and _are_parts(cast("list[object]", said["parts"]), days, start is not None)
+        and _are_parts(cast("list[object]", said["parts"]), days, start, end is not None, cut)
     )
 
 
@@ -437,33 +573,42 @@ def _all_different(ids: object) -> frozenset[str] | None:
     return found if len(found) == len(listed) else None
 
 
-def _is_a_time(written: object) -> bool:
-    """Whether this is a time of a real day, written as ``shown`` writes one."""
-    if not isinstance(written, str) or not _TIME.fullmatch(written):
-        return False
-    try:
-        datetime.strptime(written, "%Y-%m-%dT%H:%M:%S")
-    except ValueError:
-        return False
-    return True
+def _are_parts(
+    parts: list[object],
+    days: list[dict[str, object]],
+    start: object,
+    has_an_end: bool,
+    cut: bool,
+) -> bool:
+    """Whether these are the parts of one step, each in a later stretch than the one before.
 
-
-def _are_parts(parts: list[object], days: int, timed: bool) -> bool:
-    """Whether these are the parts of one step, each on a later day than the one before.
-
-    Only a step with a time has parts. Only its first part can begin where the step starts,
-    and only its last can end where the step ends.
+    A step with a time has a part, unless days are left out. Its first part begins the step,
+    on the date and at the time of day of its start. Only its last part can end it. A step
+    with no known end has one part, with no length. A step with no time has no part.
     """
-    if parts and not timed:
-        return False
+    if start is None:
+        return not parts
+    if not parts:
+        return cut
     before = -1
     for position, part in enumerate(parts):
         if not _fits(part, _PART):
             return False
         said = cast("dict[str, int]", part)
-        if not before < said["day"] < days or not 0 <= said["from"] <= said["to"] <= _A_DAY:
+        if not before < said["day"] < len(days):
             return False
-        if (said["begins"] and position > 0) or (said["ends"] and position < len(parts) - 1):
+        day = days[said["day"]]
+        opens, closes = cast("int", day["opens"]), cast("int", day["closes"])
+        if not opens <= said["from"] <= said["to"] <= closes:
+            return False
+        if said["begins"] is not (position == 0) or (said["ends"] and position < len(parts) - 1):
             return False
         before = said["day"]
-    return True
+    first = cast("dict[str, int]", parts[0])
+    at = datetime.strptime(cast("dict[str, str]", start)["at"], "%Y-%m-%dT%H:%M:%S")
+    on_its_day = days[first["day"]]["date"] == at.date().isoformat()
+    at_its_time = first["from"] == at.hour * 3600 + at.minute * 60 + at.second
+    with_no_end = has_an_end or (
+        len(parts) == 1 and first["from"] == first["to"] and not first["ends"]
+    )
+    return on_its_day and at_its_time and with_no_end

@@ -7,6 +7,8 @@ import { after, says, start } from "./state.js";
 const PER_MINUTE = 0.8; // pixels down the calendar for each minute
 const HUES = 6; // the colours that tell the PERSONs apart, in view.css
 const EDGE = 14; // pixels that the words at a start or an end of the TRIP need
+const SMALLEST = 3; // pixels: the least height of a mark
+const TICK = 7; // pixels: the height of the tick for a WAY that takes next to no time
 
 const part = (id) => document.getElementById(id);
 let state = start();
@@ -28,14 +30,18 @@ function hourName(minute) {
  * column for a WAY. The name of a WAY stands beside the line of the first PERSON who takes it,
  * as far as its day has room.
  */
-function put(body, mark, people) {
-  const box = made("div", `mark ${mark.state}${mark.begins ? "" : " goes-on"}${mark.ends ? "" : " no-end"}`);
+function put(body, mark, people, tall) {
+  const box = made("div", `mark ${mark.state}${mark.begins ? "" : " goes-on"}${mark.ends ? "" : " no-end"}${mark.brief ? " brief" : ""}`);
   const columns = mark.last - mark.first + 1;
   const when = mark.late ? `${mark.when}, ${mark.late}` : mark.when;
+  // A mark is never smaller than the eye can find, and never outside its day. The tick of a
+  // WAY that takes next to no time sits across the moment it happens at.
+  const height = mark.brief ? TICK : Math.max(mark.height * PER_MINUTE, SMALLEST);
+  const top = Math.min(Math.max(mark.top * PER_MINUTE - (mark.brief ? TICK / 2 : 0), 0), tall - height);
   box.style.left = `${((mark.first + mark.lane / mark.lanes) / people) * 100}%`;
   box.style.width = `${(columns / mark.lanes / people) * 100}%`;
-  box.style.top = `${mark.top * PER_MINUTE}px`;
-  box.style.height = `${Math.max(mark.height * PER_MINUTE, 3)}px`;
+  box.style.top = `${top}px`;
+  box.style.height = `${height}px`;
   box.title = [mark.name, when, mark.where, mark.who, mark.lock ?? "A WAY in the plan of the report."].join("\n");
   const block = made("div", "block");
   const stripes = made("div", "stripes");
@@ -74,14 +80,22 @@ function draw(laid) {
     laid.persons.forEach((person, n) => heads.append(Object.assign(made("span", `person p${n % HUES}`, person.name), { title: person.name })));
     const body = made("div", "day-body");
     body.style.height = `${tall}px`;
-    for (const mark of day.marks) put(body, mark, people);
+    for (const shut of day.shut) {
+      // The hours of this column that its clocks do not show.
+      const band = Object.assign(made("div", "shut"), { title: "The clocks do not show these hours in this column." });
+      band.style.top = `${shut.top * PER_MINUTE}px`;
+      band.style.height = `${shut.height * PER_MINUTE}px`;
+      body.append(band);
+    }
+    for (const mark of day.marks) put(body, mark, people, tall);
     for (const bound of day.bounds) {
-      const line = made("div", `bound ${bound.edge}`);
+      const line = made("div", "bound");
       const down = bound.top * PER_MINUTE;
       line.style.top = `${down}px`;
-      // The words stand outside the TRIP, where no step is, unless the edge of the day is too near.
-      const outside = bound.edge === "starts" ? down >= EDGE : tall - down >= EDGE;
-      line.append(made("span", outside ? "outside" : "inside", bound.says));
+      // The words stand outside the TRIP, where no step is, unless the edge of the day is too
+      // near. Words for the start and the end at once stand where there is room.
+      const above = bound.edge === "ends" ? tall - down < EDGE : down >= EDGE;
+      line.append(made("span", above ? "above" : "below", bound.says));
       body.append(line);
     }
     column.append(Object.assign(made("h3", "day-name", day.name), { title: day.name }), heads, body);

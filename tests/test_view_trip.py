@@ -6,8 +6,9 @@ shows times on. For a FEASIBLE TRIP the steps are the ITINERARY of the report. F
 TRIP the report shows no ITINERARY, and the steps are the OPTIONs that a LOCK names, at the
 times the FILE states.
 
-The days are the days of those clocks, and each step says which part of it lies on which day.
-So the page works out no time for itself, on any night and in any time zone.
+A day is sent as the stretch of it in which the clocks run on without a change, and each step
+says which part of it lies in which stretch. So the page works out no time for itself, on any
+night and in any time zone.
 """
 
 import copy
@@ -50,7 +51,7 @@ FILES = sorted(
 # In the report in words: the line that names a day, and a line that shows one step of the plan.
 DAY = re.compile(r"^(\w+) (\d+) (\w+) (\d+) \(times in .+\)$")
 LINE = re.compile(r"^  \d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+, .+$")
-MONTHS: list[str] = [
+MONTHS = [
     "January",
     "February",
     "March",
@@ -103,8 +104,27 @@ def drawn(path: Path) -> Trip:
     return copy.deepcopy(_drawn(path))
 
 
+def time(written: str, offset: str | None = None) -> dict[str, Any]:
+    """A time as a page is sent it: as the clocks show it, with its offset where one is sent."""
+    return {"at": written, "offset": offset}
+
+
+def clock(sent: dict[str, Any] | None) -> str | None:
+    """What the clocks show at a time that a page is sent."""
+    return None if sent is None else sent["at"]
+
+
+def day(date: str, opens: int = 0, closes: int = 24 * HOUR, offset: str | None = None) -> Trip:
+    """A stretch of a day as a page is sent it: its date, and from when to when by the clock."""
+    return {"date": date, "offset": offset, "opens": opens, "closes": closes}
+
+
+def dates(sent: Trip) -> list[str]:
+    return [each["date"] for each in sent["days"]]
+
+
 def part(day: int, start: int, end: int, begins: bool = True, ends: bool = True) -> dict[str, Any]:
-    """A part of a step: its day, and from when to when by the clock, in seconds."""
+    """A part of a step: its stretch of a day, and from when to when by the clock, in seconds."""
     return {"day": day, "from": start, "to": end, "begins": begins, "ends": ends}
 
 
@@ -119,12 +139,16 @@ def test_every_example_is_sent_as_a_trip_that_a_page_can_draw(path: Path) -> Non
     assert sent["persons"] == [{"id": each.id, "name": each.name} for each in file.persons]
     assert sent["places"] == [{"id": each.id, "name": each.name} for each in file.places]
     assert sent["itinerary"] is (expected(path)["answer"] == "FEASIBLE")
-    assert sent["left_out"] == 0
-    # Every step with a time is on a day, and every day is from the first to the last.
+    assert sent["until"] is None
+    # In the examples the clocks do not change: every day is whole, and no time needs its offset.
+    for each in sent["days"]:
+        assert (each["offset"], each["opens"], each["closes"]) == (None, 0, 24 * HOUR)
+    assert len(set(dates(sent))) == len(sent["days"])
     for step in sent["steps"]:
         assert bool(step["parts"]) is (step["start"] is not None)
         if step["parts"]:
-            assert sent["days"][step["parts"][0]["day"]] == step["start"][:10]
+            assert dates(sent)[step["parts"][0]["day"]] == step["start"]["at"][:10]
+            assert step["start"]["offset"] is None
 
 
 @pytest.mark.parametrize("path", FEASIBLE, ids=name_of)
@@ -132,17 +156,23 @@ def test_a_feasible_trip_is_sent_with_the_itinerary_of_its_report(path: Path) ->
     """Each PERSON takes the same steps, at the same times, as in the report."""
     sent = drawn(path)
 
-    def clock(written: str | None) -> str | None:
+    def on_the_clock(written: str | None) -> str | None:
         # The report writes a time with its offset and its time zone after the clock time.
         return None if written is None else written[:19]
 
     in_report = Counter(
-        (step.get("option"), step.get("way"), person, clock(step["start"]), clock(step["end"]))
+        (
+            step.get("option"),
+            step.get("way"),
+            person,
+            on_the_clock(step["start"]),
+            on_the_clock(step["end"]),
+        )
         for step in expected(path)["itinerary"]
         for person in step["persons"]
     )
     in_trip = Counter(
-        (step["option"], step["way"], person, step["start"], step["end"])
+        (step["option"], step["way"], person, clock(step["start"]), clock(step["end"]))
         for step in sent["steps"]
         for person in step["persons"]
     )
@@ -158,7 +188,7 @@ def test_a_feasible_trip_is_sent_with_the_itinerary_of_its_report(path: Path) ->
         named = DAY.match(line)
         if named:
             month = MONTHS.index(named[3]) + 1
-            assert f"{int(named[4]):04d}-{month:02d}-{int(named[2]):02d}" in sent["days"]
+            assert f"{int(named[4]):04d}-{month:02d}-{int(named[2]):02d}" in dates(sent)
 
 
 def test_each_step_says_which_of_its_persons_a_lock_names() -> None:
@@ -168,7 +198,7 @@ def test_each_step_says_which_of_its_persons_a_lock_names() -> None:
         ("blue-line", []),
         ("flight", ["alex", "sam"]),
     ]
-    assert sent["days"] == ["2027-05-15"]
+    assert sent["days"] == [day("2027-05-15")]
     assert (sent["starts"], sent["ends"]) == (None, None)
 
 
@@ -192,8 +222,8 @@ def test_a_lock_that_names_one_of_the_persons_marks_that_person_only() -> None:
             # The PERSONs come in the order of the FILE, as they do in the report.
             "persons": ["alex", "sam"],
             "locked": ["sam"],
-            "start": "2027-05-15T14:00:00",
-            "end": "2027-05-15T15:00:00",
+            "start": time("2027-05-15T14:00:00"),
+            "end": time("2027-05-15T15:00:00"),
             "latest": None,
             # The visit is on the first day, from 14 hours into it to 15.
             "parts": [part(0, 14 * HOUR, 15 * HOUR)],
@@ -231,8 +261,8 @@ def test_persons_who_take_a_way_together_are_one_step() -> None:
             "to": "hotel",
             "persons": ["alex", "sam"],
             "locked": [],
-            "start": "2027-05-15T15:00:00",
-            "end": "2027-05-15T15:20:00",
+            "start": time("2027-05-15T15:00:00"),
+            "end": time("2027-05-15T15:20:00"),
             "latest": None,
             "parts": [part(0, 15 * HOUR, 15 * HOUR + 1200)],
         }
@@ -249,7 +279,10 @@ def test_persons_who_take_a_way_apart_are_a_step_each() -> None:
         Step(None, "hotel", "museum", ("sam",), seconds(17), None, way="walk"),
     )
     sent = sent_for(file, Report(Answer.FEASIBLE, itinerary=apart))
-    told = [(step["persons"], step["from"], step["start"], step["end"]) for step in sent["steps"]]
+    told = [
+        (step["persons"], step["from"], clock(step["start"]), clock(step["end"]))
+        for step in sent["steps"]
+    ]
     assert told == [
         (["alex"], "museum", "2027-05-15T15:00:00", "2027-05-15T15:20:00"),
         (["sam"], "museum", "2027-05-15T16:00:00", "2027-05-15T16:20:00"),
@@ -273,7 +306,7 @@ def test_a_way_that_the_file_does_not_list_has_no_name() -> None:
 
 
 def test_a_step_that_can_take_longer_says_how_late_it_can_end() -> None:
-    """The FILE gives the duration as a range. A plan ends the step after the least."""
+    """The FILE gives the duration as a range. A plan ends the step after the least or the most."""
 
     def file_with(*about_the_walk: dict[str, Any]) -> File:
         return trip(
@@ -291,7 +324,7 @@ def test_a_step_that_can_take_longer_says_how_late_it_can_end() -> None:
     )
     both = file_with(takes_between("walk", "PT20M", "PT45M"))
     sent = sent_for(both, Report(Answer.FEASIBLE, itinerary=plan))
-    assert [(step["end"], step["latest"]) for step in sent["steps"]] == [
+    assert [(clock(step["end"]), clock(step["latest"])) for step in sent["steps"]] == [
         ("2027-05-15T15:00:00", "2027-05-15T16:00:00"),
         ("2027-05-15T15:20:00", "2027-05-15T15:45:00"),
     ]
@@ -306,7 +339,7 @@ def test_a_step_that_can_take_longer_says_how_late_it_can_end() -> None:
     # A WAY that takes one length of time, or of which the FILE says nothing, can end no later.
     for file in (file_with(takes("walk", "PT20M")), file_with()):
         sent = sent_for(file, Report(Answer.FEASIBLE, itinerary=plan))
-        assert [step["latest"] for step in sent["steps"]] == ["2027-05-15T16:00:00", None]
+        assert [clock(step["latest"]) for step in sent["steps"]] == ["2027-05-15T16:00:00", None]
         assert holds(sent)
 
 
@@ -323,8 +356,8 @@ def test_a_trip_with_no_itinerary_is_sent_with_the_options_that_a_lock_names() -
             "to": "art-institute",
             "persons": both,
             "locked": both,
-            "start": "2027-05-15T14:30:00",
-            "end": "2027-05-15T15:30:00",
+            "start": time("2027-05-15T14:30:00"),
+            "end": time("2027-05-15T15:30:00"),
             "latest": None,
             "parts": [part(0, 14 * HOUR + 1800, 15 * HOUR + 1800)],
         },
@@ -336,8 +369,8 @@ def test_a_trip_with_no_itinerary_is_sent_with_the_options_that_a_lock_names() -
             "to": "home",
             "persons": both,
             "locked": both,
-            "start": "2027-05-15T17:00:00",
-            "end": "2027-05-15T19:30:00",
+            "start": time("2027-05-15T17:00:00"),
+            "end": time("2027-05-15T19:30:00"),
             "latest": None,
             "parts": [part(0, 17 * HOUR, 19 * HOUR + 1800)],
         },
@@ -389,7 +422,13 @@ def test_a_locked_option_is_sent_at_the_time_that_the_file_states() -> None:
     assert holds(sent)
     assert sent["itinerary"] is False
     told = [
-        (step["option"], step["persons"], step["start"], step["end"], step["latest"])
+        (
+            step["option"],
+            step["persons"],
+            clock(step["start"]),
+            clock(step["end"]),
+            clock(step["latest"]),
+        )
         for step in sent["steps"]
     ]
     assert told == [
@@ -438,28 +477,43 @@ def test_every_time_is_on_the_clocks_that_the_report_shows_times_on() -> None:
     sent = sent_for(file, Report(Answer.UNDETERMINED))
     assert sent["zone"] == "America/Chicago"
     (step,) = sent["steps"]
-    assert (step["start"], step["end"]) == ("2027-05-15T20:00:00", "2027-05-15T20:30:00")
+    # Chicago's clocks are at one offset from UTC all that day, so no time needs its offset.
+    assert (step["start"], step["end"]) == (
+        time("2027-05-15T20:00:00"),
+        time("2027-05-15T20:30:00"),
+    )
     assert step["parts"] == [part(0, 20 * HOUR, 20 * HOUR + 1800)]
 
 
-def alone(start: str, length: int | None) -> Trip:
-    """What is sent of one stay of Alex's, in a plan: from this time, for so many seconds.
+def alone(*stays_of_alex: tuple[str, int | None]) -> Trip:
+    """What is sent of Alex's stays, in a plan: each from a time, for so many seconds.
 
-    The stay's time is the first in the FILE, so its time zone is the one of the report.
+    The first stay's time is the first in the FILE, so its time zone is the one of the report.
     """
-    time = {"id": "stay-time", "option": "stay", "starts_at": start}
-    file = trip(["alex"], ["hotel"], [stays("stay", "hotel")], [time], [])
-    begins = instant(start)
-    end = None if length is None else begins + length
-    step = Step("stay", "hotel", "hotel", ("alex",), begins, end)
-    return sent_for(file, Report(Answer.FEASIBLE, itinerary=(step,)))
+    when = {"id": "stay-time", "option": "stay", "starts_at": stays_of_alex[0][0]}
+    file = trip(["alex"], ["hotel"], [stays("stay", "hotel")], [when], [])
+    plan = tuple(
+        Step(
+            "stay",
+            "hotel",
+            "hotel",
+            ("alex",),
+            instant(start),
+            None if length is None else instant(start) + length,
+        )
+        for start, length in stays_of_alex
+    )
+    return sent_for(file, Report(Answer.FEASIBLE, itinerary=plan))
 
 
 def test_a_step_that_runs_past_midnight_has_a_part_on_each_day() -> None:
-    sent = alone(at(23, 30, day=14), 8 * HOUR)
-    assert sent["days"] == ["2027-05-14", "2027-05-15"]
+    sent = alone((at(23, 30, day=14), 8 * HOUR))
+    assert sent["days"] == [day("2027-05-14"), day("2027-05-15")]
     (night,) = sent["steps"]
-    assert (night["start"], night["end"]) == ("2027-05-14T23:30:00", "2027-05-15T07:30:00")
+    assert (night["start"], night["end"]) == (
+        time("2027-05-14T23:30:00"),
+        time("2027-05-15T07:30:00"),
+    )
     # The first part runs to the end of its day: 24 hours. The second starts as its day does.
     assert night["parts"] == [
         part(0, 23 * HOUR + 1800, 24 * HOUR, ends=False),
@@ -469,16 +523,16 @@ def test_a_step_that_runs_past_midnight_has_a_part_on_each_day() -> None:
 
 
 def test_a_step_that_ends_as_a_day_starts_does_not_reach_that_day() -> None:
-    sent = alone(at(22, day=14), 2 * HOUR)
-    assert sent["days"] == ["2027-05-14"]
-    assert sent["steps"][0]["end"] == "2027-05-15T00:00:00"
+    sent = alone((at(22, day=14), 2 * HOUR))
+    assert dates(sent) == ["2027-05-14"]
+    assert clock(sent["steps"][0]["end"]) == "2027-05-15T00:00:00"
     assert sent["steps"][0]["parts"] == [part(0, 22 * HOUR, 24 * HOUR)]
 
 
 def test_a_step_with_no_known_end_is_on_the_day_it_starts_on() -> None:
     """Whatever the page draws for it, the step itself reaches no later day."""
-    sent = alone(at(23, 55), None)
-    assert sent["days"] == ["2027-05-15"]
+    sent = alone((at(23, 55), None))
+    assert dates(sent) == ["2027-05-15"]
     assert sent["steps"][0]["parts"] == [part(0, 23 * HOUR + 3300, 23 * HOUR + 3300, ends=False)]
 
 
@@ -491,13 +545,13 @@ def test_a_step_with_no_length_is_on_one_day_only() -> None:
         [starts_at("signal", 9)],
         [],
     )
-    day = 24 * HOUR
+    whole = 24 * HOUR
     plan = (
         Step("signal", "pier", "pier", ("alex",), seconds(9), seconds(9)),
         Step("wait", "pier", "pier", ("alex",), seconds(10), None),
         # A stay that starts as a day starts, and one with no length at that same moment.
-        Step("stay", "pier", "pier", ("alex",), seconds(0) + day, seconds(1) + 3 * day),
-        Step("signal", "pier", "pier", ("alex",), seconds(0) + 2 * day, seconds(0) + 2 * day),
+        Step("stay", "pier", "pier", ("alex",), seconds(0) + whole, seconds(1) + 3 * whole),
+        Step("signal", "pier", "pier", ("alex",), seconds(0) + 2 * whole, seconds(0) + 2 * whole),
     )
     sent = sent_for(file, Report(Answer.FEASIBLE, itinerary=plan))
     assert len(sent["days"]) == 4
@@ -505,8 +559,8 @@ def test_a_step_with_no_length_is_on_one_day_only() -> None:
         [part(0, 9 * HOUR, 9 * HOUR)],
         [part(0, 10 * HOUR, 10 * HOUR, ends=False)],
         [
-            part(1, 0, day, ends=False),
-            part(2, 0, day, False, False),
+            part(1, 0, whole, ends=False),
+            part(2, 0, whole, False, False),
             part(3, 0, HOUR, begins=False),
         ],
         [part(2, 0, 0)],
@@ -514,44 +568,86 @@ def test_a_step_with_no_length_is_on_one_day_only() -> None:
     assert holds(sent)
 
 
-def test_a_step_on_a_night_when_the_clocks_go_forward_ends_at_its_time_of_day() -> None:
+def test_a_day_on_which_the_clocks_go_forward_is_two_stretches() -> None:
     """In Chicago the clocks go from 2:00 am to 3:00 am on 14 March 2027."""
-    sent = alone("2027-03-13T23:00:00-06:00[America/Chicago]", 7 * HOUR)
+    sent = alone(("2027-03-13T23:00:00-06:00[America/Chicago]", 7 * HOUR))
+    # The Sunday is sent as the two hours before the change, and the 21 hours after it.
+    assert sent["days"] == [
+        day("2027-03-13"),
+        day("2027-03-14", 0, 2 * HOUR, "UTC-6"),
+        day("2027-03-14", 3 * HOUR, 24 * HOUR, "UTC-5"),
+    ]
     (night,) = sent["steps"]
-    # Seven hours after 11:00 pm, the clocks show 7:00 am.
-    assert (night["start"], night["end"]) == ("2027-03-13T23:00:00", "2027-03-14T07:00:00")
+    # Seven hours after 11:00 pm, the clocks show 7:00 am. The times of this TRIP are not all at
+    # one offset from UTC, so each comes with its own, as in the report.
+    assert (night["start"], night["end"]) == (
+        time("2027-03-13T23:00:00", "UTC-6"),
+        time("2027-03-14T07:00:00", "UTC-5"),
+    )
     assert night["parts"] == [
         part(0, 23 * HOUR, 24 * HOUR, ends=False),
-        part(1, 0, 7 * HOUR, begins=False),
+        part(1, 0, 2 * HOUR, False, False),
+        part(2, 3 * HOUR, 7 * HOUR, begins=False),
     ]
+    # Every part is as long as it takes: one hour, two hours and four make seven.
+    assert sum(each["to"] - each["from"] for each in night["parts"]) == 7 * HOUR
     assert holds(sent)
 
 
-def test_a_step_in_the_hour_that_the_clocks_show_twice_is_as_long_as_it_takes() -> None:
+def test_two_moments_that_the_clocks_show_as_one_time_are_in_two_stretches() -> None:
     """In Chicago the clocks go back from 2:00 am to 1:00 am on 7 November 2027.
 
-    A stay of 40 minutes from the first 1:30 am ends at the second 1:10 am. By the clock it
-    ends before it starts. Its part is 40 minutes long, so that the page does not lose it.
+    So they show 1:10 am twice that night, an hour apart. A stay at the first is in the stretch
+    before the change, and a stay at the second in the stretch after it.
     """
-    sent = alone("2027-11-07T01:30:00-05:00[America/Chicago]", 40 * 60)
-    (stay,) = sent["steps"]
-    assert (stay["start"], stay["end"]) == ("2027-11-07T01:30:00", "2027-11-07T01:10:00")
-    assert stay["parts"] == [part(0, HOUR + 1800, HOUR + 1800 + 40 * 60)]
-    assert sent["days"] == ["2027-11-07"]
+    first, second = "2027-11-07T01:10:00-05:00", "2027-11-07T01:10:00-06:00"
+    sent = alone((f"{first}[America/Chicago]", 300), (f"{second}[America/Chicago]", 300))
+    assert sent["days"] == [
+        day("2027-11-07", 0, 2 * HOUR, "UTC-5"),
+        day("2027-11-07", HOUR, 24 * HOUR, "UTC-6"),
+    ]
+    earlier, later = sent["steps"]
+    assert (earlier["start"], later["start"]) == (
+        time("2027-11-07T01:10:00", "UTC-5"),
+        time("2027-11-07T01:10:00", "UTC-6"),
+    )
+    assert earlier["parts"] == [part(0, HOUR + 600, HOUR + 900)]
+    assert later["parts"] == [part(1, HOUR + 600, HOUR + 900)]
     assert holds(sent)
+    # A stay of 70 minutes from the first 1:05 am ends at the second 1:15 am. It has 55 minutes
+    # before the change and 15 after it.
+    (long,) = alone(("2027-11-07T01:05:00-05:00[America/Chicago]", 70 * 60))["steps"]
+    assert (long["start"], long["end"]) == (
+        time("2027-11-07T01:05:00", "UTC-5"),
+        time("2027-11-07T01:15:00", "UTC-6"),
+    )
+    assert long["parts"] == [
+        part(0, HOUR + 300, 2 * HOUR, ends=False),
+        part(1, HOUR, HOUR + 900, begins=False),
+    ]
     # A stay through the whole of that night ends at its time of day, as on any other night.
-    night = alone("2027-11-06T23:00:00-05:00[America/Chicago]", 9 * HOUR)["steps"][0]
-    assert night["end"] == "2027-11-07T07:00:00"
-    assert night["parts"][1] == part(1, 0, 7 * HOUR, begins=False)
+    night = alone(("2027-11-06T23:00:00-05:00[America/Chicago]", 9 * HOUR))
+    assert dates(night) == ["2027-11-06", "2027-11-07", "2027-11-07"]
+    assert clock(night["steps"][0]["end"]) == "2027-11-07T07:00:00"
+    assert night["steps"][0]["parts"] == [
+        part(0, 23 * HOUR, 24 * HOUR, ends=False),
+        part(1, 0, 2 * HOUR, False, False),
+        part(2, HOUR, 7 * HOUR, begins=False),
+    ]
+    assert holds(night)
 
 
 def test_a_date_that_a_time_zone_left_out_is_no_day() -> None:
     """Samoa went from 29 December 2011 to 31 December: its clocks never showed the 30th."""
-    sent = alone("2011-12-29T23:00:00-10:00[Pacific/Apia]", 2 * HOUR)
+    sent = alone(("2011-12-29T23:00:00-10:00[Pacific/Apia]", 2 * HOUR))
     assert sent["zone"] == "Pacific/Apia"
-    assert sent["days"] == ["2011-12-29", "2011-12-31"]
+    # Each of the two dates is one stretch, so neither needs to say which stretch it is.
+    assert sent["days"] == [day("2011-12-29"), day("2011-12-31")]
     (stay,) = sent["steps"]
-    assert (stay["start"], stay["end"]) == ("2011-12-29T23:00:00", "2011-12-31T01:00:00")
+    assert (stay["start"], stay["end"]) == (
+        time("2011-12-29T23:00:00", "UTC-10"),
+        time("2011-12-31T01:00:00", "UTC+14"),
+    )
     assert stay["parts"] == [
         part(0, 23 * HOUR, 24 * HOUR, ends=False),
         part(1, 0, HOUR, begins=False),
@@ -564,10 +660,14 @@ def test_a_day_that_starts_late_starts_where_its_clocks_do() -> None:
 
     That day has no first hour. A stay through that night is on it from 1:00 am.
     """
-    sent = alone("2027-03-27T23:00:00+02:00[Asia/Beirut]", 3 * HOUR)
-    assert sent["days"] == ["2027-03-27", "2027-03-28"]
+    sent = alone(("2027-03-27T23:00:00+02:00[Asia/Beirut]", 3 * HOUR))
+    # The stretch that is less than a whole day says its offset from UTC.
+    assert sent["days"] == [day("2027-03-27"), day("2027-03-28", HOUR, 24 * HOUR, "UTC+3")]
     (stay,) = sent["steps"]
-    assert (stay["start"], stay["end"]) == ("2027-03-27T23:00:00", "2027-03-28T03:00:00")
+    assert (clock(stay["start"]), clock(stay["end"])) == (
+        "2027-03-27T23:00:00",
+        "2027-03-28T03:00:00",
+    )
     assert stay["parts"] == [
         part(0, 23 * HOUR, 24 * HOUR, ends=False),
         part(1, HOUR, 3 * HOUR, begins=False),
@@ -575,26 +675,79 @@ def test_a_day_that_starts_late_starts_where_its_clocks_do() -> None:
     assert holds(sent)
 
 
-def test_a_day_that_ends_late_ends_where_its_clocks_do() -> None:
+def test_a_day_that_ends_late_has_its_last_hour_in_a_stretch_of_its_own() -> None:
     """In Beirut the clocks go back from midnight to 11:00 pm on 30 October 2027.
 
-    That day has its last hour twice. A stay through that night is on it until the second
-    midnight, and on the next day from then on.
+    That day has its last hour twice. A stay through that night is in both, and then on the
+    next day.
     """
-    sent = alone("2027-10-30T22:00:00+03:00[Asia/Beirut]", 4 * HOUR)
-    assert sent["days"] == ["2027-10-30", "2027-10-31"]
+    sent = alone(("2027-10-30T22:00:00+03:00[Asia/Beirut]", 4 * HOUR))
+    assert sent["days"] == [
+        day("2027-10-30", 0, 24 * HOUR, "UTC+3"),
+        day("2027-10-30", 23 * HOUR, 24 * HOUR, "UTC+2"),
+        day("2027-10-31"),
+    ]
     (stay,) = sent["steps"]
-    assert (stay["start"], stay["end"]) == ("2027-10-30T22:00:00", "2027-10-31T01:00:00")
+    assert (clock(stay["start"]), clock(stay["end"])) == (
+        "2027-10-30T22:00:00",
+        "2027-10-31T01:00:00",
+    )
     assert stay["parts"] == [
         part(0, 22 * HOUR, 24 * HOUR, ends=False),
-        part(1, 0, HOUR, begins=False),
+        part(1, 23 * HOUR, 24 * HOUR, False, False),
+        part(2, 0, HOUR, begins=False),
     ]
     assert holds(sent)
-    # A stay that ends in the second of those hours ends, by the clock, where it started.
-    short = alone("2027-10-30T23:10:00+03:00[Asia/Beirut]", HOUR)
-    assert short["days"] == ["2027-10-30"]
-    assert short["steps"][0]["end"] == "2027-10-30T23:10:00"
-    assert short["steps"][0]["parts"] == [part(0, 23 * HOUR + 600, 24 * HOUR)]
+    # A stay of an hour from the first 11:10 pm ends, by the clock, where it started.
+    (short,) = alone(("2027-10-30T23:10:00+03:00[Asia/Beirut]", HOUR))["steps"]
+    assert (short["start"], short["end"]) == (
+        time("2027-10-30T23:10:00", "UTC+3"),
+        time("2027-10-30T23:10:00", "UTC+2"),
+    )
+    assert short["parts"] == [
+        part(0, 23 * HOUR + 600, 24 * HOUR, ends=False),
+        part(1, 23 * HOUR, 23 * HOUR + 600, begins=False),
+    ]
+
+
+def test_clocks_that_go_back_over_midnight_show_a_date_again() -> None:
+    """In St. John's the clocks went back from 12:01 am on 1 November 2009 to 11:01 pm.
+
+    So they showed the first minute of 1 November, then the last hour of 31 October again, and
+    then 1 November. Each stay is on the date that the clocks showed when it happened.
+    """
+    sent = alone(
+        ("2009-11-01T00:00:00-02:30[America/St_Johns]", 30),
+        ("2009-10-31T23:05:00-03:30[America/St_Johns]", 60),
+    )
+    assert sent["days"] == [
+        day("2009-11-01", 0, 60, "UTC-2:30"),
+        day("2009-10-31", 23 * HOUR + 60, 24 * HOUR, "UTC-3:30"),
+    ]
+    first, then = sent["steps"]
+    assert (first["start"], then["start"]) == (
+        time("2009-11-01T00:00:00", "UTC-2:30"),
+        time("2009-10-31T23:05:00", "UTC-3:30"),
+    )
+    assert first["parts"] == [part(0, 0, 30)]
+    assert then["parts"] == [part(1, 23 * HOUR + 300, 23 * HOUR + 360)]
+    assert holds(sent)
+    # A stay from the evening before to the morning after is in all four stretches.
+    night = alone(("2009-10-31T22:00:00-02:30[America/St_Johns]", 4 * HOUR))
+    assert night["days"] == [
+        day("2009-10-31", 0, 24 * HOUR, "UTC-2:30"),
+        day("2009-11-01", 0, 60, "UTC-2:30"),
+        day("2009-10-31", 23 * HOUR + 60, 24 * HOUR, "UTC-3:30"),
+        day("2009-11-01", 0, 24 * HOUR, "UTC-3:30"),
+    ]
+    assert [(each["from"], each["to"]) for each in night["steps"][0]["parts"]] == [
+        (22 * HOUR, 24 * HOUR),
+        (0, 60),
+        (23 * HOUR + 60, 24 * HOUR),
+        # Two hours, one minute and 59 minutes are gone: the last hour is left.
+        (0, HOUR),
+    ]
+    assert holds(night)
 
 
 def framed(starts: str | None, ends: str | None) -> Trip:
@@ -614,58 +767,89 @@ def framed(starts: str | None, ends: str | None) -> Trip:
     return sent_for(file, Report(Answer.UNDETERMINED))
 
 
+def bound(written: str, on: int | None, second: int | None) -> Trip:
+    """When a TRIP starts or ends, as a page is sent it."""
+    return {"at": written, "offset": None, "day": on, "second": second}
+
+
 def test_the_days_run_from_when_the_trip_starts_to_when_it_ends() -> None:
     """The TRIP starts on Friday and ends on Monday, says the FILE. Its one step is on Saturday."""
     sent = framed(at(17, day=14), at(20, 30, day=17))
-    assert sent["days"] == ["2027-05-14", "2027-05-15", "2027-05-16", "2027-05-17"]
-    assert sent["starts"] == {"at": "2027-05-14T17:00:00", "day": 0, "second": 17 * HOUR}
-    assert sent["ends"] == {"at": "2027-05-17T20:30:00", "day": 3, "second": 20 * HOUR + 1800}
+    assert dates(sent) == ["2027-05-14", "2027-05-15", "2027-05-16", "2027-05-17"]
+    assert sent["starts"] == bound("2027-05-14T17:00:00", 0, 17 * HOUR)
+    assert sent["ends"] == bound("2027-05-17T20:30:00", 3, 20 * HOUR + 1800)
     assert sent["steps"][0]["parts"] == [part(1, 14 * HOUR, 15 * HOUR)]
     assert holds(sent)
     # A TRIP that says only when it ends starts with its first step.
     sent = framed(None, at(9, day=16))
-    assert sent["days"] == ["2027-05-15", "2027-05-16"]
+    assert dates(sent) == ["2027-05-15", "2027-05-16"]
     assert sent["starts"] is None
 
 
 def test_a_trip_that_ends_as_a_day_starts_ends_on_the_day_before() -> None:
     sent = framed(at(0, day=15), at(0, day=17))
-    assert sent["days"] == ["2027-05-15", "2027-05-16"]
-    assert sent["starts"] == {"at": "2027-05-15T00:00:00", "day": 0, "second": 0}
-    assert sent["ends"] == {"at": "2027-05-17T00:00:00", "day": 1, "second": 24 * HOUR}
+    assert dates(sent) == ["2027-05-15", "2027-05-16"]
+    assert sent["starts"] == bound("2027-05-15T00:00:00", 0, 0)
+    assert sent["ends"] == bound("2027-05-17T00:00:00", 1, 24 * HOUR)
     assert holds(sent)
 
 
-def test_a_page_is_sent_two_months_at_most_and_is_told_what_is_left_out() -> None:
+def test_a_trip_that_takes_no_time_starts_and_ends_on_one_day() -> None:
+    """It starts and ends at midnight. Both are at the start of that day, not the end of another."""
+    file = trip(
+        ["alex"],
+        ["museum"],
+        [],
+        [],
+        [
+            {"id": "trip-start", "trip_starts_at": at(0, day=15)},
+            {"id": "trip-end", "trip_ends_at": at(0, day=15)},
+        ],
+    )
+    sent = sent_for(file, Report(Answer.FEASIBLE))
+    assert dates(sent) == ["2027-05-15"]
+    assert sent["starts"] == sent["ends"] == bound("2027-05-15T00:00:00", 0, 0)
+    assert holds(sent)
+    # So it is in the first second that can be written.
+    first = {"id": "trip-end", "trip_ends_at": "0001-01-01T00:00:00+00:00[UTC]"}
+    sent = sent_for(trip(["alex"], ["museum"], [], [], [first]), Report(Answer.FEASIBLE))
+    assert dates(sent) == ["0001-01-01"]
+    assert sent["ends"] == bound("0001-01-01T00:00:00", 0, 0)
+    assert holds(sent)
+
+
+def test_a_page_is_sent_two_months_at_most_and_is_told_where_the_trip_ends() -> None:
     assert MOST_DAYS == 62
     sent = framed(None, at(18, day=15).replace("2027-05", "2027-09"))
     assert len(sent["days"]) == 62
-    assert (sent["days"][0], sent["days"][-1]) == ("2027-05-15", "2027-07-15")
-    # The TRIP ends on 15 September: 62 days after 15 July.
-    assert sent["left_out"] == 62
-    assert sent["ends"] == {"at": "2027-09-15T18:00:00", "day": None, "second": None}
+    assert (dates(sent)[0], dates(sent)[-1]) == ("2027-05-15", "2027-07-15")
+    assert sent["until"] == "2027-09-15"
+    assert sent["ends"] == bound("2027-09-15T18:00:00", None, None)
     assert holds(sent)
     # A step that goes on past the last day is sent as far as that day.
-    sent = alone(at(10), 100 * 24 * HOUR)
+    sent = alone((at(10), 100 * 24 * HOUR))
     assert len(sent["days"]) == 62
-    # The step ends on 23 August: 39 days after 15 July.
-    assert sent["left_out"] == 39
+    assert sent["until"] == "2027-08-23"
     parts = sent["steps"][0]["parts"]
     assert len(parts) == 62
     assert parts[0] == part(0, 10 * HOUR, 24 * HOUR, ends=False)
     assert parts[-1] == part(61, 0, 24 * HOUR, begins=False, ends=False)
     assert holds(sent)
+    # A step that starts after the last day is sent with no part.
+    late = alone((at(10), HOUR), (at(10).replace("2027-05", "2027-12"), HOUR))
+    assert [len(step["parts"]) for step in late["steps"]] == [1, 0]
+    assert holds(late)
 
 
 def test_a_trip_with_a_time_that_cannot_be_written_cannot_be_drawn() -> None:
     """The page is told that there is nothing to draw, never a time that is not the TRIP's."""
     last = "9999-12-31T23:59:59+00:00[UTC]"
-    time = {"id": "fireworks-time", "option": "fireworks", "starts_at": last}
+    when = {"id": "fireworks-time", "option": "fireworks", "starts_at": last}
     file = trip(
         ["alex"],
         ["pier"],
         [stays("fireworks", "pier")],
-        [time, lasts("fireworks", "PT1S")],
+        [when, lasts("fireworks", "PT1S")],
         [lock("fireworks", "alex")],
     )
     assert shown(file, Report(Answer.INFEASIBLE)) is None
@@ -675,16 +859,16 @@ def test_a_trip_with_a_time_that_cannot_be_written_cannot_be_drawn() -> None:
     assert shown(file, Report(Answer.FEASIBLE, itinerary=(step,))) is None
 
 
-def test_the_last_day_that_can_be_written_can_be_drawn() -> None:
+def test_the_first_and_the_last_day_that_can_be_written_can_be_drawn() -> None:
     """The fireworks end in the last second of the year 9999."""
-    sent = alone("9999-12-31T22:00:00+00:00[UTC]", 2 * HOUR - 1)
-    assert sent["days"] == ["9999-12-31"]
+    sent = alone(("9999-12-31T22:00:00+00:00[UTC]", 2 * HOUR - 1))
+    assert sent["days"] == [day("9999-12-31")]
     (fireworks,) = sent["steps"]
-    assert fireworks["end"] == "9999-12-31T23:59:59"
+    assert clock(fireworks["end"]) == "9999-12-31T23:59:59"
     assert fireworks["parts"] == [part(0, 22 * HOUR, 24 * HOUR - 1)]
     assert holds(sent)
-    first = alone("0001-01-01T00:00:00+00:00[UTC]", HOUR)
-    assert first["days"] == ["0001-01-01"]
+    first = alone(("0001-01-01T00:00:00+00:00[UTC]", HOUR))
+    assert first["days"] == [day("0001-01-01")]
     assert holds(first)
 
 
@@ -707,7 +891,7 @@ def good() -> Trip:
     )
     sent = sent_for(file, Report(Answer.FEASIBLE, itinerary=steps))
     assert [len(step["parts"]) for step in sent["steps"]] == [1, 2]
-    assert sent["steps"][1]["latest"] == "2027-05-16T08:00:00"
+    assert sent["steps"][1]["latest"] == time("2027-05-16T08:00:00")
     return sent
 
 
@@ -737,6 +921,11 @@ def _no_time(sent: Trip) -> None:
     sent["steps"][0].update(start=None, end=None, parts=[])
 
 
+def _no_end(sent: Trip) -> None:
+    """The night has no known end, and still the two parts of a night that ends."""
+    sent["steps"][1].update(end=None, latest=None)
+
+
 BROKEN: dict[str, Callable[[Trip], None]] = {
     "no zone": _drop("zone"),
     "one thing more": _set("more", to=1),
@@ -747,28 +936,36 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "a person with one thing more": _set("persons", 0, "more", to=1),
     "a person whose id is no text": _set("persons", 0, "id", to=1),
     "a person whose name is no text": _set("persons", 0, "name", to=None),
+    "a person whose name is blank": _set("persons", 0, "name", to="  "),
     "a person who is no record": _set("persons", 0, to="alex"),
     "two persons with one id": _set("persons", 1, "id", to="alex"),
     "places that are no list": _set("places", to="museum"),
     "a place with no id": _drop("places", 0, "id"),
+    "a place whose name is empty": _set("places", 0, "name", to=""),
     "two places with one id": _set("places", 1, "id", to="museum"),
     "days that are no list": _set("days", to="2027-05-15"),
-    "a day that is no date": _set("days", 0, to="15 May 2027"),
-    "a day that is no day": _set("days", 0, to="2027-02-30"),
-    "a day that is a time": _set("days", 0, to="2027-05-15T00:00:00"),
-    "a day that is a number": _set("days", 0, to=20270515),
-    "days out of order": _set("days", to=["2027-05-16", "2027-05-15"]),
-    "one day twice": _set("days", to=["2027-05-15", "2027-05-15"]),
+    "a day that is a date and no more": _set("days", 0, to="2027-05-15"),
+    "a day with no date": _drop("days", 0, "date"),
+    "a day with one thing more": _set("days", 0, "more", to=1),
+    "a day whose date is no date": _set("days", 0, "date", to="15 May 2027"),
+    "a day whose date is no day": _set("days", 0, "date", to="2027-02-30"),
+    "a day whose date is a time": _set("days", 0, "date", to="2027-05-15T00:00:00"),
+    "a day whose date is a number": _set("days", 0, "date", to=20270515),
+    "a day that opens before it starts": _set("days", 1, "opens", to=-1),
+    "a day that closes after 24 hours": _set("days", 1, "closes", to=86401),
+    "a day that closes before it opens": _set("days", 1, "closes", to=-1),
+    "a day that opens at half a second": _set("days", 1, "opens", to=0.5),
+    "a day with an offset that is none": _set("days", 0, "offset", to="-5"),
+    "a day with an offset in words": _set("days", 0, "offset", to="UTC minus five"),
     "too many days": _set(
-        "days", to=[f"2027-{month:02d}-{day:02d}" for month in (5, 6, 7) for day in range(1, 29)]
+        "days", to=[{"date": "2027-05-15", "offset": None, "opens": 0, "closes": 86400}] * 63
     ),
-    "days left out that are no number": _set("left_out", to="none"),
-    "days left out that are a yes": _set("left_out", to=True),
-    "fewer than no days left out": _set("left_out", to=-1),
-    "half a day left out": _set("left_out", to=0.5),
+    "a last date that is no date": _set("until", to="soon"),
+    "a last date that is a number": _set("until", to=20270916),
     "a start of the trip that is a time": _set("starts", to="2027-05-15T09:00:00"),
     "a start of the trip with no time": _drop("starts", "at"),
     "a start of the trip at no time": _set("starts", "at", to="9 am"),
+    "a start of the trip with an offset that is none": _set("starts", "offset", to="UTC"),
     "a start of the trip on a day that is not sent": _set("starts", "day", to=2),
     "a start of the trip on a day before the first": _set("starts", "day", to=-1),
     "a start of the trip on a day and at no second": _set("starts", "second", to=None),
@@ -785,6 +982,7 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "an option and a way at once": _set("steps", 1, "way", to="walk"),
     "a name that is no text": _set("steps", 0, "name", to=["walk"]),
     "an option with no name": _set("steps", 1, "name", to=None),
+    "an option whose name is blank": _set("steps", 1, "name", to=" "),
     "a way of the file with no name": _set("steps", 0, "name", to=None),
     "a way with a name that the file does not list": _set("steps", 0, "way", to=None),
     "a step from no place of the trip": _set("steps", 0, "from", to="pier"),
@@ -796,17 +994,28 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "a person of a step who is no text": _set("steps", 1, "persons", to=[["alex"]]),
     "a lock for somebody who takes no part": _set("steps", 0, "locked", to=["sam"]),
     "locks that are no list": _set("steps", 0, "locked", to=True),
-    "a start that is a number": _set("steps", 0, "start", to=1810000000),
-    "a start with no seconds": _set("steps", 0, "start", to="2027-05-15T22:00"),
-    "a start with an offset": _set("steps", 0, "start", to="2027-05-15T22:00:00-05:00"),
-    "a start on no day": _set("steps", 0, "start", to="2027-02-30T22:00:00"),
-    "a start at no time": _set("steps", 0, "start", to="2027-05-15T24:00:00"),
-    "a start in the year nought": _set("steps", 0, "start", to="0000-05-15T22:00:00"),
-    "a start in other digits": _set("steps", 0, "start", to="٢٠٢٧-05-15T22:00:00"),
+    "a start that is text and no more": _set("steps", 0, "start", to="2027-05-15T22:00:00"),
+    "a start that is a number": _set("steps", 0, "start", "at", to=1810000000),
+    "a start with one thing more": _set("steps", 0, "start", "more", to=1),
+    "a start with no seconds": _set("steps", 0, "start", "at", to="2027-05-15T22:00"),
+    "a start with its offset in it": _set(
+        "steps", 0, "start", "at", to="2027-05-15T22:00:00-05:00"
+    ),
+    "a start on no day": _set("steps", 0, "start", "at", to="2027-02-30T22:00:00"),
+    "a start at no time": _set("steps", 0, "start", "at", to="2027-05-15T24:00:00"),
+    "a start in the year nought": _set("steps", 0, "start", "at", to="0000-05-15T22:00:00"),
+    "a start in other digits": _set("steps", 0, "start", "at", to="٢٠٢٧-05-15T22:00:00"),
+    "a start with an offset that is none": _set("steps", 0, "start", "offset", to="-05:00"),
+    "a start on another day than its part": _set(
+        "steps", 0, "start", "at", to="2027-05-16T22:00:00"
+    ),
+    "a start at another time than its part": _set(
+        "steps", 0, "start", "at", to="2027-05-15T22:00:01"
+    ),
     "an end with no start": _set("steps", 0, "start", to=None),
-    "an end that is no time": _set("steps", 0, "end", to="22:20"),
-    "an end with a line after it": _set("steps", 0, "end", to="2027-05-15T22:20:00\n"),
-    "a latest end that is no time": _set("steps", 1, "latest", to="8 am"),
+    "an end that is no time": _set("steps", 0, "end", "at", to="22:20"),
+    "an end with a line after it": _set("steps", 0, "end", "at", to="2027-05-15T22:20:00\n"),
+    "a latest end that is no time": _set("steps", 1, "latest", "at", to="8 am"),
     "a latest end with no end": _set("steps", 1, "end", to=None),
     "a step of an itinerary with no time": _no_time,
     "a way and a person whom no lock names, with no itinerary": _set("itinerary", to=False),
@@ -817,15 +1026,19 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "a part on a day that is not sent": _set("steps", 0, "parts", 0, "day", to=2),
     "a part on a day before the first": _set("steps", 0, "parts", 0, "day", to=-1),
     "a part on half a day": _set("steps", 0, "parts", 0, "day", to=0.5),
+    "a part on another day than its step starts on": _set("steps", 0, "parts", 0, "day", to=1),
     "a part that ends before it starts": _set("steps", 0, "parts", 0, "to", to=79199),
-    "a part that starts before its day": _set("steps", 0, "parts", 0, "from", to=-1),
+    "a part that starts before its day": _set("steps", 1, "parts", 1, "from", to=-1),
     "a part that ends after its day": _set("steps", 1, "parts", 0, "to", to=86401),
-    "a part that begins at a yes": _set("steps", 0, "parts", 0, "from", to=True),
+    "a part that starts at a yes": _set("steps", 1, "parts", 1, "from", to=True),
     "a part whose beginning is a number": _set("steps", 0, "parts", 0, "begins", to=1),
+    "a first part that does not begin the step": _set("steps", 0, "parts", 0, "begins", to=False),
     "two parts on one day": _set("steps", 1, "parts", 1, "day", to=0),
     "a later part that begins the step": _set("steps", 1, "parts", 1, "begins", to=True),
     "an earlier part that ends the step": _set("steps", 1, "parts", 0, "ends", to=True),
     "parts of a step with no time": lambda sent: sent["steps"][0].update(start=None, end=None),
+    "no part of a step with a time": _set("steps", 0, "parts", to=[]),
+    "two parts of a step with no known end": _no_end,
 }
 
 

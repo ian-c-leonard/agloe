@@ -7,6 +7,9 @@
 // ITINERARY of the report. For any other TRIP the report shows no ITINERARY, and the steps are
 // the OPTIONs that a LOCK names.
 //
+// A day is sent as the stretch of it in which the clocks run on without a change. Most days are
+// one stretch. A day on which the clocks change is two, each a column of its own.
+//
 // Nothing here judges a TRIP, nothing here reads a FILE, and nothing here works out which day a
 // moment is on: the view says. This lays out what it is sent: how far down its day a part
 // starts, how tall it is, whose columns it spans, and what its words are.
@@ -34,23 +37,26 @@ function read(written) {
   return { year, month, day, seconds: hour * 3600 + minute * 60 + second };
 }
 
-const sameDay = (one, other) => one.year === other.year && one.month === other.month && one.day === other.day;
-
-/** A day as the report names it: Saturday 15 May 2027. */
-export function dayName(written) {
+/** A date as the report names it: Saturday 15 May 2027. */
+export function dateName(written) {
   const { year, month, day } = read(written);
   return `${DAYS[(((dayNumber(year, month, day) + 3) % 7) + 7) % 7]} ${day} ${MONTHS[month - 1]} ${year}`;
 }
 
-/** A time of day as the report writes it: 2:00 pm. The date is added when it is not on the day of `from`. */
-export function clock(written, from = null) {
-  const at = read(written);
+/**
+ * A time of day as the report writes it: 2:00 pm. Its offset from UTC follows where the view
+ * sends one. The date is added when it is not on the day of `from`.
+ */
+export function clock(time, from = null) {
+  const at = read(time.at);
   const hour = Math.floor(at.seconds / 3600);
   const minute = Math.floor(at.seconds / 60) % 60;
   const second = at.seconds % 60;
-  const time = `${hour % 12 || 12}:${String(minute).padStart(2, "0")}${second ? `:${String(second).padStart(2, "0")}` : ""} ${hour < 12 ? "am" : "pm"}`;
-  if (from === null || sameDay(at, read(from))) return time;
-  return `${time} on ${at.day} ${MONTHS[at.month - 1]}${at.year === read(from).year ? "" : ` ${at.year}`}`;
+  const shown = `${hour % 12 || 12}:${String(minute).padStart(2, "0")}${second ? `:${String(second).padStart(2, "0")}` : ""} ${hour < 12 ? "am" : "pm"}${time.offset === null ? "" : ` (${time.offset})`}`;
+  if (from === null) return shown;
+  const day = read(from.at);
+  if (at.year === day.year && at.month === day.month && at.day === day.day) return shown;
+  return `${shown} on ${at.day} ${MONTHS[at.month - 1]}${at.year === day.year ? "" : ` ${at.year}`}`;
 }
 
 /** Names as a sentence joins them: Alex, Sam and Jo. */
@@ -105,31 +111,34 @@ function lanesOf(marks) {
 /** What the calendar holds, in words. */
 function saysOf(trip, timed) {
   const clocks = ` Times are on the clocks of ${trip.zone}.`;
-  const cut = trip.left_out ? ` The calendar shows the first ${trip.days.length} days. The TRIP goes on for ${trip.left_out} more.` : "";
+  const changes = trip.days.some((day) => day.offset !== null) ? " A column that names its offset from UTC is part of a day on which those clocks change." : "";
+  const cut = trip.until === null ? "" : ` The calendar shows the first ${trip.days.length} columns. The TRIP goes on until ${dateName(trip.until)}.`;
+  const more = clocks + changes + cut;
   if (trip.itinerary) {
-    if (!trip.steps.length) return `The ITINERARY of the report is empty: nobody has to do anything.${trip.days.length ? clocks + cut : ""}`;
-    return `The ITINERARY of the report.${clocks}${cut}`;
+    if (!trip.steps.length) return `The ITINERARY of the report is empty: nobody has to do anything.${trip.days.length ? more : ""}`;
+    return `The ITINERARY of the report.${more}`;
   }
-  const empty = trip.days.length ? clocks + cut : " So the calendar is empty.";
+  const empty = trip.days.length ? more : " So the calendar is empty.";
   if (!trip.steps.length) return `The report shows no ITINERARY, and no LOCK names an OPTION.${empty}`;
   if (!timed) return `The report shows no ITINERARY, and the FILE gives no time to the OPTIONs that a LOCK names.${empty}`;
-  return `The report shows no ITINERARY. The calendar holds only the OPTIONs that a LOCK names, at the times the FILE states.${clocks}${cut}`;
+  return `The report shows no ITINERARY. The calendar holds only the OPTIONs that a LOCK names, at the times the FILE states.${more}`;
 }
 
 /**
  * The calendar of a TRIP as the view sends it, or of no TRIP where the view sends none.
  *
  * `hours` is the part of the clock that every day shows, in minutes. Each day has its name, its
- * marks and its bounds. A mark is the part of one step that one day shows, for PERSONs whose
- * columns are side by side: `top` and `height` are minutes from the top of the day, `first` and
- * `last` are columns. Marks of one PERSON at the same time each get a `lane` of the `lanes` in
- * that column. `begins` and `ends` say whether the part holds the start and the end of its step.
- * A bound is where the TRIP starts or ends. `untimed` names the steps that have no time.
- * `itinerary` says whether the steps are the ITINERARY of the report.
+ * marks, its bounds, and the parts of those hours that its clocks never show (`shut`). A mark is
+ * the part of one step that one day shows, for PERSONs whose columns are side by side: `top` and
+ * `height` are minutes from the top of the day, `first` and `last` are columns. Marks of one
+ * PERSON at the same time each get a `lane` of the `lanes` in that column. `begins` and `ends`
+ * say whether the part holds the start and the end of its step. A bound is where the TRIP starts
+ * or ends. `untimed` names the steps that have no time. `itinerary` says whether the steps are
+ * the ITINERARY of the report.
  */
 export function calendar(trip) {
   const none = { says: "", zone: null, itinerary: false, persons: [], hours: { from: 9 * 60, to: 17 * 60 }, days: [], untimed: [] };
-  if (trip === null) return { ...none, says: "This TRIP holds a time outside the years 0001 to 9999, so it has no calendar." };
+  if (trip === null) return { ...none, says: "There is no calendar of this TRIP: the view could not make one." };
   const column = new Map(trip.persons.map((person, n) => [person.id, n]));
   const place = new Map(trip.places.map((each) => [each.id, each.name]));
   const names = (columns) => listed(columns.map((n) => trip.persons[n].name));
@@ -155,8 +164,10 @@ export function calendar(trip) {
 
   // ---- the hours that every day shows: from the earliest start of a step on any day to the
   // latest end. A step that runs past midnight counts to midnight on the day it starts on. The
-  // day after shows it from the first hour that the calendar shows.
-  const reach = (step, part) => (step.end === null ? Math.min(part.from + NO_END, DAY) : part.to);
+  // day after shows it from the first hour that the calendar shows. A step with no known end
+  // is drawn half an hour long, and no longer than its day has left.
+  const reach = (step, part) => (step.end === null ? Math.min(part.from + NO_END, trip.days[part.day].closes) : part.to);
+  const bounds = [[trip.starts, "starts"], [trip.ends, "ends"]].filter(([bound]) => bound !== null && bound.day !== null);
   let low = DAY, high = 0;
   for (const step of steps) {
     for (const part of step.parts) {
@@ -165,12 +176,22 @@ export function calendar(trip) {
       high = Math.max(high, reach(step, part));
     }
   }
-  if (low > high) [low, high] = [9 * 3600 + ROOM, 17 * 3600 - ROOM];
+  if (low > high) {
+    // No step is on any day. The hours are those of the TRIP itself, or of a working day.
+    const seconds = bounds.map(([bound]) => bound.second);
+    [low, high] = seconds.length ? [Math.min(...seconds), Math.max(...seconds)] : [9 * 3600 + ROOM, 17 * 3600 - ROOM];
+  }
   const from = Math.max(0, Math.floor((low - ROOM) / 3600) * 3600);
   const to = Math.min(DAY, Math.ceil((high + ROOM) / 3600) * 3600);
+  const down = (seconds) => (Math.min(Math.max(seconds, from), to) - from) / 60;
 
   // ---- what each day shows of each step
-  const days = trip.days.map((date) => ({ name: dayName(date), marks: [], bounds: [], shown: [] }));
+  const days = trip.days.map((day) => ({
+    name: `${dateName(day.date)}${day.offset === null ? "" : ` (${day.offset})`}`,
+    marks: [], bounds: [], shown: [],
+    // The hours of this column that its clocks never show: before it opens, and after it closes.
+    shut: [[from, day.opens], [day.closes, to]].filter(([start, end]) => down(end) > down(start)).map(([start, end]) => ({ top: down(start), height: down(end) - down(start) })),
+  }));
   for (const step of steps) {
     for (const part of step.parts) {
       const top = Math.max(part.from, from);
@@ -205,15 +226,20 @@ export function calendar(trip) {
           begins: part.begins && top === part.from,
           ends: part.ends && bottom === part.to && step.late === null,
           named: step.kind === "option" || bottom - top >= NAMED,
+          // A WAY that takes next to no time is a tick on top of what is beside it, so that it shows.
+          brief: step.kind === "way" && bottom - top < SMALLEST,
         });
       }
     }
     delete day.shown;
   }
-  // ---- when the TRIP starts and ends. A time outside the hours shown is at their edge.
-  for (const [bound, word] of [[trip.starts, "starts"], [trip.ends, "ends"]]) {
-    if (bound === null || bound.day === null) continue;
-    days[bound.day].bounds.push({ says: `The TRIP ${word} at ${clock(bound.at)}`, edge: word, top: (Math.min(Math.max(bound.second, from), to) - from) / 60 });
+  // ---- when the TRIP starts and ends. A time outside the hours shown is at their edge. Where
+  // both are at one place on one day, they share their words.
+  for (const [bound, word] of bounds) {
+    const says = `The TRIP ${word} at ${clock(bound)}`;
+    const beside = days[bound.day].bounds.find((other) => other.top === down(bound.second));
+    if (beside) Object.assign(beside, { says: `${beside.says}, and ends at ${clock(bound)}`, edge: "both" });
+    else days[bound.day].bounds.push({ says, edge: word, top: down(bound.second) });
   }
   return { says, zone: trip.zone, itinerary: trip.itinerary, persons: trip.persons, hours: { from: from / 60, to: to / 60 }, days, untimed };
 }
