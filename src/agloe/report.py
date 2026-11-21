@@ -407,7 +407,7 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
 
 
 @dataclass(frozen=True)
-class _Clock:
+class Clock:
     """How times are put in words: on the clocks of one time zone.
 
     With ``offsets``, each time also gives its offset from UTC, because the clocks change during
@@ -435,7 +435,7 @@ class _Clock:
         half = "am" if there.hour < 12 else "pm"
         clock = f"{there.hour % 12 or 12}:{there.minute:02d}{seconds} {half}"
         if self.offsets:
-            clock += f" ({_offset(there.utcoffset() or timedelta())})"
+            clock += f" ({offset_from_utc(there.utcoffset() or timedelta())})"
         if day is None or there.date() == day:
             return clock
         year = "" if there.year == day.year else f" {there.year}"
@@ -446,7 +446,7 @@ class _Clock:
         return f"{self.time(moment)} on {self.day_name(moment)}"
 
 
-def _offset(ahead: timedelta) -> str:
+def offset_from_utc(ahead: timedelta) -> str:
     """An offset from UTC, to the second where it has seconds: UTC-5, UTC+5:30, UTC+0:09:21."""
     seconds = round(ahead.total_seconds())
     hours, rest = divmod(abs(seconds), 3600)
@@ -472,18 +472,18 @@ def _times_stated(file: File, records: tuple[str, ...]) -> list[int]:
     return times
 
 
-def _clock_for(file: File, report: Report) -> _Clock:
+def clock_for(file: File, report: Report) -> Clock:
     """The clock for one report: with offsets if the times it shows have more than one."""
     moments = [step.start for step in report.itinerary]
     moments += [step.end for step in report.itinerary if step.end is not None]
     moments += _times_stated(file, (*report.relies_on, *report.conflict))
     offsets = {local(moment, file.zone).utcoffset() for moment in moments}
-    return _Clock(file.zone, len(offsets) > 1)
+    return Clock(file.zone, len(offsets) > 1)
 
 
 def as_text(file: File, report: Report) -> str:
     """The Report in plain words, ending with a line break."""
-    clock = _clock_for(file, report)
+    clock = clock_for(file, report)
     if report.answer is Answer.FEASIBLE:
         lines = _feasible(file, clock, report)
     elif report.answer is Answer.INFEASIBLE:
@@ -607,7 +607,7 @@ def _budgets(file: File, first: str = "") -> list[str]:
     return lines
 
 
-def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
+def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
     to_buy = _to_buy(report)
     if not report.robust:
         lines = ["FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold."]
@@ -615,7 +615,7 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
         lines = ["FEASIBLE, with a WARNING: this trip works, but not everything is booked yet."]
     else:
         lines = ["FEASIBLE: this trip works."]
-    marks = _marks(file, report)
+    marked = marks(file, report)
     day = None
     for number, (step, _) in enumerate(_lines(report.itinerary)):
         if clock.day(step.start) != day:
@@ -625,7 +625,7 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
         who = _people(file, step.persons)
         what = _name(file, step.option or step.way)
         lines.append(f"  {clock.time(step.start)} to {end}: {what}, {who}")
-        lines += [f"    ! {mark}" for mark in marks.get(number, [])]
+        lines += [f"    ! {mark}" for mark in marked.get(number, [])]
     if not report.itinerary:
         lines += ["", "Nobody has to do anything."]
     relied_on = [fact for fact in file.facts if fact.id in report.relies_on]
@@ -740,7 +740,7 @@ def _lines(itinerary: Itinerary) -> list[tuple[Step, list[int]]]:
     return lines
 
 
-def _marks(file: File, report: Report) -> dict[int, list[str]]:
+def marks(file: File, report: Report) -> dict[int, list[str]]:
     """The WARNINGs about a plan, in words, for each line of the plan.
 
     First who still has to buy a right to an OPTION, and from which OFFER. Then what the plan
@@ -762,7 +762,7 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
     for found in report.at_worst:
         number = line_of[found.step] if found.step is not None else line_of_option[found.option]
         together.setdefault((number, found.constraint, found.late), []).extend(found.persons)
-    marks: dict[int, list[str]] = {}
+    said: dict[int, list[str]] = {}
     for (option, offer, budget), covers in _to_buy(report).items():
         buyers = [cover.person for cover in covers]
         have = "has" if len(buyers) == 1 else "have"
@@ -774,7 +774,7 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
         elif price is not None:
             offer = f"{offer}, at no cost"
         mark = f"{_people(file, tuple(buyers))} still {have} to buy a right to this{if_needed}"
-        marks.setdefault(line_of_option[option], []).append(f"{mark}, from {offer}.")
+        said.setdefault(line_of_option[option], []).append(f"{mark}, from {offer}.")
     for (number, constraint, late), persons in together.items():
         who = _people(file, tuple(persons))
         if constraint is Constraint.ARRIVAL and late is not None:
@@ -787,8 +787,8 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
             mark = f"This would end {_span(late)} after the trip ends."
         else:
             mark = f'This would break the rule "{constraint.value}" for {who}.'
-        marks.setdefault(number, []).append(mark)
-    return marks
+        said.setdefault(number, []).append(mark)
+    return said
 
 
 class _OwnWords(str):
@@ -927,7 +927,7 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
     return _OwnWords(f"people need not be at {place} long before {name} starts")
 
 
-def _record(file: File, clock: _Clock, record: str) -> str:
+def _record(file: File, clock: Clock, record: str) -> str:
     """One FACT, WANT or DECISION in words."""
     records = (*file.facts, *file.wants, *file.decisions)
     found = next(each for each in records if each.id == record)
@@ -1151,8 +1151,8 @@ def _names(
 
 def _quoted(name: str, joins: str | None) -> str:
     """A name, in quotes where it could be taken for something else."""
-    marks = any(mark in name for mark in ",:;")  # what a report puts between its own parts
-    splits = marks or (joins is not None and joins in name.casefold().split())
+    parted = any(mark in name for mark in ",:;")  # what a report puts between its own parts
+    splits = parted or (joins is not None and joins in name.casefold().split())
     if splits or '"' in name or _WITH_AN_ID.search(name):
         return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
     return name

@@ -1,6 +1,7 @@
 """Every example FILE gives the result written beside it."""
 
 import json
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -47,3 +48,31 @@ def test_the_itinerary_shown_works_and_has_nothing_needless(path: Path) -> None:
 def test_every_expected_result_has_its_file() -> None:
     for result in EXAMPLES.rglob("*.expected.json"):
         assert result.with_name(result.name.replace(".expected.json", ".json")) in FILES
+
+
+@pytest.mark.parametrize("path", FILES, ids=lambda path: f"{path.parent.name}/{path.stem}")
+def test_the_marks_on_a_plan_are_the_lines_its_text_marks(path: Path) -> None:
+    """Each mark belongs to a line of the plan, and the text prints it under that line."""
+    file = read(path)
+    found = check(file)
+    marks = report.marks(file, found)
+    assert set(marks) <= set(range(len(report.together(found.itinerary))))
+    words = path.with_name(path.stem + ".expected.txt").read_text().splitlines()
+    printed = [line.removeprefix("    ! ") for line in words if line.startswith("    ! ")]
+    assert printed == [mark for number in sorted(marks) for mark in marks[number]]
+
+
+@pytest.mark.parametrize("path", FILES, ids=lambda path: f"{path.parent.name}/{path.stem}")
+def test_the_clock_of_a_report_is_the_one_its_text_uses(path: Path) -> None:
+    """Times are on the clocks of the FILE's time zone, with offsets only where they change."""
+    file = read(path)
+    clock = report.clock_for(file, check(file))
+    assert clock.zone == file.zone
+    words = path.with_name(path.stem + ".expected.txt").read_text()
+    assert clock.offsets == ("(UTC" in words)
+
+
+def test_an_offset_from_utc_is_written_to_the_second_where_it_has_seconds() -> None:
+    assert report.offset_from_utc(timedelta(hours=-5)) == "UTC-5"
+    assert report.offset_from_utc(timedelta(hours=5, minutes=30)) == "UTC+5:30"
+    assert report.offset_from_utc(timedelta(minutes=9, seconds=21)) == "UTC+0:09:21"
