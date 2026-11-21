@@ -553,7 +553,7 @@ def test_the_view_serves_its_page_and_nothing_else(tmp_path: Path) -> None:
             for script in STATIC.glob("*.js")
             for name in re.findall(r'(?:from |import\()"\./([^"]+)"', script.read_text())
         }
-        assert {"state.js", "calendar.js", "lines.js"} <= loaded
+        assert {"state.js", "calendar.js", "lines.js", "strip.js"} <= loaded
         assert {*named, *loaded} == set(PAGE) - {"index.html"}
         for name in [*named, *sorted(loaded)]:
             status, headers, _ = asked(view, f"/{name}")
@@ -617,8 +617,8 @@ def test_the_view_serves_the_answer_and_the_report_without_what_they_do_not_need
 ) -> None:
     """A file of the page that only the calendar needs cannot be read. The view still starts."""
     shutil.copytree(STATIC, tmp_path / "static")
-    (tmp_path / "static" / "lines.js").unlink()
-    (tmp_path / "static" / "calendar.js").unlink()
+    for name in ["lines.js", "calendar.js", "strip.js"]:
+        (tmp_path / "static" / name).unlink()
 
     def beside(package: str) -> Path:
         return tmp_path
@@ -629,8 +629,8 @@ def test_the_view_serves_the_answer_and_the_report_without_what_they_do_not_need
     with serving(path) as view:
         assert asked(view, "/")[0] == 200
         assert asked(view, "/state.js")[0] == 200
-        assert asked(view, "/lines.js")[0] == 404
-        assert asked(view, "/calendar.js")[0] == 404
+        for name in ["lines.js", "calendar.js", "strip.js"]:
+            assert asked(view, f"/{name}")[0] == 404
         assert kinds(Sent(view).until("report")) == ["file", "answer", "report"]
     # Without a file that the answer and the report need, there is no view.
     (tmp_path / "static" / "state.js").unlink()
@@ -644,6 +644,7 @@ def test_the_answer_and_the_report_need_no_calendar() -> None:
     assert re.findall(r'^import .* from "\./([^"]+)";$', code, re.MULTILINE) == ["state.js"]
     assert 'import("./calendar.js")' in code
     assert 'import("./lines.js")' in code
+    assert 'import("./strip.js")' in code
     # What the page says in each state needs nothing else at all.
     assert "import" not in (STATIC / "state.js").read_text()
 

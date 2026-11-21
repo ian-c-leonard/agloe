@@ -234,7 +234,8 @@ export function calendar(trip, report = null, warnings = []) {
     name: `${dateName(day.date)}${day.offset === null ? "" : ` (${day.offset})`}`,
     marks: [], bounds: [], shown: [],
     // The part of the hours shown in which this column's clocks run: no mark is outside it.
-    open: { top: down(day.opens), bottom: down(day.closes) },
+    // `first` and `last` say that it holds the first moment of the column, and its last.
+    open: { top: down(day.opens), bottom: down(day.closes), first: day.opens >= from && day.opens < to, last: day.closes <= to && day.closes > from },
     // The hours of this column that its clocks never show: before it opens, and after it closes.
     shut: [[from, day.opens], [day.closes, to]].filter(([start, end]) => down(end) > down(start)).map(([start, end]) => ({ top: down(start), height: down(end) - down(start) })),
   }));

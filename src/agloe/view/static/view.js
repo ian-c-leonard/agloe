@@ -2,7 +2,8 @@
 //
 // The answer and the report need nothing but state.js. The calendar is loaded beside them, so
 // that a calendar that fails to load or to draw leaves the answer and the report on the page.
-// So is what ties each line of the report to the step or the record that it is about.
+// So is what ties each line of the report to the step or the record that it is about, and so
+// is the strip above the calendar.
 import { after, says, start } from "./state.js";
 
 const PER_MINUTE = 0.8; // pixels down the calendar for each minute
@@ -10,11 +11,16 @@ const HUES = 6; // the colours that tell the PERSONs apart, in view.css
 const SMALLEST = 3; // pixels: the least height of a mark
 const TICK = 7; // pixels: the height of the tick for a WAY that takes next to no time
 const BESIDE = 18; // pixels from one tick to the next where several are at one place
+const EDGES = 80; // pixels of the strip that are not its rows: the names, the padding and the edge
+const NARROWEST = 40; // pixels: the least room for the rows of a strip
 
 const part = (id) => document.getElementById(id);
 let state = start();
 let lay = null; // what lays a calendar out, once the page has loaded it: false where it cannot
 let tie = null; // what ties the lines of a report to steps and records, once the page has loaded it
+let turn = null; // what turns a calendar into the strip above it, once the page has loaded it
+let onStrip = null; // the calendar that the strip on the page is of
+let stripRoom = 0; // pixels: how wide the page was when the strip was laid out
 let drawn; // the TRIP that the calendar on the page is of
 let written = []; // what the report on the page was written from: its words, and what its lines are tied to
 
@@ -28,14 +34,25 @@ function hourName(minute) {
   return hour === 0 ? "midnight" : hour === 12 ? "noon" : `${hour % 12} ${hour < 12 ? "am" : "pm"}`;
 }
 
+/** What a mark says to a pointer that rests on it. */
+function wordsOf(mark) {
+  const when = mark.late ? `${mark.when}, ${mark.late}` : mark.when;
+  return [mark.name, when, mark.where, mark.who, mark.lock ?? "A WAY in the plan of the report.", ...(mark.finds ? [mark.finds] : []), ...mark.warns].join("\n");
+}
+
+/** How a mark looks, on the calendar and on the strip: by what the view and the report say of its step. */
+function looksOf(mark) {
+  return `${mark.state}${mark.begins ? "" : " goes-on"}${mark.ends ? "" : " no-end"}${mark.brief ? " brief" : ""}${mark.clash.length ? " clash" : ""}${mark.warns.length ? " warned" : ""}`;
+}
+
 /**
  * One mark of the calendar, put on its day: a block for an OPTION, or a line down each PERSON's
  * column for a WAY. The name of a WAY stands beside the line of the first PERSON who takes it,
  * as far as its day has room.
  */
-function put(body, mark, people, open, ticks) {
-  const box = made("div", `mark ${mark.state}${mark.begins ? "" : " goes-on"}${mark.ends ? "" : " no-end"}${mark.brief ? " brief" : ""}${mark.clash.length ? " clash" : ""}${mark.warns.length ? " warned" : ""}`);
-  Object.assign(box.dataset, { step: mark.step, records: mark.records.join(" ") });
+function put(body, mark, index, people, open, ticks) {
+  const box = made("div", `mark ${looksOf(mark)}`);
+  Object.assign(box.dataset, { step: mark.step, records: mark.records.join(" "), mark: index });
   const columns = mark.last - mark.first + 1;
   const when = mark.late ? `${mark.when}, ${mark.late}` : mark.when;
   // A mark is never smaller than the eye can find, and never outside the hours of its column.
@@ -48,7 +65,7 @@ function put(body, mark, people, open, ticks) {
   box.style.width = `${(columns / mark.lanes / people) * 100}%`;
   box.style.top = `${top}px`;
   box.style.height = `${height}px`;
-  box.title = [mark.name, when, mark.where, mark.who, mark.lock ?? "A WAY in the plan of the report.", ...(mark.finds ? [mark.finds] : []), ...mark.warns].join("\n");
+  box.title = wordsOf(mark);
   const block = made("div", "block");
   const stripes = made("div", "stripes");
   for (let column = mark.first; column <= mark.last; column += 1) {
@@ -116,7 +133,7 @@ function draw(laid) {
       body.append(band);
     }
     const ticks = new Map();
-    for (const mark of day.marks) put(body, mark, people, day.open, ticks);
+    day.marks.forEach((mark, index) => put(body, mark, index, people, day.open, ticks));
     // Where the TRIP starts and where it ends: a line across the day. Its words stand above
     // the day for the start and below it for the end, so that they cover no step.
     const words = { starts: made("div", "bound-says"), ends: made("div", "bound-says") };
@@ -151,8 +168,91 @@ function draw(laid) {
   part("calendar-untimed").hidden = !laid.untimed.length;
 }
 
+/**
+ * One mark of the strip. It stands for one mark of the calendar, or for several that are too
+ * close together to show apart at this width, and then it says so.
+ */
+function bar(mark, people) {
+  const [one] = mark.of;
+  const several = mark.of.length > 1;
+  // A mark for several has the edges of each of them: it is dashed where one of them does not
+  // start there, and fades where one of them may not end there.
+  const any = (holds) => mark.of.some(holds);
+  const looks = several ? `several${any((each) => !each.begins) ? " goes-on" : ""}${any((each) => !each.ends) ? " no-end" : ""}${any((each) => each.clash.length) ? " clash" : ""}${any((each) => each.warns.length) ? " warned" : ""}` : looksOf(one);
+  const box = made("div", `bar ${looks}${mark.small ? " small" : ""}`);
+  box.title = several ? [`${mark.of.length} steps too close together to show apart at this width:`, ...mark.of.map((each) => `${each.name}, ${each.late ? `${each.when}, ${each.late}` : each.when}`)].join("\n") : wordsOf(one);
+  // A click goes to the first of the marks that it stands for.
+  Object.assign(box.dataset, {
+    step: [...new Set(mark.of.map((each) => each.step))].join(" "),
+    records: [...new Set(mark.of.flatMap((each) => each.records))].join(" "),
+    day: one.day,
+    mark: one.index,
+  });
+  box.style.left = `${mark.x}px`;
+  box.style.width = `${mark.w}px`;
+  box.style.top = `${((mark.first + mark.lane / mark.lanes) / people) * 100}%`;
+  box.style.height = `${((mark.last - mark.first + 1) / mark.lanes / people) * 100}%`;
+  // A block for an OPTION, with its name where there is room. A line along each PERSON's row
+  // for a WAY, or a tick for a WAY that is too short to draw. Two ticks, one above the other,
+  // for several marks. Only a tick itself answers the pointer, so that what it sits on can be
+  // reached too.
+  if (several) box.append(Object.assign(made("i", `bar-several p${mark.first % HUES}`), { title: box.title }));
+  else if (one.kind === "option") box.append(made("i", "bar-block"), made("b", "bar-name", one.name));
+  else if (mark.small) box.append(Object.assign(made("i", `bar-tick p${mark.first % HUES}`), { title: box.title }));
+  else for (let row = mark.first; row <= mark.last; row += 1) box.append(made("i", `bar-line p${row % HUES}`));
+  return box;
+}
+
+/**
+ * The strip above the calendar: all its days, with a row for each PERSON and time from left to
+ * right. It holds the marks of the calendar. So pointing at a step on it lights up the same
+ * step below, and what the report says of it. A calendar of one day has no strip.
+ */
+function drawStrip(laid) {
+  onStrip = laid;
+  const box = part("strip");
+  box.replaceChildren();
+  box.hidden = part("strip-says").hidden = true;
+  // The strip is laid out in the pixels that the page has for its rows. A page with next to
+  // none has no strip.
+  stripRoom = part("calendar-part").clientWidth;
+  const strip = turn && laid && stripRoom - EDGES >= NARROWEST ? turn(laid, stripRoom - EDGES) : null;
+  if (strip === null) return;
+  box.hidden = part("strip-says").hidden = false;
+  const people = Math.max(strip.persons.length, 1);
+  box.style.setProperty("--people", people);
+  box.style.setProperty("--row", `${strip.row}px`);
+  const names = made("div", "strip-people");
+  strip.persons.forEach((person, n) => names.append(Object.assign(made("span", `p${n % HUES}`, person.name), { title: person.name })));
+  const days = made("div", "strip-days");
+  const rows = made("div", "strip-rows");
+  days.style.width = rows.style.width = `${strip.wide}px`;
+  for (const day of strip.days) {
+    if (!day.w) continue;
+    const name = Object.assign(made("span", "strip-day", day.short), { title: day.name });
+    name.style.left = `${day.x}px`;
+    name.style.width = `${day.w}px`;
+    days.append(name);
+    if (!day.x) continue;
+    // Where the strip leaves hours out before a day, the line between the days is double.
+    const edge = made("i", day.gap ? "strip-edge gap" : "strip-edge");
+    edge.style.left = `${day.x}px`;
+    rows.append(edge);
+  }
+  for (const mark of strip.marks) rows.append(bar(mark, people));
+  for (const bound of strip.bounds) {
+    const line = Object.assign(made("i", bound.clash ? "strip-bound clash" : "strip-bound"), { title: bound.says });
+    line.style.left = `${bound.x}px`;
+    line.dataset.record = bound.record;
+    rows.append(line);
+  }
+  box.append(made("span", ""), days, names, rows);
+  part("strip-says").textContent = strip.says;
+}
+
 /** The calendar part says this, and shows no calendar. */
 function noCalendar(words) {
+  drawStrip(null);
   part("calendar").hidden = part("calendar-key").hidden = part("calendar-untimed").hidden = true;
   part("calendar-says").textContent = words;
 }
@@ -182,11 +282,14 @@ function write(text, tied) {
 function light(target) {
   const from = target instanceof Element ? target.closest("[data-step], [data-record], [data-records]") : null;
   const ids = (each) => [each.dataset.record, ...(each.dataset.records ?? "").split(" ")].filter(Boolean);
+  // A mark of the strip can stand for several steps.
+  const stepsOf = (each) => (each.dataset.step ?? "").split(" ").filter(Boolean);
   const records = new Set(from ? ids(from) : []);
-  const step = from?.dataset.step;
+  const steps = new Set(from ? stepsOf(from) : []);
   for (const each of document.querySelectorAll("[data-step], [data-record], [data-records]")) {
+    const theirs = stepsOf(each);
     const shares = ids(each).some((id) => records.has(id));
-    const same = from !== null && (step === undefined ? shares : each.dataset.step === step || (each.dataset.step === undefined && shares));
+    const same = from !== null && (steps.size && theirs.length ? theirs.some((step) => steps.has(step)) : shares);
     each.classList.toggle("lit", same);
   }
 }
@@ -224,12 +327,21 @@ function show() {
   if (lay === false) return noCalendar("The page could not load its calendar.");
   if (said.calendar.trip === drawn) return;
   drawn = said.calendar.trip;
+  let laid;
   try {
-    draw(lay(drawn, said.calendar.report, tied ? tie.warningsOf(tied) : []));
+    laid = lay(drawn, said.calendar.report, tied ? tie.warningsOf(tied) : []);
+    draw(laid);
     lightAgain();
   } catch (problem) {
     // Half a calendar is no calendar. The report below is whole.
     noCalendar("The page could not draw the calendar of this TRIP.");
+    throw problem;
+  }
+  try {
+    drawStrip(laid);
+  } catch (problem) {
+    // Half a strip is no strip. The calendar below is whole.
+    drawStrip(null);
     throw problem;
   }
 }
@@ -245,6 +357,14 @@ view.onmessage = (message) => hear(JSON.parse(message.data));
 view.onerror = () => hear({ kind: "lost" });
 document.querySelector("main").addEventListener("mouseover", (event) => light(event.target));
 document.querySelector("main").addEventListener("mouseleave", () => light(null));
+// A click on a mark of the strip brings the same mark of the calendar into view: that part
+// of the step, in the columns of those PERSONs.
+part("strip").addEventListener("click", (event) => {
+  const bar = event.target instanceof Element ? event.target.closest(".bar") : null;
+  if (bar === null) return;
+  const day = part("calendar").querySelectorAll(".day")[bar.dataset.day];
+  day?.querySelector(`.mark[data-mark="${bar.dataset.mark}"]`)?.scrollIntoView({ block: "nearest", inline: "center" });
+});
 show();
 import("./calendar.js").then(
   (loaded) => {
@@ -266,4 +386,21 @@ import("./lines.js").then(
     show();
   },
   () => {}, // The report stays on the page as it is, and nothing lights up.
+);
+// The strip is laid out again when the page has more room for it, or less.
+if (typeof ResizeObserver === "function") {
+  new ResizeObserver(() => {
+    if (onStrip === null || part("calendar-part").clientWidth === stripRoom) return;
+    drawStrip(onStrip);
+    lightAgain();
+  }).observe(part("calendar-part"));
+}
+import("./strip.js").then(
+  (loaded) => {
+    // The calendar is drawn again, with the strip above it.
+    turn = loaded.strip;
+    drawn = undefined;
+    show();
+  },
+  () => {}, // The calendar stays on the page as it is, with no strip above it.
 );
