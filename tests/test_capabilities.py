@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from itertools import combinations
 from random import Random
+from typing import Any
 
 import pytest
 
@@ -1375,6 +1376,138 @@ def a_trip_that_needs_a_helper(rng: Random) -> File:
     return replace(file, capabilities=listed, facts=(*file.facts, *facts))
 
 
+def test_two_persons_can_come_along_for_two_requirements_of_one_stay() -> None:
+    """Alex is LOCKed into the tour and can neither swim nor row. Sam only swims, Jo only rows."""
+    both = ("swimming", "rowing")
+    file = a_tour(
+        requires("tour", "swimming", "one"),
+        requires("tour", "rowing", "one"),
+        cannot("alex", "swimming"),
+        cannot("alex", "rowing"),
+        can("sam", "swimming"),
+        cannot("sam", "rowing"),
+        cannot("jo", "swimming"),
+        can("jo", "rowing"),
+        locked=("alex",),
+        capabilities=both,
+    )
+    found = answers.check(file, compiler.shown, compiler.works, compiler.can_work)
+    assert found == answers.check(file)
+    assert found.itinerary == (TOUR,)
+    assert found.supplies == (
+        Supply("tour", "swimming", "one", ("sam",)),
+        Supply("tour", "rowing", "one", ("jo",)),
+    )
+
+
+def test_the_solver_answers_for_a_file_with_capabilities(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The reference checker's own search is not asked."""
+    file = a_tour(requires("tour", "swimming", "each"), can("alex", "swimming"), persons=("alex",))
+    expected = list(answers.reports(file))
+
+    def not_asked(*given: object, **named: object) -> None:
+        raise AssertionError("the reference checker's search was asked")
+
+    monkeypatch.setattr(reference, "_that_work", not_asked)
+    assert list(compiler.reports(file)) == expected
+    last = expected[-1]
+    assert isinstance(last, Report)
+    assert last.answer is Answer.FEASIBLE
+    assert last.supplies == (Supply("tour", "swimming", "each", ("alex",)),)
+
+
+def models_built(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """A list that grows by one each time the solver builds a model."""
+    built: list[int] = []
+    search = compiler._Search  # pyright: ignore[reportPrivateUsage]
+    build = search.__init__
+
+    def counted(self: object, *given: Any, **named: Any) -> None:
+        built.append(1)
+        build(self, *given, **named)  # pyright: ignore[reportArgumentType]
+
+    monkeypatch.setattr(search, "__init__", counted)
+    return built
+
+
+def test_the_only_person_who_can_meet_a_requirement_has_to_take_part(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Alex is LOCKed into the river tour, which requires one guide. Only Sam can guide.
+
+    Sam is LOCKed into the lake tour at the same hour. So Sam has to be in both, and no model
+    is needed to see that nothing works.
+    """
+    options = [stays("river-tour", "dock"), stays("lake-tour", "beach")]
+    facts = [
+        *at_three("river-tour"),
+        *at_three("lake-tour"),
+        requires("river-tour", "guiding"),
+        requires("lake-tour", "guiding", "none"),
+        cannot("alex", "guiding"),
+        can("sam", "guiding"),
+    ]
+    locks = [lock("river-tour", "alex"), lock("lake-tour", "sam")]
+    file = trip(["alex", "sam"], ["dock", "beach"], options, facts, locks, capabilities=["guiding"])
+    expected = answers.check(file)
+    assert expected.answer is Answer.INFEASIBLE
+    built = models_built(monkeypatch)
+    world = best_case(file)
+    assert compiler.shown(file, world) is None
+    assert not compiler.works(file, world)
+    assert not compiler.can_work(Remaining(file))
+    assert not built
+    assert compiler.check(file) == expected
+
+
+def test_no_helper_is_brought_to_a_stay_that_nobody_needs() -> None:
+    """Sam can swim, and the tour requires one swimmer. No LOCK names the tour and it meets no
+    must, so it need not happen, and the model builds no travel to it for Sam."""
+    asked = [
+        requires("tour", "swimming", "one"),
+        can("sam", "swimming"),
+        cannot("alex", "swimming"),
+    ]
+    file = a_tour(*asked, persons=("alex", "sam"), locked=())
+    search = compiler._Search(file, worst_case(file))  # pyright: ignore[reportPrivateUsage]
+    assert search.left_out == {(0, 0), (1, 0)}
+    assert checked(file).itinerary == ()
+    needed = a_tour(*asked, persons=("alex", "sam"), locked=("alex",))
+    search = compiler._Search(needed, worst_case(needed))  # pyright: ignore[reportPrivateUsage]
+    assert search.left_out == set()
+
+
+def test_no_helper_is_brought_where_somebody_a_lock_names_meets_the_requirement() -> None:
+    """Alex is LOCKed into the tour and can swim. Sam can swim too, and stays away."""
+    file = a_tour(
+        requires("tour", "swimming", "one"),
+        can("alex", "swimming"),
+        can("sam", "swimming"),
+        persons=("alex", "sam"),
+        locked=("alex",),
+    )
+    search = compiler._Search(file, worst_case(file))  # pyright: ignore[reportPrivateUsage]
+    assert search.left_out == {(1, 0)}
+    assert checked(file).itinerary == (replace(TOUR, persons=("alex",)),)
+
+
+def test_no_helper_is_brought_for_what_each_person_has_to_have() -> None:
+    """Paddling is a must for Jo, and the tour SATISFIES it. It requires swimming of each
+    PERSON. Jo can swim. Sam can swim too, and that helps nobody else."""
+    file = a_tour(
+        requires("tour", "swimming", "each"),
+        satisfies("tour", "paddling"),
+        can("jo", "swimming"),
+        can("sam", "swimming"),
+        persons=("jo", "sam"),
+        locked=(),
+        wants=[must("paddling", "jo")],
+    )
+    search = compiler._Search(file, worst_case(file))  # pyright: ignore[reportPrivateUsage]
+    assert search.left_out == {(1, 0)}
+    assert checked(file).itinerary == (replace(TOUR, persons=("jo",)),)
+
+
 def trips_with_capabilities(rng: Random) -> list[File]:
     """Random trips of every kind the other tests build, each with CAPABILITIES."""
     trips = [a_trip_with_capabilities(rng, leave_out=0.15) for _ in range(100)]
@@ -1460,6 +1593,7 @@ def test_the_two_searches_agree_on_what_is_left_of_a_file_with_capabilities() ->
     answers_seen: set[bool] = set()
     for file in trips_with_capabilities(rng)[::4]:
         records = [*(fact.id for fact in file.facts), *(each.id for each in file.decisions)]
+        records += [want.id for want in file.wants if want.musts or want.must_nots]
         left = Remaining(file)
         for record in rng.sample(records, min(len(records), 5)):
             left = left.without(record)

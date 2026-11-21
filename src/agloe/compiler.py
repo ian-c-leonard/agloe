@@ -250,6 +250,9 @@ def _have_to_take(
     ``open_pairs``, which may. That holds unless this world has another OPTION for the WANT
     and the PERSON. A WANT to end the TRIP at a PLACE asks for no OPTION.
 
+    An OPTION that somebody has to take part in happens. Where it requires a CAPABILITY of one
+    PERSON, and one PERSON alone has it in this world, that PERSON has to take part in it too.
+
     A PERSON can have to take part in more than these. Nothing here says that they do not.
     """
     position = {option.id: index for index, option in enumerate(file.options)}
@@ -266,6 +269,12 @@ def _have_to_take(
             for person in want.musts:
                 if (want.id, person) not in world.another_option:
                     have_to.setdefault(person, set()).add(able[0])
+    happening = {index for theirs in have_to.values() for index in theirs}
+    for (option, capability), of in world.requires.items():
+        if of == "one" and position[option] in happening:
+            has = [person.id for person in file.persons if (person.id, capability) in world.has]
+            if len(has) == 1:
+                have_to.setdefault(has[0], set()).add(position[option])
     return have_to
 
 
@@ -474,7 +483,7 @@ class _Search:
         self.used = [model.new_bool_var(f"used {option.id}") for option in file.options]
         self.left_out: set[tuple[int, int]] = set()  # each PERSON and OPTION that is ruled out
         meets = self._hold_to_the_wants()
-        supplies = self._could_supply()
+        supplies = self._could_supply(meets)
         for index, option in enumerate(file.options):
             model.add_max_equality(self.used[index], [0, *(row[index] for row in self.takes)])
             for number, person in enumerate(file.persons):
@@ -495,17 +504,34 @@ class _Search:
         self._hold_to_the_requirements()
         self._hold_to_the_rights()
 
-    def _could_supply(self) -> set[tuple[int, int]]:
-        """Each PERSON and OPTION where the PERSON has a CAPABILITY it requires of one PERSON."""
+    def _could_supply(self, meets: Sequence[set[int]]) -> set[tuple[int, int]]:
+        """Each PERSON and OPTION where the PERSON may have to come to meet a requirement.
+
+        The OPTION requires a CAPABILITY of one PERSON, and the PERSON has it. Two cases are
+        left out. Nobody comes where nobody else has a reason to be there: a LOCK, or a must
+        that the OPTION could meet, as ``meets`` says for each PERSON. Without them the OPTION
+        need not happen at all. And nobody comes for a CAPABILITY that a PERSON whom a LOCK
+        names in the OPTION has: that requirement is met whenever the OPTION happens.
+        """
         file, world = self.file, self.world
         position = {option.id: index for index, option in enumerate(file.options)}
-        return {
-            (number, position[option])
-            for (option, capability), of in world.requires.items()
-            if of == "one"
-            for number, person in enumerate(file.persons)
-            if (person.id, capability) in world.has
-        }
+        locked: dict[str, set[str]] = {}
+        for lock in file.locks:
+            locked.setdefault(lock.option, set()).update(lock.persons)
+        supplies: set[tuple[int, int]] = set()
+        for (option, capability), of in world.requires.items():
+            index = position[option]
+            named = locked.get(option, set())
+            if of != "one" or not (named or any(index in theirs for theirs in meets)):
+                continue
+            if any((person, capability) in world.has for person in named):
+                continue
+            supplies.update(
+                (number, index)
+                for number, person in enumerate(file.persons)
+                if (person.id, capability) in world.has
+            )
+        return supplies
 
     def _hold_to_the_requirements(self) -> None:
         """Each requirement of an OPTION is met by the PERSONs who take part in it.
