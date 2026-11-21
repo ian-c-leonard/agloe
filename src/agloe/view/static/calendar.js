@@ -12,7 +12,9 @@
 //
 // Each step names the FACTs and DECISIONs of the FILE that are about it. A report on a TRIP that
 // cannot work names the FACTs, WANTs and DECISIONs that rule out every plan. So the calendar
-// marks the steps that the report is about, and the start and the end of the TRIP likewise.
+// marks the steps that the report is about, and the start and the end of the TRIP likewise. A
+// report on a TRIP that depends on what the FILE does not say names, for each case in which
+// the trip works, what that case needs. So the calendar marks the steps whose OPTION it names.
 //
 // Nothing here judges a TRIP, nothing here reads a FILE, and nothing here works out which day a
 // moment is on: the view says. This lays out what it is sent: how far down its day a part
@@ -157,15 +159,31 @@ function saysOf(trip, timed) {
  * `warnings` holds, at the place of each step, what the report in words warns of there.
  * `warns` on a mark holds those words, and `warned` on the calendar says that a mark has some.
  * Each mark also holds the `records` that are about its step, and each bound its `record`.
+ *
+ * `stated` holds the words of the report for the cases in which it says the trip works: the
+ * line of each case, at the place of the case, and the heading over them where it lists
+ * several. `cases` on a mark holds the cases that name the OPTION of its step among what the
+ * FILE does not say, as their places in `missing` of the report. `asks` holds what the report
+ * says of them, and `asked` on the calendar says that a mark has some.
  */
-export function calendar(trip, report = null, warnings = []) {
-  const none = { says: "", zone: null, itinerary: false, clash: false, warned: false, persons: [], hours: { from: 9 * 60, to: 17 * 60 }, days: [], untimed: [] };
+export function calendar(trip, report = null, warnings = [], stated = null) {
+  const none = { says: "", zone: null, itinerary: false, clash: false, warned: false, asked: false, persons: [], hours: { from: 9 * 60, to: 17 * 60 }, days: [], untimed: [] };
   if (trip === null) return { ...none, says: "There is no calendar of this TRIP: the view could not make one." };
   const column = new Map(trip.persons.map((person, n) => [person.id, n]));
   const place = new Map(trip.places.map((each) => [each.id, each.name]));
   const names = (columns) => listed(columns.map((n) => trip.persons[n].name));
   // The FACTs, WANTs and DECISIONs that the report names as ruling out every plan.
   const ruled = new Set(report !== null && report.answer === "INFEASIBLE" && Array.isArray(report.conflict) ? report.conflict.filter((id) => typeof id === "string") : []);
+  // The cases in which the report says the trip works, where it depends on what the FILE does
+  // not say: for each case, the things that it needs. A list that is not of that shape is none.
+  const missing = report !== null && report.answer === "UNDETERMINED" ? report.missing : null;
+  const isNeed = (need) => need !== null && typeof need === "object";
+  const needed = Array.isArray(missing) && missing.every((needs) => Array.isArray(needs) && needs.every(isNeed)) ? missing : [];
+  // The OPTIONs that one of those things names: its own, and each that somebody has to buy a place for.
+  const namedBy = (need) => [need.option, ...(Array.isArray(need.buys) ? need.buys.filter(isNeed).map((buy) => buy.option) : [])];
+  // The words of the report for the cases, where the page has them.
+  const words = stated !== null && typeof stated === "object" && Array.isArray(stated.cases) ? stated.cases : [];
+  const heading = stated !== null && typeof stated === "object" && typeof stated.heading === "string" ? stated.heading : null;
 
   // ---- each step in words
   const steps = trip.steps.map((step, n) => {
@@ -179,6 +197,14 @@ export function calendar(trip, report = null, warnings = []) {
       get finds() {
         return this.clash.length ? `The report names ${listed(this.clash)} among what rules out every plan.` : null;
       },
+      // The cases that name the OPTION of this step, and what the report says of each.
+      cases: step.option === null ? [] : needed.flatMap((needs, at) => (needs.some((need) => namedBy(need).includes(step.option)) ? [at] : [])),
+      get asks() {
+        const said = this.cases.map((at) => (typeof words[at] === "string" ? words[at] : null));
+        if (!said.length) return [];
+        if (said.includes(null)) return ["The report names this OPTION in what the FILE does not say."];
+        return heading === null ? said : [heading, ...said];
+      },
       kind: step.option === null ? "way" : "option",
       name: step.name ?? "another WAY",
       who: names(columns),
@@ -188,7 +214,7 @@ export function calendar(trip, report = null, warnings = []) {
       stateOf: (at) => (step.option === null ? "way" : locked.has(at) ? "locked" : "planned"),
     };
   });
-  const untimed = steps.filter((step) => step.when === null).map((step) => ({ name: step.name, who: step.who, records: step.records, clash: step.clash, finds: step.finds }));
+  const untimed = steps.filter((step) => step.when === null).map((step) => ({ name: step.name, who: step.who, records: step.records, clash: step.clash, finds: step.finds, cases: step.cases, asks: step.asks, step: step.n }));
   // What the report names, and how much of it is about what the calendar shows: the steps
   // on its days, the steps with no time that it names beside them, and the times of the TRIP.
   const marked = new Set(steps.filter((step) => step.parts.length || step.when === null).flatMap((step) => step.clash));
@@ -198,8 +224,12 @@ export function calendar(trip, report = null, warnings = []) {
   const warned = steps.some((step) => step.warns.length && step.parts.length);
   const after = steps.filter((step) => step.warns.length && !step.parts.length).length;
   const warns = (warned ? " A yellow edge marks each step shown at which the report warns of something." : "") + (after ? ` The report also warns of something at ${after === 1 ? "1 step" : `${after} steps`} after the days shown.` : "");
-  const says = saysOf(trip, steps.length - untimed.length) + rulesOut(ruled.size, marked.size) + warns;
-  if (!trip.days.length) return { ...none, says, zone: trip.zone, itinerary: trip.itinerary, persons: trip.persons, untimed };
+  // A step that the report names in what the FILE does not say is marked where the calendar
+  // shows it: on its days, or among the steps with no time.
+  const asked = steps.some((step) => step.cases.length && (step.parts.length || step.when === null));
+  const asks = !needed.length ? "" : asked ? " A yellow edge marks each step shown that the report says the FILE does not say enough about." : " What the report says the FILE does not say is not about a step shown here.";
+  const says = saysOf(trip, steps.length - untimed.length) + rulesOut(ruled.size, marked.size) + warns + asks;
+  if (!trip.days.length) return { ...none, says, zone: trip.zone, itinerary: trip.itinerary, asked, persons: trip.persons, untimed };
 
   // ---- the hours that every day shows: from the earliest start of a step on any day to the
   // latest end of a part of one. A step that runs past midnight counts to midnight on the day
@@ -280,6 +310,8 @@ export function calendar(trip, report = null, warnings = []) {
           finds: step.finds,
           records: step.records,
           warns: step.warns,
+          cases: step.cases,
+          asks: step.asks,
         });
       }
     }
@@ -292,5 +324,5 @@ export function calendar(trip, report = null, warnings = []) {
     const time = clock(bound, { at: trip.days[bound.day].date });
     days[bound.day].bounds.push({ says: `The TRIP ${word} at ${time}`, edge: word, top: down(bound.second), clash: ruled.has(bound.record), record: bound.record });
   }
-  return { says, zone: trip.zone, itinerary: trip.itinerary, clash: marked.size > 0, warned, persons: trip.persons, hours: { from: from / 60, to: to / 60 }, days, untimed };
+  return { says, zone: trip.zone, itinerary: trip.itinerary, clash: marked.size > 0, warned, asked, persons: trip.persons, hours: { from: from / 60, to: to / 60 }, days, untimed };
 }

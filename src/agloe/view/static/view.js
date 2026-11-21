@@ -37,12 +37,21 @@ function hourName(minute) {
 /** What a mark says to a pointer that rests on it. */
 function wordsOf(mark) {
   const when = mark.late ? `${mark.when}, ${mark.late}` : mark.when;
-  return [mark.name, when, mark.where, mark.who, mark.lock ?? "A WAY in the plan of the report.", ...(mark.finds ? [mark.finds] : []), ...mark.warns].join("\n");
+  return [mark.name, when, mark.where, mark.who, mark.lock ?? "A WAY in the plan of the report.", ...(mark.finds ? [mark.finds] : []), ...mark.warns, ...mark.asks].join("\n");
 }
 
 /** How a mark looks, on the calendar and on the strip: by what the view and the report say of its step. */
 function looksOf(mark) {
-  return `${mark.state}${mark.begins ? "" : " goes-on"}${mark.ends ? "" : " no-end"}${mark.brief ? " brief" : ""}${mark.clash.length ? " clash" : ""}${mark.warns.length ? " warned" : ""}`;
+  return `${mark.state}${mark.begins ? "" : " goes-on"}${mark.ends ? "" : " no-end"}${mark.brief ? " brief" : ""}${mark.clash.length ? " clash" : ""}${mark.warns.length ? " warned" : ""}${mark.asks.length ? " asked" : ""}`;
+}
+
+/**
+ * What a step is tied to in the report: the records that are about it, and the cases in which
+ * the report says the trip works that name it. A case is tied like a record, under a name that
+ * no record can have.
+ */
+function tiesOf(step) {
+  return [...step.records, ...step.cases.map((at) => `case:${at}`)];
 }
 
 /**
@@ -52,7 +61,7 @@ function looksOf(mark) {
  */
 function put(body, mark, index, people, open, ticks) {
   const box = made("div", `mark ${looksOf(mark)}`);
-  Object.assign(box.dataset, { step: mark.step, records: mark.records.join(" "), mark: index });
+  Object.assign(box.dataset, { step: mark.step, records: tiesOf(mark).join(" "), mark: index });
   const columns = mark.last - mark.first + 1;
   const when = mark.late ? `${mark.when}, ${mark.late}` : mark.when;
   // A mark is never smaller than the eye can find, and never outside the hours of its column.
@@ -157,11 +166,13 @@ function draw(laid) {
   part("calendar-key").classList.toggle("only-locks", !laid.itinerary);
   part("calendar-key").classList.toggle("with-clash", laid.clash);
   part("calendar-key").classList.toggle("with-warnings", laid.warned);
+  part("calendar-key").classList.toggle("with-asks", laid.asked);
   part("calendar-says").textContent = laid.says;
   // The steps with no time, each marked where the report names what is about it.
   const untimed = laid.untimed.flatMap((step, n) => {
-    const name = Object.assign(made("span", step.clash.length ? "clash" : "", `${step.name} (${step.who})`), { title: step.finds ?? "" });
-    name.dataset.records = step.records.join(" ");
+    const name = Object.assign(made("span", `${step.clash.length ? "clash" : ""}${step.asks.length ? " asked" : ""}`, `${step.name} (${step.who})`), { title: [...(step.finds ? [step.finds] : []), ...step.asks].join("\n") });
+    // It is a step of the TRIP: pointing at it lights up that step, and no other.
+    Object.assign(name.dataset, { step: step.step, records: tiesOf(step).join(" ") });
     return n ? [", ", name] : [name];
   });
   part("calendar-untimed").replaceChildren("The FILE gives no time for these LOCKed OPTIONs: ", ...untimed, ".");
@@ -178,13 +189,15 @@ function bar(mark, people) {
   // A mark for several has the edges of each of them: it is dashed where one of them does not
   // start there, and fades where one of them may not end there.
   const any = (holds) => mark.of.some(holds);
-  const looks = several ? `several${any((each) => !each.begins) ? " goes-on" : ""}${any((each) => !each.ends) ? " no-end" : ""}${any((each) => each.clash.length) ? " clash" : ""}${any((each) => each.warns.length) ? " warned" : ""}` : looksOf(one);
+  const looks = several ? `several${any((each) => !each.begins) ? " goes-on" : ""}${any((each) => !each.ends) ? " no-end" : ""}${any((each) => each.clash.length) ? " clash" : ""}${any((each) => each.warns.length) ? " warned" : ""}${any((each) => each.asks.length) ? " asked" : ""}` : looksOf(one);
   const box = made("div", `bar ${looks}${mark.small ? " small" : ""}`);
-  box.title = several ? [`${mark.of.length} steps too close together to show apart at this width:`, ...mark.of.map((each) => `${each.name}, ${each.late ? `${each.when}, ${each.late}` : each.when}`)].join("\n") : wordsOf(one);
+  // It names each of them, with its times and with what the report says of it.
+  const said = (each) => [`${each.name}, ${each.late ? `${each.when}, ${each.late}` : each.when}`, ...[...(each.finds ? [each.finds] : []), ...each.warns, ...each.asks].map((words) => `    ${words}`)];
+  box.title = several ? [`${mark.of.length} steps too close together to show apart at this width:`, ...mark.of.flatMap(said)].join("\n") : wordsOf(one);
   // A click goes to the first of the marks that it stands for.
   Object.assign(box.dataset, {
     step: [...new Set(mark.of.map((each) => each.step))].join(" "),
-    records: [...new Set(mark.of.flatMap((each) => each.records))].join(" "),
+    records: [...new Set(mark.of.flatMap(tiesOf))].join(" "),
     day: one.day,
     mark: one.index,
   });
@@ -269,6 +282,7 @@ function write(text, tied) {
     const words = made("span", line.warns ? "row warns" : "row", line.text);
     if (line.step !== null) words.dataset.step = line.step;
     if (line.record !== null) words.dataset.record = line.record;
+    if (line.case !== null) words.dataset.record = `case:${line.case}`;
     report.append(words, n + 1 < tied.length ? "\n" : "");
   });
 }
@@ -329,7 +343,7 @@ function show() {
   drawn = said.calendar.trip;
   let laid;
   try {
-    laid = lay(drawn, said.calendar.report, tied ? tie.warningsOf(tied) : []);
+    laid = lay(drawn, said.calendar.report, tied ? tie.warningsOf(tied) : [], tied ? tie.casesOf(tied) : []);
     draw(laid);
     lightAgain();
   } catch (problem) {

@@ -6,12 +6,13 @@
 //     TRIP came with, as JSON and in words, or null.
 import { readFileSync } from "node:fs";
 import { calendar } from "../src/agloe/view/static/calendar.js";
-import { lines, warningsOf } from "../src/agloe/view/static/lines.js";
+import { casesOf, lines, warningsOf } from "../src/agloe/view/static/lines.js";
 import { strip } from "../src/agloe/view/static/strip.js";
 
 const asked = JSON.parse(readFileSync(0, "utf8"));
 const made = asked.map(({ trip, report, text, wide }) => {
-  const laid = calendar(trip, report, text === null ? [] : warningsOf(lines(text, report, trip)));
+  const tied = text === null ? [] : lines(text, report, trip);
+  const laid = calendar(trip, report, warningsOf(tied), casesOf(tied));
   return { calendar: laid, strip: strip(laid, wide) };
 });
 process.stdout.write(JSON.stringify(made));
