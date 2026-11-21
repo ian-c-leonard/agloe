@@ -10,9 +10,9 @@
 //
 // Nothing here judges a TRIP. An answer is shown only once the COMPILER has given it, and only
 // for the state of the FILE it was given on. A report that is still on the page after the FILE
-// has changed is marked as old, and so is the calendar of its TRIP.
+// has changed is marked as old, and so is everything else that the page shows of its TRIP.
 
-const OLD = "The calendar and the report below are on the FILE as it was before.";
+const OLD = "What the page shows below is on the FILE as it was before.";
 const seconds = (length) => `${length.toFixed(2)} s`;
 const none = { checking: false, answer: null, answered: null, problems: null, unreadable: null, unwritable: false, stopped: false, lost: false };
 

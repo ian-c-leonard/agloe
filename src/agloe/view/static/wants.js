@@ -13,19 +13,28 @@
 
 import { casesAbout, casesIn, findsOf, listed, ruledOut, saidOf } from "./named.js";
 
-/** For whom a WANT is a must, and for whom a must-not. */
-function holdsOf(want, name) {
+/**
+ * For whom a WANT is a must, and for whom a must-not. A WANT about where the TRIP ends says
+ * what it asks of each: another WANT can ask other PERSONs to end somewhere else.
+ */
+function holdsOf(want, name, place) {
   const said = [];
-  if (want.musts.length) said.push(`A must for ${listed(want.musts.map(name))}.`);
-  if (want.must_nots.length) said.push(`A must-not for ${listed(want.must_nots.map(name))}.`);
+  const ends = want.ends_at === null ? null : ` end the TRIP at ${place(want.ends_at)}.`;
+  if (want.musts.length) said.push(ends === null ? `A must for ${listed(want.musts.map(name))}.` : `${listed(want.musts.map(name))} must${ends}`);
+  if (want.must_nots.length) said.push(ends === null ? `A must-not for ${listed(want.must_nots.map(name))}.` : `${listed(want.must_nots.map(name))} must not${ends}`);
   return said.join(" ");
 }
 
-/** Whether the OPTIONs under a WANT are all that SATISFY it, as far as the FILE says. */
+/**
+ * Whether the OPTIONs under a WANT are all that SATISFY it, as far as the FILE says. It never
+ * says that an OPTION SATISFIES the WANT where the FILE names none that does.
+ */
 function wholeOf(want) {
   if (want.ends_at !== null) return null;
-  if (want.complete !== null) return want.options.length ? "The FILE states every OPTION that SATISFIES it." : "The FILE states every OPTION that SATISFIES it, and it names none.";
-  return want.options.length ? "Other OPTIONs may SATISFY it too: the FILE does not say that these are all." : "The FILE says of no OPTION whether it SATISFIES this WANT.";
+  const some = want.options.some((option) => option.degree > 0);
+  if (want.complete !== null) return some ? "The FILE states every OPTION that SATISFIES it." : "The FILE states every OPTION that SATISFIES it, and it names none.";
+  if (some) return "Other OPTIONs may SATISFY it too: the FILE does not say that these are all.";
+  return want.options.length ? "The FILE leaves open whether another OPTION SATISFIES this WANT." : "The FILE says of no OPTION whether it SATISFIES this WANT.";
 }
 
 /**
@@ -59,8 +68,8 @@ export function wants(trip, report = null, stated = null) {
   const shown = trip.wants.map((want) => ({
     id: want.id,
     name: want.name,
-    holds: holdsOf(want, name),
-    ends: want.ends_at === null ? null : `It is about where the TRIP ends: at ${place.get(want.ends_at)}. No OPTION delivers it.`,
+    holds: holdsOf(want, name, (id) => place.get(id)),
+    ends: want.ends_at === null ? null : "It is about the whole ITINERARY: no OPTION delivers it.",
     whole: wholeOf(want),
     // A WANT's own records: itself, and the FACT that the FILE states every OPTION for it.
     ...marked([want.id, ...(want.complete === null ? [] : [want.complete])], (need) => need.want === want.id, "The report names this WANT in what the FILE does not say."),
@@ -69,7 +78,8 @@ export function wants(trip, report = null, stated = null) {
       // In a plan, those who take part. With no plan, those whom a LOCK names.
       const takers = step < 0 ? [] : (trip.itinerary ? trip.steps[step].persons : trip.steps[step].locked).map(name);
       const none = trip.itinerary ? "Not in the plan." : "No LOCK names it.";
-      const some = trip.itinerary ? `In the plan: ${listed(takers)} ${takers.length === 1 ? "takes" : "take"} part.` : `A LOCK names ${listed(takers)}.`;
+      // One LOCK can name several PERSONs, and several LOCKs one each: the words fit both.
+      const some = trip.itinerary ? `In the plan: ${listed(takers)} ${takers.length === 1 ? "takes" : "take"} part.` : `${listed(takers)} ${takers.length === 1 ? "is" : "are each"} named by a LOCK.`;
       return {
         option: option.option,
         name: option.name,

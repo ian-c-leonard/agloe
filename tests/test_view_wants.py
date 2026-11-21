@@ -119,9 +119,57 @@ def test_a_want_says_for_whom_it_is_a_must_not() -> None:
 def test_a_want_about_where_the_trip_ends_says_so() -> None:
     (ending,) = wants_of("ending-in-denver/works")["wants"]
     assert ending["name"] == "ending the trip in Denver"
-    assert ending["holds"] == "A must for Alex and Sam."
-    assert ending["ends"] == "It is about where the TRIP ends: at Denver. No OPTION delivers it."
+    # It says what the WANT asks of its holders: another WANT can ask others to end elsewhere.
+    assert ending["holds"] == "Alex and Sam must end the TRIP at Denver."
+    assert ending["ends"] == "It is about the whole ITINERARY: no OPTION delivers it."
     assert (ending["whole"], ending["options"]) == (None, [])
+    # A must-not about where the TRIP ends.
+    sent = drawn(EXAMPLES / "ending-in-denver" / "works.json")
+    sent["wants"][0].update(musts=["alex"], must_nots=["sam"])
+    (shown,) = all_wants([sent])
+    assert shown["wants"][0]["holds"] == (
+        "Alex must end the TRIP at Denver. Sam must not end the TRIP at Denver."
+    )
+
+
+def test_a_want_says_whether_its_options_are_all_that_satisfy_it() -> None:
+    """What stands under the OPTIONs of a WANT never says more than the FILE does."""
+    sent = drawn(EXAMPLES / "a-must-not" / "works.json")
+    skydeck, lunch = sent["wants"][0]["options"]
+    assert (skydeck["degree"], lunch["degree"]) == (9, 0)
+    cases: list[tuple[list[dict[str, Any]], str | None, str]] = [
+        # An OPTION SATISFIES it: there may be others, unless the FILE states every one.
+        ([skydeck, lunch], None, NOT_ALL),
+        ([skydeck, lunch], "every-view", ALL),
+        # The FILE names only an OPTION that does not SATISFY it.
+        ([lunch], None, "The FILE leaves open whether another OPTION SATISFIES this WANT."),
+        (
+            [lunch],
+            "every-view",
+            "The FILE states every OPTION that SATISFIES it, and it names none.",
+        ),
+        # The FILE says nothing of any OPTION and this WANT.
+        ([], None, "The FILE says of no OPTION whether it SATISFIES this WANT."),
+        ([], "every-view", "The FILE states every OPTION that SATISFIES it, and it names none."),
+    ]
+    trips: list[Trip | None] = []
+    for options, complete, _ in cases:
+        other = json.loads(json.dumps(sent))
+        other["wants"][0].update(options=options, complete=complete)
+        trips.append(other)
+    for (_, _, expected), shown in zip(cases, all_wants(trips), strict=True):
+        assert shown["wants"][0]["whole"] == expected
+
+
+def test_each_person_whom_a_lock_names_is_named_so() -> None:
+    """Several LOCKs can name the PERSONs of one OPTION: the words fit one LOCK and several."""
+    (view,) = wants_of("a-must-not/cannot-work")["wants"]
+    assert view["options"][0]["takes"] == "Alex, Sam and Jo are each named by a LOCK."
+    (pizza,) = wants_of("a-must/depends-on-the-menu")["wants"]
+    assert [option["takes"] for option in pizza["options"]] == [
+        "No LOCK names it.",
+        "Alex is named by a LOCK.",
+    ]
 
 
 def test_the_wants_mark_what_the_report_names_as_ruling_out_every_plan() -> None:
@@ -150,7 +198,7 @@ def test_the_wants_mark_what_the_report_names_as_ruling_out_every_plan() -> None
     assert said(skydeck) == (
         "Skydeck visit",
         "SATISFIES it, 9 out of 10",
-        "A LOCK names Alex, Sam and Jo.",
+        "Alex, Sam and Jo are each named by a LOCK.",
         0,
     )
     assert skydeck["clash"] == ["skydeck-is-high-up"]

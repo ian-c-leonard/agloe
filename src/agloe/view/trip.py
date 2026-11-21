@@ -22,6 +22,10 @@ time is written as those clocks show it, such as 2027-05-15T14:00:00. Each time 
 offset from UTC where the report gives its times with theirs, and where the times sent are not
 all at one offset. The offset is written as the report writes it.
 
+Each name is sent as the report shows it. A PERSON, a PLACE, an OPTION, a WAY or a WANT whose
+name another of its kind has comes with its id, and a name that could be taken for something
+else comes in quotes. So the page tells two apart where the report does, in the same words.
+
 A day is sent as the stretch of it in which the clocks run on without a change. So most days
 are one stretch, from midnight to midnight. A day on which the clocks change is two, and each
 says its offset from UTC. Each step says which part of it lies in which stretch, from when to
@@ -30,14 +34,15 @@ show as one time of day are never drawn as one.
 """
 
 import re
-from collections.abc import Mapping
+from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import cast
 
 from agloe import report as reports
 from agloe.answers import Answer, Report
-from agloe.file import File, Unwritable, local
+from agloe.file import File, Option, Person, Place, Unwritable, Want, Way, local
 
 type Trip = dict[str, object]
 type _Shape = Mapping[str, type | tuple[type, ...]]
@@ -48,6 +53,7 @@ _AN_HOUR = 60 * 60
 _AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}")
 _DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _OFFSET = re.compile(r"UTC[+-][0-9]{1,2}(:[0-9]{2}(:[0-9]{2})?)?")
+_WITH_AN_ID = re.compile(r" \([a-z0-9]+(-[a-z0-9]+)*\)$")  # how a name ends when its id is shown
 _NONE = type(None)
 _NAMED: _Shape = {"id": str, "name": str}
 _TRIP: _Shape = {
@@ -136,7 +142,8 @@ def shown(file: File, report: Report) -> Trip | None:
     """
     planned = report.answer is Answer.FEASIBLE
     steps = _in_the_itinerary(file, report) if planned else _named_by_a_lock(file)
-    names = {each.id: each.name for each in (*file.options, *file.ways)}
+    names = _names((*file.options, *file.ways))
+    people, sites = _names(file.persons, "and"), _names(file.places)
     locked: dict[str, set[str]] = {}
     for lock in file.locks:
         locked.setdefault(lock.option, set()).update(lock.persons)
@@ -182,8 +189,8 @@ def shown(file: File, report: Report) -> Trip | None:
 
         return {
             "zone": file.zone,
-            "persons": [{"id": each.id, "name": each.name} for each in file.persons],
-            "places": [{"id": each.id, "name": each.name} for each in file.places],
+            "persons": [{"id": each.id, "name": people[each.id]} for each in file.persons],
+            "places": [{"id": each.id, "name": sites[each.id]} for each in file.places],
             "itinerary": planned,
             "days": [
                 {
@@ -224,13 +231,46 @@ def shown(file: File, report: Report) -> Trip | None:
                 }
                 for step in steps
             ],
-            "wants": _wants(file),
+            "wants": _wants(file, names),
         }
     except Unwritable:
         return None
 
 
-def _wants(file: File) -> list[Trip]:
+def _names(
+    records: Sequence[Person | Place | Option | Way | Want], joins: str | None = None
+) -> dict[str, str]:
+    """The name to show for each record, as the report shows it, so that no two show the same.
+
+    A record whose name another record has shows its id too. If two would still show the same,
+    every record shows its id. A name is in quotes where it could be taken for something else:
+    one with a comma, a colon, a semicolon or a quote mark, one that ends like a name with its
+    id, and one that holds the word ``joins``, which joins the list the names are for.
+
+    This is the rule of the report in words. A test holds the two together.
+    """
+
+    def quoted(name: str) -> str:
+        splits = any(mark in name for mark in ",:;") or (
+            joins is not None and joins in name.casefold().split()
+        )
+        if splits or '"' in name or _WITH_AN_ID.search(name):
+            return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        return name
+
+    shared = Counter(record.name for record in records)
+    shown = {
+        record.id: quoted(record.name)
+        if shared[record.name] == 1
+        else f"{quoted(record.name)} ({record.id})"
+        for record in records
+    }
+    if len(set(shown.values())) < len(shown):
+        return {record.id: f"{quoted(record.name)} ({record.id})" for record in records}
+    return shown
+
+
+def _wants(file: File, names: Mapping[str, str]) -> list[Trip]:
     """The WANTs of the FILE, in its order, each with what the FILE says of it.
 
     ``options`` holds each OPTION that a FACT says SATISFIES the WANT or does not, in the
@@ -239,13 +279,14 @@ def _wants(file: File) -> list[Trip]:
     the WANT, where it holds one.
     """
     wants: list[Trip] = []
+    called = _names(file.wants)
     for want in file.wants:
         complete = file.complete_for(want.id)
         stated = [(option, file.satisfies(option.id, want.id)) for option in file.options]
         wants.append(
             {
                 "id": want.id,
-                "name": want.name,
+                "name": called[want.id],
                 # The PERSONs come in the order of the FILE.
                 "musts": [each.id for each in file.persons if each.id in want.musts],
                 "must_nots": [each.id for each in file.persons if each.id in want.must_nots],
@@ -254,7 +295,7 @@ def _wants(file: File) -> list[Trip]:
                 "options": [
                     {
                         "option": option.id,
-                        "name": option.name,
+                        "name": names[option.id],
                         "degree": fact.degree,
                         "record": fact.id,
                     }
@@ -520,6 +561,7 @@ def _are_wants(wants: object, persons: frozenset[str], places: frozenset[str]) -
     """Whether these are the WANTs of such a TRIP, each with an id of its own.
 
     A WANT is a must for some of the PERSONs and a must-not for others, and for nobody both.
+    Somebody holds it.
     It names each OPTION once, with a DEGREE OF SATISFACTION from 0 to 10.
     """
     seen: set[str] = set()
@@ -534,7 +576,7 @@ def _are_wants(wants: object, persons: frozenset[str], places: frozenset[str]) -
         if (
             said["id"] in seen
             or not cast("str", said["name"]).strip()
-            or holders is None
+            or not holders
             or not holders <= persons
             or not (ends_at is None or ends_at in places)
         ):

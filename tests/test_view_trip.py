@@ -28,7 +28,7 @@ import pytest
 from agloe import compiler
 from agloe import report as reports
 from agloe.answers import Answer, Report
-from agloe.file import File, instant, read
+from agloe.file import File, instant, parse, read
 from agloe.reference import Step
 from agloe.view.trip import MOST_DAYS, holds, shown
 from tests.stories import (
@@ -445,6 +445,60 @@ def test_a_want_about_where_the_trip_ends_names_the_place() -> None:
         "complete": None,
         "options": [],
     }
+
+
+def test_names_are_sent_as_the_report_shows_them() -> None:
+    """Two PERSONs are called Alex, and two OPTIONs are called Skydeck visit.
+
+    The report shows the id with a name that another record of its kind has, so that a reader
+    can tell them apart. It puts a name in quotes where it could be taken for something else.
+    The page is sent each name as the report shows it.
+    """
+    content = json.loads((EXAMPLES / "a-must-not" / "works.json").read_text())
+    by_id = {each["id"]: each for kind in ("persons", "options", "wants") for each in content[kind]}
+    by_id["jo"]["name"] = "Alex"
+    by_id["lunch"]["name"] = "Skydeck visit"
+    by_id["sam"]["name"] = "Tom and Jerry"
+    by_id["view"]["name"] = "a view, from high up"
+    file = parse(json.dumps(content))
+    found = compiler.check(file)
+    assert found.answer is Answer.FEASIBLE
+    sent = sent_for(file, found)
+    assert [each["name"] for each in sent["persons"]] == [
+        "Alex (alex)",
+        '"Tom and Jerry"',
+        "Alex (jo)",
+    ]
+    assert [step["name"] for step in sent["steps"] if step["option"]] == [
+        "Skydeck visit (skydeck)",
+        "Skydeck visit (lunch)",
+    ]
+    (view,) = sent["wants"]
+    assert view["name"] == '"a view, from high up"'
+    assert [each["name"] for each in view["options"]] == [
+        "Skydeck visit (skydeck)",
+        "Skydeck visit (lunch)",
+    ]
+    # These are the report's own names: each is in the report in words.
+    words = reports.as_text(file, found)
+    shown = [each["name"] for each in sent["persons"]] + [view["name"]]
+    shown += [each["name"] for each in view["options"]]
+    for name in shown:
+        assert name in words, name
+    assert holds(sent)
+    # A name that ends like a name with its id is in quotes, so it is not taken for one.
+    by_id["sam"]["name"] = "Alex (jo)"
+    file = parse(json.dumps(content))
+    found = compiler.check(file)
+    sent = sent_for(file, found)
+    assert [each["name"] for each in sent["persons"]] == [
+        "Alex (alex)",
+        '"Alex (jo)"',
+        "Alex (jo)",
+    ]
+    words = reports.as_text(file, found)
+    for each in sent["persons"]:
+        assert each["name"] in words, each["name"]
 
 
 def test_a_trip_with_no_itinerary_is_sent_with_the_options_that_a_lock_names() -> None:
@@ -1211,6 +1265,7 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "a want that is a must for a person the trip does not have": _want(musts=["jo"]),
     "a want that names a person twice": _want(musts=["alex", "alex"]),
     "a want that is a must and a must-not for one person": _want(must_nots=["alex"]),
+    "a want that is a must or a must-not for nobody": _want(musts=[], must_nots=[]),
     "a want whose musts are no list": _want(musts="alex"),
     "a want that ends at a place the trip does not have": _want(ends_at="denver"),
     "a want whose complete set is no id": _want(complete=7),

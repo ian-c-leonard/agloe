@@ -907,7 +907,8 @@ def test_the_page_marks_a_report_on_the_file_as_it_was() -> None:
     # The calendar on the page is the one of that report, and it is marked with it.
     kept = {"trip": first[-1]["trip"], "report": first[-1]["json"]}
     assert changed["calendar"] == answered["calendar"] == kept
-    assert "calendar" in changed["note"]
+    # The page says so of all that it still shows of that FILE, and names no part of it.
+    assert changed["note"].endswith("What the page shows below is on the FILE as it was before.")
     assert reported["line"] == "INFEASIBLE: this trip cannot work."
     assert reported["old"] is False
     assert reported["calendar"] == {"trip": second[-1]["trip"], "report": second[-1]["json"]}
