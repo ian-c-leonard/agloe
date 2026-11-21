@@ -100,7 +100,7 @@ def a_want_held_both_ways(count: int) -> File:
     wants = [must("spice", "alex", never=["sam"])]
     wants += [ends_at("a", "sam", id="end-at-a"), ends_at("b", "sam", id="end-at-b")]
     options = [stays(name, "a") for name in names]
-    return trip(["alex", "sam"], ["a", "b"], options, facts, [], wants=wants, tickets=True)
+    return trip(["alex", "sam"], ["a", "b"], options, facts, [], wants=wants, rights=True)
 
 
 def solves_counted(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, bool]]:
@@ -166,7 +166,7 @@ def test_a_fact_that_says_what_the_best_case_takes_anyway_costs_no_second_solve(
     facts = [any_time(name) for name in names[:6]] + [lasts(name, "PT1M") for name in names]
     decisions = [trip_starts(10), trip_ends(10, 7), *(lock(name, "sam") for name in names)]
     options = [stays(name, "a") for name in names]
-    file = trip(["sam"], ["a"], options, facts, decisions, tickets=True)
+    file = trip(["sam"], ["a"], options, facts, decisions, rights=True)
     solves = solves_counted(monkeypatch)
     found = compiler.check(file)
     assert found.answer is Answer.INFEASIBLE
@@ -292,7 +292,7 @@ def test_one_check_asks_the_solver_once_about_one_model(
     works in the best case. The solver answers that once.
     """
     facts = [starts_at("stay", 9), lasts("stay", "PT25M")]
-    file = trip(["sam"], ["a"], [stays("stay", "a")], facts, [lock("stay", "sam")], tickets=True)
+    file = trip(["sam"], ["a"], [stays("stay", "a")], facts, [lock("stay", "sam")], rights=True)
     solves = solves_counted(monkeypatch)
     found = compiler.check(file)
     assert found.answer is Answer.UNDETERMINED
@@ -331,7 +331,7 @@ def test_rides_that_two_persons_are_locked_into_are_asked_about_one_lock_at_a_ti
     rides = [moves(f"ride-{number}", *("ab" if number % 2 == 0 else "ba")) for number in range(18)]
     wants = [ends_at("a", "sam", id="end-at-a"), ends_at("b", "sam", id="end-at-b")]
     locks = [lock(ride["id"], "alex", "sam") for ride in reversed(rides)]
-    file = trip(["alex", "sam"], ["a", "b"], rides, [], locks, wants=wants, tickets=True)
+    file = trip(["alex", "sam"], ["a", "b"], rides, [], locks, wants=wants, rights=True)
     counted, asked = counting(compiler.can_work)
     found = by_the_solver(file, counted)
     assert found.conflict == ("end-at-a", "end-at-b")

@@ -71,7 +71,7 @@ def a_boat_tour(*more: Document, locked: Sequence[str] = ("alex", "sam")) -> Fil
     """A boat tour at 10:00 am that needs a right. A LOCK names Alex and Sam."""
     decisions = [lock("tour", *locked)] if locked else []
     facts = [*at_ten("tour"), needs_right("tour"), *more]
-    return trip(EVERYONE, ["dock"], [stays("tour", "dock")], facts, decisions, tickets=True)
+    return trip(EVERYONE, ["dock"], [stays("tour", "dock")], facts, decisions, rights=True)
 
 
 TEN = Money(Decimal("10.00"), "USD")
@@ -169,7 +169,7 @@ def test_an_offer_for_another_option_is_not_one_for_this_option() -> None:
     options = [stays("tour", "dock"), stays("cruise", "dock")]
     facts = [offer("cruise", 1), every_right("tour", "cruise-offer")]
     with pytest.raises(FileError, match="/facts/1: cruise-offer is not an OFFER for tour"):
-        trip(["alex"], ["dock"], options, facts, [], tickets=True)
+        trip(["alex"], ["dock"], options, facts, [], rights=True)
 
 
 # ------------------------------- The CONSTRAINT -------------------------------
@@ -195,7 +195,7 @@ def test_the_places_of_two_offers_add_up() -> None:
 def test_a_place_is_for_its_own_option_only() -> None:
     options = [stays("tour", "dock"), stays("cruise", "dock")]
     facts = [*at_ten("tour"), needs_right("tour"), needs_right("cruise"), offer("cruise", 3)]
-    file = trip(["alex"], ["dock"], options, facts, [], tickets=True)
+    file = trip(["alex"], ["dock"], options, facts, [], rights=True)
     left_out = [Broken(Constraint.RIGHT, "tour", ("alex",))]
     assert broken(file, worst_case(file), on_the_tour("alex")) == left_out
 
@@ -291,7 +291,7 @@ def test_a_right_has_to_be_bought_only_if_the_option_needs_one() -> None:
     """Nobody knows whether the tour needs a right. The plan holds either way."""
     facts = [*at_ten("tour"), offer("tour", 2)]
     locks = [lock("tour", "alex", "sam")]
-    file = trip(EVERYONE, ["dock"], [stays("tour", "dock")], facts, locks, tickets=True)
+    file = trip(EVERYONE, ["dock"], [stays("tour", "dock")], facts, locks, rights=True)
     found = checked(file)
     assert found.answer is Answer.FEASIBLE
     assert found.relies_on == (*TIMES, "tour-offer", "lock-tour")
@@ -307,7 +307,7 @@ def test_a_right_has_to_be_bought_only_if_the_option_needs_one() -> None:
 def test_an_option_that_needs_no_right_takes_no_place() -> None:
     facts = [*at_ten("tour"), needs_no_right("tour"), offer("tour", 2)]
     locks = [lock("tour", "alex", "sam")]
-    file = trip(EVERYONE, ["dock"], [stays("tour", "dock")], facts, locks, tickets=True)
+    file = trip(EVERYONE, ["dock"], [stays("tour", "dock")], facts, locks, rights=True)
     found = checked(file)
     assert found.rights == ()
     assert found.relies_on == (*TIMES, "tour-open", "lock-tour")
@@ -329,7 +329,7 @@ def two_views(deck: Document | None = None, tower: Document | None = None) -> Fi
     facts += [offer("deck", 1), booking("tower", "alex")]
     wants = [must("view", "alex")]
     return trip(
-        ["alex"], ["loop"], options, facts, [lock("lunch", "alex")], wants=wants, tickets=True
+        ["alex"], ["loop"], options, facts, [lock("lunch", "alex")], wants=wants, rights=True
     )
 
 
@@ -378,7 +378,7 @@ def test_a_report_can_give_both_warnings() -> None:
     facts = [starts_at("swim", 9), lasts_between("swim", "PT30M", "PT2H"), cutoff("swim", "PT0S")]
     facts += [*at_ten("tour"), needs_no_right("swim"), needs_right("tour"), offer("tour", 1)]
     locks = [lock("swim", "alex"), lock("tour", "alex")]
-    file = trip(["alex"], ["dock"], options, facts, locks, tickets=True)
+    file = trip(["alex"], ["dock"], options, facts, locks, rights=True)
     found = checked(file)
     assert found.robust is False
     assert found.rights == (bought("tour", "alex", "tour-offer"),)
@@ -433,7 +433,7 @@ def test_each_case_says_everything_its_set_holds() -> None:
     """
     facts = [starts_at("tour", 10), cutoff("tour", "PT0S"), needs_right("tour"), offer("tour", 1)]
     decisions = [lock("tour", "alex", "sam"), trip_ends(11)]
-    file = trip(EVERYONE, ["dock"], [stays("tour", "dock")], facts, decisions, tickets=True)
+    file = trip(EVERYONE, ["dock"], [stays("tour", "dock")], facts, decisions, rights=True)
     length = Unknown("duration", "tour")
     assert asked(checked(file)) == [[length, right("tour", "alex")], [length, right("tour", "sam")]]
     more = "in addition to the 1 place on OFFER"
@@ -457,7 +457,7 @@ def test_a_shortage_among_many_locked_persons_takes_few_searches(
     idle = [f"idle-{number}" for number in range(14)]
     facts = [*at_ten("tour"), needs_right("tour"), offer("tour", 1)]
     options = [stays("tour", "dock"), stays("swim", "dock")]
-    file = trip([*people, *idle], ["dock"], options, facts, [lock("tour", *people)], tickets=True)
+    file = trip([*people, *idle], ["dock"], options, facts, [lock("tour", *people)], rights=True)
     calls = 0
     solver = compiler.works
 
@@ -635,7 +635,7 @@ def test_each_way_to_pick_the_persons_who_need_a_right_is_a_case() -> None:
     people = ["alex", "sam", "jo", "pat"]
     facts = [*at_ten("tour"), needs_right("tour"), offer("tour", 2)]
     file = trip(
-        people, ["dock"], [stays("tour", "dock")], facts, [lock("tour", *people)], tickets=True
+        people, ["dock"], [stays("tour", "dock")], facts, [lock("tour", *people)], rights=True
     )
     pairs = [[right("tour", one), right("tour", other)] for one, other in combinations(people, 2)]
     assert asked(checked(file)) == pairs
@@ -651,7 +651,7 @@ def test_a_lock_asks_that_its_option_needs_no_right_only_where_the_places_run_ou
     def tour_with(places: int) -> File:
         facts = [*at_ten("tour"), offer("tour", places)]
         locks = [lock("tour", "alex", "sam"), {"id": "lock-jo", "lock": "tour", "persons": ["jo"]}]
-        return trip(EVERYONE, ["dock"], [stays("tour", "dock")], facts, locks, tickets=True)
+        return trip(EVERYONE, ["dock"], [stays("tour", "dock")], facts, locks, rights=True)
 
     free = Unknown("needs no right", "tour")
     assert answers._asked_by_a_lock(tour_with(3)) == (frozenset(), [])  # pyright: ignore[reportPrivateUsage]
@@ -689,7 +689,7 @@ def two_tours_with_offers(rng: Random) -> File:
             facts.append(every_right(option, *offers))
         if rng.random() < 0.8:
             decisions.append(lock(option, *rng.sample(persons, rng.randrange(1, len(persons) + 1))))
-    return trip(persons, ["dock"], options, facts, decisions, tickets=True)
+    return trip(persons, ["dock"], options, facts, decisions, rights=True)
 
 
 def test_the_three_answers_hold_for_every_way_rights_could_turn_out_with_offers() -> None:
