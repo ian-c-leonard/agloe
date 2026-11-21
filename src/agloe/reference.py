@@ -761,9 +761,10 @@ def way_to_pay(
     the FILE's order: the first that still fits, and that the purchases after it can follow.
     A purchase with no pair left sends the one before it on to its next pair.
 
-    Before a purchase takes a pair, the search looks at the purchases after it: see
-    ``_can_follow``. A pair that they cannot follow is passed over at once. The search would
-    give it up anyway, after trying everything behind it, so the way to pay is the same.
+    Once the search has had to go back, it looks at the purchases after a pair before it
+    takes the pair: see ``_can_follow``. A pair that they cannot follow is passed over at
+    once. The search would give it up anyway, after trying everything behind it, so the way
+    to pay is the same. Where the first pairs all fit, nothing is looked at.
     """
     buyers: list[tuple[str, str]] = []
     for option, persons in taking_part.items():
@@ -795,6 +796,7 @@ def way_to_pay(
     left = {offer.id: offer.places for option in taking_part for offer in file.offers(option)}
     picked: list[int] = []
     start = 0
+    looks_ahead = False
     while len(picked) < len(buyers):
         able = pairs[len(picked)]
         found = None
@@ -805,7 +807,7 @@ def way_to_pay(
             left[offer] -= 1
             if key is not None:
                 room[key] -= units
-            if _can_follow(pairs, len(picked) + 1, left, room):
+            if not looks_ahead or _can_follow(pairs, len(picked) + 1, left, room):
                 found = number
                 break
             left[offer] += 1
@@ -814,6 +816,7 @@ def way_to_pay(
         if found is None:
             if not picked:
                 return None
+            looks_ahead = True
             start = picked.pop() + 1
             offer, _, key, units = pairs[len(picked)][start - 1]
             left[offer] += 1
