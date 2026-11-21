@@ -1191,8 +1191,8 @@ def looks_ahead_counted(monkeypatch: pytest.MonkeyPatch, skip_nothing: bool = Fa
         looks.append(said)
         return said
 
-    def never_the_same(*given: object) -> tuple[int, tuple[int, ...], tuple[int, ...]]:
-        return len(looks), (len(seen),), (seen.append(None) or 0,)
+    def never_the_same(*given: object) -> tuple[tuple[int, ...], tuple[int, ...]]:
+        return (len(seen),), (seen.append(None) or 0,)
 
     seen: list[None] = []
     monkeypatch.setattr(reference, "_can_follow", counted)

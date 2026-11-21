@@ -815,7 +815,7 @@ def way_to_pay(
                 room[key] -= units
             ahead = len(picked) + 1
             if not looks_ahead or (
-                _tried(ahead, left, room) not in no_way and _can_follow(pairs, ahead, left, room)
+                _tried(left, room) not in no_way and _can_follow(pairs, ahead, left, room)
             ):
                 found = number
                 break
@@ -827,7 +827,7 @@ def way_to_pay(
                 return None
             # Every pair of this purchase has been tried from here, now or before the search
             # last came back to it.
-            no_way.add(_tried(len(picked), left, room))
+            no_way.add(_tried(left, room))
             looks_ahead = True
             start = picked.pop() + 1
             offer, _, key, units = pairs[len(picked)][start - 1]
@@ -843,17 +843,18 @@ def way_to_pay(
     }
 
 
-type _Tried = tuple[int, tuple[int, ...], tuple[int, ...]]
+type _Tried = tuple[tuple[int, ...], tuple[int, ...]]
 
 
-def _tried(first: int, left: Mapping[str, int], room: Mapping[tuple[str, str], int]) -> _Tried:
-    """What decides whether the purchases from this one on have a way to pay.
+def _tried(left: Mapping[str, int], room: Mapping[tuple[str, str], int]) -> _Tried:
+    """What decides whether the purchases still to come have a way to pay.
 
-    It is the purchases themselves, the places each OFFER still has and the room each cap
-    still has. Which pairs the purchases before them took plays no part beyond that. So the
-    search for the rest goes the same way each time these three are the same.
+    It is the places each OFFER still has and the room each cap still has. Each purchase
+    takes one place, so the places left also say how many purchases are behind, and which
+    are still to come. Which pairs the purchases behind took plays no part beyond that. So
+    the search for the rest goes the same way each time the two are the same.
     """
-    return first, tuple(left.values()), tuple(room.values())
+    return tuple(left.values()), tuple(room.values())
 
 
 def _can_follow(
