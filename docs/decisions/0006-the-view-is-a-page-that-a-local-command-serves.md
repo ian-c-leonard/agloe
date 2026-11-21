@@ -1,0 +1,39 @@
+# 0006. The view is a page that a local command serves
+
+- **Status:** Accepted
+- **Date:** 2026-11-20
+- **Decided by:** Ian Leonard
+
+## Context
+
+The COMPILER's report is made for an agent that plans a TRIP. A person needs to see the same TRIP: who is where and when, what is decided, what is still open, and what the report says. A person and their agent work on one FILE, so what the person sees has to follow the FILE as the agent changes it. Whatever it says about whether a TRIP works has to be Agloe's own answer.
+
+The COMPILER answers a weekend for four PERSONs in about a second where the TRIP works. Its solver has no build for browsers. The reference checker runs in a browser, and it is too slow for a weekend.
+
+## Options considered
+
+1. **A page that runs the reference checker in the browser,** as the home page does. Only small TRIPs get an answer.
+2. **A service on the internet that runs the COMPILER.** Anyone with a browser can use it. It needs a host to run and to protect, and the FILE leaves the person's machine.
+3. **A page that a command serves on the person's own machine.** The COMPILER runs beside the FILE. It works for whoever has Agloe installed.
+
+## Decision
+
+The view is a page that the command `agloe view FILE` serves on the person's own machine.
+
+- The command watches the FILE. A state of the FILE is its content at one look, and each new state gets a number, its revision. For each state the command tells the page that there is a FILE to check, runs the COMPILER on that content in a process of its own, and sends the answer as soon as it is proved, then the report in words and as JSON. A check that is still running when the FILE changes again is ended.
+- Nothing in the view judges a TRIP. Every mark on the page comes from the FILE or from the COMPILER's report on that FILE.
+- Everything that the page is sent names the revision it is about. The page shows no answer on a state of the FILE until the COMPILER has answered on that state. While a check runs, the page marks what it still shows of the report on the FILE as it was before.
+- A FILE with no report gets the reason instead. The page shows the problems that the format names, or says that the FILE cannot be read, or that a check stopped before its report came. It says each of these in its own words, and never as an answer.
+- The command serves the person's own machine only, and the page asks no other host for anything.
+- The view lives in [`src/agloe/view/`](../../src/agloe/view/), so it is installed with Agloe: the program that serves, and the page as files beside it. The page is plain HTML, CSS and JavaScript, with nothing to build.
+- The view has its own part of the [roadmap](../ROADMAP.md). It is built alongside the releases and does not delay them.
+
+## Consequences
+
+- A person needs Agloe on their machine to use the view. The view is checked on Linux and on macOS, as the rest of Agloe is. A view for people without it needs the first or the second option, by a decision of its own.
+- The view shows what a report holds. A report shows an ITINERARY that the travelers can use only for a FEASIBLE TRIP.
+- A check that takes long shows its answer first, and the page says that the report is on its way.
+- The words the page shows for each state are worked out in [`src/agloe/view/static/state.js`](../../src/agloe/view/static/state.js), which has no page in it. A test runs it with Node on what the command sends for the examples.
+- The tests start the view on an example, change the FILE, and read what a page is sent. They also stop the command while a page listens, and put a program that never ends in the place of a check.
+- The view serves a port from 1024 to 65535 that browsers open. Where no port is given, it takes a free one of those. It refuses a request that names another host, or that says it comes from another site, and it tells the browser to show the page in no other page.
+- Each view has a name of its own and says it with each new state of the FILE. A page that listened to one view lets its report go when another view answers at the same address.

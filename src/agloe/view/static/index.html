@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agloe</title>
+<link rel="stylesheet" href="view.css">
+<script type="module" src="view.js"></script>
+</head>
+<body>
+<header>
+  <span class="word">agloe</span>
+  <span class="name" id="name"></span>
+</header>
+<main>
+  <section class="answer waiting" id="answer" aria-live="polite">
+    <p class="line" id="line"></p>
+    <p class="note" id="note"></p>
+    <ul class="problems" id="problems" hidden></ul>
+  </section>
+  <section class="report-part" id="report-part" hidden>
+    <h2>The COMPILER's report</h2>
+    <pre id="report"></pre>
+  </section>
+</main>
+</body>
+</html>

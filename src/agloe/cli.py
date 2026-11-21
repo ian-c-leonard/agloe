@@ -1,9 +1,15 @@
-"""The command line: ``agloe check FILE`` prints the COMPILER's report for one FILE."""
+"""The command line: ``agloe check FILE`` prints the COMPILER's report for one FILE.
+
+``agloe view FILE`` serves a page that shows the report and follows the FILE as it changes.
+"""
 
 import argparse
 import json
 import os
+import signal
 import sys
+import threading
+import webbrowser
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -39,7 +45,29 @@ def main(arguments: Sequence[str] | None = None) -> int:
         action="store_true",
         help="print the answer as soon as it is proved, ahead of the report",
     )
+    view = commands.add_parser(
+        "view",
+        help="show a trip on a page that follows the FILE as it changes",
+        description=(
+            "Serves a page on this machine that shows the COMPILER's answer and report on one "
+            "FILE. Each time the FILE changes, the COMPILER checks it again and the page shows "
+            "the new answer. Ends with 2 when the FILE is not there. Stop it with Ctrl-C."
+        ),
+    )
+    view.add_argument("file", type=Path, help="the trip, as a JSON FILE")
+    view.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        help=(
+            "the port to serve on: one from 1024 to 65535 that browsers open, "
+            "or a free port if not given"
+        ),
+    )
+    view.add_argument("--no-browser", action="store_true", help="do not open the page in a browser")
     chosen = parser.parse_args(arguments)
+    if chosen.command == "view":
+        return _view(chosen.file, chosen.port, not chosen.no_browser)
 
     try:
         file = read(chosen.file)
@@ -75,6 +103,43 @@ def main(arguments: Sequence[str] | None = None) -> int:
             return 2
         answer = found if isinstance(found, Answer) else found.answer
     return 0 if answer is Answer.FEASIBLE else 1
+
+
+def _view(path: Path, port: int, in_a_browser: bool) -> int:
+    """Serve the view of one FILE on this machine until the command is stopped."""
+    if not path.is_file():
+        print(f"{path}: there is no such FILE", file=sys.stderr)
+        return 2
+    # The view needs sockets and processes, so it is loaded only where it is asked for.
+    from agloe.view import View
+
+    try:
+        view = View(path, port)
+    except ValueError as problem:
+        print(f"{problem}. Leave --port out, and the view takes a free port.", file=sys.stderr)
+        return 2
+    except OSError as problem:
+        print(f"the view cannot be served on port {port}: {problem.strerror}", file=sys.stderr)
+        return 2
+    # However the command is stopped, and whenever, the check that is running is ended with it.
+    signal.signal(signal.SIGTERM, _stopped)
+    try:
+        print(f"The view of {path} is at {view.address}", flush=True)
+        if in_a_browser:
+            # A browser can take its time, and some wait until they are closed. The view
+            # serves meanwhile, or the browser would wait for a page that nobody sends.
+            threading.Thread(target=webbrowser.open, args=(view.address,), daemon=True).start()
+        view.serve()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        view.close()
+    return 0
+
+
+def _stopped(signal_number: int, frame: object) -> None:
+    """The command was told to end. It ends the way Ctrl-C ends it."""
+    raise KeyboardInterrupt
 
 
 def _in_print(file: File, found: Answer | Report, as_json: bool, on_one_line: bool) -> str:
