@@ -119,15 +119,15 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .bar.no-end .bar-tick { background: linear-gradient(to right, transparent 40%, var(--surface)), linear-gradient(var(--hue), var(--hue)); }
 .bar.no-end .bar-several { background: linear-gradient(to right, transparent 40%, var(--surface)), linear-gradient(var(--hue) 0 40%, var(--surface) 40% 60%, var(--hue) 60% 100%); }
 /* The yellow or red edge of a mark is inside it: it is never on another day, or in another row. */
-.bar.warned .bar-block, .bar.way.warned { box-shadow: inset 0 0 0 1.5px var(--warn); }
-.bar.warned .bar-block { border-color: var(--warn); }
+.bar.warned .bar-block, .bar.asked .bar-block, .bar.way.warned { box-shadow: inset 0 0 0 1.5px var(--warn); }
+.bar.warned .bar-block, .bar.asked .bar-block { border-color: var(--warn); }
 .bar.clash .bar-block, .bar.way.clash { box-shadow: inset 0 0 0 1.5px var(--stop); }
 .bar.clash .bar-block { border-color: var(--stop); }
 .bar.lit .bar-block { outline: 2px solid var(--ink); outline-offset: 1.5px; }
 .bar.way.lit { outline: 1.5px solid var(--ink); outline-offset: 1px; }
 /* A tick has its edge and its light on the tick itself. */
 .bar.way.small.warned, .bar.way.small.clash { box-shadow: none; }
-.bar.warned .bar-tick, .bar.warned .bar-several { box-shadow: inset 0 0 0 1.5px var(--warn); }
+.bar.warned .bar-tick, .bar.warned .bar-several, .bar.asked .bar-several { box-shadow: inset 0 0 0 1.5px var(--warn); }
 .bar.clash .bar-tick, .bar.clash .bar-several { box-shadow: inset 0 0 0 1.5px var(--stop); }
 .bar.way.small.lit { outline: 0; }
 .bar.lit .bar-tick, .bar.lit .bar-several { outline: 1.5px solid var(--ink); outline-offset: 2px; }
@@ -140,10 +140,12 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .key { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 12px; }
 .key span { display: inline-flex; align-items: center; gap: 6px; }
 .key.only-locks .in-a-plan { display: none; }
-.key .in-a-clash, .key .in-a-warning { display: none; }
-.key.with-clash .in-a-clash, .key.with-warnings .in-a-warning { display: inline-flex; }
-/* What a report warns of at a step has a yellow edge. Yellow is kept for what a report says. */
-.warned .block, .key-box.warned { border-color: var(--warn); box-shadow: 0 0 0 1.5px var(--warn); }
+.key .in-a-clash, .key .in-a-warning, .key .in-an-ask { display: none; }
+.key.with-clash .in-a-clash, .key.with-warnings .in-a-warning, .key.with-asks .in-an-ask { display: inline-flex; }
+/* What a report warns of at a step has a yellow edge. So has a step that the report names in
+   what the FILE does not say. Yellow is kept for what a report says. */
+.warned .block, .key-box.warned, .asked .block, .key-box.asked { border-color: var(--warn); box-shadow: 0 0 0 1.5px var(--warn); }
+.says .asked { border-bottom: 1.5px solid var(--warn); }
 /* Pointing at a step or at a line of the report lights up what is about the same thing. */
 .mark.lit .block { outline: 2.5px solid var(--ink); outline-offset: 2px; }
 .mark.way.lit .block { outline-width: 1.5px; }
