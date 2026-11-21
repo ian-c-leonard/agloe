@@ -210,20 +210,20 @@ def trip(
     decisions: list[Document],
     ways: Sequence[Document] = (),
     wants: Sequence[Document] = (),
-    tickets: bool = False,
+    rights: bool = False,
     budgets: Sequence[Document] | None = None,
 ) -> File:
-    """A FILE. None of its OPTIONs needs a right, unless the story is about tickets.
+    """A FILE. None of its OPTIONs needs a right, unless the story is about rights.
 
     After the FACTs given, one more for each OPTION says that nobody needs a right to it. With
-    ``tickets``, the FILE says about rights only what ``facts`` says.
+    ``rights``, the FILE says about rights only what ``facts`` says.
 
     Unless the story is about money, one BUDGET called money pays for everybody, in USD.
     ``budgets`` are the BUDGETs of a story that is.
     """
     if budgets is None:
         budgets = [budget("money", *persons)]
-    stated = facts if tickets else [*facts, *(needs_no_right(option["id"]) for option in options)]
+    stated = facts if rights else [*facts, *(needs_no_right(option["id"]) for option in options)]
     return load(
         {
             "persons": named(*persons),

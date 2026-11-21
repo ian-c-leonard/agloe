@@ -49,7 +49,7 @@ def a_tour_and_a_talk(*more: Document, budgets: Sequence[Document] | None = None
     facts = [*at("tour", 10), *at("talk", 12), needs_right("tour"), *more]
     facts += [offer("tour", 2, price="32.00 USD"), offer("talk", 1, price="8.50 USD")]
     locked = [lock("tour", *EVERYONE), lock("talk", "alex")]
-    return trip(EVERYONE, ["dock"], options, facts, locked, tickets=True, budgets=budgets)
+    return trip(EVERYONE, ["dock"], options, facts, locked, rights=True, budgets=budgets)
 
 
 def in_words(file: File) -> list[str]:
@@ -171,7 +171,7 @@ def test_what_is_bought_only_if_needed_is_the_most_it_can_come_to() -> None:
     facts = [*at("tour", 10), *at("talk", 12)]
     facts += [offer("tour", 1, price="1 USD"), offer("talk", 1, price="2 USD")]
     locked = [lock("tour", "alex"), lock("talk", "alex")]
-    file = trip(["alex"], ["dock"], options, facts, locked, tickets=True)
+    file = trip(["alex"], ["dock"], options, facts, locked, rights=True)
     assert in_words(file)[-1] == (
         "  USD: up to 3 more, depending on which OPTIONs need a right (tour-offer and talk-offer)"
     )
@@ -205,7 +205,7 @@ def test_the_sums_do_not_depend_on_the_decimal_settings_of_the_caller() -> None:
     options = [stays("tour", "dock")]
     facts = [*at("tour", 10), needs_right("tour"), offer("tour", 2, price="999999999999.9999 USD")]
     file = trip(
-        ["alex", "sam"], ["dock"], options, facts, [lock("tour", "alex", "sam")], tickets=True
+        ["alex", "sam"], ["dock"], options, facts, [lock("tour", "alex", "sam")], rights=True
     )
     usual = report.as_text(file, checked(file))
     assert usual.splitlines()[-1] == "  USD: 1999999999999.9998 still to buy (tour-offer)"
@@ -254,7 +254,7 @@ def test_a_payment_of_nothing_does_not_read_like_a_payment_nobody_stated() -> No
     def with_ticket(ticket: Document) -> File:
         facts = [*at("tour", 10), needs_right("tour"), ticket]
         pots = [budget("trip-money", "alex")]
-        return trip(["alex"], ["dock"], options, facts, [], tickets=True, budgets=pots)
+        return trip(["alex"], ["dock"], options, facts, [], rights=True, budgets=pots)
 
     paid_nothing = with_ticket(booking("tour", "alex", paid="0 USD", budget="trip-money"))
     not_stated = with_ticket(booking("tour", "alex"))
@@ -324,7 +324,7 @@ def test_only_a_plan_states_the_money() -> None:
     options = [stays("tour", "dock")]
     locked = [lock("tour", *EVERYONE)]
     facts = [*at("tour", 10), needs_right("tour"), *one_place]
-    file = trip(EVERYONE, ["dock"], options, facts, locked, tickets=True)
+    file = trip(EVERYONE, ["dock"], options, facts, locked, rights=True)
     found = checked(file)
     assert found.answer is Answer.UNDETERMINED
     assert RECEIPTS not in in_words(file) and SUMS not in in_words(file)

@@ -78,7 +78,7 @@ def a_boat_tour(
     decisions = [lock("tour", *locked)] if locked else []
     options = [stays("tour", "dock")]
     return trip(
-        EVERYONE, ["dock"], options, [*at_ten("tour"), *more], decisions, wants=wants, tickets=True
+        EVERYONE, ["dock"], options, [*at_ten("tour"), *more], decisions, wants=wants, rights=True
     )
 
 
@@ -186,7 +186,7 @@ def test_an_option_that_needs_no_right_is_open_to_everybody() -> None:
 def test_a_booking_is_for_its_own_option_only() -> None:
     options = [stays("tour", "dock"), stays("cruise", "dock")]
     facts = [*at_ten("tour"), needs_right("tour"), needs_right("cruise"), booking("cruise", "alex")]
-    file = trip(["alex"], ["dock"], options, facts, [], tickets=True)
+    file = trip(["alex"], ["dock"], options, facts, [], rights=True)
     without = [Broken(Constraint.RIGHT, "tour", ("alex",))]
     assert broken(file, worst_case(file), on_the_tour("alex")) == without
 
@@ -258,7 +258,7 @@ def test_a_right_is_unknown_only_where_one_might_be_had_and_would_help() -> None
 
 def test_the_unknown_facts_about_rights_come_before_those_about_wants() -> None:
     options = [stays("tour", "dock")]
-    file = trip(["alex"], ["dock"], options, [], [], wants=[must("water", "alex")], tickets=True)
+    file = trip(["alex"], ["dock"], options, [], [], wants=[must("water", "alex")], rights=True)
     assert [unknown.what for unknown in unknowns(file)] == [
         "start",
         "duration",
@@ -268,7 +268,7 @@ def test_the_unknown_facts_about_rights_come_before_those_about_wants() -> None:
         "another option",
     ]
     wants = [must("water", "alex")]
-    stated = trip(["alex"], ["dock"], options, [needs_right("tour")], [], wants=wants, tickets=True)
+    stated = trip(["alex"], ["dock"], options, [needs_right("tour")], [], wants=wants, rights=True)
     assert [unknown.what for unknown in unknowns(stated)][3:5] == ["another right", "satisfies"]
 
 
@@ -283,7 +283,7 @@ def test_the_sets_a_report_names_come_in_the_order_of_their_facts() -> None:
     facts += [satisfies("tower", "view"), satisfies("tower", "breeze", 0)]
     facts += [satisfies("deck", "breeze"), satisfies("deck", "view", 0)]
     wants = [must("view", "alex"), must("breeze", "alex")]
-    file = trip(["alex"], ["loop"], options, facts, [], wants=wants, tickets=True)
+    file = trip(["alex"], ["loop"], options, facts, [], wants=wants, rights=True)
     a_view_elsewhere = Unknown("another option", want="view", person="alex")
     a_breeze_elsewhere = Unknown("another option", want="breeze", person="alex")
     assert asked(checked(file)) == [
@@ -297,7 +297,7 @@ def test_the_options_that_have_to_need_no_right_are_named_together() -> None:
     facts = [starts_at("tour", 10), starts_at("cruise", 12), starts_at("swim", 14)]
     facts += [fact for id in ("tour", "cruise", "swim") for fact in at_ten(id)[1:]]
     locks = [lock(id, "alex") for id in ("tour", "cruise", "swim")]
-    file = trip(["alex"], ["dock"], options, facts, locks, tickets=True)
+    file = trip(["alex"], ["dock"], options, facts, locks, rights=True)
     assert asked(checked(file)) == [[free("tour"), free("cruise"), free("swim")]]
     words = "The trip works if nobody needs a right to take part in tour, cruise or swim."
     assert in_words(file)[2] == words
@@ -308,7 +308,7 @@ def test_the_words_keep_the_order_of_the_unknown_facts() -> None:
     options = [stays("tour", "dock"), stays("cruise", "dock")]
     facts = [*at_ten("tour"), *at_ten("cruise")[1:]]
     locks = [lock("tour", "alex"), lock("cruise", "alex")]
-    file = trip(["alex"], ["dock"], options, facts, locks, tickets=True)
+    file = trip(["alex"], ["dock"], options, facts, locks, rights=True)
     assert asked(checked(file)) == [[free("tour"), Unknown("start", "cruise"), free("cruise")]]
     assert in_words(file)[2] == (
         "The trip works if nobody needs a right to take part in tour and cruise can start at any"
@@ -418,7 +418,7 @@ def a_view(*more: Document) -> File:
     facts = [*at_ten("tower"), *at_ten("rooftop"), satisfies("tower", "view")]
     facts += [needs_right("tower"), every_right("tower"), needs_no_right("rooftop"), *more]
     wants = [must("view", "alex")]
-    return trip(["alex"], ["loop"], options, facts, [], wants=wants, tickets=True)
+    return trip(["alex"], ["loop"], options, facts, [], wants=wants, rights=True)
 
 
 def test_an_option_nobody_can_get_into_leaves_a_must_to_the_others() -> None:
@@ -452,7 +452,7 @@ def test_the_rights_a_report_asks_for_work_together_in_one_plan() -> None:
     facts += [satisfies("river", "skyline"), satisfies("tower", "skyline"), every("skyline")]
     locks = [lock("river", "alex"), lock("tower", "sam")]
     wants = [must("skyline", "jo")]
-    file = trip(EVERYONE, ["dock", "loop"], options, facts, locks, wants=wants, tickets=True)
+    file = trip(EVERYONE, ["dock", "loop"], options, facts, locks, wants=wants, rights=True)
     found = checked(file)
     assert asked(found) == [
         [right("river", "alex"), right("river", "jo"), right("tower", "sam")],
@@ -492,7 +492,7 @@ def two_tours(rng: Random) -> File:
             facts.append(every_right(option))
         if rng.random() < 0.7:
             decisions.append(lock(option, *rng.sample(persons, rng.randrange(1, len(persons) + 1))))
-    return trip(persons, ["dock"], options, facts, decisions, tickets=True)
+    return trip(persons, ["dock"], options, facts, decisions, rights=True)
 
 
 def every_world_of_rights(file: File) -> list[World]:
@@ -651,7 +651,7 @@ def test_a_file_that_says_nothing_about_rights_gets_its_report_at_once(
     ]
     options = [stays(name, "dock") for name in names]
     file = trip(
-        ["alex"], ["dock"], options, facts, [lock(name, "alex") for name in names], tickets=True
+        ["alex"], ["dock"], options, facts, [lock(name, "alex") for name in names], rights=True
     )
     calls = 0
     solver = compiler.works
@@ -678,12 +678,12 @@ def test_a_file_that_says_nothing_about_rights_gets_its_report_at_once(
 def test_a_lock_says_which_unknown_facts_every_set_holds() -> None:
     """The start of a LOCKed OPTION, and that it needs no right where somebody is not covered."""
     nothing_said = trip(
-        EVERYONE, ["dock"], [stays("tour", "dock")], [], [lock("tour", "alex", "sam")], tickets=True
+        EVERYONE, ["dock"], [stays("tour", "dock")], [], [lock("tour", "alex", "sam")], rights=True
     )
     assert answers._asked_by_a_lock(nothing_said)[0] == {Unknown("start", "tour"), free("tour")}  # pyright: ignore[reportPrivateUsage]
     for_alex = [lasts("tour", "PT1H"), cutoff("tour", "PT0S"), booking("tour", "alex")]
     one_covered = trip(
-        EVERYONE, ["dock"], [stays("tour", "dock")], for_alex, [lock("tour", "alex")], tickets=True
+        EVERYONE, ["dock"], [stays("tour", "dock")], for_alex, [lock("tour", "alex")], rights=True
     )
     assert asked(checked(one_covered)) == [[Unknown("start", "tour")]]
     both_locked = trip(
@@ -692,7 +692,7 @@ def test_a_lock_says_which_unknown_facts_every_set_holds() -> None:
         [stays("tour", "dock")],
         for_alex,
         [lock("tour", "alex", "sam")],
-        tickets=True,
+        rights=True,
     )
     assert asked(checked(both_locked)) == [[Unknown("start", "tour"), free("tour")]]
     assert answers._asked_by_a_lock(both_locked)[0] == {Unknown("start", "tour"), free("tour")}  # pyright: ignore[reportPrivateUsage]
