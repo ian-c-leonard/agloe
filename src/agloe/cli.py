@@ -50,8 +50,9 @@ def main(arguments: Sequence[str] | None = None) -> int:
         help="show a trip on a page that follows the FILE as it changes",
         description=(
             "Serves a page on this machine that shows the COMPILER's answer and report on one "
-            "FILE. Each time the FILE changes, the COMPILER checks it again and the page shows "
-            "the new answer. Ends with 2 when the FILE is not there. Stop it with Ctrl-C."
+            "FILE, with a calendar of the trip. Each time the FILE changes, the COMPILER checks "
+            "it again and the page shows the new answer. Ends with 2 when the FILE is not there. "
+            "Stop it with Ctrl-C."
         ),
     )
     view.add_argument("file", type=Path, help="the trip, as a JSON FILE")

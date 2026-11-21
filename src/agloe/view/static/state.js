@@ -2,16 +2,17 @@
 //
 // The view sends the page events. Each one names the state of the FILE that it is about, by a
 // number, its revision. `file` says that there is a new state to check, and which view says so.
-// What follows is about that state: `answer` as soon as the COMPILER has proved one, then `report`. A FILE that does
-// not follow the format gets `refused` with the problems, a FILE that cannot be read gets
-// `unreadable`, a report that cannot be written gets `unwritable`, and a check that ends with
-// none of these gets `stopped`. The page itself adds `lost` when it no longer hears the view.
+// What follows is about that state: `answer` as soon as the COMPILER has proved one, then
+// `report`, which comes with the TRIP as the calendar draws it. A FILE that does not follow the
+// format gets `refused` with the problems, a FILE that cannot be read gets `unreadable`, a
+// report that cannot be written gets `unwritable`, and a check that ends with none of these
+// gets `stopped`. The page itself adds `lost` when it no longer hears the view.
 //
 // Nothing here judges a TRIP. An answer is shown only once the COMPILER has given it, and only
 // for the state of the FILE it was given on. A report that is still on the page after the FILE
-// has changed is marked as old.
+// has changed is marked as old, and so is the calendar of its TRIP.
 
-const OLD = "The report below is on the FILE as it was before.";
+const OLD = "The calendar and the report below are on the FILE as it was before.";
 const seconds = (length) => `${length.toFixed(2)} s`;
 const none = { checking: false, answer: null, answered: null, problems: null, unreadable: null, unwritable: false, stopped: false, lost: false };
 
@@ -35,7 +36,7 @@ export function after(state, event) {
   const done = { ...state, checking: false, old: state.report !== null };
   if (event.kind === "answer") return { ...state, answer: event.answer, answered: event.seconds };
   if (event.kind === "report") {
-    return { ...done, answer: event.answer, answered: state.answered ?? event.seconds, report: { text: event.text, json: event.json }, reported: event.seconds, old: false };
+    return { ...done, answer: event.answer, answered: state.answered ?? event.seconds, report: { text: event.text, json: event.json, trip: event.trip }, reported: event.seconds, old: false };
   }
   if (event.kind === "refused") return { ...done, problems: event.problems };
   if (event.kind === "unreadable") return { ...done, unreadable: event.problem };
@@ -54,9 +55,13 @@ function markOf(json) {
 /**
  * What the page shows: a mark, a line, a note under it, the report in words, whether that
  * report is on the FILE as it was before, and the problems of a FILE that the format refuses.
+ *
+ * `calendar` holds the TRIP that came with the report on the page, for the calendar to draw.
+ * It is null where the page shows no report. The TRIP in it is null where the view sent none.
  */
 export function says(state) {
-  const shown = { name: state.name, report: state.report ? state.report.text : null, old: state.old, problems: state.problems };
+  const calendar = state.report ? { trip: state.report.trip } : null;
+  const shown = { name: state.name, report: state.report ? state.report.text : null, calendar, old: state.old, problems: state.problems };
   const with_old = (note) => `${note} ${state.old ? OLD : ""}`.trim();
   if (state.lost) {
     return { ...shown, mark: "lost", line: "The view is not answering.", note: with_old("Start agloe view again, and open the address that it prints.") };

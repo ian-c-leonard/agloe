@@ -27,11 +27,13 @@ from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from agloe.view.trip import holds
+
 if TYPE_CHECKING:
     # Only the name of the type is needed here. The check itself runs in a process of its own.
     from agloe.view.check import Event
 
-PAGE = ("index.html", "view.css", "view.js", "state.js")  # the page and its files
+PAGE = ("index.html", "view.css", "view.js", "state.js", "calendar.js")  # the page and its files
 KINDS = {".html": "text/html", ".css": "text/css", ".js": "text/javascript"}
 LOOK = 0.1  # seconds between two looks at the FILE, and at whether the view is closed
 QUIET = 15.0  # seconds after which a page with nothing new is told that the view is still there
@@ -78,17 +80,39 @@ def _finite(written: str) -> float:
     return number
 
 
+def _without_its_trip(line: bytes) -> object:
+    """What a check printed, without the TRIP, where the line is no event as it stands.
+
+    What is wrong may be in the TRIP alone: a number that no page can read. The rest is then
+    read again as strictly as any event. Raises ValueError where the rest is no event either.
+    """
+    loose: object = json.loads(line.decode())
+    if not isinstance(loose, dict) or cast("Event", loose).get("kind") != "report":
+        raise ValueError("a check printed something that is no event")
+    rest = {name: held for name, held in cast("Event", loose).items() if name != "trip"}
+    again = json.dumps(rest, allow_nan=False)
+    return json.loads(again, parse_constant=_no_number, parse_float=_finite)
+
+
 def _said(line: bytes) -> Event:
     """One line that a check printed, as the event it is. Raises ValueError where it is none.
 
     An event is passed on only if it holds all that a page reads from it, so that no page is
     ever left with half an event.
+
+    A report is whole without the TRIP that the calendar draws. So a report comes with its TRIP
+    where that is one a page can draw, and with none where it is not: what is wrong with a
+    calendar never costs the reader the report.
     """
-    said: object = json.loads(line.decode(), parse_constant=_no_number, parse_float=_finite)
+    try:
+        said: object = json.loads(line.decode(), parse_constant=_no_number, parse_float=_finite)
+    except ValueError:
+        said = _without_its_trip(line)
     if not isinstance(said, dict):
         raise ValueError("a check printed something that is no event")
     event = cast("Event", said)
     kind = event.get("kind")
+    trip = event.pop("trip", None) if kind == "report" else None
     shape = SHAPES.get(kind) if isinstance(kind, str) else None
     if shape is None or set(event) != {"kind", *shape}:
         raise ValueError("a check printed something that is no event")
@@ -106,6 +130,9 @@ def _said(line: bytes) -> Event:
         isinstance(problem, str) for problem in cast("list[object]", event["problems"])
     ):
         raise ValueError("a check printed a problem that is no text")
+    if kind == "report":
+        planned = cast("Event", trip).get("itinerary") if holds(trip) else None
+        event["trip"] = trip if planned is (event["answer"] == "FEASIBLE") else None
     return event
 
 
