@@ -21,6 +21,9 @@ Later releases are planned once 0.2 works.
 
 ## The view
 
-The view is a page for a person. It shows a TRIP from its FILE and from the COMPILER's report, and it follows the FILE as the FILE changes. The command `agloe view FILE` serves it on the person's own machine.
+The command `agloe view FILE` shows a TRIP to a person, on a page served from their own machine. The page updates each time the FILE changes.
 
-The view is built beside the releases, in steps of its own, and it holds no release up. Its first step shows the COMPILER's answer and report, and keeps them up to date. Each later step adds one drawing of the TRIP, or one way to change the TRIP by hand.
+- First step: the COMPILER's answer and report.
+- Later steps: drawings of the TRIP, and ways to change the TRIP by hand.
+
+The view is built alongside the releases and does not delay them.

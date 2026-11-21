@@ -26,7 +26,7 @@ The view is a page that the command `agloe view FILE` serves on the person's own
 - A FILE with no report gets the reason instead. The page shows the problems that the format names, or says that the FILE cannot be read, or that a check stopped before its report came. It says each of these in its own words, and never as an answer.
 - The command serves the person's own machine only, and the page asks no other host for anything.
 - The view lives in [`src/agloe/view/`](../../src/agloe/view/), so it is installed with Agloe: the program that serves, and the page as files beside it. The page is plain HTML, CSS and JavaScript, with nothing to build.
-- The view has its own part of the [roadmap](../ROADMAP.md), beside the releases. It grows in steps of its own and holds no release up.
+- The view has its own part of the [roadmap](../ROADMAP.md). It is built alongside the releases and does not delay them.
 
 ## Consequences
 
