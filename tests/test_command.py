@@ -199,7 +199,7 @@ def test_a_way_nobody_timed_is_named_in_what_is_missing() -> None:
     found = compiler.check(file)
     assert report.as_text(file, found).splitlines()[2:] == [
         "The trip works in any of these cases:",
-        "  1. Walk takes 30 min or less.",
+        "  1. walk takes 30 min or less.",
         "  2. There are other WAYs from hotel to restaurant that take 30 min or less.",
         "",
         "Other WAYs help only if they can be taken when the plan needs them, with a right where"

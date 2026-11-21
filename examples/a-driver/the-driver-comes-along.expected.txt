@@ -18,6 +18,6 @@ The plan relies on these FACTs and DECISIONs:
   lock-drive-out: Alex takes part in Drive to the dunes
   lock-drive-back: Alex takes part in Drive back to the hotel
 
-What the plan requires of the PERSONs in it:
+Who meets the requirements:
   Drive to the dunes requires driving a manual car of one PERSON: Sam has it.
   Drive back to the hotel requires driving a manual car of one PERSON: Sam has it.

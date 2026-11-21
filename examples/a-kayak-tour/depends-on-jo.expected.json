@@ -5,8 +5,7 @@
       {
         "what": "has",
         "person": "jo",
-        "capability": "swimming",
-        "at_most": null
+        "capability": "swimming"
       }
     ]
   ]

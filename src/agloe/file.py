@@ -605,16 +605,24 @@ class File:
 
         "none", "one" or "each", and None where the FILE does not say. A FACT about the two
         settles it. Without one, a FACT that the CAPABILITY's set is COMPLETE settles it too:
-        the OPTION does not require it.
+        the OPTION does not require it. That FACT is about the OPTIONs of the FILE only, so
+        the answer is None for anything else.
         """
         stated = self._requirements.get((option, capability))
         if stated is not None:
             return stated.of
-        return None if self.requires_complete(capability) is None else "none"
+        listed = option in self._options_listed
+        whole = listed and self.requires_complete(capability) is not None
+        return "none" if whole else None
 
     def requires_complete(self, capability: str) -> CompleteRequires | None:
         """The FACT that the FILE states every OPTION that requires this CAPABILITY, if any."""
         return self._requires_complete.get(capability)
+
+    @cached_property
+    def _options_listed(self) -> frozenset[str]:
+        """The id of each OPTION of the FILE."""
+        return frozenset(option.id for option in self.options)
 
     @cached_property
     def _abilities(self) -> dict[tuple[str, str], Has]:
@@ -1258,12 +1266,13 @@ def _describe(error: ValidationError, shapes: dict[str, dict[str, object]]) -> s
                 "complete_set": bool(keys & {"from", "to", "leaving"}),
                 "complete_for_a_want": "satisfies" in keys,
                 "complete_rights": bool(keys & {"rights_to", "offers"}),
+                "complete_for_a_capability": "requires" in keys,
             }
             meant = [kind for kind, there in kinds.items() if there] or ["complete_set"]
             if len(meant) > 1:
                 return (
                     f"{where}: a COMPLETE set is of one kind: travel, the OPTIONs that SATISFY"
-                    " a WANT, or the rights to an OPTION"
+                    " a WANT, the rights to an OPTION, or the OPTIONs that require a CAPABILITY"
                 )
             misses = [miss for miss in misses if name(miss) == meant[0]] or misses
     closest = max(misses, key=lambda miss: len(miss.absolute_path))

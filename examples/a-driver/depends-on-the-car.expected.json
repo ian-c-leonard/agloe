@@ -3,16 +3,16 @@
   "missing": [
     [
       {
-        "what": "requires nothing",
+        "what": "requirement",
         "option": "drive-out",
         "capability": "drive-manual",
-        "at_most": null
+        "of": "none"
       },
       {
-        "what": "requires nothing",
+        "what": "requirement",
         "option": "drive-back",
         "capability": "drive-manual",
-        "at_most": null
+        "of": "none"
       }
     ]
   ]

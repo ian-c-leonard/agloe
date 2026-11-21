@@ -3,11 +3,10 @@
   "missing": [
     [
       {
-        "what": "requires nothing",
+        "what": "requirement",
         "option": "brunch",
         "capability": "drive-manual",
-        "of_at_most": "none",
-        "at_most": null
+        "of_at_most": "none"
       }
     ]
   ]

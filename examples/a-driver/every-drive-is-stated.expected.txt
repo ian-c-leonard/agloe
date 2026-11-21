@@ -24,6 +24,6 @@ The plan relies on these FACTs and DECISIONs:
   lock-drive-back: Alex and Sam take part in Drive back to the hotel
   lock-brunch: Jo takes part in Brunch at the hotel
 
-What the plan requires of the PERSONs in it:
+Who meets the requirements:
   Drive to the dunes requires driving a manual car of one PERSON: Sam has it.
   Drive back to the hotel requires driving a manual car of one PERSON: Sam has it.

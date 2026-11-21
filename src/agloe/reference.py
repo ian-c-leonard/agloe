@@ -182,8 +182,8 @@ class Unknown:
     that SATISFIES the WANT, and that the PERSON can take part in. That is one condition for one
     WANT and one PERSON, whichever OPTION meets it.
 
-    For an OPTION and a CAPABILITY it is "requires nothing", and for a PERSON and a CAPABILITY
-    "has": ``about`` names the CAPABILITY.
+    For an OPTION and a CAPABILITY it is "requirement": what the OPTION requires of it. For a
+    PERSON and a CAPABILITY it is "has". ``about`` names the CAPABILITY.
     """
 
     what: str
@@ -234,7 +234,7 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
             out.append(Unknown("needs no right", option.id))
         for capability in file.capabilities:
             if file.requires(option.id, capability.id) is None:
-                out.append(Unknown("requires nothing", option.id, about=capability.id))
+                out.append(Unknown("requirement", option.id, about=capability.id))
         if file.needs_right(option.id) is True and file.rights_complete(option.id) is None:
             for person in file.persons:
                 if file.booking(option.id, person.id) is None:
@@ -316,6 +316,10 @@ class Remaining:
     so it might cover anybody. ``open_to_all`` holds the OPTION of each such BOOKING. Both
     belong to the search for a conflict: no FILE that is read has them, and no answer is ever
     given for what is left.
+
+    What an OPTION requires of a CAPABILITY needs nothing of the kind. Only best cases are
+    asked about what is left, and the best an unknown requirement can be is nothing: what a
+    COMPLETE set says of an OPTION with no FACT.
     """
 
     file: File
@@ -461,9 +465,9 @@ def no_better_than(file: File, found: Iterable[Unknown]) -> World:
 def with_one_required(file: File, unknown: Unknown) -> World:
     """The worst case, except that one OPTION requires one CAPABILITY of one PERSON only.
 
-    ``unknown`` is a "requires nothing": the FILE does not say what that OPTION requires.
+    ``unknown`` is a "requirement" that the FILE does not state.
     """
-    if unknown.what != "requires nothing" or unknown.option is None or unknown.about is None:
+    if unknown.what != "requirement" or unknown.option is None or unknown.about is None:
         raise ValueError("only what an OPTION requires can be of one PERSON")
     worst = worst_case(file)
     return replace(worst, requires={**worst.requires, (unknown.option, unknown.about): "one"})
@@ -635,7 +639,7 @@ def _world(
         for option in file.options:
             of = file.requires(option.id, capability.id)
             if of is None:
-                nothing = well(Unknown("requires nothing", option.id, about=capability.id))
+                nothing = well(Unknown("requirement", option.id, about=capability.id))
                 of = "none" if nothing else "each"
             if of != "none":
                 requires[option.id, capability.id] = of

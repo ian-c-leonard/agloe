@@ -5,16 +5,14 @@
       {
         "what": "has",
         "person": "alex",
-        "capability": "drive-manual",
-        "at_most": null
+        "capability": "drive-manual"
       }
     ],
     [
       {
         "what": "has",
         "person": "sam",
-        "capability": "drive-manual",
-        "at_most": null
+        "capability": "drive-manual"
       }
     ]
   ]

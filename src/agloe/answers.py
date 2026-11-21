@@ -699,7 +699,7 @@ def _most_required(file: File, unknown: Unknown, works: Works) -> str | None:
     unknown FACT at its worst, and "none" where it works only if the OPTION requires nothing.
     None for an unknown that is not what an OPTION requires.
     """
-    if unknown.what != "requires nothing":
+    if unknown.what != "requirement":
         return None
     return "one" if works(file, with_one_required(file, unknown)) else "none"
 
@@ -710,7 +710,7 @@ def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
     None for an unknown that is not a length of time, and None when any length would do.
     """
     no_length = ("start", "satisfies", "does not satisfy", "another option")
-    no_length += ("requires nothing", "has")
+    no_length += ("requirement", "has")
     about_rights = ("needs no right", "another right", "price", "funding", "charged")
     if unknown.what in (*no_length, *about_rights):
         return None

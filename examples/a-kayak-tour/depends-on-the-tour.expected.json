@@ -3,11 +3,10 @@
   "missing": [
     [
       {
-        "what": "requires nothing",
+        "what": "requirement",
         "option": "kayak-tour",
         "capability": "swimming",
-        "of_at_most": "one",
-        "at_most": null
+        "of_at_most": "one"
       }
     ]
   ]

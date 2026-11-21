@@ -1,3 +1,3 @@
 UNDETERMINED: the FILE does not say enough to tell.
 
-The trip works if Kayak tour requires swimming of one PERSON at most.
+The trip works if Kayak tour requires swimming of one PERSON who takes part, or does not require it.

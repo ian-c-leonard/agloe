@@ -439,8 +439,8 @@ def test_each_case_says_everything_its_set_holds() -> None:
     more = "in addition to the 1 place on OFFER"
     assert in_words(file)[-3:] == [
         "The trip works in any of these cases:",
-        f"  1. Tour is quick enough and a right to tour is found for alex, {more}.",
-        f"  2. Tour is quick enough and a right to tour is found for sam, {more}.",
+        f"  1. tour is quick enough and a right to tour is found for alex, {more}.",
+        f"  2. tour is quick enough and a right to tour is found for sam, {more}.",
     ]
 
 

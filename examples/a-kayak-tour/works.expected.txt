@@ -14,5 +14,5 @@ The plan relies on these FACTs and DECISIONs:
   jo-swims: Jo has the CAPABILITY swimming
   lock-kayak-tour: Alex, Sam and Jo take part in Kayak tour
 
-What the plan requires of the PERSONs in it:
+Who meets the requirements:
   Kayak tour requires swimming of each PERSON: Alex, Sam and Jo have it.

@@ -378,12 +378,20 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
         out["want"] = unknown.want
     if unknown.person is not None:
         out["person"] = unknown.person
-    if unknown.what in ("requires nothing", "has"):
+    if unknown.what == "requirement":
+        # The most the OPTION can require where the set asks nothing else. In a larger set,
+        # what the set is enough with: the OPTION requires nothing.
         out["capability"] = unknown.about
-    elif unknown.about is not None:
+        if needed.of is None:
+            out["of"] = "none"
+        else:
+            out["of_at_most"] = needed.of
+        return out
+    if unknown.what == "has":
+        out["capability"] = unknown.about
+        return out
+    if unknown.about is not None:
         out["booking" if unknown.what == "charged" else "offer"] = unknown.about
-    if needed.of is not None:
-        out["of_at_most"] = needed.of
     if needed.buys:
         out["buys"] = [
             {
@@ -500,7 +508,7 @@ def as_text(file: File, report: Report) -> str:
         else:
             lines.append("The trip works in any of these cases:")
             for number, (case, plan) in enumerate(zip(cases, plans, strict=True), 1):
-                lines.append(f"  {number}. {case[0].upper()}{case[1:]}.")
+                lines.append(f"  {number}. {_as_a_sentence(file, case)}.")
                 lines += [f"     {line}" for line in plan]
         asked = [needed.unknown for enough in report.missing for needed in enough]
         kinds = {unknown.what for unknown in asked}
@@ -559,9 +567,10 @@ def as_text(file: File, report: Report) -> str:
                 lines[-1] += " One OPTION can be found for several PERSONs and several WANTs."
             if file.capabilities:
                 lines[-1] += (
-                    " Whatever it requires has to be met: the PERSON has each CAPABILITY that"
-                    " it requires of each PERSON, and somebody who takes part in it from its"
-                    " start to its end has each CAPABILITY that it requires of one PERSON."
+                    " Whatever it requires has to be met. Everybody who takes part in it has"
+                    " each CAPABILITY that it requires of each PERSON. For each CAPABILITY that"
+                    " it requires of one PERSON, somebody who takes part in it from its start"
+                    " to its end has it. Different PERSONs can meet different requirements."
                 )
     return "\n".join(lines) + "\n"
 
@@ -642,15 +651,15 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
                 used_for = f"; this plan uses it for {_people(file, credited)}"
             lines.append(f"  {record}: {_record(file, clock, record)}{used_for}")
     if report.supplies:
-        lines += ["", "What the plan requires of the PERSONs in it:"]
+        lines += ["", "Who meets the requirements:"]
         able = _names(file.capabilities)
         for supply in report.supplies:
             name, what = _name(file, supply.option), able[supply.capability]
             who = _people(file, supply.persons)
             verb = "has" if len(supply.persons) == 1 else "have"
             if supply.of is None:
-                asks = f"{name} might require {what}: the FILE does not say"
-                lines.append(f"  {asks}. {who} {verb} it.")
+                silent = f"The FILE does not say whether {name} requires {what}"
+                lines.append(f"  {silent}. The plan holds if it does: {who} {verb} it.")
             else:
                 whom = "one PERSON" if supply.of == "one" else "each PERSON"
                 lines.append(f"  {name} requires {what} of {whom}: {who} {verb} it.")
@@ -766,6 +775,17 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
     return marks
 
 
+def _as_a_sentence(file: File, case: str) -> str:
+    """A case with a capital first letter, unless it begins with a name from the FILE.
+
+    A name stays as the FILE writes it: "jo" and "Jo" can be two PERSONs.
+    """
+    named = (*file.persons, *file.options, *file.ways)
+    if any(case.startswith(record.name) for record in named):
+        return case
+    return f"{case[0].upper()}{case[1:]}"
+
+
 def _case(file: File, enough: Sequence[Missing]) -> str:
     """One set of unknown FACTs that would be enough, in words.
 
@@ -824,10 +844,10 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
         return f"{_name(file, unknown.option)} SATISFIES {_want(file, unknown.want)}"
     if unknown.what == "does not satisfy":
         return f"{_name(file, unknown.option)} does not SATISFY {_want(file, unknown.want)}"
-    if unknown.what == "requires nothing":
+    if unknown.what == "requirement":
         name, what = _name(file, unknown.option), _names(file.capabilities)[unknown.about or ""]
         if needed.of == "one":
-            return f"{name} requires {what} of one PERSON at most"
+            return f"{name} requires {what} of one PERSON who takes part, or does not require it"
         return f"{name} does not require {what}"
     if unknown.what == "has":
         what = _names(file.capabilities)[unknown.about or ""]

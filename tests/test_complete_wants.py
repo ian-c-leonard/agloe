@@ -446,10 +446,14 @@ def test_a_complete_set_of_two_kinds_is_refused_as_that() -> None:
     both["complete"]["from"] = "art-institute"
     document["facts"].append(both)
     last = len(document["facts"]) - 1
-    one_kind = "travel, the OPTIONs that SATISFY a WANT, or the rights to an OPTION"
+    one_kind = "travel, the OPTIONs that SATISFY a WANT, the rights to an OPTION, or the OPTIONs"
+    one_kind += " that require a CAPABILITY"
     assert problems(document) == f"/facts/{last}: a COMPLETE set is of one kind: {one_kind}"
     both["complete"] = {"satisfies": "window-seat", "rights_to": "flight"}
     assert problems(document) == f"/facts/{last}: a COMPLETE set is of one kind: {one_kind}"
+    for other in ({"satisfies": "window-seat"}, {"rights_to": "flight"}, {"to": "ohare"}):
+        both["complete"] = {"requires": "swimming", **other}
+        assert problems(document) == f"/facts/{last}: a COMPLETE set is of one kind: {one_kind}"
 
 
 def test_the_search_finds_a_plan_whenever_trying_everything_does() -> None:
