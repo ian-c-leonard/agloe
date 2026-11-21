@@ -760,6 +760,10 @@ def way_to_pay(
     the purchases are taken in order, and each tries its pairs of an OFFER and a BUDGET in
     the FILE's order: the first that still fits, and that the purchases after it can follow.
     A purchase with no pair left sends the one before it on to its next pair.
+
+    Before a purchase takes a pair, the search looks at the purchases after it: see
+    ``_can_follow``. A pair that they cannot follow is passed over at once. The search would
+    give it up anyway, after trying everything behind it, so the way to pay is the same.
     """
     buyers: list[tuple[str, str]] = []
     for option, persons in taking_part.items():
@@ -796,9 +800,17 @@ def way_to_pay(
         found = None
         for number in range(start, len(able)):
             offer, _, key, units = able[number]
-            if left[offer] and (key is None or room[key] >= units):
+            if not left[offer] or (key is not None and room[key] < units):
+                continue
+            left[offer] -= 1
+            if key is not None:
+                room[key] -= units
+            if _can_follow(pairs, len(picked) + 1, left, room):
                 found = number
                 break
+            left[offer] += 1
+            if key is not None:
+                room[key] += units
         if found is None:
             if not picked:
                 return None
@@ -808,16 +820,54 @@ def way_to_pay(
             if key is not None:
                 room[key] += units
             continue
-        offer, _, key, units = able[found]
-        left[offer] -= 1
-        if key is not None:
-            room[key] -= units
         picked.append(found)
         start = 0
     return {
         buyer: (able[number][0], able[number][1])
         for buyer, able, number in zip(buyers, pairs, picked, strict=True)
     }
+
+
+def _can_follow(
+    pairs: Sequence[Sequence[Pair]],
+    first: int,
+    left: Mapping[str, int],
+    room: Mapping[tuple[str, str], int],
+) -> bool:
+    """Whether nothing yet rules out the purchases from this one on. False is a proof.
+
+    ``left`` says how many places each OFFER still has, and ``room`` what each cap still
+    allows, after the purchases before these. A pair is open to a purchase while its OFFER
+    has a place and its cap has room for the price. The purchases before it only ever take
+    places and room away, so the pair a purchase ends with is one that is open to it now.
+
+    So a purchase with no pair open cannot be made. And where every pair still open to a
+    purchase draws on one cap, that cap owes it the cheapest of them at least. A cap that
+    owes more than it has left cannot pay for all of them.
+
+    True promises nothing: the purchases can still turn out to have no way to pay.
+    """
+    owed: dict[tuple[str, str], int] = {}
+    for able in pairs[first:]:
+        only: tuple[str, str] | None = None
+        least = 0
+        choice = False
+        for offer, _, key, units in able:
+            if not left[offer] or (key is not None and room[key] < units):
+                continue
+            if key is None or (only is not None and key != only):
+                choice = True
+                break
+            least = units if only is None else min(least, units)
+            only = key
+        if choice:
+            continue
+        if only is None:
+            return False
+        owed[only] = owed.get(only, 0) + least
+        if owed[only] > room[only]:
+            return False
+    return True
 
 
 def placed(file: File, world: World, option: str, persons: Sequence[str]) -> dict[str, str]:

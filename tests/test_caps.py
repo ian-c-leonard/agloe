@@ -1143,3 +1143,150 @@ def test_a_group_with_nothing_to_choose_is_asked_about_no_order(
     assert compiler.shown(file, reference.best_case(file)) is not None
     assert len(solves) > 10
     assert compiler.check(file) == found
+
+
+# ------------------------------ The search for the way to pay -------------------------------
+
+
+def a_festival(sessions: int) -> File:
+    """Four people go to some sessions at 5 USD each, and Alex to a masterclass at 150 USD.
+
+    Two BUDGETs cover everyone. The first may spend 150 USD, and the second just what the
+    sessions cost. So the masterclass has to come from the first BUDGET, and every session
+    from the second. The search for the way to pay tries the first BUDGET first.
+    """
+    people = ["alex", "sam", "jo", "max"]
+    names = [f"session-{number}" for number in range(sessions)]
+    facts: list[Document] = []
+    for number, name in enumerate([*names, "masterclass"]):
+        facts += [*at(name, 9 + number), needs_right(name)]
+    facts += [offer(name, 4, price="5 USD") for name in names]
+    facts.append(offer("masterclass", 1, price="150 USD"))
+    decisions = [lock(name, *people) for name in names]
+    decisions += [lock("masterclass", "alex")]
+    decisions += [cap("first", "150 USD"), cap("second", f"{20 * sessions} USD")]
+    pots = [budget("first", *people), budget("second", *people)]
+    options = [stays(name, "tent") for name in [*names, "masterclass"]]
+    return trip(people, ["tent"], options, facts, decisions, rights=True, budgets=pots)
+
+
+def looks_ahead_counted(monkeypatch: pytest.MonkeyPatch, skip_nothing: bool = False) -> list[bool]:
+    """A list that gains an entry each time the search for the way to pay looks ahead.
+
+    With ``skip_nothing`` the look ahead always says that the rest can follow, so the search
+    tries everything, as the rule says it in words.
+    """
+    looks: list[bool] = []
+    can_follow = reference._can_follow  # pyright: ignore[reportPrivateUsage]
+
+    def counted(*given: object) -> bool:
+        said = skip_nothing or can_follow(*given)  # type: ignore[arg-type]
+        looks.append(said)
+        return said
+
+    monkeypatch.setattr(reference, "_can_follow", counted)
+    return looks
+
+
+def test_a_purchase_that_one_budget_has_to_pay_keeps_that_budget_free(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Six sessions for four make 24 small purchases before the masterclass.
+
+    Trying everything, the search would give the first BUDGET up for each of them only after
+    it had tried every way to pay for the rest: sixteen million ways.
+    """
+    file = a_festival(6)
+    looks = looks_ahead_counted(monkeypatch)
+    found = compiler.check(file)
+    assert found.answer is Answer.FEASIBLE
+    paid_from = {(cover.option, cover.budget) for cover in found.rights}
+    assert ("masterclass", "first") in paid_from
+    assert {budget for option, budget in paid_from if option != "masterclass"} == {"second"}
+    first, second = found.caps
+    assert (first.to_buy, first.left) == (1_500_000, 0)
+    assert (second.to_buy, second.left) == (1_200_000, 0)
+    assert len(looks) < 1000
+
+
+def test_looking_ahead_changes_no_way_to_pay_on_a_small_festival(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Three sessions: few enough to try everything. The same way to pay, in far fewer steps."""
+    file = a_festival(3)
+    world = worst_case(file)
+    taking_part = {found.option: found.persons for found in file.locks}
+    looks = looks_ahead_counted(monkeypatch)
+    quick = way_to_pay(file, world, taking_part)
+    with_it = len(looks)
+    monkeypatch.undo()
+    looks = looks_ahead_counted(monkeypatch, skip_nothing=True)
+    assert way_to_pay(file, world, taking_part) == quick
+    assert quick is not None
+    assert with_it < 100 < 1000 < len(looks)
+
+
+def a_group_with_two_pots(rng: Random) -> File:
+    """Two to four visits at one PLACE, each LOCKed for some of three PERSONs.
+
+    Each visit needs a right and has one or two OFFERs at prices from nothing to 5 USD. Two
+    BUDGETs pay, one for everybody and one for some, and each usually has a small cap. Now
+    and then a BOOKING has already charged one of them.
+    """
+    persons = ["alex", "sam", "jo"]
+    names = [f"visit-{number}" for number in range(rng.randrange(2, 5))]
+    facts: list[Document] = []
+    decisions: list[Document] = []
+    for number, name in enumerate(names):
+        facts += [*at(name, 9 + 2 * number), needs_right(name)]
+        for count in range(rng.choice([1, 1, 2])):
+            price = rng.choice(["0 USD", "1 USD", "2 USD", "5 USD"])
+            places = rng.randrange(1, 4)
+            facts.append(offer(name, places, id=f"{name}-offer-{count}", price=price))
+        decisions.append(lock(name, *rng.sample(persons, rng.randrange(1, 4))))
+    if rng.random() < 0.3:
+        paid = rng.choice(["1 USD", "3 USD"])
+        holder = rng.choice(persons)
+        facts.append(booking(names[0], holder, id="old", paid=paid, budget=rng.choice(["a", "b"])))
+    pots = [budget("a", *rng.sample(persons, rng.randrange(1, 4))), budget("b", *persons)]
+    decisions += [
+        cap(pot, f"{rng.randrange(0, 13)} USD") for pot in ("a", "b") if rng.random() < 0.9
+    ]
+    options = [stays(name, "dock") for name in names]
+    return trip(persons, ["dock"], options, facts, decisions, rights=True, budgets=pots)
+
+
+def test_looking_ahead_changes_no_way_to_pay_on_random_trips(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The way to pay with the look ahead, and by trying everything, for every group of LOCKs.
+
+    The look ahead has to say no often here, or the comparison shows nothing.
+    """
+    rng = Random(77)
+    trips = [a_group_with_two_pots(rng) for _ in range(400)]
+    trips += [two_capped_visits(rng) for _ in range(200)]
+    asked = [
+        (file, world, {found.option: found.persons for found in file.locks})
+        for file in trips
+        for world in (worst_case(file), reference.best_case(file))
+    ]
+    looks = looks_ahead_counted(monkeypatch)
+    quick = [way_to_pay(file, world, taking_part) for file, world, taking_part in asked]
+    refused = looks.count(False)
+    monkeypatch.undo()
+    looks_ahead_counted(monkeypatch, skip_nothing=True)
+    assert [way_to_pay(file, world, taking_part) for file, world, taking_part in asked] == quick
+    assert refused > 100
+    assert sum(found is None for found in quick) > 100
+    assert sum(found is not None and len(found) > 2 for found in quick) > 100
+
+
+def test_looking_ahead_changes_no_report(monkeypatch: pytest.MonkeyPatch) -> None:
+    rng = Random(78)
+    trips = [a_group_with_two_pots(rng) for _ in range(150)]
+    with_it = [compiler.check(file) for file in trips]
+    assert {found.answer for found in with_it} == set(Answer)
+    looks_ahead_counted(monkeypatch, skip_nothing=True)
+    assert [compiler.check(file) for file in trips] == with_it
+    assert [answers.check(file) for file in trips[::5]] == with_it[::5]
