@@ -443,6 +443,7 @@ ASKS = (
 )
 NOT_SHOWN = " What the report says the FILE does not say is not about a step shown here."
 NAMED_SO = "The report names this OPTION in what the FILE does not say."
+ANY_OF = "The trip works in any of these cases:"
 
 
 def asked_marks(laid: Calendar) -> dict[str, tuple[list[int], list[str]]]:
@@ -481,30 +482,46 @@ def test_a_case_marks_each_step_that_it_names_and_a_step_has_each_case_that_name
     # Two cases about one OPTION: a right is found, or a place has a price that can be paid.
     sent, found, words = in_words(EXAMPLES / "a-ticket" / "depends-on-the-price.json")
     laid = calendar(sent, found, words)
+    # The words are the lines of the report: its heading, and the line of each case.
+    assert ANY_OF in words.split("\n")
     assert asked_marks(laid) == {
         "Skydeck visit": (
             [0, 1],
             [
-                "The trip works in one case: A right to Skydeck visit is found for Sam, in"
-                " addition to the 2 places on OFFER.",
-                "The trip works in one case: A place from skydeck-tickets has a price that Sam"
-                " can pay.",
+                ANY_OF,
+                "1. A right to Skydeck visit is found for Sam, in addition to the 2 places on"
+                " OFFER.",
+                "2. A place from skydeck-tickets has a price that Sam can pay.",
             ],
         ),
         "Gallery talk": ([], []),
         "Lunch in the park": ([], []),
     }
+    for line in asked_marks(laid)["Skydeck visit"][1][1:]:
+        assert f"  {line}" in words.split("\n")
     # Two cases, and one of them is about a PERSON and no step.
     sent, found, words = in_words(EXAMPLES / "a-kayak-tour" / "two-things-left-open.json")
     assert asked_marks(calendar(sent, found, words)) == {
         "Kayak tour": (
             [0],
             [
-                "The trip works in one case: Kayak tour requires swimming of one PERSON who"
-                " takes part, or does not require it."
+                ANY_OF,
+                "1. Kayak tour requires swimming of one PERSON who takes part, or does not"
+                " require it.",
             ],
         )
     }
+    # A case can name a step by the place that somebody has to buy for it.
+    sent, found, words = in_words(EXAMPLES / "a-ticket" / "nobody-said-who-pays.json")
+    assert [need.get("option") for need in found["missing"][1]] == [None]
+    assert [buy["option"] for buy in found["missing"][1][0]["buys"]] == ["skydeck"]
+    cases, said = asked_marks(calendar(sent, found, words))["Skydeck visit"]
+    assert cases == [0, 1]
+    assert [line[:40] for line in said] == [
+        ANY_OF,
+        "1. A right to Skydeck visit is found for",
+        "2. Each place that Sam has to buy can be",
+    ]
 
 
 def test_the_calendar_says_where_what_is_missing_is_about_no_step_shown() -> None:
@@ -551,6 +568,8 @@ def test_a_step_with_no_time_is_marked_where_the_report_says_what_is_missing_abo
     laid = calendar(sent, found)
     (dinner,) = laid["untimed"]
     assert (dinner["name"], dinner["cases"], dinner["asks"]) == ("dinner", [0], [NAMED_SO])
+    # It says which step of the TRIP it is, so that pointing at it lights up that step alone.
+    assert sent["steps"][dinner["step"]]["option"] == "dinner"
     assert laid["asked"] is True
     assert laid["says"].endswith(ASKS)
 
@@ -1106,6 +1125,8 @@ def test_a_step_with_no_time_is_named_beside_the_calendar() -> None:
             "finds": None,
             "cases": [],
             "asks": [],
+            # The visit comes first, at its time. The fireworks have none.
+            "step": 1,
         }
     ]
     assert marks(laid) == [(0, "locked", 0, 0, 60, 60, True, True)]
@@ -1142,6 +1163,7 @@ def test_a_calendar_with_nothing_on_it_says_why() -> None:
             "finds": None,
             "cases": [],
             "asks": [],
+            "step": 0,
         }
     ]
     assert idle["says"] == "The ITINERARY of the report is empty: nobody has to do anything."

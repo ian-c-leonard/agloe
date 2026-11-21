@@ -209,6 +209,40 @@ def test_a_line_that_only_looks_like_a_case_is_tied_to_none() -> None:
     assert [line["case"] for line in tied if line["case"] is not None] == [0, 1]
 
 
+def test_what_a_report_says_under_a_case_is_between_the_lines_of_the_cases() -> None:
+    """With a cap on what a BUDGET spends, the report shows a plan under each case."""
+    written = json.loads((EXAMPLES / "a-ticket" / "depends-on-the-price.json").read_text())
+    cap = {
+        "id": "trip-cap",
+        "budget": "trip-money",
+        "spend_at_most": {"amount": "200.00", "currency": "USD"},
+    }
+    written["decisions"].append(cap)
+    file = parse(json.dumps(written))
+    found = compiler.check(file)
+    in_words = report.as_text(file, found)
+    as_json = report.as_json(file, found)
+    assert len(cast("list[Any]", as_json["missing"])) == 2
+    asked = {"text": in_words, "report": as_json, "trip": shown(file, found)}
+    (tied,) = lines_of([asked])
+    states = [line for line in tied if line["case"] is not None]
+    assert [(line["case"], line["text"][:30]) for line in states] == [
+        (0, "  1. A right to Skydeck visit "),
+        (1, "  2. A place from skydeck-tick"),
+    ]
+    # Between the two is what the report says of the first case, further in.
+    first, second = (tied.index(line) for line in states)
+    between = tied[first + 1 : second]
+    assert between
+    assert all(line["text"].startswith("     ") and line["case"] is None for line in between)
+    # With a line numbered out of turn under the heading, the words are not the cases of the
+    # report as JSON, and nothing is tied.
+    lines = in_words.split("\n")
+    out_of_turn = "\n".join([*lines[: second + 1], "  4. Something else.", *lines[second + 1 :]])
+    (tied,) = lines_of([{**asked, "text": out_of_turn}])
+    assert all(line["case"] is None for line in tied)
+
+
 def test_cases_are_tied_only_where_the_report_states_each_of_them() -> None:
     """With another report as JSON, the report in words is whole and no line states a case."""
     asked = asked_of(EXAMPLES / "a-kayak-tour" / "two-things-left-open.json")
@@ -222,6 +256,7 @@ def test_cases_are_tied_only_where_the_report_states_each_of_them() -> None:
         {**said, "missing": said["missing"][:1]},
         {**said, "missing": "swimming"},
         {**said, "missing": [said["missing"][0], "swimming"]},
+        {**said, "missing": [said["missing"][0], [None]]},
         {**said, "missing": []},
     ]
     for found in lines_of([{**asked, "report": other} for other in odd]):

@@ -24,7 +24,8 @@ const CASES = "The trip works in any of these cases:";
 /** The cases in which a report as JSON says that the trip works: for each, the list of what it needs. */
 function casesIn(report) {
   const missing = report?.answer === "UNDETERMINED" ? report.missing : null;
-  return Array.isArray(missing) && missing.every((each) => Array.isArray(each)) ? missing : [];
+  const isNeed = (need) => need !== null && typeof need === "object";
+  return Array.isArray(missing) && missing.every((needs) => Array.isArray(needs) && needs.every(isNeed)) ? missing : [];
 }
 
 /** The lists of ids that a report as JSON names one after another in its words. */
@@ -68,7 +69,9 @@ export function lines(text, report, trip) {
     if (at >= 0) ids.forEach((id, n) => (found[at + n].record = id));
   }
   // The cases in which the trip works. One case is the only sentence that starts so. Several
-  // are the numbered lines right under their heading, as many as the report as JSON holds.
+  // are under their heading, each on a line with its number. What the report says of a case
+  // is under that line, further in. The list ends at the first line that is neither. Its
+  // lines are tied where they are numbered in turn, as many as the report as JSON holds.
   const cases = casesIn(report);
   const free = (line) => line !== undefined && line.step === null && line.record === null;
   if (cases.length === 1) {
@@ -76,24 +79,29 @@ export function lines(text, report, trip) {
     if (states.length === 1 && free(states[0])) states[0].case = 0;
   } else if (cases.length > 1) {
     const heads = found.flatMap((line, at) => (line.text === CASES ? [at] : []));
-    const numbered = (n) => found[heads[0] + 1 + n]?.text.startsWith(`  ${n + 1}. `) === true;
-    if (heads.length === 1 && cases.every((_, n) => numbered(n) && free(found[heads[0] + 1 + n])) && !numbered(cases.length)) {
-      cases.forEach((_, n) => (found[heads[0] + 1 + n].case = n));
+    const numbered = [];
+    for (let at = heads[0] + 1; heads.length === 1 && at < found.length; at += 1) {
+      if (/^ {2}\d+\. /.test(found[at].text)) numbered.push(at);
+      else if (!/^ {3,}\S/.test(found[at].text)) break;
+    }
+    if (numbered.length === cases.length && numbered.every((at, n) => free(found[at]) && found[at].text.startsWith(`  ${n + 1}. `))) {
+      numbered.forEach((at, n) => (found[at].case = n));
     }
   }
   return found;
 }
 
 /**
- * The words of each case in which the trip works, from the lines of the report, at the place
- * of the case. A case in a numbered list is without its number.
+ * The words of the report for the cases in which the trip works, from its lines: the line of
+ * each case, at the place of the case, and the heading over them where the report lists
+ * several.
  */
 export function casesOf(tied) {
   const cases = [];
   for (const line of tied) {
-    if (line.case !== null) cases[line.case] = line.text.replace(/^ {2}\d+\. /, "");
+    if (line.case !== null) cases[line.case] = line.text.trim();
   }
-  return cases;
+  return { heading: cases.length > 1 ? CASES : null, cases };
 }
 
 /**

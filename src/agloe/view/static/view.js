@@ -171,7 +171,8 @@ function draw(laid) {
   // The steps with no time, each marked where the report names what is about it.
   const untimed = laid.untimed.flatMap((step, n) => {
     const name = Object.assign(made("span", `${step.clash.length ? "clash" : ""}${step.asks.length ? " asked" : ""}`, `${step.name} (${step.who})`), { title: [...(step.finds ? [step.finds] : []), ...step.asks].join("\n") });
-    name.dataset.records = tiesOf(step).join(" ");
+    // It is a step of the TRIP: pointing at it lights up that step, and no other.
+    Object.assign(name.dataset, { step: step.step, records: tiesOf(step).join(" ") });
     return n ? [", ", name] : [name];
   });
   part("calendar-untimed").replaceChildren("The FILE gives no time for these LOCKed OPTIONs: ", ...untimed, ".");
@@ -190,7 +191,9 @@ function bar(mark, people) {
   const any = (holds) => mark.of.some(holds);
   const looks = several ? `several${any((each) => !each.begins) ? " goes-on" : ""}${any((each) => !each.ends) ? " no-end" : ""}${any((each) => each.clash.length) ? " clash" : ""}${any((each) => each.warns.length) ? " warned" : ""}${any((each) => each.asks.length) ? " asked" : ""}` : looksOf(one);
   const box = made("div", `bar ${looks}${mark.small ? " small" : ""}`);
-  box.title = several ? [`${mark.of.length} steps too close together to show apart at this width:`, ...mark.of.map((each) => `${each.name}, ${each.late ? `${each.when}, ${each.late}` : each.when}`)].join("\n") : wordsOf(one);
+  // It names each of them, with its times and with what the report says of it.
+  const said = (each) => [`${each.name}, ${each.late ? `${each.when}, ${each.late}` : each.when}`, ...[...(each.finds ? [each.finds] : []), ...each.warns, ...each.asks].map((words) => `    ${words}`)];
+  box.title = several ? [`${mark.of.length} steps too close together to show apart at this width:`, ...mark.of.flatMap(said)].join("\n") : wordsOf(one);
   // A click goes to the first of the marks that it stands for.
   Object.assign(box.dataset, {
     step: [...new Set(mark.of.map((each) => each.step))].join(" "),

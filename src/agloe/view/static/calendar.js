@@ -160,12 +160,13 @@ function saysOf(trip, timed) {
  * `warns` on a mark holds those words, and `warned` on the calendar says that a mark has some.
  * Each mark also holds the `records` that are about its step, and each bound its `record`.
  *
- * `stated` holds, at the place of each case in which the report says the trip works, the words
- * of the report for that case. `cases` on a mark holds the cases that name the OPTION of its
- * step among what the FILE does not say, as their places in `missing` of the report. `asks`
- * holds what the report says of them, and `asked` on the calendar says that a mark has some.
+ * `stated` holds the words of the report for the cases in which it says the trip works: the
+ * line of each case, at the place of the case, and the heading over them where it lists
+ * several. `cases` on a mark holds the cases that name the OPTION of its step among what the
+ * FILE does not say, as their places in `missing` of the report. `asks` holds what the report
+ * says of them, and `asked` on the calendar says that a mark has some.
  */
-export function calendar(trip, report = null, warnings = [], stated = []) {
+export function calendar(trip, report = null, warnings = [], stated = null) {
   const none = { says: "", zone: null, itinerary: false, clash: false, warned: false, asked: false, persons: [], hours: { from: 9 * 60, to: 17 * 60 }, days: [], untimed: [] };
   if (trip === null) return { ...none, says: "There is no calendar of this TRIP: the view could not make one." };
   const column = new Map(trip.persons.map((person, n) => [person.id, n]));
@@ -178,8 +179,11 @@ export function calendar(trip, report = null, warnings = [], stated = []) {
   const missing = report !== null && report.answer === "UNDETERMINED" ? report.missing : null;
   const isNeed = (need) => need !== null && typeof need === "object";
   const needed = Array.isArray(missing) && missing.every((needs) => Array.isArray(needs) && needs.every(isNeed)) ? missing : [];
-  // What the report says of one case, where the page has its words.
-  const saidOf = (at) => (typeof stated[at] !== "string" ? null : needed.length === 1 ? stated[at] : `The trip works in one case: ${stated[at]}`);
+  // The OPTIONs that one of those things names: its own, and each that somebody has to buy a place for.
+  const namedBy = (need) => [need.option, ...(Array.isArray(need.buys) ? need.buys.filter(isNeed).map((buy) => buy.option) : [])];
+  // The words of the report for the cases, where the page has them.
+  const words = stated !== null && typeof stated === "object" && Array.isArray(stated.cases) ? stated.cases : [];
+  const heading = stated !== null && typeof stated === "object" && typeof stated.heading === "string" ? stated.heading : null;
 
   // ---- each step in words
   const steps = trip.steps.map((step, n) => {
@@ -194,11 +198,12 @@ export function calendar(trip, report = null, warnings = [], stated = []) {
         return this.clash.length ? `The report names ${listed(this.clash)} among what rules out every plan.` : null;
       },
       // The cases that name the OPTION of this step, and what the report says of each.
-      cases: step.option === null ? [] : needed.flatMap((needs, at) => (needs.some((need) => need.option === step.option) ? [at] : [])),
+      cases: step.option === null ? [] : needed.flatMap((needs, at) => (needs.some((need) => namedBy(need).includes(step.option)) ? [at] : [])),
       get asks() {
-        const said = this.cases.map(saidOf);
+        const said = this.cases.map((at) => (typeof words[at] === "string" ? words[at] : null));
         if (!said.length) return [];
-        return said.every((words) => words !== null) ? said : ["The report names this OPTION in what the FILE does not say."];
+        if (said.includes(null)) return ["The report names this OPTION in what the FILE does not say."];
+        return heading === null ? said : [heading, ...said];
       },
       kind: step.option === null ? "way" : "option",
       name: step.name ?? "another WAY",
@@ -209,7 +214,7 @@ export function calendar(trip, report = null, warnings = [], stated = []) {
       stateOf: (at) => (step.option === null ? "way" : locked.has(at) ? "locked" : "planned"),
     };
   });
-  const untimed = steps.filter((step) => step.when === null).map((step) => ({ name: step.name, who: step.who, records: step.records, clash: step.clash, finds: step.finds, cases: step.cases, asks: step.asks }));
+  const untimed = steps.filter((step) => step.when === null).map((step) => ({ name: step.name, who: step.who, records: step.records, clash: step.clash, finds: step.finds, cases: step.cases, asks: step.asks, step: step.n }));
   // What the report names, and how much of it is about what the calendar shows: the steps
   // on its days, the steps with no time that it names beside them, and the times of the TRIP.
   const marked = new Set(steps.filter((step) => step.parts.length || step.when === null).flatMap((step) => step.clash));
