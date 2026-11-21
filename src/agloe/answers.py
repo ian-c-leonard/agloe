@@ -651,6 +651,12 @@ def _asked_by_a_lock(file: File) -> tuple[frozenset[Unknown], list[tuple[frozens
     In a FILE with a cap, every set also holds what each BOOKING with no stated payment
     charged: at its worst that has no upper bound, and no cap can be shown to hold.
 
+    A LOCKed OPTION that requires a CAPABILITY of each PERSON asks that each PERSON the LOCK
+    names has it. Where the FILE does not say whether one of them has, every set holds that
+    they do. And where a FACT says that one of them does not have a CAPABILITY, and the FILE
+    does not say what the OPTION requires of it, every set holds what it requires: at its
+    worst that is of each PERSON.
+
     Second, groups of FACTs with a number: every such set holds at least that many of the
     group. Where a FACT says the OPTION needs a right, each of those PERSONs needs one. The
     places on OFFER serve some of them, whoever they are, and each of the rest needs another
@@ -667,6 +673,16 @@ def _asked_by_a_lock(file: File) -> tuple[frozenset[Unknown], list[tuple[frozens
             asked.add(Unknown("start", lock.option))
         locked.setdefault(lock.option, set()).update(lock.persons)
     for option, persons in locked.items():
+        for capability in file.capabilities:
+            of = file.requires(option, capability.id)
+            for person in file.persons:
+                if person.id not in persons:
+                    continue
+                has = file.has(person.id, capability.id)
+                if of == "each" and has is None:
+                    asked.add(Unknown("has", person=person.id, about=capability.id))
+                if of is None and has is False:
+                    asked.add(Unknown("requirement", option, about=capability.id))
         without = [person for person in persons if file.booking(option, person) is None]
         short = len(without) - file.places_on_offer(option)
         if file.needs_right(option) is None and short > 0:
