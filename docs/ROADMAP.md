@@ -8,7 +8,7 @@ Agloe grows in releases, each built on one that already works. Before 1.0, anyth
 - The COMPILER: for any TRIP it answers FEASIBLE, INFEASIBLE or UNDETERMINED, and reports every FINDING with its evidence, including DEADLINEs and BETs.
 - A command line, a Python library and an MCP tool, so an AI agent can use the COMPILER from the start.
 
-0.1 is built in steps along one fictional trip to Chicago: one connection, a full day, a group, several days, musts and must-nots, tickets and money, cars and drivers, DEADLINEs and BETs, and the tools for an AI agent.
+0.1 is built in steps along one fictional trip to Chicago: one connection, a full day, a group, several days, musts and must-nots, tickets and money, OBJECTs and CAPABILITIES, DEADLINEs and BETs, and the tools for an AI agent.
 
 0.1 is done when the COMPILER gives the right answer at every step of that trip, and an AI agent plans the trip with it. The agent gets a one-page description of the trip and of Agloe. It writes the FILE, reads the COMPILER's reports, and ends with a FEASIBLE TRIP, with no other help.
 
