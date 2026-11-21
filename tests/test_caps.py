@@ -1143,3 +1143,268 @@ def test_a_group_with_nothing_to_choose_is_asked_about_no_order(
     assert compiler.shown(file, reference.best_case(file)) is not None
     assert len(solves) > 10
     assert compiler.check(file) == found
+
+
+# ------------------------------ The search for the way to pay -------------------------------
+
+
+def a_festival(sessions: int, classes: int = 1) -> File:
+    """Four people go to some sessions at 5 USD each, and Alex to a masterclass.
+
+    Two BUDGETs cover everyone. The second may spend just what the sessions cost. A
+    masterclass costs 30 USD more than that, and the first BUDGET may spend just that. So
+    the masterclass has to come from the first BUDGET, and every session from the second.
+    The search for the way to pay tries the first BUDGET first.
+
+    With two ``classes``, Alex goes to two at that price, and the first BUDGET may spend
+    what both cost. Either one would fit beside a session in it, and the two together do not.
+    """
+    people = ["alex", "sam", "jo", "max"]
+    names = [f"session-{number}" for number in range(sessions)]
+    big = [f"masterclass-{number}" for number in range(classes)]
+    most = 20 * sessions * classes + 30 * classes
+    facts: list[Document] = []
+    for number, name in enumerate([*names, *big]):
+        facts += [*at(name, 9 + number), needs_right(name)]
+    facts += [offer(name, 4, price="5 USD") for name in names]
+    facts += [offer(name, 1, price=f"{most // classes} USD") for name in big]
+    decisions = [lock(name, *people) for name in names]
+    decisions += [lock(name, "alex") for name in big]
+    decisions += [cap("first", f"{most} USD"), cap("second", f"{20 * sessions} USD")]
+    pots = [budget("first", *people), budget("second", *people)]
+    options = [stays(name, "tent") for name in [*names, *big]]
+    return trip(people, ["tent"], options, facts, decisions, rights=True, budgets=pots)
+
+
+def looks_ahead_counted(monkeypatch: pytest.MonkeyPatch, skip_nothing: bool = False) -> list[bool]:
+    """A list that gains an entry each time the search for the way to pay looks ahead.
+
+    With ``skip_nothing`` the look ahead always says that the rest can follow, so the search
+    tries everything, as the rule says it in words.
+    """
+    looks: list[bool] = []
+    can_follow = reference._can_follow  # pyright: ignore[reportPrivateUsage]
+
+    def counted(*given: object) -> bool:
+        said = skip_nothing or can_follow(*given)  # type: ignore[arg-type]
+        looks.append(said)
+        return said
+
+    monkeypatch.setattr(reference, "_can_follow", counted)
+    return looks
+
+
+def test_a_purchase_that_one_budget_has_to_pay_keeps_that_budget_free(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Six sessions for four make 24 small purchases before the masterclass.
+
+    Trying everything, the search would give the first BUDGET up for each of them only after
+    it had tried every way to pay for the rest: sixteen million ways.
+    """
+    file = a_festival(6)
+    looks = looks_ahead_counted(monkeypatch)
+    found = compiler.check(file)
+    assert found.answer is Answer.FEASIBLE
+    paid_from = {(cover.option, cover.budget) for cover in found.rights}
+    assert ("masterclass-0", "first") in paid_from
+    assert {budget for option, budget in paid_from if option != "masterclass-0"} == {"second"}
+    first, second = found.caps
+    assert (first.to_buy, first.left) == (1_500_000, 0)
+    assert (second.to_buy, second.left) == (1_200_000, 0)
+    assert len(looks) < 1000
+
+
+def test_looking_ahead_changes_no_way_to_pay_on_a_small_festival(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Three sessions: few enough to try everything. The same way to pay, in far fewer steps."""
+    file = a_festival(3)
+    world = worst_case(file)
+    taking_part = {found.option: found.persons for found in file.locks}
+    looks = looks_ahead_counted(monkeypatch)
+    quick = way_to_pay(file, world, taking_part)
+    with_it = len(looks)
+    monkeypatch.undo()
+    looks = looks_ahead_counted(monkeypatch, skip_nothing=True)
+    assert way_to_pay(file, world, taking_part) == quick
+    assert quick is not None
+    assert with_it < 100 < 1000 < len(looks)
+
+
+def a_group_with_two_pots(rng: Random) -> File:
+    """Two to four visits at one PLACE, each LOCKed for some of three PERSONs.
+
+    Each visit needs a right and has one or two OFFERs at prices from nothing to 5 USD. Two
+    BUDGETs pay, one for everybody and one for some, and each usually has a small cap. Now
+    and then a BOOKING has already charged one of them.
+    """
+    persons = ["alex", "sam", "jo"]
+    names = [f"visit-{number}" for number in range(rng.randrange(2, 5))]
+    facts: list[Document] = []
+    decisions: list[Document] = []
+    for number, name in enumerate(names):
+        facts += [*at(name, 9 + 2 * number), needs_right(name)]
+        for count in range(rng.choice([1, 1, 2])):
+            price = rng.choice(["0 USD", "1 USD", "2 USD", "5 USD"])
+            places = rng.randrange(1, 4)
+            facts.append(offer(name, places, id=f"{name}-offer-{count}", price=price))
+        decisions.append(lock(name, *rng.sample(persons, rng.randrange(1, 4))))
+    if rng.random() < 0.3:
+        paid = rng.choice(["1 USD", "3 USD"])
+        holder = rng.choice(persons)
+        facts.append(booking(names[0], holder, id="old", paid=paid, budget=rng.choice(["a", "b"])))
+    pots = [budget("a", *rng.sample(persons, rng.randrange(1, 4))), budget("b", *persons)]
+    decisions += [
+        cap(pot, f"{rng.randrange(0, 13)} USD") for pot in ("a", "b") if rng.random() < 0.9
+    ]
+    options = [stays(name, "dock") for name in names]
+    return trip(persons, ["dock"], options, facts, decisions, rights=True, budgets=pots)
+
+
+def test_looking_ahead_changes_no_way_to_pay_on_random_trips(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The way to pay with the look ahead, and by trying everything, for every group of LOCKs.
+
+    The look ahead has to say no often here, or the comparison shows nothing.
+    """
+    rng = Random(77)
+    trips = [a_group_with_two_pots(rng) for _ in range(400)]
+    trips += [two_capped_visits(rng) for _ in range(200)]
+    asked = [
+        (file, world, {found.option: found.persons for found in file.locks})
+        for file in trips
+        for world in (worst_case(file), reference.best_case(file))
+    ]
+    looks = looks_ahead_counted(monkeypatch)
+    quick = [way_to_pay(file, world, taking_part) for file, world, taking_part in asked]
+    refused = looks.count(False)
+    monkeypatch.undo()
+    looks_ahead_counted(monkeypatch, skip_nothing=True)
+    assert [way_to_pay(file, world, taking_part) for file, world, taking_part in asked] == quick
+    assert refused > 100
+    assert sum(found is None for found in quick) > 100
+    assert sum(found is not None and len(found) > 2 for found in quick) > 100
+
+
+def test_looking_ahead_changes_no_report(monkeypatch: pytest.MonkeyPatch) -> None:
+    rng = Random(78)
+    trips = [a_group_with_two_pots(rng) for _ in range(150)]
+    with_it = [compiler.check(file) for file in trips]
+    assert {found.answer for found in with_it} == set(Answer)
+    looks_ahead_counted(monkeypatch, skip_nothing=True)
+    assert [compiler.check(file) for file in trips] == with_it
+    assert [answers.check(file) for file in trips[::5]] == with_it[::5]
+
+
+def test_two_purchases_that_fit_one_by_one_are_added_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Alex goes to two classes at 90 USD each, after three sessions for four.
+
+    The first BUDGET may spend 180 USD. With one session paid from it, either class still
+    fits, and the two together do not. The look ahead adds up what the cap owes.
+    """
+    file = a_festival(3, classes=2)
+    taking_part = {found.option: found.persons for found in file.locks}
+    looks = looks_ahead_counted(monkeypatch)
+    found = way_to_pay(file, worst_case(file), taking_part)
+    assert found is not None
+    assert {found[name, "alex"][1] for name in ("masterclass-0", "masterclass-1")} == {"first"}
+    assert {pot for (option, _), (_, pot) in found.items() if "session" in option} == {"second"}
+    assert len(looks) < 100
+
+
+def one_wallet_in_two_currencies(*paid: str) -> File:
+    """Alex, Sam and Jo are LOCKed into one tour. One place is free, and two cost 1 each.
+
+    Sam and Jo can draw on a wallet that may spend 1 USD and 1 EUR. Alex can draw on nothing.
+    ``paid`` gives the prices of the two places that cost something, in the FILE's order. A
+    FACT says that these three places are every right to the tour.
+    """
+    people = ["alex", "sam", "jo"]
+    wallet = budget("wallet", "sam", "jo", holds=["USD", "EUR"])
+    caps = [cap("wallet", "1 USD", id="usd-cap"), cap("wallet", "1 EUR", id="eur-cap")]
+    places = [offer("tour", 1, id="free", price="0 USD")]
+    places += [offer("tour", 1, id=price.split()[1].lower(), price=price) for price in paid]
+    sold = every_right("tour", *(place["id"] for place in places))
+    return a_tour(*places, sold, locked=people, budgets=[wallet], caps=caps, persons=people)
+
+
+@pytest.mark.parametrize(
+    ("paid", "sam", "jo"),
+    [(("1 USD", "1 EUR"), "usd", "eur"), (("1 EUR", "1 USD"), "eur", "usd")],
+    ids=["the place in USD is listed first", "the place in EUR is listed first"],
+)
+def test_two_caps_of_one_budget_are_owed_apart(paid: tuple[str, str], sam: str, jo: str) -> None:
+    """Sam takes the first place that costs something, and Jo the other one.
+
+    Each of the two is the only purchase its cap has to pay for. Taken as one cap for the
+    whole wallet, they would be more than either has left.
+    """
+    file = one_wallet_in_two_currencies(*paid)
+    taking_part = {"tour": ("alex", "sam", "jo")}
+    for world in (worst_case(file), reference.best_case(file)):
+        assert way_to_pay(file, world, taking_part) == {
+            ("tour", "alex"): ("free", None),
+            ("tour", "sam"): (sam, "wallet"),
+            ("tour", "jo"): (jo, "wallet"),
+        }
+    found = compiler.check(file)
+    assert found == answers.check(file)
+    assert found.answer is Answer.FEASIBLE
+
+
+def test_a_trip_whose_first_pairs_all_fit_is_never_looked_ahead_at(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Twenty people on one tour at 10 USD, and a cap with room for all of them."""
+    file = a_group_on_one_tour(20, "200 USD")
+    looks = looks_ahead_counted(monkeypatch)
+    found = way_to_pay(file, worst_case(file), {"tour": tuple(p.id for p in file.persons)})
+    assert found is not None
+    assert len(found) == 20
+    assert looks == []
+
+
+def test_the_look_ahead_keeps_two_caps_of_one_budget_apart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A coffee for two makes the search go back once, and then it looks ahead at a tour.
+
+    Sam and Alex have coffee: one cup is free and one costs 1 GBP, and only Sam can pay.
+    Sam takes the free cup first and has to give it to Alex. Then Kim, Jo and Max take the
+    tour: one place is free, one costs 1 USD and one 1 EUR, and their wallet may spend 1 USD
+    and 1 EUR. Kim takes the free place. Jo and Max then each have the two places that cost
+    something open: two caps of one BUDGET, and each pays for one of them.
+    """
+    people = ["sam", "alex", "kim", "jo", "max"]
+    pots = [
+        budget("cash", "sam", holds=["GBP"]),
+        budget("wallet", "kim", "jo", "max", holds=["USD", "EUR"]),
+    ]
+    facts = [*at("coffee", 9), needs_right("coffee"), *at("tour", 11), needs_right("tour")]
+    facts += [
+        offer("coffee", 1, id="cup", price="0 GBP"),
+        offer("coffee", 1, id="paid-cup", price="1 GBP"),
+    ]
+    facts += [
+        offer("tour", 1, id="free", price="0 USD"),
+        offer("tour", 1, id="usd", price="1 USD"),
+        offer("tour", 1, id="eur", price="1 EUR"),
+    ]
+    facts += [every_right("coffee", "cup", "paid-cup"), every_right("tour", "free", "usd", "eur")]
+    decisions = [lock("coffee", "sam", "alex"), lock("tour", "kim", "jo", "max")]
+    decisions += [cap("wallet", "1 USD", id="usd-cap"), cap("wallet", "1 EUR", id="eur-cap")]
+    options = [stays("coffee", "dock"), stays("tour", "dock")]
+    file = trip(people, ["dock"], options, facts, decisions, rights=True, budgets=pots)
+    taking_part = {"coffee": ("sam", "alex"), "tour": ("kim", "jo", "max")}
+    looks = looks_ahead_counted(monkeypatch)
+    assert way_to_pay(file, worst_case(file), taking_part) == {
+        ("coffee", "sam"): ("paid-cup", "cash"),
+        ("coffee", "alex"): ("cup", None),
+        ("tour", "kim"): ("free", None),
+        ("tour", "jo"): ("usd", "wallet"),
+        ("tour", "max"): ("eur", "wallet"),
+    }
+    assert looks
+    assert compiler.check(file) == answers.check(file)
