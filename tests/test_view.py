@@ -474,7 +474,7 @@ def test_a_fault_in_what_makes_the_drawing_costs_the_calendar_and_not_the_report
     # The page shows the answer and the report, and has no TRIP for the calendar.
     (said,) = page_says([[file, answer, report]])
     assert said[-1]["line"] == "FEASIBLE: this trip works."
-    assert said[-1]["calendar"] == {"trip": None}
+    assert said[-1]["calendar"] == {"trip": None, "report": report["json"]}
 
     # So it is where what is made cannot be printed.
     def unprintable(*given: object) -> dict[str, date]:
@@ -853,7 +853,7 @@ def test_the_page_says_what_the_report_says() -> None:
         assert on_report["report"] == words, name
         assert on_report["old"] is False, name
         # The calendar is of the TRIP that came with the report.
-        assert on_report["calendar"] == {"trip": sent[-1]["trip"]}, name
+        assert on_report["calendar"] == {"trip": sent[-1]["trip"], "report": expected}, name
         assert sent[-1]["trip"]["itinerary"] is (expected["answer"] == "FEASIBLE"), name
 
 
@@ -876,11 +876,12 @@ def test_the_page_marks_a_report_on_the_file_as_it_was() -> None:
     assert answered["line"].startswith("INFEASIBLE")
     assert (answered["report"], answered["old"]) == (words, True)
     # The calendar on the page is the one of that report, and it is marked with it.
-    assert changed["calendar"] == answered["calendar"] == {"trip": first[-1]["trip"]}
+    kept = {"trip": first[-1]["trip"], "report": first[-1]["json"]}
+    assert changed["calendar"] == answered["calendar"] == kept
     assert "calendar" in changed["note"]
     assert reported["line"] == "INFEASIBLE: this trip cannot work."
     assert reported["old"] is False
-    assert reported["calendar"] == {"trip": second[-1]["trip"]}
+    assert reported["calendar"] == {"trip": second[-1]["trip"], "report": second[-1]["json"]}
     assert reported["calendar"] != changed["calendar"]
     # A FILE that breaks the format has no report: the page shows the problems, and no answer.
     broken = said[8]
@@ -888,7 +889,7 @@ def test_the_page_marks_a_report_on_the_file_as_it_was() -> None:
     assert broken["problems"] == ["/facts/0: fits no known shape"]
     assert not any(answer in broken["line"] for answer in ANSWERS)
     assert broken["old"] is True
-    assert broken["calendar"] == {"trip": second[-1]["trip"]}
+    assert broken["calendar"] == reported["calendar"]
     assert said[-1]["line"] == "FEASIBLE: this trip works."
     assert said[-1]["problems"] is None
 
@@ -986,7 +987,7 @@ def test_the_page_keeps_no_report_from_another_view() -> None:
     ]
     (said,) = page_says([[*first, {"kind": "lost"}, *other]])
     assert said[4]["report"] == (STORY / "works.expected.txt").read_text()
-    assert said[4]["calendar"] == {"trip": first[-1]["trip"]}
+    assert said[4]["calendar"] == {"trip": first[-1]["trip"], "report": first[-1]["json"]}
     for after_it in said[5:]:
         assert after_it["name"] == "other.json"
         assert after_it["report"] is None

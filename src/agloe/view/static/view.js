@@ -32,7 +32,7 @@ function hourName(minute) {
  * as far as its day has room.
  */
 function put(body, mark, people, open, ticks) {
-  const box = made("div", `mark ${mark.state}${mark.begins ? "" : " goes-on"}${mark.ends ? "" : " no-end"}${mark.brief ? " brief" : ""}`);
+  const box = made("div", `mark ${mark.state}${mark.begins ? "" : " goes-on"}${mark.ends ? "" : " no-end"}${mark.brief ? " brief" : ""}${mark.clash.length ? " clash" : ""}`);
   const columns = mark.last - mark.first + 1;
   const when = mark.late ? `${mark.when}, ${mark.late}` : mark.when;
   // A mark is never smaller than the eye can find, and never outside the hours of its column.
@@ -45,7 +45,7 @@ function put(body, mark, people, open, ticks) {
   box.style.width = `${(columns / mark.lanes / people) * 100}%`;
   box.style.top = `${top}px`;
   box.style.height = `${height}px`;
-  box.title = [mark.name, when, mark.where, mark.who, mark.lock ?? "A WAY in the plan of the report."].join("\n");
+  box.title = [mark.name, when, mark.where, mark.who, mark.lock ?? "A WAY in the plan of the report.", ...(mark.finds ? [mark.finds] : [])].join("\n");
   const block = made("div", "block");
   const stripes = made("div", "stripes");
   for (let column = mark.first; column <= mark.last; column += 1) {
@@ -109,7 +109,7 @@ function draw(laid) {
     const ticks = new Map();
     for (const mark of day.marks) put(body, mark, people, day.open, ticks);
     for (const bound of day.bounds) {
-      const line = made("div", "bound");
+      const line = made("div", bound.clash ? "bound clash" : "bound");
       const down = bound.top * PER_MINUTE;
       line.style.top = `${down}px`;
       // The words stand outside the TRIP, where no step is, unless the edge of the day is too
@@ -126,6 +126,7 @@ function draw(laid) {
   part("calendar-key").hidden = !laid.days.length;
   // A calendar of what is LOCKed holds nothing that is only in a plan, and no WAY.
   part("calendar-key").classList.toggle("only-locks", !laid.itinerary);
+  part("calendar-key").classList.toggle("with-clash", laid.clash);
   part("calendar-says").textContent = laid.says;
   part("calendar-untimed").textContent = `The FILE gives no time for these LOCKed OPTIONs: ${laid.untimed.map((step) => `${step.name} (${step.who})`).join(", ")}.`;
   part("calendar-untimed").hidden = !laid.untimed.length;
@@ -158,7 +159,7 @@ function show() {
   if (said.calendar.trip === drawn) return;
   drawn = said.calendar.trip;
   try {
-    draw(lay(drawn));
+    draw(lay(drawn, said.calendar.report));
   } catch (problem) {
     // Half a calendar is no calendar. The report below is whole.
     noCalendar("The page could not draw the calendar of this TRIP.");

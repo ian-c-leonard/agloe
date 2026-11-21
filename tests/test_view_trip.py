@@ -227,6 +227,8 @@ def test_a_lock_that_names_one_of_the_persons_marks_that_person_only() -> None:
             "latest": None,
             # The visit is on the first day, from 14 hours into it to 15.
             "parts": [part(0, 14 * HOUR, 15 * HOUR)],
+            # The FACTs about the visit and the LOCK of it, in the FILE's order.
+            "records": ["visit-time", "visit-length", "visit-open", "lock-visit"],
         }
     ]
     assert holds(sent)
@@ -265,6 +267,8 @@ def test_persons_who_take_a_way_together_are_one_step() -> None:
             "end": time("2027-05-15T15:20:00"),
             "latest": None,
             "parts": [part(0, 15 * HOUR, 15 * HOUR + 1200)],
+            # The FILE says nothing of the walk but that it is there.
+            "records": [],
         }
     ]
     assert holds(sent)
@@ -303,6 +307,37 @@ def test_a_way_that_the_file_does_not_list_has_no_name() -> None:
     (step,) = sent["steps"]
     assert (step["option"], step["way"], step["name"]) == (None, None, None)
     assert holds(sent)
+
+
+def test_each_step_names_the_records_of_the_file_that_are_about_it() -> None:
+    """The FACTs about its OPTION or its WAY, and the LOCKs of its OPTION, in the FILE's order."""
+    file = trip(
+        ["alex", "sam"],
+        ["museum", "hotel"],
+        [stays("visit", "museum"), stays("lunch", "hotel")],
+        [starts_at("visit", 14), lasts("visit", "PT1H"), takes("walk", "PT20M")],
+        [
+            {"id": "sam-visits", "lock": "visit", "persons": ["sam"]},
+            {"id": "alex-visits", "lock": "visit", "persons": ["alex"]},
+        ],
+        ways=[way_between("walk", "museum", "hotel")],
+    )
+    plan = (
+        Step("visit", "museum", "museum", ("alex", "sam"), seconds(14), seconds(15)),
+        Step(None, "museum", "hotel", ("alex",), seconds(15), seconds(15, 20), way="walk"),
+        Step(None, "hotel", "museum", ("alex",), seconds(16), None),
+    )
+    sent = sent_for(file, Report(Answer.FEASIBLE, itinerary=plan))
+    assert [step["records"] for step in sent["steps"]] == [
+        ["visit-time", "visit-length", "visit-open", "sam-visits", "alex-visits"],
+        ["walk-length"],
+        # A WAY that the FILE does not list has no record.
+        [],
+    ]
+    assert holds(sent)
+    # With no ITINERARY, the OPTIONs that a LOCK names say the same of themselves.
+    (visit,) = sent_for(file, Report(Answer.INFEASIBLE))["steps"]
+    assert visit["records"] == sent["steps"][0]["records"]
 
 
 def test_a_step_that_can_take_longer_says_how_late_it_can_end() -> None:
@@ -360,6 +395,13 @@ def test_a_trip_with_no_itinerary_is_sent_with_the_options_that_a_lock_names() -
             "end": time("2027-05-15T15:30:00"),
             "latest": None,
             "parts": [part(0, 14 * HOUR + 1800, 15 * HOUR + 1800)],
+            "records": [
+                "visit-time",
+                "visit-length",
+                "visit-needs-a-ticket",
+                "museum-tickets",
+                "lock-visit",
+            ],
         },
         {
             "option": "flight",
@@ -373,6 +415,14 @@ def test_a_trip_with_no_itinerary_is_sent_with_the_options_that_a_lock_names() -
             "end": time("2027-05-15T19:30:00"),
             "latest": None,
             "parts": [part(0, 17 * HOUR, 19 * HOUR + 1800)],
+            "records": [
+                "flight-time",
+                "flight-length",
+                "bag-drop",
+                "flight-needs-a-ticket",
+                "flight-tickets",
+                "lock-flight",
+            ],
         },
     ]
 
@@ -778,17 +828,17 @@ def framed(starts: str | None, ends: str | None) -> Trip:
     return sent_for(file, Report(Answer.UNDETERMINED))
 
 
-def bound(written: str, on: int | None, second: int | None) -> Trip:
-    """When a TRIP starts or ends, as a page is sent it."""
-    return {"at": written, "offset": None, "day": on, "second": second}
+def bound(written: str, on: int | None, second: int | None, record: str) -> Trip:
+    """When a TRIP starts or ends, as a page is sent it, with the id of its DECISION."""
+    return {"at": written, "offset": None, "day": on, "second": second, "record": record}
 
 
 def test_the_days_run_from_when_the_trip_starts_to_when_it_ends() -> None:
     """The TRIP starts on Friday and ends on Monday, says the FILE. Its one step is on Saturday."""
     sent = framed(at(17, day=14), at(20, 30, day=17))
     assert dates(sent) == ["2027-05-14", "2027-05-15", "2027-05-16", "2027-05-17"]
-    assert sent["starts"] == bound("2027-05-14T17:00:00", 0, 17 * HOUR)
-    assert sent["ends"] == bound("2027-05-17T20:30:00", 3, 20 * HOUR + 1800)
+    assert sent["starts"] == bound("2027-05-14T17:00:00", 0, 17 * HOUR, "trip-start")
+    assert sent["ends"] == bound("2027-05-17T20:30:00", 3, 20 * HOUR + 1800, "trip-end")
     assert sent["steps"][0]["parts"] == [part(1, 14 * HOUR, 15 * HOUR)]
     assert holds(sent)
     # A TRIP that says only when it ends starts with its first step.
@@ -800,8 +850,8 @@ def test_the_days_run_from_when_the_trip_starts_to_when_it_ends() -> None:
 def test_a_trip_that_ends_as_a_day_starts_ends_on_the_day_before() -> None:
     sent = framed(at(0, day=15), at(0, day=17))
     assert dates(sent) == ["2027-05-15", "2027-05-16"]
-    assert sent["starts"] == bound("2027-05-15T00:00:00", 0, 0)
-    assert sent["ends"] == bound("2027-05-17T00:00:00", 1, 24 * HOUR)
+    assert sent["starts"] == bound("2027-05-15T00:00:00", 0, 0, "trip-start")
+    assert sent["ends"] == bound("2027-05-17T00:00:00", 1, 24 * HOUR, "trip-end")
     assert holds(sent)
 
 
@@ -819,13 +869,14 @@ def test_a_trip_that_takes_no_time_starts_and_ends_on_one_day() -> None:
     )
     sent = sent_for(file, Report(Answer.FEASIBLE))
     assert dates(sent) == ["2027-05-15"]
-    assert sent["starts"] == sent["ends"] == bound("2027-05-15T00:00:00", 0, 0)
+    assert sent["starts"] == bound("2027-05-15T00:00:00", 0, 0, "trip-start")
+    assert sent["ends"] == bound("2027-05-15T00:00:00", 0, 0, "trip-end")
     assert holds(sent)
     # So it is in the first second that can be written.
     first = {"id": "trip-end", "trip_ends_at": "0001-01-01T00:00:00+00:00[UTC]"}
     sent = sent_for(trip(["alex"], ["museum"], [], [], [first]), Report(Answer.FEASIBLE))
     assert dates(sent) == ["0001-01-01"]
-    assert sent["ends"] == bound("0001-01-01T00:00:00", 0, 0)
+    assert sent["ends"] == bound("0001-01-01T00:00:00", 0, 0, "trip-end")
     assert holds(sent)
 
 
@@ -844,7 +895,8 @@ def test_a_trip_that_takes_no_time_is_on_one_day_whatever_is_before_it() -> None
     )
     sent = sent_for(file, Report(Answer.INFEASIBLE))
     assert dates(sent) == ["2027-05-15", "2027-05-16"]
-    assert sent["starts"] == sent["ends"] == bound("2027-05-16T00:00:00", 1, 0)
+    assert sent["starts"] == bound("2027-05-16T00:00:00", 1, 0, "trip-start")
+    assert sent["ends"] == bound("2027-05-16T00:00:00", 1, 0, "trip-end")
     assert holds(sent)
 
 
@@ -856,12 +908,12 @@ def test_the_first_day_that_can_be_written_is_a_whole_day() -> None:
     first = {"id": "trip-start", "trip_starts_at": "0001-01-01T05:00:00+05:00[Etc/GMT-5]"}
     sent = sent_for(trip(["alex"], ["museum"], [], [], [first]), Report(Answer.FEASIBLE))
     assert sent["days"] == [day("0001-01-01")]
-    assert sent["starts"] == bound("0001-01-01T05:00:00", 0, 5 * HOUR)
+    assert sent["starts"] == bound("0001-01-01T05:00:00", 0, 5 * HOUR, "trip-start")
     assert holds(sent)
     last = {"id": "trip-end", "trip_ends_at": "9999-12-31T18:59:59-05:00[Etc/GMT+5]"}
     sent = sent_for(trip(["alex"], ["museum"], [], [], [last]), Report(Answer.FEASIBLE))
     assert sent["days"] == [day("9999-12-31")]
-    assert sent["ends"] == bound("9999-12-31T18:59:59", 0, 19 * HOUR - 1)
+    assert sent["ends"] == bound("9999-12-31T18:59:59", 0, 19 * HOUR - 1, "trip-end")
     assert holds(sent)
 
 
@@ -871,7 +923,7 @@ def test_a_page_is_sent_two_months_at_most_and_is_told_where_the_trip_ends() -> 
     assert len(sent["days"]) == 62
     assert (dates(sent)[0], dates(sent)[-1]) == ("2027-05-15", "2027-07-15")
     assert sent["until"] == "2027-09-15"
-    assert sent["ends"] == bound("2027-09-15T18:00:00", None, None)
+    assert sent["ends"] == bound("2027-09-15T18:00:00", None, None, "trip-end")
     assert holds(sent)
     # A step that goes on past the last day is sent as far as that day.
     sent = alone((at(10), 100 * 24 * HOUR))
@@ -1021,6 +1073,9 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "an end of the trip before its day": _set("ends", "second", to=-1),
     "an end of the trip at half a second": _set("ends", "second", to=0.5),
     "an end of the trip with one thing more": _set("ends", "more", to=1),
+    "an end of the trip with no record": _drop("ends", "record"),
+    "an end of the trip whose record is no text": _set("ends", "record", to=7),
+    "an end of the trip whose record has no id": _set("ends", "record", to=""),
     "steps that are no list": _set("steps", to=None),
     "a step that is no record": _set("steps", 0, to=[]),
     "a step with no start": _drop("steps", 0, "start"),
@@ -1085,6 +1140,10 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "an earlier part that ends the step": _set("steps", 1, "parts", 0, "ends", to=True),
     "parts of a step with no time": lambda sent: sent["steps"][0].update(start=None, end=None),
     "no part of a step with a time": _set("steps", 0, "parts", to=[]),
+    "no records of a step": _drop("steps", 0, "records"),
+    "records that are no list": _set("steps", 1, "records", to="night-time"),
+    "a record that is no text": _set("steps", 1, "records", to=[1]),
+    "one record twice": _set("steps", 1, "records", to=["night-time", "night-time"]),
     "two parts of a step with no known end": _no_end,
 }
 
