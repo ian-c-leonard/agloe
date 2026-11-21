@@ -496,6 +496,17 @@ def as_text(file: File, report: Report) -> str:
             f" said unknown. Times are in {file.zone}.",
             *(f"  {record}: {_record(file, clock, record)}" for record in report.conflict),
         ]
+        of_one = any(
+            isinstance(fact, Requires) and fact.of == "one" and fact.id in report.conflict
+            for fact in file.facts
+        )
+        if of_one:
+            everybody = _people(file, tuple(person.id for person in file.persons))
+            lines += [
+                "",
+                "Only a PERSON of this FILE can meet a requirement of one PERSON. The FILE"
+                f" lists {everybody}.",
+            ]
         if report.given_budgets:
             lines += ["", *_budgets(file)]
     else:
@@ -508,7 +519,7 @@ def as_text(file: File, report: Report) -> str:
         else:
             lines.append("The trip works in any of these cases:")
             for number, (case, plan) in enumerate(zip(cases, plans, strict=True), 1):
-                lines.append(f"  {number}. {_as_a_sentence(file, case)}.")
+                lines.append(f"  {number}. {_with_a_capital(case)}.")
                 lines += [f"     {line}" for line in plan]
         asked = [needed.unknown for enough in report.missing for needed in enough]
         kinds = {unknown.what for unknown in asked}
@@ -570,7 +581,8 @@ def as_text(file: File, report: Report) -> str:
                     " Whatever it requires has to be met. Everybody who takes part in it has"
                     " each CAPABILITY that it requires of each PERSON. For each CAPABILITY that"
                     " it requires of one PERSON, somebody who takes part in it from its start"
-                    " to its end has it. Different PERSONs can meet different requirements."
+                    " to its end has it, and can still do everything else the trip asks of"
+                    " them. Different PERSONs can meet different requirements."
                 )
     return "\n".join(lines) + "\n"
 
@@ -656,13 +668,17 @@ def _feasible(file: File, clock: _Clock, report: Report) -> list[str]:
         for supply in report.supplies:
             name, what = _name(file, supply.option), able[supply.capability]
             who = _people(file, supply.persons)
-            verb = "has" if len(supply.persons) == 1 else "have"
+            one = len(supply.persons) == 1
             if supply.of is None:
                 silent = f"The FILE does not say whether {name} requires {what}"
-                lines.append(f"  {silent}. The plan holds if it does: {who} {verb} it.")
+                have = "has" if one else "have"
+                lines.append(
+                    f"  {silent}. {who} {have} that CAPABILITY, so the plan holds if it does."
+                )
             else:
                 whom = "one PERSON" if supply.of == "one" else "each PERSON"
-                lines.append(f"  {name} requires {what} of {whom}: {who} {verb} it.")
+                meet = "meets" if one else "meet"
+                lines.append(f"  {name} requires {what} of {whom}. {who} {meet} that requirement.")
     money = _money(file, report)
     if money is not None:
         people, pots = _names(file.persons, "and"), _names(file.budgets)
@@ -775,15 +791,19 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
     return marks
 
 
-def _as_a_sentence(file: File, case: str) -> str:
-    """A case with a capital first letter, unless it begins with a name from the FILE.
+class _OwnWords(str):
+    """Words that begin with a word of the report's own, and not with a name from the FILE.
 
-    A name stays as the FILE writes it: "jo" and "Jo" can be two PERSONs.
+    Only such a word can take a capital letter at the start of a sentence. A name stays as
+    the FILE writes it: "jo" and "Jo" can be two PERSONs.
     """
-    named = (*file.persons, *file.options, *file.ways)
-    if any(case.startswith(record.name) for record in named):
-        return case
-    return f"{case[0].upper()}{case[1:]}"
+
+    __slots__ = ()
+
+
+def _with_a_capital(words: str) -> str:
+    """The words as the start of a sentence. A name at the start is left as it is."""
+    return f"{words[0].upper()}{words[1:]}" if isinstance(words, _OwnWords) else words
 
 
 def _case(file: File, enough: Sequence[Missing]) -> str:
@@ -803,7 +823,7 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
             for_whom.setdefault(unknown.want, []).append(unknown.person or "")
         elif unknown.what == "needs no right":
             names = [_name(file, needed.unknown.option, "or") for needed in group]
-            parts.append(f"nobody needs a right to take part in {_listed(names, 'or')}")
+            parts.append(_OwnWords(f"nobody needs a right to take part in {_listed(names, 'or')}"))
         elif unknown.what == "another right":
             # A right that is found is one more than the places on OFFER, and the words say so.
             places = file.places_on_offer(unknown.option or "")
@@ -811,14 +831,17 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
             more += ", at a cost that fits the caps" if file.caps else ""
             each = "each of " if len(group) > 1 else ""
             who = _people(file, tuple(needed.unknown.person or "" for needed in group))
-            parts.append(f"a right to {_name(file, unknown.option)} is found for {each}{who}{more}")
+            right = f"a right to {_name(file, unknown.option)} is found for {each}{who}{more}"
+            parts.append(_OwnWords(right))
         else:
             parts.append(_wanted(file, group[0], len(enough) == 1))
     for want, persons in for_whom.items():
         who = _people(file, tuple(persons))
         each = "each of " if len(persons) > 1 else ""
-        parts.append(f"another OPTION that SATISFIES {_want(file, want)} is found for {each}{who}")
-    return " and ".join(parts)
+        other = f"another OPTION that SATISFIES {_want(file, want)} is found for {each}{who}"
+        parts.append(_OwnWords(other))
+    whole = " and ".join(parts)
+    return _OwnWords(whole) if isinstance(parts[0], _OwnWords) else whole
 
 
 def _places(count: int) -> str:
@@ -836,7 +859,11 @@ def _named_with(needed: Missing) -> object:
 
 
 def _wanted(file: File, needed: Missing, alone: bool) -> str:
-    """What one unknown FACT would have to be, in words. ``alone`` means nothing else is needed."""
+    """What one unknown FACT would have to be, in words. ``alone`` means nothing else is needed.
+
+    Words that begin with a word of the report's own are ``_OwnWords``. The others begin with
+    a name from the FILE.
+    """
     unknown, limit = needed.unknown, needed.at_most
     if unknown.what == "start":
         return f"{_name(file, unknown.option)} can start at any time"
@@ -856,14 +883,15 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
         buyers = tuple(cover.person for cover in needed.buys)
         each = " each" if len(buyers) > 1 else ""
         who = _people(file, buyers)
-        return f"a place from {unknown.about} has a price that {who} can{each} pay"
+        return _OwnWords(f"a place from {unknown.about} has a price that {who} can{each} pay")
     if unknown.what == "charged":
         booking = next(
             fact for fact in file.facts if isinstance(fact, Booking) and fact.id == unknown.about
         )
         if booking.paid is None:
-            return f"the FILE states what {booking.id} paid and from which BUDGET"
-        return f"the FILE states which BUDGET the {booking.paid.money} of {booking.id} came from"
+            return _OwnWords(f"the FILE states what {booking.id} paid and from which BUDGET")
+        paid = f"the {booking.paid.money} of {booking.id}"
+        return _OwnWords(f"the FILE states which BUDGET {paid} came from")
     if unknown.what == "funding":
         who = _people(file, (unknown.person or "",))
         places = [
@@ -874,27 +902,29 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
         ]
         within = ", within its caps" if file.caps else ""
         can_be_paid = f"can be paid from a BUDGET that lists {who}{within}"
-        return f"each place that {who} has to buy {can_be_paid} ({', '.join(places)})"
+        return _OwnWords(f"each place that {who} has to buy {can_be_paid} ({', '.join(places)})")
     if unknown.what == "other ways":
         places = _names(file.places)
         there = f"there are other WAYs from {places[unknown.origin or '']} to "
         there += places[unknown.destination or ""]
         if limit is not None:
-            return f"{there} that take {_at_most(limit)}"
-        return there if alone else f"{there} that are quick enough"
+            return _OwnWords(f"{there} that take {_at_most(limit)}")
+        return _OwnWords(there if alone else f"{there} that are quick enough")
     name = _name(file, unknown.option or unknown.way)
     if unknown.what == "duration":
         if limit is not None:
             return f"{name} takes {_at_most(limit)}"
-        return f"the FILE says how long {name} takes" if alone else f"{name} is quick enough"
+        if alone:
+            return _OwnWords(f"the FILE says how long {name} takes")
+        return f"{name} is quick enough"
     place = _starts_at(file, unknown.option)
     if limit == 0:
-        return f"nobody has to be at {place} before {name} starts"
+        return _OwnWords(f"nobody has to be at {place} before {name} starts")
     if limit is not None:
-        return f"people must be at {place} {_span(limit)} or less before {name} starts"
+        return _OwnWords(f"people must be at {place} {_span(limit)} or less before {name} starts")
     if alone:
-        return f"the FILE says how long before {name} starts people must be at {place}"
-    return f"people need not be at {place} long before {name} starts"
+        return _OwnWords(f"the FILE says how long before {name} starts people must be at {place}")
+    return _OwnWords(f"people need not be at {place} long before {name} starts")
 
 
 def _record(file: File, clock: _Clock, record: str) -> str:
@@ -952,9 +982,11 @@ def _record(file: File, clock: _Clock, record: str) -> str:
             if isinstance(fact, Requires) and fact.capability == found.capability
             if fact.of != "none"
         ]
-        said = _listed(which) if which else "there is none"
         what = _names(file.capabilities)[found.capability]
-        return f"the FILE states every OPTION that requires {what}: {said}"
+        if not which:
+            return f"no OPTION in this FILE requires {what}"
+        verb = "requires" if len(which) == 1 else "require"
+        return f"of the OPTIONs in this FILE, only {_listed(which)} {verb} {what}"
     if isinstance(found, Requires):
         what = _names(file.capabilities)[found.capability]
         if found.of == "none":

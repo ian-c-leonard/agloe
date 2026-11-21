@@ -1,6 +1,7 @@
 """CAPABILITIES: what a PERSON can do, and what an OPTION requires of the PERSONs in it."""
 
 import json
+from collections.abc import Sequence
 from dataclasses import replace
 from itertools import combinations
 from random import Random
@@ -22,6 +23,7 @@ from agloe.reference import (
     broken,
     in_world,
     itineraries,
+    one_way_each,
     unknowns,
     with_one_required,
     with_these_at_best,
@@ -70,6 +72,7 @@ def a_tour(
     persons: tuple[str, ...] = ("alex", "sam", "jo"),
     locked: tuple[str, ...] | None = None,
     capabilities: tuple[str, ...] = ("swimming",),
+    wants: Sequence[Document] = (),
 ) -> File:
     """A kayak tour at 3:00 pm for two hours, with these PERSONs LOCKed into it.
 
@@ -84,6 +87,7 @@ def a_tour(
         options,
         [*at_three("tour"), *more],
         locks,
+        wants=wants,
         capabilities=capabilities,
     )
 
@@ -462,6 +466,37 @@ def test_one_driver_cannot_be_in_two_cars_at_once() -> None:
         "lock-first-car",
         "lock-second-car",
     )
+
+
+def test_a_conflict_about_a_requirement_of_one_person_names_the_persons_of_the_file() -> None:
+    """With a fourth PERSON who might drive, the same records would rule nothing out."""
+    locks = [lock("first-car", "alex"), lock("second-car", "jo")]
+    file = two_drives(*SAM_DRIVES, locks=locks)
+    assert report.as_text(file, checked(file)).splitlines()[-2:] == [
+        "",
+        "Only a PERSON of this FILE can meet a requirement of one PERSON. The FILE lists alex,"
+        " sam and jo.",
+    ]
+    document = {
+        "persons": [{"id": id, "name": id} for id in ("alex", "sam", "jo", "pat")],
+        "places": [{"id": id, "name": id} for id in ("hotel", "dunes")],
+        "capabilities": [{"id": "driving", "name": "driving"}],
+        "options": [moves("first-car", "hotel", "dunes"), moves("second-car", "hotel", "dunes")],
+        "ways": [],
+        "wants": [],
+        "facts": [
+            *(starts_at(option, 8) for option in ("first-car", "second-car")),
+            *(lasts(option, "PT1H") for option in ("first-car", "second-car")),
+            *(requires(option, "driving") for option in ("first-car", "second-car")),
+            *(needs_no_right(option) for option in ("first-car", "second-car")),
+            *SAM_DRIVES,
+        ],
+        "decisions": locks,
+    }
+    with_pat = load(document)
+    assert checked(with_pat).answer is Answer.UNDETERMINED
+    of_each = a_tour(requires("tour", "swimming", "each"), cannot("jo", "swimming"))
+    assert "Only a PERSON of this FILE" not in report.as_text(of_each, checked(of_each))
 
 
 def test_a_car_that_nobody_has_to_take_can_stay_at_the_hotel() -> None:
@@ -844,6 +879,20 @@ def test_a_name_at_the_start_of_a_case_stays_as_the_file_writes_it() -> None:
     ]
 
 
+def test_the_first_word_of_a_case_takes_a_capital_where_it_is_the_reports_own() -> None:
+    """A PERSON is called a. The article that starts a case is the report's, and it is A."""
+    document = a_document(*at_three("tour"), needs_right("tour"), offer("tour", 1, price=None))
+    document["persons"] = [{"id": "a", "name": "a"}]
+    document["capabilities"] = []
+    document["decisions"] = [lock("tour", "a")]
+    file = load(document)
+    assert report.as_text(file, checked(file)).splitlines()[2:5] == [
+        "The trip works in any of these cases:",
+        "  1. A right to tour is found for a, in addition to the 1 place on OFFER.",
+        "  2. A place from tour-offer has a price that a can pay.",
+    ]
+
+
 def two_tours() -> File:
     """Two tours at 3:00 pm. Alex is LOCKed into one and Jo into the other, and neither can swim.
 
@@ -935,20 +984,42 @@ def test_the_plan_for_a_requirement_of_one_person_works_at_that_requirement() ->
 
 
 def smallest_sets(file: File) -> list[tuple[Unknown, ...]]:
-    """Every set of unknown FACTs that is enough and has the fewest FACTs, by trying each set.
+    """The sets of unknown FACTs that a report names, found by trying each set.
 
-    They come in the fixed order, comparing their first FACTs first.
+    They ask for the fewest OPTIONs that the FILE does not list, and among those they have
+    the fewest FACTs. They come in the fixed order, comparing their first FACTs first.
     """
     every = unknowns(file)
-    for size in range(1, len(every) + 1):
-        enough = [
-            some
-            for some in combinations(every, size)
-            if itineraries(file, with_these_at_best(file, some))
-        ]
-        if enough:
-            return enough
+    facts = [unknown for unknown in every if unknown.what != "another option"]
+    found = [unknown for unknown in every if unknown.what == "another option"]
+    for count in range(len(found) + 1):
+        for size in range(len(facts) + 1):
+            enough = [
+                (*some, *others)
+                for some in combinations(facts, size)
+                for others in combinations(found, count)
+                if one_way_each(some)
+                and itineraries(file, with_these_at_best(file, (*some, *others)))
+            ]
+            if enough and count + size:
+                return enough
     return []
+
+
+def test_another_option_counts_before_the_facts_about_a_listed_one() -> None:
+    """Paddling is a must for Alex, who cannot swim. Nobody has recorded whether the tour
+    SATISFIES it, or what the tour requires. Another OPTION would be one condition, and the
+    report asks first about the tour that the FILE lists: two FACTs."""
+    file = a_tour(
+        cannot("alex", "swimming"), persons=("alex",), locked=(), wants=[must("paddling", "alex")]
+    )
+    found = checked(file)
+    asked = (
+        Unknown("requirement", "tour", about="swimming"),
+        Unknown("satisfies", "tour", want="paddling"),
+    )
+    assert [tuple(needed.unknown for needed in enough) for enough in found.missing] == [asked]
+    assert smallest_sets(file) == [asked]
 
 
 def test_the_sets_named_are_all_the_smallest_that_are_enough() -> None:
@@ -960,9 +1031,10 @@ def test_the_sets_named_are_all_the_smallest_that_are_enough() -> None:
     rng = Random(2718)
     limits: set[str | None] = set()
     kinds: set[str] = set()
-    compared = several = 0
-    for _ in range(200):
-        file = a_trip_with_capabilities(rng, leave_out=0.15)
+    compared = several = with_another = 0
+    for number in range(200):
+        with_wants = 0.6 if number % 2 else 0
+        file = a_trip_with_capabilities(rng, leave_out=0.15, with_wants=with_wants)
         found = answers.check(file)
         for enough in found.missing:
             named = [needed.unknown for needed in enough]
@@ -983,10 +1055,12 @@ def test_the_sets_named_are_all_the_smallest_that_are_enough() -> None:
             assert named_sets == smallest_sets(file)
             compared += 1
             several += len(named_sets) > 1
+            with_another += any(u.what == "another option" for some in named_sets for u in some)
     assert limits == {"one", "none"}
     assert {"requirement", "has"} <= kinds
     assert compared > 30
     assert several > 10
+    assert with_another > 3
 
 
 # The two cases settle the answer for every possible world.
@@ -1078,8 +1152,10 @@ def test_a_feasible_report_says_who_meets_each_requirement() -> None:
     text = path.with_name("works.expected.txt").read_text()
     assert text.splitlines()[-3:] == [
         "Who meets the requirements:",
-        "  Drive to the dunes requires driving a manual car of one PERSON: Sam has it.",
-        "  Drive back to the hotel requires driving a manual car of one PERSON: Sam has it.",
+        "  Drive to the dunes requires driving a manual car of one PERSON. Sam meets that"
+        " requirement.",
+        "  Drive back to the hotel requires driving a manual car of one PERSON. Sam meets that"
+        " requirement.",
     ]
     result = json.loads(path.with_name("works.expected.json").read_text())
     assert result["requirements"] == [
@@ -1093,8 +1169,8 @@ def test_a_feasible_report_says_where_the_file_leaves_a_requirement_open() -> No
     found = checked(file)
     assert report.as_text(file, found).splitlines()[-2:] == [
         "Who meets the requirements:",
-        "  The FILE does not say whether tour requires swimming. The plan holds if it does: alex,"
-        " sam and jo have it.",
+        "  The FILE does not say whether tour requires swimming. alex, sam and jo have that"
+        " CAPABILITY, so the plan holds if it does.",
     ]
     assert report.as_json(file, found)["requirements"] == [
         {"option": "tour", "capability": "swimming", "of": None, "persons": ["alex", "sam", "jo"]}
@@ -1140,19 +1216,19 @@ def test_the_report_puts_each_fact_about_a_capability_in_words() -> None:
         "tour-requires-swimming: tour requires swimming of one PERSON who takes part",
         "dive-requires-swimming: dive requires swimming of each PERSON who takes part",
         "lunch-requires-swimming: lunch does not require swimming",
-        "every-driving: the FILE states every OPTION that requires driving: there is none",
+        "every-driving: no OPTION in this FILE requires driving",
         "alex-swimming: alex has the CAPABILITY swimming",
         "sam-swimming: sam has the CAPABILITY swimming",
     ]
     assert lines[-3:] == [
         "Who meets the requirements:",
-        "tour requires swimming of one PERSON: alex has it.",
-        "dive requires swimming of each PERSON: alex and sam have it.",
+        "tour requires swimming of one PERSON. alex meets that requirement.",
+        "dive requires swimming of each PERSON. alex and sam meet that requirement.",
     ]
     whole = EXAMPLES / "a-driver" / "every-drive-is-stated.expected.txt"
     assert (
-        "  every-drive-that-needs-a-driver: the FILE states every OPTION that requires driving a"
-        " manual car: Drive to the dunes and Drive back to the hotel"
+        "  every-drive-that-needs-a-driver: of the OPTIONs in this FILE, only Drive to the dunes"
+        " and Drive back to the hotel require driving a manual car"
     ) in whole.read_text().splitlines()
     lacking = EXAMPLES / "a-kayak-tour" / "cannot-work.expected.txt"
     assert (
@@ -1200,7 +1276,8 @@ def test_a_must_for_another_option_says_what_that_option_has_to_meet() -> None:
         " everything else the trip asks of them. Whatever it requires has to be met. Everybody"
         " who takes part in it has each CAPABILITY that it requires of each PERSON. For each"
         " CAPABILITY that it requires of one PERSON, somebody who takes part in it from its"
-        " start to its end has it. Different PERSONs can meet different requirements."
+        " start to its end has it, and can still do everything else the trip asks of them."
+        " Different PERSONs can meet different requirements."
     )
 
 

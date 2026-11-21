@@ -6,3 +6,5 @@ These FACTs and DECISIONs rule out every plan by themselves. Take any one away a
   sam-does-not-drive-manual: Sam does not have the CAPABILITY driving a manual car
   jo-does-not-drive-manual: Jo does not have the CAPABILITY driving a manual car
   lock-drive-back: Alex and Sam take part in Drive back to the hotel
+
+Only a PERSON of this FILE can meet a requirement of one PERSON. The FILE lists Alex, Sam and Jo.

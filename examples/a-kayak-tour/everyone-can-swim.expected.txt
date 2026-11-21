@@ -14,4 +14,4 @@ The plan relies on these FACTs and DECISIONs:
   lock-kayak-tour: Alex, Sam and Jo take part in Kayak tour
 
 Who meets the requirements:
-  The FILE does not say whether Kayak tour requires swimming. The plan holds if it does: Alex, Sam and Jo have it.
+  The FILE does not say whether Kayak tour requires swimming. Alex, Sam and Jo have that CAPABILITY, so the plan holds if it does.

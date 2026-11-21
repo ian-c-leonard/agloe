@@ -18,12 +18,12 @@ The plan relies on these FACTs and DECISIONs:
   brunch-time: Brunch at the hotel starts at 10:00 am on Saturday 17 July 2027
   brunch-length: Brunch at the hotel takes 1 h
   brunch-is-walk-up: nobody needs a right to take part in Brunch at the hotel
-  every-drive-that-needs-a-driver: the FILE states every OPTION that requires driving a manual car: Drive to the dunes and Drive back to the hotel
+  every-drive-that-needs-a-driver: of the OPTIONs in this FILE, only Drive to the dunes and Drive back to the hotel require driving a manual car
   sam-drives-manual: Sam has the CAPABILITY driving a manual car
   lock-drive-out: Alex and Sam take part in Drive to the dunes
   lock-drive-back: Alex and Sam take part in Drive back to the hotel
   lock-brunch: Jo takes part in Brunch at the hotel
 
 Who meets the requirements:
-  Drive to the dunes requires driving a manual car of one PERSON: Sam has it.
-  Drive back to the hotel requires driving a manual car of one PERSON: Sam has it.
+  Drive to the dunes requires driving a manual car of one PERSON. Sam meets that requirement.
+  Drive back to the hotel requires driving a manual car of one PERSON. Sam meets that requirement.

@@ -15,4 +15,4 @@ The plan relies on these FACTs and DECISIONs:
   lock-kayak-tour: Alex, Sam and Jo take part in Kayak tour
 
 Who meets the requirements:
-  Kayak tour requires swimming of each PERSON: Alex, Sam and Jo have it.
+  Kayak tour requires swimming of each PERSON. Alex, Sam and Jo meet that requirement.
