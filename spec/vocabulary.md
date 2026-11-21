@@ -84,7 +84,7 @@ A human the TRIP concerns, whether or not they travel. A PERSON may hold WANTs, 
 
 ### CAPABILITY
 
-Something a PERSON can do: drive a manual car, climb stairs, dive. An OPTION can require a CAPABILITY; an ITINERARY meets that requirement only if a PERSON with the CAPABILITY takes part in the OPTION.
+Something a PERSON can do: drive a manual car, climb stairs, dive. An OPTION can require a CAPABILITY of one PERSON, or of each PERSON who takes part in it. An ITINERARY meets a requirement of one PERSON only if a PERSON with the CAPABILITY takes part in the OPTION. It meets a requirement of each PERSON only if every PERSON who takes part has the CAPABILITY.
 
 *Uses:* PERSON, → OPTION, → ITINERARY.
 
