@@ -11,7 +11,6 @@ const HUES = 6; // the colours that tell the PERSONs apart, in view.css
 const SMALLEST = 3; // pixels: the least height of a mark
 const TICK = 7; // pixels: the height of the tick for a WAY that takes next to no time
 const BESIDE = 18; // pixels from one tick to the next where several are at one place
-const ROW = 20; // pixels: the height of the row of one PERSON on the strip
 const EDGES = 80; // pixels of the strip that are not its rows: the names, the padding and the edge
 const NARROWEST = 40; // pixels: the least room for the rows of a strip
 
@@ -222,7 +221,7 @@ function drawStrip(laid) {
   box.hidden = part("strip-says").hidden = false;
   const people = Math.max(strip.persons.length, 1);
   box.style.setProperty("--people", people);
-  box.style.setProperty("--row", `${ROW}px`);
+  box.style.setProperty("--row", `${strip.row}px`);
   const names = made("div", "strip-people");
   strip.persons.forEach((person, n) => names.append(Object.assign(made("span", `p${n % HUES}`, person.name), { title: person.name })));
   const days = made("div", "strip-days");

@@ -7,15 +7,18 @@
 // strip holds the marks of the calendar and no others, each with the words, the lane and the
 // edges that it has there.
 //
-// A strip is narrow, and a mark can be too short to draw at its width. Such a mark is small:
-// it is drawn across the middle of its time, as small as the eye can find, in the row of each
-// of its PERSONs. Where small marks would lie on each other in one row, they are one mark,
-// which stands for each of them. A mark that they would cover joins them. And a day that holds
-// something is wide enough for it. So nothing on the strip hides a step, and nothing is drawn
-// on another day than its own.
+// A strip is narrow. A mark can be too short to draw at its width, and then it is drawn across
+// the middle of its time, as small as the eye can find. Or its lane can be too thin to draw
+// it in. Such a mark is small: it takes the whole height of the row of each of its PERSONs.
+// Where small marks would lie on each other in one row, they are one mark, which stands for
+// each of them. A mark that they would cover joins them. And a day that holds something is
+// wide enough for it. So nothing on the strip hides a step, and nothing is drawn on another
+// day than its own, or in the row of another PERSON.
 //
 // Nothing here judges a TRIP, and nothing here works out a time.
 
+const ROW = 20; // pixels: the height of the row of one PERSON
+const LANE = 6; // pixels: the least height of a lane in which a mark can be drawn
 const ROOM = 20; // minutes of room before the first thing on the strip, and after the last
 const LEAST = 3; // pixels: the least width of the block of an OPTION, and of the line of a WAY
 const TICK = 5; // pixels: the width of the tick of a WAY that is too short for a line
@@ -71,10 +74,11 @@ function clear(mark, groups) {
  * the `lanes` in those rows. `of` holds the marks of the calendar that it stands for, in their
  * order there, each with the `day` it is on and its `index` among the marks of that day. A
  * mark that is not `small` is drawn from its start to its end, and stands for itself. A mark
- * that is `small` is in one row. It stands for a mark that is too short to draw, with every
- * mark of that row that would lie on it or under it.
+ * that is `small` is in one row, and takes its height. It stands for a mark that is too short
+ * to draw or in too thin a lane, with every mark of that row that would lie on it or under it.
  *
- * A bound is where the TRIP starts or ends, with its `x`, on its own day.
+ * A bound is where the TRIP starts or ends, with its `x`, on its own day. `row` is the height
+ * of a row, in pixels.
  */
 export function strip(laid, wide = 800) {
   const open = laid.days.map((day) => ({ from: day.open.top, to: Math.max(day.open.bottom, day.open.top) }));
@@ -121,13 +125,14 @@ export function strip(laid, wide = 800) {
     day.marks.forEach(({ top, height, ...rest }, index) => {
       const mark = { ...rest, day: n, index };
       const from = along(n, top), to = along(n, top + height);
-      if (to - from >= LEAST) {
+      const long = to - from >= LEAST;
+      if (long && ROW / mark.lanes >= LANE) {
         whole.push({ x: from, w: to - from, first: mark.first, last: mark.last, lane: mark.lane, lanes: mark.lanes, small: false, of: [mark] });
         return;
       }
-      // Too short to draw: across the middle of its time, and inside its day.
-      const w = Math.min(mark.kind === "way" ? TICK : LEAST, days[n].w);
-      const x = Math.min(Math.max((from + to) / 2 - w / 2, days[n].x), days[n].x + days[n].w - w);
+      // Small. Where it is too short to draw, it is across the middle of its time, inside its day.
+      const w = long ? to - from : Math.min(mark.kind === "way" ? TICK : LEAST, days[n].w);
+      const x = long ? from : Math.min(Math.max((from + to) / 2 - w / 2, days[n].x), days[n].x + days[n].w - w);
       for (let row = mark.first; row <= mark.last; row += 1) pieces[row].push({ x, w, mark });
     });
   });
@@ -149,5 +154,5 @@ export function strip(laid, wide = 800) {
   );
   const cut = days.some((day) => day.gap);
   const says = `All the days of the calendar on one strip, a row for each PERSON.${cut ? " It leaves out the hours that the calendar does not show." : ""} Click a step to see it in the calendar.`;
-  return { says, persons: laid.persons, wide: across, cut, days, marks: [...whole, ...groups.flat()], bounds };
+  return { says, persons: laid.persons, wide: across, row: ROW, cut, days, marks: [...whole, ...groups.flat()], bounds };
 }

@@ -110,7 +110,7 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
    it sits on can be reached too. */
 .bar.small { z-index: 3; }
 .bar.way.small, .bar.several { display: block; padding: 0; pointer-events: none; }
-.bar-tick, .bar-several { position: absolute; left: 0; right: 0; border-radius: 2px; box-shadow: 0 0 0 1px var(--surface); pointer-events: auto; cursor: pointer; }
+.bar-tick, .bar-several { position: absolute; left: 0; right: 0; border-radius: 2px; box-shadow: inset 0 0 0 1px var(--surface); pointer-events: auto; cursor: pointer; }
 .bar-tick { top: 35%; height: 30%; background: var(--hue); }
 .bar-several { top: 15%; height: 70%; background: linear-gradient(var(--hue) 0 40%, var(--surface) 40% 60%, var(--hue) 60% 100%); }
 /* A tick is dashed on the left where its step does not start there, and fades to the right
@@ -118,22 +118,24 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .bar.goes-on .bar-tick, .bar.goes-on .bar-several { border-left: 1.5px dashed var(--ink); }
 .bar.no-end .bar-tick { background: linear-gradient(to right, transparent 40%, var(--surface)), linear-gradient(var(--hue), var(--hue)); }
 .bar.no-end .bar-several { background: linear-gradient(to right, transparent 40%, var(--surface)), linear-gradient(var(--hue) 0 40%, var(--surface) 40% 60%, var(--hue) 60% 100%); }
-.bar.warned .bar-block, .bar.way.warned { box-shadow: 0 0 0 1.5px var(--warn); }
+/* The yellow or red edge of a mark is inside it: it is never on another day, or in another row. */
+.bar.warned .bar-block, .bar.way.warned { box-shadow: inset 0 0 0 1.5px var(--warn); }
 .bar.warned .bar-block { border-color: var(--warn); }
-.bar.clash .bar-block, .bar.way.clash { box-shadow: 0 0 0 1.5px var(--stop); }
+.bar.clash .bar-block, .bar.way.clash { box-shadow: inset 0 0 0 1.5px var(--stop); }
 .bar.clash .bar-block { border-color: var(--stop); }
 .bar.lit .bar-block { outline: 2px solid var(--ink); outline-offset: 1.5px; }
 .bar.way.lit { outline: 1.5px solid var(--ink); outline-offset: 1px; }
 /* A tick has its edge and its light on the tick itself. */
 .bar.way.small.warned, .bar.way.small.clash { box-shadow: none; }
-.bar.warned .bar-tick, .bar.warned .bar-several { box-shadow: 0 0 0 2px var(--warn); }
-.bar.clash .bar-tick, .bar.clash .bar-several { box-shadow: 0 0 0 2px var(--stop); }
+.bar.warned .bar-tick, .bar.warned .bar-several { box-shadow: inset 0 0 0 1.5px var(--warn); }
+.bar.clash .bar-tick, .bar.clash .bar-several { box-shadow: inset 0 0 0 1.5px var(--stop); }
 .bar.way.small.lit { outline: 0; }
 .bar.lit .bar-tick, .bar.lit .bar-several { outline: 1.5px solid var(--ink); outline-offset: 2px; }
 /* Where the TRIP starts and where it ends: a dotted line down the strip. */
 .strip-bound { position: absolute; top: -3px; bottom: -3px; z-index: 2; border-left: 1.5px dotted var(--ink2); }
 .strip-bound.clash { border-left-color: var(--stop); }
-.strip-bound.lit { border-left-width: 3px; }
+/* A line that is lit is solid. It keeps its width, so that it takes the pointer from nothing beside it. */
+.strip-bound.lit { border-left-style: solid; }
 
 .key { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 12px; }
 .key span { display: inline-flex; align-items: center; gap: 6px; }

@@ -47,6 +47,8 @@ TICK = 5  # pixels: the width of the tick of a WAY that is too short for a line
 LEAST = 3  # pixels: the least width of the block of an OPTION, and of the line of a WAY
 STUB = 24  # pixels: the room of a day that shows no hours and holds a time of the TRIP
 A_DAY_AT_LEAST = 6  # pixels: the least room of a day that holds something
+ROW = 20  # pixels: the height of the row of one PERSON
+LANE = 6  # pixels: the least height of a lane in which a mark can be drawn
 A_DAY = 24 * 3600
 
 type Trip = dict[str, Any]
@@ -491,6 +493,33 @@ def test_a_mark_that_small_marks_would_cover_joins_them() -> None:
     assert [[each["step"] for each in mark["of"]] for mark in band["marks"]] == [[0], [1], [2], [3]]
 
 
+def test_a_mark_in_a_lane_too_thin_to_draw_is_small() -> None:
+    """Eight stops of half a minute each, one after another, and one more the day after.
+
+    The calendar puts the eight side by side, in eight lanes: none of them is tall enough to
+    read there. On the strip a lane would be under three pixels high. So each of the eight is
+    small: it takes the whole height of the row, from its start to its end, and none lies on
+    another.
+    """
+    stops = [
+        (f"2027-05-15T23:5{5 + n // 2}:{30 * (n % 2):02d}-05:00{CHICAGO}", 30) for n in range(8)
+    ]
+    sent = alone(*stops, (f"2027-05-16T00:05:00-05:00{CHICAGO}", 30))
+    ((laid, band),) = strips([sent], wide=[505])
+    assert band is not None
+    assert {mark["lanes"] for mark in laid["days"][0]["marks"]} == {8}
+    assert [day["per"] for day in band["days"]] == [10, 10]
+    assert [
+        ([each["step"] for each in mark["of"]], mark["small"], mark["x"], mark["w"], mark["lanes"])
+        for mark in band["marks"]
+    ] == [
+        ([8], False, 300, 5, 1),
+        *[([n], True, 200 + 5 * n, 5, 1) for n in range(8)],
+    ]
+    covered(laid, band)
+    assert band["row"] == ROW
+
+
 def test_a_day_that_holds_something_has_room_for_it() -> None:
     """A check-in of one minute on Saturday at 11:59 pm, and a TRIP that ends on Friday at 12:05 am.
 
@@ -612,9 +641,11 @@ def test_whatever_calendar_the_page_draws_has_a_strip_or_needs_none() -> None:
                 assert mark["w"] == pytest.approx(was["height"] * day["per"])
                 assert mark["w"] >= LEAST - 1e-6
                 assert (mark["first"], mark["last"]) == (one["first"], one["last"])
+                # Its lane is high enough to draw it in.
+                assert ROW / mark["lanes"] >= LANE
                 continue
             assert mark["first"] == mark["last"]
-            assert mark["w"] <= max(TICK * len(mark["of"]), TICK) + 1e-6
+            assert (mark["lane"], mark["lanes"]) == (0, 1)
             merged += len(mark["of"]) > 1
             small.setdefault(mark["first"], []).append((mark["x"], mark["x"] + mark["w"]))
         # In one row, no two marks that are too short to draw lie on each other.
