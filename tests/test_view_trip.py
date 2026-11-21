@@ -501,6 +501,35 @@ def test_names_are_sent_as_the_report_shows_them() -> None:
         assert each["name"] in words, each["name"]
 
 
+def test_names_that_look_the_same_on_a_page_come_with_their_ids() -> None:
+    """Two PERSONs are called Joséphine, spelled with two different sets of characters.
+
+    One has the letter with its accent as one character, the other has the letter and then
+    the accent. A page shows the two alike. So it does two names that differ only in how many
+    spaces they hold: a page shows a run of spaces as one. Each of these comes with its id,
+    in the spelling of the FILE.
+    """
+    content = json.loads((EXAMPLES / "a-must-not" / "works.json").read_text())
+    by_id = {each["id"]: each for kind in ("persons", "options") for each in content[kind]}
+    one, other = "Jos\u00e9phine", "Jose\u0301phine"
+    assert one != other
+    by_id["alex"]["name"], by_id["jo"]["name"] = one, other
+    by_id["skydeck"]["name"], by_id["lunch"]["name"] = "Anne Marie", "Anne  Marie"
+    file = parse(json.dumps(content))
+    sent = sent_for(file, compiler.check(file))
+    assert [each["name"] for each in sent["persons"]] == [f"{one} (alex)", "Sam", f"{other} (jo)"]
+    assert [step["name"] for step in sent["steps"] if step["option"]] == [
+        "Anne Marie (skydeck)",
+        "Anne  Marie (lunch)",
+    ]
+    assert holds(sent)
+    # A name that only differs in its capitals looks different, and comes as it is.
+    by_id["alex"]["name"], by_id["jo"]["name"] = "Alex", "alex"
+    file = parse(json.dumps(content))
+    sent = sent_for(file, compiler.check(file))
+    assert [each["name"] for each in sent["persons"]] == ["Alex", "Sam", "alex"]
+
+
 def test_a_trip_with_no_itinerary_is_sent_with_the_options_that_a_lock_names() -> None:
     sent = drawn(STORY / "cannot-work.json")
     assert sent["itinerary"] is False
@@ -1224,7 +1253,7 @@ WANT: dict[str, Any] = {
     "name": "a bed",
     "musts": ["alex"],
     "must_nots": ["sam"],
-    "ends_at": "hotel",
+    "ends_at": None,
     "complete": "every-bed",
     "options": [{"option": "night", "name": "night", "degree": 8, "record": "night-is-a-bed"}],
 }
@@ -1245,8 +1274,11 @@ def test_a_trip_with_a_want_is_a_trip() -> None:
     assert sent["wants"] == []
     _want()(sent)
     assert holds(sent)
-    # A WANT with nobody for whom it is a must-not, no PLACE to end at, and no OPTION.
-    _want(must_nots=[], ends_at=None, complete=None, options=[])(sent)
+    # A WANT with nobody for whom it is a must-not, and no OPTION.
+    _want(must_nots=[], complete=None, options=[])(sent)
+    assert holds(sent)
+    # A WANT about where the TRIP ends names a PLACE. No OPTION delivers such a WANT.
+    _want(ends_at="hotel", complete=None, options=[])(sent)
     assert holds(sent)
     # A DEGREE OF SATISFACTION is from 0 to 10, both ends included.
     for degree in (0, 10):
@@ -1267,7 +1299,8 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "a want that is a must and a must-not for one person": _want(must_nots=["alex"]),
     "a want that is a must or a must-not for nobody": _want(musts=[], must_nots=[]),
     "a want whose musts are no list": _want(musts="alex"),
-    "a want that ends at a place the trip does not have": _want(ends_at="denver"),
+    "a want that ends at a place the trip does not have": _want(ends_at="denver", options=[]),
+    "a want about where the trip ends that an option delivers": _want(ends_at="hotel"),
     "a want whose complete set is no id": _want(complete=7),
     "a want whose options are no list": _want(options={}),
     "an option of a want that is no record": _want(options=["night"]),

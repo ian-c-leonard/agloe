@@ -357,6 +357,32 @@ def test_a_long_name_under_a_want_lies_on_nothing(chromium: Browser, tmp_path: P
             assert page.evaluate(apart) == [True, True], wide
 
 
+def test_a_long_word_in_the_name_of_a_want_stays_on_its_card(
+    chromium: Browser, tmp_path: Path
+) -> None:
+    """Two WANTs side by side, and the first is named with a word longer than its card."""
+    content = json.loads((EXAMPLES / "a-must-not" / "works.json").read_text())
+    (view,) = content["wants"]
+    long = "Llanfairpwllgwyngyllgogerychwyrndrobwllllantysiliogogogoch"
+    content["wants"] = [
+        {**view, "name": f"Visit {long}"},
+        {**view, "id": "air", "name": "Eat outdoors"},
+    ]
+    inside = """() => [...document.querySelectorAll("#wants .want")].map((card) => {
+      const range = document.createRange();
+      range.selectNodeContents(card.querySelector(".want-name"));
+      return range.getBoundingClientRect().right <= card.getBoundingClientRect().right + 0.5;
+    })"""
+    with opened(chromium, written(tmp_path, content)) as page:
+        page.locator("#wants .want").first.wait_for()
+        assert page.locator("#wants .want").count() == 2
+        for wide in [1280, 700, 420]:
+            page.set_viewport_size({"width": wide, "height": 1000})
+            assert page.evaluate(inside) == [True, True], wide
+            # The page is no wider than its window.
+            assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth"), wide
+
+
 def test_a_step_with_no_time_lights_up_alone(chromium: Browser, tmp_path: Path) -> None:
     """Two drives are in one case of the report, and the FILE gives the second no time."""
     content = json.loads((EXAMPLES / "a-driver" / "depends-on-the-car.json").read_text())

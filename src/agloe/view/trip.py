@@ -25,6 +25,8 @@ all at one offset. The offset is written as the report writes it.
 Each name is sent as the report shows it. A PERSON, a PLACE, an OPTION, a WAY or a WANT whose
 name another of its kind has comes with its id, and a name that could be taken for something
 else comes in quotes. So the page tells two apart where the report does, in the same words.
+A page shows two names alike that a report in words does not: those that differ only in how
+an accent is put on a letter, or in how many spaces they hold. Those come with their ids too.
 
 A day is sent as the stretch of it in which the clocks run on without a change. So most days
 are one stretch, from midnight to midnight. A day on which the clocks change is two, and each
@@ -34,6 +36,7 @@ show as one time of day are never drawn as one.
 """
 
 import re
+import unicodedata
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -247,8 +250,14 @@ def _names(
     one with a comma, a colon, a semicolon or a quote mark, one that ends like a name with its
     id, and one that holds the word ``joins``, which joins the list the names are for.
 
-    This is the rule of the report in words. A test holds the two together.
+    This is the rule of the report in words. A test holds the two together. One thing is
+    added for a page: two names count as the same where a page shows them alike. That is where
+    they have the same characters once each accent is joined to its letter, and each run of
+    spaces is one space. Each name is still printed in the spelling of the FILE.
     """
+
+    def looks(name: str) -> str:
+        return " ".join(unicodedata.normalize("NFC", name).split())
 
     def quoted(name: str) -> str:
         splits = any(mark in name for mark in ",:;") or (
@@ -258,14 +267,14 @@ def _names(
             return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
         return name
 
-    shared = Counter(record.name for record in records)
+    shared = Counter(looks(record.name) for record in records)
     shown = {
         record.id: quoted(record.name)
-        if shared[record.name] == 1
+        if shared[looks(record.name)] == 1
         else f"{quoted(record.name)} ({record.id})"
         for record in records
     }
-    if len(set(shown.values())) < len(shown):
+    if len({looks(name) for name in shown.values()}) < len(shown):
         return {record.id: f"{quoted(record.name)} ({record.id})" for record in records}
     return shown
 
@@ -561,7 +570,7 @@ def _are_wants(wants: object, persons: frozenset[str], places: frozenset[str]) -
     """Whether these are the WANTs of such a TRIP, each with an id of its own.
 
     A WANT is a must for some of the PERSONs and a must-not for others, and for nobody both.
-    Somebody holds it.
+    Somebody holds it. No OPTION delivers a WANT about where the TRIP ends.
     It names each OPTION once, with a DEGREE OF SATISFACTION from 0 to 10.
     """
     seen: set[str] = set()
@@ -578,7 +587,7 @@ def _are_wants(wants: object, persons: frozenset[str], places: frozenset[str]) -
             or not cast("str", said["name"]).strip()
             or not holders
             or not holders <= persons
-            or not (ends_at is None or ends_at in places)
+            or not (ends_at is None or (ends_at in places and not said["options"]))
         ):
             return False
         seen.add(cast("str", said["id"]))

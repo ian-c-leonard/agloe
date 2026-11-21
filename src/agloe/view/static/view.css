@@ -140,7 +140,7 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 /* The WANTs of the FILE: each with for whom it is a must or a must-not, and under it the
    OPTIONs that the FILE says SATISFY it or do not. */
 .wants { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 10px; }
-.want { display: grid; gap: 6px; align-content: start; margin: 0; padding: 10px 14px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; }
+.want { display: grid; gap: 6px; align-content: start; min-width: 0; overflow-wrap: anywhere; margin: 0; padding: 10px 14px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; }
 .want-name { margin: 0; font: 600 14px/1.3 var(--text); }
 .want-holds, .want-whole { font-size: 12.5px; color: var(--ink2); }
 .want-whole { color: var(--muted); }
