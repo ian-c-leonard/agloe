@@ -23,6 +23,7 @@ from typing import Any, cast
 import pytest
 
 from agloe import compiler
+from agloe import report as reports
 from agloe.answers import Answer, Report
 from agloe.file import File, instant, read
 from agloe.reference import Step
@@ -533,6 +534,77 @@ def test_every_time_is_on_the_clocks_that_the_report_shows_times_on() -> None:
         time("2027-05-15T20:30:00"),
     )
     assert step["parts"] == [part(0, 20 * HOUR, 20 * HOUR + 1800)]
+
+
+def around_a_change(*locked: str) -> File:
+    """A dinner before Chicago's clocks go back, and a brunch after. LOCKs name some of them."""
+
+    def when(option: str, written: str) -> dict[str, Any]:
+        return {"id": f"{option}-time", "option": option, "starts_at": written}
+
+    return trip(
+        ["alex"],
+        ["hotel"],
+        [stays("dinner", "hotel"), stays("brunch", "hotel")],
+        [
+            when("dinner", "2027-11-06T19:00:00-05:00[America/Chicago]"),
+            lasts("dinner", "PT1H"),
+            when("brunch", "2027-11-07T10:00:00-06:00[America/Chicago]"),
+            lasts("brunch", "PT1H"),
+        ],
+        [lock(option, "alex") for option in locked],
+    )
+
+
+def test_a_time_gives_its_offset_where_the_report_gives_offsets() -> None:
+    file = around_a_change("dinner")
+    # This report names the times of dinner and of brunch, which are at two offsets from UTC.
+    # So it gives each time with its offset. The calendar holds dinner only, and does the same.
+    found = Report(Answer.INFEASIBLE, conflict=("dinner-time", "brunch-time"))
+    assert reports.clock_for(file, found).offsets
+    assert "7:00 pm (UTC-5)" in reports.as_text(file, found)
+    (step,) = sent_for(file, found)["steps"]
+    assert (step["start"], step["end"]) == (
+        time("2027-11-06T19:00:00", "UTC-5"),
+        time("2027-11-06T20:00:00", "UTC-5"),
+    )
+    # A report that names no time gives no offset. The times sent are all at one, so none has it.
+    quiet = Report(Answer.UNDETERMINED)
+    assert not reports.clock_for(file, quiet).offsets
+    (step,) = sent_for(file, quiet)["steps"]
+    assert (step["start"], step["end"]) == (
+        time("2027-11-06T19:00:00"),
+        time("2027-11-06T20:00:00"),
+    )
+
+
+def test_times_at_two_offsets_each_give_theirs_whatever_the_report_names() -> None:
+    file = around_a_change("dinner", "brunch")
+    quiet = Report(Answer.UNDETERMINED)
+    assert not reports.clock_for(file, quiet).offsets
+    dinner, brunch = sent_for(file, quiet)["steps"]
+    assert (dinner["start"], brunch["start"]) == (
+        time("2027-11-06T19:00:00", "UTC-5"),
+        time("2027-11-07T10:00:00", "UTC-6"),
+    )
+
+
+def test_an_offset_is_written_as_the_report_writes_it() -> None:
+    """India's clocks are five and a half hours ahead of UTC, and Nepal's change in 1986."""
+    when = {
+        "id": "stay-time",
+        "option": "stay",
+        "starts_at": "1985-12-31T23:00:00+05:30[Asia/Kathmandu]",
+    }
+    file = trip(["alex"], ["hotel"], [stays("stay", "hotel")], [when, lasts("stay", "PT2H")], [])
+    start = instant(when["starts_at"])
+    plan = (Step("stay", "hotel", "hotel", ("alex",), start, start + 2 * HOUR),)
+    found = Report(Answer.FEASIBLE, itinerary=plan)
+    (step,) = sent_for(file, found)["steps"]
+    written = reports.as_text(file, found)
+    for sent in (step["start"], step["end"]):
+        assert f"({sent['offset']})" in written
+    assert (step["start"]["offset"], step["end"]["offset"]) == ("UTC+5:30", "UTC+5:45")
 
 
 def alone(*stays_of_alex: tuple[str, int | None]) -> Trip:

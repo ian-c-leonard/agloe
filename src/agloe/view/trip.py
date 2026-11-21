@@ -13,8 +13,9 @@ report names FACTs and DECISIONs too. So the page can mark the steps that a repo
 and judges nothing by itself.
 
 Every time is on the clocks that the report shows times on: those of the FILE's time zone. A
-time is written as those clocks show it, such as 2027-05-15T14:00:00. Where the times of a TRIP
-are not all at one offset from UTC, each comes with its own, as in the report.
+time is written as those clocks show it, such as 2027-05-15T14:00:00. Each time comes with its
+offset from UTC where the report gives its times with theirs, and where the times sent are not
+all at one offset. The offset is written as the report writes it.
 
 A day is sent as the stretch of it in which the clocks run on without a change. So most days
 are one stretch, from midnight to midnight. A day on which the clocks change is two, and each
@@ -154,7 +155,11 @@ def shown(file: File, report: Report) -> Trip | None:
     held += [] if ends is None else [ends.at - 1 if closes else ends.at]
     try:
         days, until = _days(file, held)
-        offsets = len({local(moment, file.zone).utcoffset() for moment in times}) > 1
+        # Each time gives its offset where the report's do, and where these are not at one.
+        offsets = (
+            reports.clock_for(file, report).offsets
+            or len({local(moment, file.zone).utcoffset() for moment in times}) > 1
+        )
 
         def time(moment: int | None) -> Trip | None:
             return None if moment is None else _time(file, moment, offsets)
@@ -168,7 +173,7 @@ def shown(file: File, report: Report) -> Trip | None:
                 {
                     "date": day.date.isoformat(),
                     # A stretch with a change of the clocks at one end says its offset.
-                    "offset": _offset(day.offset) if day.changes else None,
+                    "offset": reports.offset_from_utc(day.offset) if day.changes else None,
                     "opens": day.opens,
                     "closes": day.opens + (day.end - day.start),
                 }
@@ -282,25 +287,14 @@ def _seconds_into_the_day(file: File, moment: int) -> int:
     return there.hour * 3600 + there.minute * 60 + there.second
 
 
-def _offset(ahead: timedelta) -> str:
-    """An offset from UTC as the report writes it: UTC-5, UTC+5:30, UTC+0:09:21."""
-    seconds = round(ahead.total_seconds())
-    hours, rest = divmod(abs(seconds), 3600)
-    minutes, left = divmod(rest, 60)
-    written = f"UTC{'-' if seconds < 0 else '+'}{hours}"
-    if minutes or left:
-        written += f":{minutes:02d}"
-    if left:
-        written += f":{left:02d}"
-    return written
-
-
 def _time(file: File, moment: int, with_its_offset: bool) -> Trip:
     """A time as the clocks of the FILE's time zone show it. Raises Unwritable where none can."""
     there = local(moment, file.zone)
     return {
         "at": there.replace(tzinfo=None).isoformat(timespec="seconds"),
-        "offset": _offset(there.utcoffset() or timedelta()) if with_its_offset else None,
+        "offset": reports.offset_from_utc(there.utcoffset() or timedelta())
+        if with_its_offset
+        else None,
     }
 
 
