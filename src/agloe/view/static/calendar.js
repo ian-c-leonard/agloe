@@ -153,9 +153,13 @@ function saysOf(trip, timed) {
  * that are about its step and that the report names as ruling out every plan. `clash` on a
  * bound says that the report names the DECISION about it. `clash` on the calendar says that
  * something on it is marked so.
+ *
+ * `warnings` holds, at the place of each step, what the report in words warns of there.
+ * `warns` on a mark holds those words, and `warned` on the calendar says that a mark has some.
+ * Each mark also holds the `records` that are about its step, and each bound its `record`.
  */
-export function calendar(trip, report = null) {
-  const none = { says: "", zone: null, itinerary: false, clash: false, persons: [], hours: { from: 9 * 60, to: 17 * 60 }, days: [], untimed: [] };
+export function calendar(trip, report = null, warnings = []) {
+  const none = { says: "", zone: null, itinerary: false, clash: false, warned: false, persons: [], hours: { from: 9 * 60, to: 17 * 60 }, days: [], untimed: [] };
   if (trip === null) return { ...none, says: "There is no calendar of this TRIP: the view could not make one." };
   const column = new Map(trip.persons.map((person, n) => [person.id, n]));
   const place = new Map(trip.places.map((each) => [each.id, each.name]));
@@ -169,6 +173,8 @@ export function calendar(trip, report = null) {
     const locked = new Set(step.locked.map((id) => column.get(id)));
     return {
       n, columns, parts: step.parts, end: step.end,
+      records: step.records,
+      warns: Array.isArray(warnings[n]) ? warnings[n].filter((words) => typeof words === "string") : [],
       clash: step.records.filter((id) => ruled.has(id)),
       get finds() {
         return this.clash.length ? `The report names ${listed(this.clash)} among what rules out every plan.` : null;
@@ -182,12 +188,13 @@ export function calendar(trip, report = null) {
       stateOf: (at) => (step.option === null ? "way" : locked.has(at) ? "locked" : "planned"),
     };
   });
-  const untimed = steps.filter((step) => step.when === null).map((step) => ({ name: step.name, who: step.who, clash: step.clash, finds: step.finds }));
+  const untimed = steps.filter((step) => step.when === null).map((step) => ({ name: step.name, who: step.who, records: step.records, clash: step.clash, finds: step.finds }));
   // What the report names, and how much of it is about what the calendar shows: the steps
   // on its days, the steps with no time that it names beside them, and the times of the TRIP.
   const marked = new Set(steps.filter((step) => step.parts.length || step.when === null).flatMap((step) => step.clash));
   for (const bound of [trip.starts, trip.ends]) if (bound !== null && bound.day !== null && ruled.has(bound.record)) marked.add(bound.record);
-  const says = saysOf(trip, steps.length - untimed.length) + rulesOut(ruled.size, marked.size);
+  const warned = steps.some((step) => step.warns.length && step.parts.length);
+  const says = saysOf(trip, steps.length - untimed.length) + rulesOut(ruled.size, marked.size) + (warned ? " A yellow edge marks each step at which the report warns of something." : "");
   if (!trip.days.length) return { ...none, says, zone: trip.zone, itinerary: trip.itinerary, persons: trip.persons, untimed };
 
   // ---- the hours that every day shows: from the earliest start of a step on any day to the
@@ -266,6 +273,8 @@ export function calendar(trip, report = null) {
           brief: step.kind === "way" && bottom - top < SMALLEST,
           clash: step.clash,
           finds: step.finds,
+          records: step.records,
+          warns: step.warns,
         });
       }
     }
@@ -276,7 +285,7 @@ export function calendar(trip, report = null) {
   // column. Each is marked where the report names the DECISION about it, and only there.
   for (const [bound, word] of bounds) {
     const time = clock(bound, { at: trip.days[bound.day].date });
-    days[bound.day].bounds.push({ says: `The TRIP ${word} at ${time}`, edge: word, top: down(bound.second), clash: ruled.has(bound.record) });
+    days[bound.day].bounds.push({ says: `The TRIP ${word} at ${time}`, edge: word, top: down(bound.second), clash: ruled.has(bound.record), record: bound.record });
   }
-  return { says, zone: trip.zone, itinerary: trip.itinerary, clash: marked.size > 0, persons: trip.persons, hours: { from: from / 60, to: to / 60 }, days, untimed };
+  return { says, zone: trip.zone, itinerary: trip.itinerary, clash: marked.size > 0, warned, persons: trip.persons, hours: { from: from / 60, to: to / 60 }, days, untimed };
 }

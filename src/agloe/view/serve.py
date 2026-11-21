@@ -33,7 +33,14 @@ if TYPE_CHECKING:
     # Only the name of the type is needed here. The check itself runs in a process of its own.
     from agloe.view.check import Event
 
-PAGE = ("index.html", "view.css", "view.js", "state.js", "calendar.js")  # the page and its files
+PAGE = (
+    "index.html",
+    "view.css",
+    "view.js",
+    "state.js",
+    "calendar.js",
+    "lines.js",
+)  # the page and its files
 KINDS = {".html": "text/html", ".css": "text/css", ".js": "text/javascript"}
 LOOK = 0.1  # seconds between two looks at the FILE, and at whether the view is closed
 QUIET = 15.0  # seconds after which a page with nothing new is told that the view is still there

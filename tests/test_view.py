@@ -553,7 +553,7 @@ def test_the_view_serves_its_page_and_nothing_else(tmp_path: Path) -> None:
             for script in STATIC.glob("*.js")
             for name in re.findall(r'(?:from |import\()"\./([^"]+)"', script.read_text())
         }
-        assert {"state.js", "calendar.js"} <= loaded
+        assert {"state.js", "calendar.js", "lines.js"} <= loaded
         assert {*named, *loaded} == set(PAGE) - {"index.html"}
         for name in [*named, *sorted(loaded)]:
             status, headers, _ = asked(view, f"/{name}")
@@ -617,6 +617,7 @@ def test_the_answer_and_the_report_need_no_calendar() -> None:
     code = (STATIC / "view.js").read_text()
     assert re.findall(r'^import .* from "\./([^"]+)";$', code, re.MULTILINE) == ["state.js"]
     assert 'import("./calendar.js")' in code
+    assert 'import("./lines.js")' in code
     # What the page says in each state needs nothing else at all.
     assert "import" not in (STATIC / "state.js").read_text()
 
