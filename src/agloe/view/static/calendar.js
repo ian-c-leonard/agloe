@@ -20,6 +20,8 @@
 // moment is on: the view says. This lays out what it is sent: how far down its day a part
 // starts, how tall it is, whose columns it spans, and what its words are.
 
+import { casesAbout, casesIn, findsOf, listed, optionsOf, ruledOut, saidOf } from "./named.js";
+
 const DAY = 24 * 60 * 60; // seconds
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -65,10 +67,7 @@ export function clock(time, from = null) {
   return `${shown} on ${at.day} ${MONTHS[at.month - 1]}${at.year === day.year ? "" : ` ${at.year}`}`;
 }
 
-/** Names as a sentence joins them: Alex, Sam and Jo. */
-export function listed(names) {
-  return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-}
+export { listed };
 
 /**
  * Where each of these marks goes in one PERSON's column: its lane, and how many lanes there are
@@ -173,17 +172,10 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
   const place = new Map(trip.places.map((each) => [each.id, each.name]));
   const names = (columns) => listed(columns.map((n) => trip.persons[n].name));
   // The FACTs, WANTs and DECISIONs that the report names as ruling out every plan.
-  const ruled = new Set(report !== null && report.answer === "INFEASIBLE" && Array.isArray(report.conflict) ? report.conflict.filter((id) => typeof id === "string") : []);
+  const ruled = ruledOut(report);
   // The cases in which the report says the trip works, where it depends on what the FILE does
-  // not say: for each case, the things that it needs. A list that is not of that shape is none.
-  const missing = report !== null && report.answer === "UNDETERMINED" ? report.missing : null;
-  const isNeed = (need) => need !== null && typeof need === "object";
-  const needed = Array.isArray(missing) && missing.every((needs) => Array.isArray(needs) && needs.every(isNeed)) ? missing : [];
-  // The OPTIONs that one of those things names: its own, and each that somebody has to buy a place for.
-  const namedBy = (need) => [need.option, ...(Array.isArray(need.buys) ? need.buys.filter(isNeed).map((buy) => buy.option) : [])];
-  // The words of the report for the cases, where the page has them.
-  const words = stated !== null && typeof stated === "object" && Array.isArray(stated.cases) ? stated.cases : [];
-  const heading = stated !== null && typeof stated === "object" && typeof stated.heading === "string" ? stated.heading : null;
+  // not say: for each case, the things that it needs.
+  const needed = casesIn(report);
 
   // ---- each step in words
   const steps = trip.steps.map((step, n) => {
@@ -195,15 +187,12 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
       warns: Array.isArray(warnings[n]) ? warnings[n].filter((words) => typeof words === "string") : [],
       clash: step.records.filter((id) => ruled.has(id)),
       get finds() {
-        return this.clash.length ? `The report names ${listed(this.clash)} among what rules out every plan.` : null;
+        return findsOf(this.clash);
       },
       // The cases that name the OPTION of this step, and what the report says of each.
-      cases: step.option === null ? [] : needed.flatMap((needs, at) => (needs.some((need) => namedBy(need).includes(step.option)) ? [at] : [])),
+      cases: step.option === null ? [] : casesAbout(needed, (need) => optionsOf(need).includes(step.option)),
       get asks() {
-        const said = this.cases.map((at) => (typeof words[at] === "string" ? words[at] : null));
-        if (!said.length) return [];
-        if (said.includes(null)) return ["The report names this OPTION in what the FILE does not say."];
-        return heading === null ? said : [heading, ...said];
+        return saidOf(this.cases, stated, "The report names this OPTION in what the FILE does not say.");
       },
       kind: step.option === null ? "way" : "option",
       name: step.name ?? "another WAY",

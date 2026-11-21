@@ -15,8 +15,8 @@
 <main>
   <section class="answer waiting" id="answer" aria-live="polite">
     <p class="line" id="line"></p>
-    <p class="note" id="note"></p>
     <ul class="problems" id="problems" hidden></ul>
+    <p class="note" id="note"></p>
   </section>
   <section class="calendar-part" id="calendar-part" hidden>
     <h2>Calendar</h2>
@@ -34,6 +34,11 @@
       <span class="in-a-warning"><i class="key-box warned"></i>a yellow edge: the report warns of something at this step</span>
       <span class="in-an-ask"><i class="key-box asked"></i>a yellow edge: the report says the FILE does not say enough about this step</span>
     </p>
+  </section>
+  <section class="wants-part" id="wants-part" hidden>
+    <h2>WANTs</h2>
+    <p class="says" id="wants-says"></p>
+    <div class="wants" id="wants"></div>
   </section>
   <section class="report-part" id="report-part" hidden>
     <h2>The COMPILER's report</h2>

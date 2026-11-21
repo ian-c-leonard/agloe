@@ -12,10 +12,21 @@ Each step names the FACTs and DECISIONs of the FILE that are about its OPTION or
 report names FACTs and DECISIONs too. So the page can mark the steps that a report is about,
 and judges nothing by itself.
 
+The page is also sent the WANTs of the FILE: for whom each is a must or a must-not, the PLACE
+where a WANT has its holders end the TRIP, and each OPTION that a FACT says SATISFIES the WANT
+or does not, with its DEGREE OF SATISFACTION. Whether an ITINERARY SATISFIES a WANT is for the
+COMPILER to say, and the page is not told.
+
 Every time is on the clocks that the report shows times on: those of the FILE's time zone. A
 time is written as those clocks show it, such as 2027-05-15T14:00:00. Each time comes with its
 offset from UTC where the report gives its times with theirs, and where the times sent are not
 all at one offset. The offset is written as the report writes it.
+
+Each name is sent as the report shows it. A PERSON, a PLACE, an OPTION, a WAY or a WANT whose
+name another of its kind has comes with its id, and a name that could be taken for something
+else comes in quotes. So the page tells two apart where the report does, in the same words.
+A page shows two names alike that a report in words does not: those that differ only in how
+an accent is put on a letter, or in how many spaces they hold. Those come with their ids too.
 
 A day is sent as the stretch of it in which the clocks run on without a change. So most days
 are one stretch, from midnight to midnight. A day on which the clocks change is two, and each
@@ -25,14 +36,16 @@ show as one time of day are never drawn as one.
 """
 
 import re
-from collections.abc import Mapping
+import unicodedata
+from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import cast
 
 from agloe import report as reports
 from agloe.answers import Answer, Report
-from agloe.file import File, Unwritable, local
+from agloe.file import File, Option, Person, Place, Unwritable, Want, Way, local
 
 type Trip = dict[str, object]
 type _Shape = Mapping[str, type | tuple[type, ...]]
@@ -43,6 +56,7 @@ _AN_HOUR = 60 * 60
 _AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}")
 _DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _OFFSET = re.compile(r"UTC[+-][0-9]{1,2}(:[0-9]{2}(:[0-9]{2})?)?")
+_WITH_AN_ID = re.compile(r" \([a-z0-9]+(-[a-z0-9]+)*\)$")  # how a name ends when its id is shown
 _NONE = type(None)
 _NAMED: _Shape = {"id": str, "name": str}
 _TRIP: _Shape = {
@@ -55,7 +69,18 @@ _TRIP: _Shape = {
     "starts": (dict, _NONE),
     "ends": (dict, _NONE),
     "steps": list,
+    "wants": list,
 }
+_WANT: _Shape = {
+    "id": str,
+    "name": str,
+    "musts": list,
+    "must_nots": list,
+    "ends_at": (str, _NONE),
+    "complete": (str, _NONE),
+    "options": list,
+}
+_DELIVERY: _Shape = {"option": str, "name": str, "degree": int, "record": str}
 _DAY: _Shape = {"date": str, "offset": (str, _NONE), "opens": int, "closes": int}
 _TIME: _Shape = {"at": str, "offset": (str, _NONE)}
 _BOUND: _Shape = {**_TIME, "day": (int, _NONE), "second": (int, _NONE), "record": str}
@@ -120,7 +145,8 @@ def shown(file: File, report: Report) -> Trip | None:
     """
     planned = report.answer is Answer.FEASIBLE
     steps = _in_the_itinerary(file, report) if planned else _named_by_a_lock(file)
-    names = {each.id: each.name for each in (*file.options, *file.ways)}
+    names = _names((*file.options, *file.ways))
+    people, sites = _names(file.persons, "and"), _names(file.places)
     locked: dict[str, set[str]] = {}
     for lock in file.locks:
         locked.setdefault(lock.option, set()).update(lock.persons)
@@ -166,8 +192,8 @@ def shown(file: File, report: Report) -> Trip | None:
 
         return {
             "zone": file.zone,
-            "persons": [{"id": each.id, "name": each.name} for each in file.persons],
-            "places": [{"id": each.id, "name": each.name} for each in file.places],
+            "persons": [{"id": each.id, "name": people[each.id]} for each in file.persons],
+            "places": [{"id": each.id, "name": sites[each.id]} for each in file.places],
             "itinerary": planned,
             "days": [
                 {
@@ -208,9 +234,86 @@ def shown(file: File, report: Report) -> Trip | None:
                 }
                 for step in steps
             ],
+            "wants": _wants(file, names),
         }
     except Unwritable:
         return None
+
+
+def _names(
+    records: Sequence[Person | Place | Option | Way | Want], joins: str | None = None
+) -> dict[str, str]:
+    """The name to show for each record, as the report shows it, so that no two show the same.
+
+    A record whose name another record has shows its id too. If two would still show the same,
+    every record shows its id. A name is in quotes where it could be taken for something else:
+    one with a comma, a colon, a semicolon or a quote mark, one that ends like a name with its
+    id, and one that holds the word ``joins``, which joins the list the names are for.
+
+    This is the rule of the report in words. A test holds the two together. One thing is
+    added for a page: two names count as the same where a page shows them alike. That is where
+    they have the same characters once each accent is joined to its letter, and each run of
+    spaces is one space. Each name is still printed in the spelling of the FILE.
+    """
+
+    def looks(name: str) -> str:
+        return " ".join(unicodedata.normalize("NFC", name).split())
+
+    def quoted(name: str) -> str:
+        splits = any(mark in name for mark in ",:;") or (
+            joins is not None and joins in name.casefold().split()
+        )
+        if splits or '"' in name or _WITH_AN_ID.search(name):
+            return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        return name
+
+    shared = Counter(looks(record.name) for record in records)
+    shown = {
+        record.id: quoted(record.name)
+        if shared[looks(record.name)] == 1
+        else f"{quoted(record.name)} ({record.id})"
+        for record in records
+    }
+    if len({looks(name) for name in shown.values()}) < len(shown):
+        return {record.id: f"{quoted(record.name)} ({record.id})" for record in records}
+    return shown
+
+
+def _wants(file: File, names: Mapping[str, str]) -> list[Trip]:
+    """The WANTs of the FILE, in its order, each with what the FILE says of it.
+
+    ``options`` holds each OPTION that a FACT says SATISFIES the WANT or does not, in the
+    FILE's order of OPTIONs, with the FACT. A DEGREE OF SATISFACTION of zero says that the
+    OPTION does not. ``complete`` is the FACT that the FILE states every OPTION that SATISFIES
+    the WANT, where it holds one.
+    """
+    wants: list[Trip] = []
+    called = _names(file.wants)
+    for want in file.wants:
+        complete = file.complete_for(want.id)
+        stated = [(option, file.satisfies(option.id, want.id)) for option in file.options]
+        wants.append(
+            {
+                "id": want.id,
+                "name": called[want.id],
+                # The PERSONs come in the order of the FILE.
+                "musts": [each.id for each in file.persons if each.id in want.musts],
+                "must_nots": [each.id for each in file.persons if each.id in want.must_nots],
+                "ends_at": want.ends_at,
+                "complete": None if complete is None else complete.id,
+                "options": [
+                    {
+                        "option": option.id,
+                        "name": names[option.id],
+                        "degree": fact.degree,
+                        "record": fact.id,
+                    }
+                    for option, fact in stated
+                    if fact is not None
+                ],
+            }
+        )
+    return wants
 
 
 def _in_the_itinerary(file: File, report: Report) -> list[_Step]:
@@ -453,10 +556,60 @@ def holds(trip: object) -> bool:
     ):
         return False
     planned = sent["itinerary"] is True
-    return all(_is_a_bound(sent[which], days) for which in ("starts", "ends")) and all(
-        _is_a_step(step, persons, places, days, planned, until is not None)
-        for step in cast("list[object]", sent["steps"])
+    return (
+        all(_is_a_bound(sent[which], days) for which in ("starts", "ends"))
+        and all(
+            _is_a_step(step, persons, places, days, planned, until is not None)
+            for step in cast("list[object]", sent["steps"])
+        )
+        and _are_wants(sent["wants"], persons, places)
     )
+
+
+def _are_wants(wants: object, persons: frozenset[str], places: frozenset[str]) -> bool:
+    """Whether these are the WANTs of such a TRIP, each with an id of its own.
+
+    A WANT is a must for some of the PERSONs and a must-not for others, and for nobody both.
+    Somebody holds it. No OPTION delivers a WANT about where the TRIP ends.
+    It names each OPTION once, with a DEGREE OF SATISFACTION from 0 to 10.
+    """
+    seen: set[str] = set()
+    for want in cast("list[object]", wants):
+        if not _fits(want, _WANT):
+            return False
+        said = cast("dict[str, object]", want)
+        holders = _all_different(
+            [*cast("list[object]", said["musts"]), *_listed(said["must_nots"])]
+        )
+        ends_at = said["ends_at"]
+        if (
+            said["id"] in seen
+            or not cast("str", said["name"]).strip()
+            or not holders
+            or not holders <= persons
+            or not (ends_at is None or (ends_at in places and not said["options"]))
+        ):
+            return False
+        seen.add(cast("str", said["id"]))
+        options: list[object] = []
+        for delivery in cast("list[object]", said["options"]):
+            if not _fits(delivery, _DELIVERY):
+                return False
+            stated = cast("dict[str, object]", delivery)
+            if (
+                not cast("str", stated["name"]).strip()
+                or not 0 <= cast("int", stated["degree"]) <= 10
+            ):
+                return False
+            options.append(stated["option"])
+        if _all_different(options) is None:
+            return False
+    return True
+
+
+def _listed(value: object) -> list[object]:
+    """A list as it is, read as a list of anything."""
+    return cast("list[object]", value)
 
 
 def _fits(value: object, shape: _Shape) -> bool:

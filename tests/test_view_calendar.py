@@ -1256,6 +1256,7 @@ def made(times: list[tuple[str, str | None]]) -> Trip:
         "until": None,
         "starts": None,
         "ends": None,
+        "wants": [],
         "steps": [
             {
                 "option": "stay",
@@ -1371,6 +1372,7 @@ def some_trip(chosen: random.Random) -> Trip:
         "itinerary": planned,
         "days": [whole(day) for day in days],
         "until": chosen.choice([None, None, "2030-01-01"]),
+        "wants": [],
         "starts": bound("trip-start"),
         "ends": bound("trip-end"),
         "steps": steps,

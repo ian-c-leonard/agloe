@@ -11,6 +11,8 @@
 //
 // Nothing here judges a TRIP. It finds what the report already says, line by line.
 
+import { casesIn } from "./named.js";
+
 /** A line that shows one step of a plan: "  2:00 pm to 3:00 pm: Museum visit, Alex and Sam". */
 const STEP = /^ {2}\d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+, .+$/;
 /** A line under a step that says what the report warns of there. */
@@ -20,13 +22,6 @@ const WARNING = /^ {4}! /;
 const ONE_CASE = "The trip works if ";
 /** The line above the cases in which a trip works, where the report lists several. */
 const CASES = "The trip works in any of these cases:";
-
-/** The cases in which a report as JSON says that the trip works: for each, the list of what it needs. */
-function casesIn(report) {
-  const missing = report?.answer === "UNDETERMINED" ? report.missing : null;
-  const isNeed = (need) => need !== null && typeof need === "object";
-  return Array.isArray(missing) && missing.every((needs) => Array.isArray(needs) && needs.every(isNeed)) ? missing : [];
-}
 
 /** The lists of ids that a report as JSON names one after another in its words. */
 function listsOf(report) {

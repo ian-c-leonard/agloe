@@ -6,6 +6,9 @@ shows times on. For a FEASIBLE TRIP the steps are the ITINERARY of the report. F
 TRIP the report shows no ITINERARY, and the steps are the OPTIONs that a LOCK names, at the
 times the FILE states.
 
+It also sends the WANTs of the FILE: for whom each is a must or a must-not, and each OPTION
+that a FACT says SATISFIES it or does not.
+
 A day is sent as the stretch of it in which the clocks run on without a change, and each step
 says which part of it lies in which stretch. So the page works out no time for itself, on any
 night and in any time zone.
@@ -25,7 +28,7 @@ import pytest
 from agloe import compiler
 from agloe import report as reports
 from agloe.answers import Answer, Report
-from agloe.file import File, instant, read
+from agloe.file import File, instant, parse, read
 from agloe.reference import Step
 from agloe.view.trip import MOST_DAYS, holds, shown
 from tests.stories import (
@@ -141,6 +144,8 @@ def test_every_example_is_sent_as_a_trip_that_a_page_can_draw(path: Path) -> Non
     assert sent["places"] == [{"id": each.id, "name": each.name} for each in file.places]
     assert sent["itinerary"] is (expected(path)["answer"] == "FEASIBLE")
     assert sent["until"] is None
+    in_the_file = json.loads(path.read_text()).get("wants", [])
+    assert [want["id"] for want in sent["wants"]] == [want["id"] for want in in_the_file]
     # In the examples the clocks do not change: every day is whole, and no time needs its offset.
     for each in sent["days"]:
         assert (each["offset"], each["opens"], each["closes"]) == (None, 0, 24 * HOUR)
@@ -377,6 +382,152 @@ def test_a_step_that_can_take_longer_says_how_late_it_can_end() -> None:
         sent = sent_for(file, Report(Answer.FEASIBLE, itinerary=plan))
         assert [clock(step["latest"]) for step in sent["steps"]] == ["2027-05-15T16:00:00", None]
         assert holds(sent)
+
+
+def wants_of(path: Path) -> list[dict[str, Any]]:
+    wants: list[dict[str, Any]] = drawn(path)["wants"]
+    return wants
+
+
+def test_the_wants_of_the_file_are_sent_with_the_options_that_satisfy_each() -> None:
+    """Alex must have deep-dish pizza. One dinner serves it, and two other OPTIONs do not."""
+    path = EXAMPLES / "a-must" / "works.json"
+    names = {each["id"]: each["name"] for each in json.loads(path.read_text())["options"]}
+    said = {
+        "dinner-pizzeria": (9, "pizzeria-serves-it"),
+        "dinner-tavern": (0, "tavern-does-not-serve-it"),
+        "blues-show": (0, "show-does-not-serve-it"),
+    }
+    assert wants_of(path) == [
+        {
+            "id": "deep-dish",
+            "name": "deep-dish pizza",
+            "musts": ["alex"],
+            "must_nots": [],
+            "ends_at": None,
+            # The FILE does not say that these are all the OPTIONs that SATISFY it.
+            "complete": None,
+            # Each OPTION that a FACT says SATISFIES the WANT or does not, in the FILE's order
+            # of OPTIONs, with its DEGREE OF SATISFACTION and the FACT that states it.
+            "options": [
+                {"option": id, "name": names[id], "degree": said[id][0], "record": said[id][1]}
+                for id in names
+                if id in said
+            ],
+        }
+    ]
+    assert len(wants_of(path)[0]["options"]) == 3
+
+
+def test_a_want_says_for_whom_it_is_a_must_not_and_whether_its_options_are_all_stated() -> None:
+    # Alex must have a view from high up, and Jo must not.
+    (view,) = wants_of(EXAMPLES / "a-must-not" / "works.json")
+    assert (view["musts"], view["must_nots"]) == (["alex"], ["jo"])
+    assert [(each["option"], each["degree"]) for each in view["options"]] == [
+        ("skydeck", 9),
+        ("lunch", 0),
+    ]
+    # A FACT says that the FILE states every OPTION that SATISFIES the WANT.
+    (pizza,) = wants_of(EXAMPLES / "a-must" / "cannot-work.json")
+    assert pizza["complete"] == "every-deep-dish-place"
+    assert [each["option"] for each in pizza["options"]] == ["dinner-pizzeria"]
+
+
+def test_a_want_about_where_the_trip_ends_names_the_place() -> None:
+    """Alex and Sam must end the TRIP in Denver. No OPTION delivers such a WANT."""
+    (ending,) = wants_of(EXAMPLES / "ending-in-denver" / "works.json")
+    assert ending == {
+        "id": "ending-in-denver",
+        "name": "ending the trip in Denver",
+        "musts": ["alex", "sam"],
+        "must_nots": [],
+        "ends_at": "denver",
+        "complete": None,
+        "options": [],
+    }
+
+
+def test_names_are_sent_as_the_report_shows_them() -> None:
+    """Two PERSONs are called Alex, and two OPTIONs are called Skydeck visit.
+
+    The report shows the id with a name that another record of its kind has, so that a reader
+    can tell them apart. It puts a name in quotes where it could be taken for something else.
+    The page is sent each name as the report shows it.
+    """
+    content = json.loads((EXAMPLES / "a-must-not" / "works.json").read_text())
+    by_id = {each["id"]: each for kind in ("persons", "options", "wants") for each in content[kind]}
+    by_id["jo"]["name"] = "Alex"
+    by_id["lunch"]["name"] = "Skydeck visit"
+    by_id["sam"]["name"] = "Tom and Jerry"
+    by_id["view"]["name"] = "a view, from high up"
+    file = parse(json.dumps(content))
+    found = compiler.check(file)
+    assert found.answer is Answer.FEASIBLE
+    sent = sent_for(file, found)
+    assert [each["name"] for each in sent["persons"]] == [
+        "Alex (alex)",
+        '"Tom and Jerry"',
+        "Alex (jo)",
+    ]
+    assert [step["name"] for step in sent["steps"] if step["option"]] == [
+        "Skydeck visit (skydeck)",
+        "Skydeck visit (lunch)",
+    ]
+    (view,) = sent["wants"]
+    assert view["name"] == '"a view, from high up"'
+    assert [each["name"] for each in view["options"]] == [
+        "Skydeck visit (skydeck)",
+        "Skydeck visit (lunch)",
+    ]
+    # These are the report's own names: each is in the report in words.
+    words = reports.as_text(file, found)
+    shown = [each["name"] for each in sent["persons"]] + [view["name"]]
+    shown += [each["name"] for each in view["options"]]
+    for name in shown:
+        assert name in words, name
+    assert holds(sent)
+    # A name that ends like a name with its id is in quotes, so it is not taken for one.
+    by_id["sam"]["name"] = "Alex (jo)"
+    file = parse(json.dumps(content))
+    found = compiler.check(file)
+    sent = sent_for(file, found)
+    assert [each["name"] for each in sent["persons"]] == [
+        "Alex (alex)",
+        '"Alex (jo)"',
+        "Alex (jo)",
+    ]
+    words = reports.as_text(file, found)
+    for each in sent["persons"]:
+        assert each["name"] in words, each["name"]
+
+
+def test_names_that_look_the_same_on_a_page_come_with_their_ids() -> None:
+    """Two PERSONs are called Joséphine, spelled with two different sets of characters.
+
+    One has the letter with its accent as one character, the other has the letter and then
+    the accent. A page shows the two alike. So it does two names that differ only in how many
+    spaces they hold: a page shows a run of spaces as one. Each of these comes with its id,
+    in the spelling of the FILE.
+    """
+    content = json.loads((EXAMPLES / "a-must-not" / "works.json").read_text())
+    by_id = {each["id"]: each for kind in ("persons", "options") for each in content[kind]}
+    one, other = "Jos\u00e9phine", "Jose\u0301phine"
+    assert one != other
+    by_id["alex"]["name"], by_id["jo"]["name"] = one, other
+    by_id["skydeck"]["name"], by_id["lunch"]["name"] = "Anne Marie", "Anne  Marie"
+    file = parse(json.dumps(content))
+    sent = sent_for(file, compiler.check(file))
+    assert [each["name"] for each in sent["persons"]] == [f"{one} (alex)", "Sam", f"{other} (jo)"]
+    assert [step["name"] for step in sent["steps"] if step["option"]] == [
+        "Anne Marie (skydeck)",
+        "Anne  Marie (lunch)",
+    ]
+    assert holds(sent)
+    # A name that only differs in its capitals looks different, and comes as it is.
+    by_id["alex"]["name"], by_id["jo"]["name"] = "Alex", "alex"
+    file = parse(json.dumps(content))
+    sent = sent_for(file, compiler.check(file))
+    assert [each["name"] for each in sent["persons"]] == ["Alex", "Sam", "alex"]
 
 
 def test_a_trip_with_no_itinerary_is_sent_with_the_options_that_a_lock_names() -> None:
@@ -1097,7 +1248,69 @@ def _no_end(sent: Trip) -> None:
     sent["steps"][1].update(end=None, latest=None)
 
 
+WANT: dict[str, Any] = {
+    "id": "a-bed",
+    "name": "a bed",
+    "musts": ["alex"],
+    "must_nots": ["sam"],
+    "ends_at": None,
+    "complete": "every-bed",
+    "options": [{"option": "night", "name": "night", "degree": 8, "record": "night-is-a-bed"}],
+}
+
+
+def _want(**other: object) -> Callable[[Trip], None]:
+    """The TRIP gets one WANT, which is good but for these parts."""
+    return _set("wants", to=[{**WANT, **other}])
+
+
+def _delivery(**other: object) -> Callable[[Trip], None]:
+    """The TRIP gets one WANT, whose one OPTION is good but for these parts."""
+    return _want(options=[{**WANT["options"][0], **other}])
+
+
+def test_a_trip_with_a_want_is_a_trip() -> None:
+    sent = good()
+    assert sent["wants"] == []
+    _want()(sent)
+    assert holds(sent)
+    # A WANT with nobody for whom it is a must-not, and no OPTION.
+    _want(must_nots=[], complete=None, options=[])(sent)
+    assert holds(sent)
+    # A WANT about where the TRIP ends names a PLACE. No OPTION delivers such a WANT.
+    _want(ends_at="hotel", complete=None, options=[])(sent)
+    assert holds(sent)
+    # A DEGREE OF SATISFACTION is from 0 to 10, both ends included.
+    for degree in (0, 10):
+        _delivery(degree=degree)(sent)
+        assert holds(sent)
+
+
 BROKEN: dict[str, Callable[[Trip], None]] = {
+    "no wants": _drop("wants"),
+    "wants that are no list": _set("wants", to={}),
+    "a want that is no record": _set("wants", to=["a-bed"]),
+    "a want with one thing more": _want(more=1),
+    "a want with a blank name": _want(name=" "),
+    "a want with an id that is no text": _want(id=7),
+    "two wants with one id": _set("wants", to=[WANT, WANT]),
+    "a want that is a must for a person the trip does not have": _want(musts=["jo"]),
+    "a want that names a person twice": _want(musts=["alex", "alex"]),
+    "a want that is a must and a must-not for one person": _want(must_nots=["alex"]),
+    "a want that is a must or a must-not for nobody": _want(musts=[], must_nots=[]),
+    "a want whose musts are no list": _want(musts="alex"),
+    "a want that ends at a place the trip does not have": _want(ends_at="denver", options=[]),
+    "a want about where the trip ends that an option delivers": _want(ends_at="hotel"),
+    "a want whose complete set is no id": _want(complete=7),
+    "a want whose options are no list": _want(options={}),
+    "an option of a want that is no record": _want(options=["night"]),
+    "an option of a want with a degree above ten": _delivery(degree=11),
+    "an option of a want with a degree below nothing": _delivery(degree=-1),
+    "an option of a want with a degree in words": _delivery(degree="8"),
+    "an option of a want with a degree that is a yes": _delivery(degree=True),
+    "an option of a want with a blank name": _delivery(name=""),
+    "an option of a want with no fact": _delivery(record=None),
+    "a want that names an option twice": _want(options=[WANT["options"][0]] * 2),
     "no zone": _drop("zone"),
     "one thing more": _set("more", to=1),
     "a zone that is no text": _set("zone", to=5),

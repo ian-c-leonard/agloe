@@ -403,7 +403,7 @@ def test_a_check_that_ends_without_a_report_has_stopped(does: str | None, tmp_pa
 
 EMPTY = (
     '{"zone": "UTC", "persons": [], "places": [], "itinerary": true, "days": [], '
-    '"until": null, "starts": null, "ends": null, "steps": []}'
+    '"until": null, "starts": null, "ends": null, "steps": [], "wants": []}'
 )
 
 
@@ -553,7 +553,7 @@ def test_the_view_serves_its_page_and_nothing_else(tmp_path: Path) -> None:
             for script in STATIC.glob("*.js")
             for name in re.findall(r'(?:from |import\()"\./([^"]+)"', script.read_text())
         }
-        assert {"state.js", "calendar.js", "lines.js", "strip.js"} <= loaded
+        assert {"state.js", "calendar.js", "lines.js", "strip.js", "wants.js", "named.js"} <= loaded
         assert {*named, *loaded} == set(PAGE) - {"index.html"}
         for name in [*named, *sorted(loaded)]:
             status, headers, _ = asked(view, f"/{name}")
@@ -617,7 +617,7 @@ def test_the_view_serves_the_answer_and_the_report_without_what_they_do_not_need
 ) -> None:
     """A file of the page that only the calendar needs cannot be read. The view still starts."""
     shutil.copytree(STATIC, tmp_path / "static")
-    for name in ["lines.js", "calendar.js", "strip.js"]:
+    for name in ["lines.js", "calendar.js", "strip.js", "wants.js", "named.js"]:
         (tmp_path / "static" / name).unlink()
 
     def beside(package: str) -> Path:
@@ -629,7 +629,7 @@ def test_the_view_serves_the_answer_and_the_report_without_what_they_do_not_need
     with serving(path) as view:
         assert asked(view, "/")[0] == 200
         assert asked(view, "/state.js")[0] == 200
-        for name in ["lines.js", "calendar.js", "strip.js"]:
+        for name in ["lines.js", "calendar.js", "strip.js", "wants.js", "named.js"]:
             assert asked(view, f"/{name}")[0] == 404
         assert kinds(Sent(view).until("report")) == ["file", "answer", "report"]
     # Without a file that the answer and the report need, there is no view.
@@ -645,6 +645,7 @@ def test_the_answer_and_the_report_need_no_calendar() -> None:
     assert 'import("./calendar.js")' in code
     assert 'import("./lines.js")' in code
     assert 'import("./strip.js")' in code
+    assert 'import("./wants.js")' in code
     # What the page says in each state needs nothing else at all.
     assert "import" not in (STATIC / "state.js").read_text()
 
@@ -906,7 +907,8 @@ def test_the_page_marks_a_report_on_the_file_as_it_was() -> None:
     # The calendar on the page is the one of that report, and it is marked with it.
     kept = {"trip": first[-1]["trip"], "report": first[-1]["json"]}
     assert changed["calendar"] == answered["calendar"] == kept
-    assert "calendar" in changed["note"]
+    # The page says so of all that it still shows of that FILE, and names no part of it.
+    assert changed["note"].endswith("What the page shows below is on the FILE as it was before.")
     assert reported["line"] == "INFEASIBLE: this trip cannot work."
     assert reported["old"] is False
     assert reported["calendar"] == {"trip": second[-1]["trip"], "report": second[-1]["json"]}

@@ -60,7 +60,7 @@ FITTED = """() => {
   return Math.abs(rows.getBoundingClientRect().width - room) < 1;
 }"""
 # What is lit on the page: the steps of the calendar, the steps with no time beside it, the
-# marks of the strip, and the lines of the report.
+# marks of the strip, the lines of the report, and the WANTs with the OPTIONs under them.
 LIT = """() => {
   const first = (each) => each.title.split("\\n")[0];
   const all = (which) => [...document.querySelectorAll(which)];
@@ -69,6 +69,7 @@ LIT = """() => {
     untimed: all("#calendar-untimed .lit").map((each) => each.textContent),
     bars: [...new Set(all("#strip .bar.lit").map(first))],
     rows: all("#report .row.lit").map((row) => row.textContent),
+    wants: all("#wants .lit").map((each) => each.querySelector("h3, b").textContent),
   };
 }"""
 # For each mark of the strip, how many of 15 by 9 points of it answer the pointer for it.
@@ -155,27 +156,40 @@ def opened(
     tall: int = 1000,
     without: tuple[str, ...] = (),
     held: tuple[str, list[Route]] | None = None,
+    faulty: tuple[str, str, list[str]] | None = None,
 ) -> Generator[Page]:
     """The page of the view of one FILE, once it shows the report on it.
 
     ``without`` names files of the page that the browser cannot load. ``held`` names one that
     the browser gets only when the test lets it: the test finds its request in the list.
+    ``faulty`` names one that the browser gets with other code in it, and the list that takes
+    the faults of the page, which are then no failure of the test.
     """
     with serving(path) as view:
         context = chromium.new_context(viewport={"width": wide, "height": tall})
         try:
             page = context.new_page()
-            problems: list[str] = []
+            problems: list[str] = [] if faulty is None else faulty[2]
             page.on("pageerror", lambda problem: problems.append(str(problem)))
             for name in without:
                 page.route(f"**/{name}", lambda route: route.abort())
+            # The page counts its own faults, so that a test can wait for one.
+            page.add_init_script(
+                "window.faults = 0; addEventListener('error', () => { window.faults += 1; });"
+            )
+            if faulty is not None:
+                code = faulty[1]
+                page.route(
+                    f"**/{faulty[0]}",
+                    lambda route: route.fulfill(body=code, content_type="text/javascript"),
+                )
             if held is not None:
                 requests = held[1]
                 page.route(f"**/{held[0]}", lambda route: requests.append(route))
             page.goto(view.address)
             page.wait_for_function(ANSWERED, timeout=60_000)
             yield page
-            assert problems == []
+            assert faulty is not None or problems == []
         finally:
             context.close()
 
@@ -253,7 +267,7 @@ def test_pointing_at_a_step_lights_up_what_the_report_says_of_it(chromium: Brows
         assert ids_of(found["rows"]) == ["lock-visit"]
         # With the pointer off the parts of the page, nothing is lit.
         page.mouse.move(2, 2)
-        lit(page, marks=[], rows=[], bars=[], untimed=[])
+        lit(page, marks=[], rows=[], bars=[], untimed=[], wants=[])
         assert page.locator(".lit").count() == 0
 
 
@@ -268,6 +282,105 @@ def test_pointing_ties_the_strip_the_calendar_and_the_report(chromium: Browser) 
         page.locator("#calendar .mark.locked").first.hover()
         found = lit(page, bars=["Dinner"], marks=["Dinner"])
         assert found["rows"][0].endswith(": Dinner, Alex")
+
+
+def test_pointing_ties_a_want_to_the_calendar_and_the_report(chromium: Browser) -> None:
+    """Alex must have a view from high up, and Jo must not. Only Alex goes up the tower."""
+    with opened(chromium, EXAMPLES / "a-must-not" / "works.json") as page:
+        page.locator("#wants .want").wait_for()
+        page.locator("#report .row").first.wait_for()
+        assert page.text_content("#wants .want-name") == "a view from high up"
+        assert page.text_content("#wants .want-holds") == "A must for Alex. A must-not for Jo."
+        # Pointing at an OPTION under the WANT lights up its step on the calendar, its line in
+        # the plan, and the line of the FACT that it SATISFIES the WANT.
+        page.locator("#wants .delivers").first.hover()
+        found = lit(page, marks=["Skydeck visit"], wants=["Skydeck visit"])
+        assert found["rows"][0] == "  10:00 am to 11:30 am: Skydeck visit, Alex"
+        assert ids_of(found["rows"][1:]) == ["skydeck-is-high-up"]
+        # Pointing at the step on the calendar lights up the OPTION under the WANT.
+        page.locator("#calendar .mark.planned").first.hover()
+        lit(page, marks=["Skydeck visit"], wants=["Skydeck visit"])
+        # Pointing at the WANT lights up its line in the report, and the other way round.
+        page.locator("#wants .want-name").hover()
+        found = lit(page, marks=[], wants=["a view from high up"])
+        assert ids_of(found["rows"]) == ["view"]
+        page.locator("#report .row[data-record='view']").hover()
+        lit(page, marks=[], wants=["a view from high up"])
+
+
+def test_a_want_has_the_red_edge_of_what_the_report_names(chromium: Browser) -> None:
+    """Alex must have deep-dish pizza, and a LOCK names the blues show at the dinner's time."""
+    with opened(chromium, EXAMPLES / "a-must" / "cannot-work.json") as page:
+        want = page.locator("#wants .want.clash")
+        want.wait_for()
+        assert want.get_attribute("title") == (
+            "The report names deep-dish and every-deep-dish-place among what rules out every plan."
+        )
+        assert (page.text_content("#wants-says") or "").endswith(
+            " A red edge marks what the report names among what rules out every plan."
+        )
+        # The OPTION under it has no red edge: the report does not name its FACT.
+        assert page.locator("#wants .delivers").count() == 1
+        assert page.locator("#wants .delivers.clash").count() == 0
+        assert page.text_content("#wants .delivers-takes") == "No LOCK names it."
+    # A FILE with no WANT has no such part on its page.
+    with opened(chromium, EXAMPLES / "flight-home" / "works.json") as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        assert page.locator("#wants-part").is_hidden()
+
+
+def test_a_long_name_under_a_want_lies_on_nothing(chromium: Browser, tmp_path: Path) -> None:
+    """What the FILE says of an OPTION goes below its name where the two do not fit on a line."""
+    content = json.loads((EXAMPLES / "a-must-not" / "works.json").read_text())
+    # A name with a long word in it, which cannot break at a space.
+    content["options"][0]["name"] = "Neuschwanstein Castle"
+    content["options"][1]["name"] = "Lunch at the Hohenschwangau village restaurant"
+    # Where the words of each are on the page, whatever box holds them.
+    apart = """() => [...document.querySelectorAll("#wants .delivers")].map((item) => {
+      const words = (which) => {
+        const range = document.createRange();
+        range.selectNodeContents(item.querySelector(which));
+        return range.getBoundingClientRect();
+      };
+      const [name, says] = [words(".delivers-name"), words(".delivers-says")];
+      const box = item.getBoundingClientRect();
+      const across = name.right <= says.left + 0.5 || says.right <= name.left + 0.5;
+      const down = name.bottom <= says.top + 0.5 || says.bottom <= name.top + 0.5;
+      const inside = name.right <= box.right + 0.5 && says.right <= box.right + 0.5;
+      return (across || down) && inside;
+    })"""
+    with opened(chromium, written(tmp_path, content)) as page:
+        page.locator("#wants .delivers").first.wait_for()
+        for wide in [1280, 980, 700]:
+            page.set_viewport_size({"width": wide, "height": 1000})
+            assert page.evaluate(apart) == [True, True], wide
+
+
+def test_a_long_word_in_the_name_of_a_want_stays_on_its_card(
+    chromium: Browser, tmp_path: Path
+) -> None:
+    """Two WANTs side by side, and the first is named with a word longer than its card."""
+    content = json.loads((EXAMPLES / "a-must-not" / "works.json").read_text())
+    (view,) = content["wants"]
+    long = "Llanfairpwllgwyngyllgogerychwyrndrobwllllantysiliogogogoch"
+    content["wants"] = [
+        {**view, "name": f"Visit {long}"},
+        {**view, "id": "air", "name": "Eat outdoors"},
+    ]
+    inside = """() => [...document.querySelectorAll("#wants .want")].map((card) => {
+      const range = document.createRange();
+      range.selectNodeContents(card.querySelector(".want-name"));
+      return range.getBoundingClientRect().right <= card.getBoundingClientRect().right + 0.5;
+    })"""
+    with opened(chromium, written(tmp_path, content)) as page:
+        page.locator("#wants .want").first.wait_for()
+        assert page.locator("#wants .want").count() == 2
+        for wide in [1280, 700, 420]:
+            page.set_viewport_size({"width": wide, "height": 1000})
+            assert page.evaluate(inside) == [True, True], wide
+            # The page is no wider than its window.
+            assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth"), wide
 
 
 def test_a_step_with_no_time_lights_up_alone(chromium: Browser, tmp_path: Path) -> None:
@@ -454,6 +567,27 @@ def test_the_page_shows_what_it_can_without_a_part_that_cannot_load(chromium: Br
         assert page.locator("#strip").is_hidden()
         assert (page.text_content("#line") or "").startswith("FEASIBLE")
         assert page.text_content("#report") == expected
+    # Without the WANTs: the calendar and the report.
+    path = EXAMPLES / "a-must-not" / "works.json"
+    expected = path.with_name(f"{path.stem}.expected.txt").read_text()
+    with opened(chromium, path, without=("wants.js",)) as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        assert page.locator("#wants-part").is_hidden()
+        assert page.text_content("#report") == expected
+    # With a fault in the WANTs: the same, and the fault is not swallowed.
+    faults: list[str] = []
+    code = 'export function wants() { throw new Error("a fault in the WANTs"); }'
+    with opened(chromium, path, faulty=("wants.js", code, faults)) as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        page.wait_for_function("() => window.faults > 0")
+        assert page.locator("#wants-part").is_hidden()
+        assert page.locator("#calendar .mark").count() == 3
+        assert page.text_content("#report") == expected
+    assert faults and all("a fault in the WANTs" in fault for fault in faults)
+    path = EXAMPLES / "several-days" / "works-but-risky.json"
+    expected = path.with_name(f"{path.stem}.expected.txt").read_text()
     # Without the ties of the lines: the report as it is, and a calendar with no yellow edge.
     # The page asks for its strip last, so with the strip on the page nothing is still to come.
     with opened(chromium, path, without=("lines.js",)) as page:
