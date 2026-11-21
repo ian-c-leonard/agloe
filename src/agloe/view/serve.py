@@ -27,11 +27,13 @@ from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from agloe.view.trip import holds
+
 if TYPE_CHECKING:
     # Only the name of the type is needed here. The check itself runs in a process of its own.
     from agloe.view.check import Event
 
-PAGE = ("index.html", "view.css", "view.js", "state.js")  # the page and its files
+PAGE = ("index.html", "view.css", "view.js", "state.js", "calendar.js")  # the page and its files
 KINDS = {".html": "text/html", ".css": "text/css", ".js": "text/javascript"}
 LOOK = 0.1  # seconds between two looks at the FILE, and at whether the view is closed
 QUIET = 15.0  # seconds after which a page with nothing new is told that the view is still there
@@ -46,7 +48,13 @@ ANSWERS = {"FEASIBLE", "INFEASIBLE", "UNDETERMINED"}
 # What a check can say, and what each of its events must hold. A check ends with one of ENDS.
 SHAPES: dict[str, dict[str, type | tuple[type, ...]]] = {
     "answer": {"answer": str, "seconds": (int, float)},
-    "report": {"answer": str, "json": dict, "text": str, "seconds": (int, float)},
+    "report": {
+        "answer": str,
+        "json": dict,
+        "text": str,
+        "trip": (dict, type(None)),
+        "seconds": (int, float),
+    },
     "refused": {"problems": list},
     "unwritable": {},
 }
@@ -106,6 +114,11 @@ def _said(line: bytes) -> Event:
         isinstance(problem, str) for problem in cast("list[object]", event["problems"])
     ):
         raise ValueError("a check printed a problem that is no text")
+    trip = event.get("trip")
+    if trip is not None:
+        planned = cast("Event", trip).get("itinerary") if holds(trip) else None
+        if planned is not (event["answer"] == "FEASIBLE"):
+            raise ValueError("a check printed a TRIP that a page cannot draw")
     return event
 
 

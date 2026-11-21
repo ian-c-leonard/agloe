@@ -34,11 +34,13 @@ from typing import Any, cast
 
 import pytest
 
+from agloe import compiler
 from agloe.cli import main
 from agloe.file import FileError, read
 from agloe.view import View
 from agloe.view.check import checked
 from agloe.view.serve import PAGE, REFUSED_BY_BROWSERS
+from agloe.view.trip import shown
 from tests.stories import EXAMPLES, lasts, lock, needs_no_right, stays
 
 STORY = EXAMPLES / "flight-home"
@@ -195,6 +197,10 @@ def test_a_page_is_sent_the_file_then_the_answer_then_the_report(name: str, tmp_
     assert report["answer"] == expected["answer"]
     assert report["json"] == expected
     assert report["text"] == (STORY / f"{name}.expected.txt").read_text()
+    # With the report comes the TRIP as the page draws it.
+    checked_file = read(path)
+    assert report["trip"] == shown(checked_file, compiler.check(checked_file))
+    assert report["trip"]["itinerary"] is (expected["answer"] == "FEASIBLE")
     assert 0 <= answer["seconds"] <= report["seconds"]
     # Each event names the state of the FILE that it is about.
     assert answer["revision"] == report["revision"] == 1
@@ -354,7 +360,33 @@ def test_the_answer_reaches_a_page_while_the_check_goes_on(tmp_path: Path) -> No
         """echo '{"kind": "answer", "answer": "PERHAPS", "seconds": 1}'""",
         """echo '{"kind": "refused", "problems": [1]}'""",
         """echo '{"kind": "file", "name": "another.json"}'""",
-        """echo '{"kind": "report", "answer": "FEASIBLE", "json": {}, "text": "", "seconds": 1}'""",
+        (
+            """echo '{"kind": "report", "answer": "FEASIBLE", "json": {}, "text": "", """
+            """"trip": null, "seconds": 1}'"""
+        ),
+        # A report with no TRIP, with one that a page cannot draw, and with one for another answer.
+        (
+            """echo '{"kind": "report", "answer": "FEASIBLE", "json": {"answer": "FEASIBLE"}, """
+            """"text": "", "seconds": 1}'"""
+        ),
+        (
+            """echo '{"kind": "report", "answer": "FEASIBLE", "json": {"answer": "FEASIBLE"}, """
+            """"text": "", "trip": {}, "seconds": 1}'"""
+        ),
+        (
+            """echo '{"kind": "report", "answer": "FEASIBLE", "json": {"answer": "FEASIBLE"}, """
+            """"text": "", "trip": [], "seconds": 1}'"""
+        ),
+        (
+            """echo '{"kind": "report", "answer": "FEASIBLE", "json": {"answer": "FEASIBLE"}, """
+            """"text": "", "seconds": 1, "trip": {"zone": "UTC", "persons": [], "places": [], """
+            """"itinerary": false, "steps": []}}'"""
+        ),
+        (
+            """echo '{"kind": "report", "answer": "FEASIBLE", "json": {"answer": "FEASIBLE"}, """
+            """"text": "", "seconds": 1, "trip": {"zone": "UTC", "persons": [], "places": [], """
+            """"itinerary": true, "steps": [{}]}}'"""
+        ),
         """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": true}'""",
         """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": NaN}'""",
         """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": -1}'""",
@@ -362,7 +394,7 @@ def test_the_answer_reaches_a_page_while_the_check_goes_on(tmp_path: Path) -> No
         f"""echo '{{"kind": "answer", "answer": "FEASIBLE", "seconds": 1{"0" * 400}}}'""",
         (
             """echo '{"kind": "report", "answer": "FEASIBLE", "text": "", "seconds": 1, """
-            """"json": {"answer": "FEASIBLE", "robust": 1e400}}'"""
+            """"trip": null, "json": {"answer": "FEASIBLE", "robust": 1e400}}'"""
         ),
         None,
     ],
@@ -381,6 +413,25 @@ def test_a_check_that_ends_without_a_report_has_stopped(does: str | None, tmp_pa
         {"kind": "file", "name": "trip.json", "revision": 1, "view": view.id},
         {"kind": "stopped", "revision": 1},
     ]
+
+
+@pytest.mark.parametrize(
+    "trip",
+    ["null", '{"zone": "UTC", "persons": [], "places": [], "itinerary": true, "steps": []}'],
+    ids=["no TRIP", "a TRIP"],
+)
+def test_a_report_reaches_a_page_with_its_trip_or_with_none(trip: str, tmp_path: Path) -> None:
+    """A check sends no TRIP where one of its times cannot be written. The report still comes."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    report = (
+        '{"kind": "report", "answer": "FEASIBLE", "json": {"answer": "FEASIBLE"}, '
+        f'"text": "FEASIBLE: this trip works.", "trip": {trip}, "seconds": 1}}'
+    )
+    with serving(path, python=stand_in(tmp_path, f"echo '{report}'")) as view:
+        sent = Sent(view).until("report", within=20)
+    assert kinds(sent) == ["file", "report"]
+    assert sent[-1]["trip"] == json.loads(trip)
 
 
 def test_a_pipe_in_the_place_of_the_file_cannot_hold_the_view_up(tmp_path: Path) -> None:
@@ -444,7 +495,15 @@ def test_the_view_serves_its_page_and_nothing_else(tmp_path: Path) -> None:
         # Every file that the page names is served, with a kind of content a browser accepts.
         named = re.findall(r'(?:src|href)="([^"]+)"', page.decode())
         assert named, "the page names no script and no style sheet"
-        for name in [*named, "state.js"]:
+        # So is every file that one of the page's scripts loads.
+        loaded = {
+            name
+            for script in STATIC.glob("*.js")
+            for name in re.findall(r'from "\./([^"]+)"', script.read_text())
+        }
+        assert {"state.js", "calendar.js"} <= loaded
+        assert {*named, *loaded} == set(PAGE) - {"index.html"}
+        for name in [*named, *sorted(loaded)]:
             status, headers, _ = asked(view, f"/{name}")
             assert status == 200, name
             assert headers.get_content_type() in {"text/javascript", "text/css"}, name
@@ -491,6 +550,14 @@ def test_the_view_serves_this_machine_only(tmp_path: Path) -> None:
 def test_the_page_asks_no_other_host_for_anything() -> None:
     for name in PAGE:
         assert not re.search(r"https?://|//[a-z]", (STATIC / name).read_text()), name
+
+
+def test_the_page_has_every_part_that_its_code_fills() -> None:
+    """The page's code finds each part of the page by its name."""
+    filled = set(re.findall(r'part\("([^"]+)"\)', (STATIC / "view.js").read_text()))
+    there = set(re.findall(r'id="([^"]+)"', (STATIC / "index.html").read_text()))
+    assert {"line", "report", "calendar", "calendar-says"} <= filled
+    assert filled <= there
 
 
 def test_what_the_page_hides_stays_hidden() -> None:
@@ -709,14 +776,19 @@ def test_the_page_says_what_the_report_says() -> None:
         assert on_file["mark"] == "checking", name
         assert not any(answer in on_file["line"] for answer in ANSWERS), name
         assert on_file["report"] is None, name
+        assert on_file["calendar"] is None, name
         # The answer comes ahead of the report, and the page says that the report is on its way.
         assert on_answer["mark"] == expected["answer"].lower(), name
         assert on_answer["line"].startswith(expected["answer"]), name
         assert on_answer["report"] is None, name
+        assert on_answer["calendar"] is None, name
         assert on_report["mark"] == kind_of(expected), name
         assert on_report["line"] == words.split("\n")[0], name
         assert on_report["report"] == words, name
         assert on_report["old"] is False, name
+        # The calendar is of the TRIP that came with the report.
+        assert on_report["calendar"] == {"trip": sent[-1]["trip"]}, name
+        assert sent[-1]["trip"]["itinerary"] is (expected["answer"] == "FEASIBLE"), name
 
 
 def test_the_page_marks_a_report_on_the_file_as_it_was() -> None:
@@ -737,14 +809,20 @@ def test_the_page_marks_a_report_on_the_file_as_it_was() -> None:
     assert (changed["report"], changed["old"]) == (words, True)
     assert answered["line"].startswith("INFEASIBLE")
     assert (answered["report"], answered["old"]) == (words, True)
+    # The calendar on the page is the one of that report, and it is marked with it.
+    assert changed["calendar"] == answered["calendar"] == {"trip": first[-1]["trip"]}
+    assert "calendar" in changed["note"]
     assert reported["line"] == "INFEASIBLE: this trip cannot work."
     assert reported["old"] is False
+    assert reported["calendar"] == {"trip": second[-1]["trip"]}
+    assert reported["calendar"] != changed["calendar"]
     # A FILE that breaks the format has no report: the page shows the problems, and no answer.
     broken = said[8]
     assert broken["mark"] == "refused"
     assert broken["problems"] == ["/facts/0: fits no known shape"]
     assert not any(answer in broken["line"] for answer in ANSWERS)
     assert broken["old"] is True
+    assert broken["calendar"] == {"trip": second[-1]["trip"]}
     assert said[-1]["line"] == "FEASIBLE: this trip works."
     assert said[-1]["problems"] is None
 
@@ -842,9 +920,11 @@ def test_the_page_keeps_no_report_from_another_view() -> None:
     ]
     (said,) = page_says([[*first, {"kind": "lost"}, *other]])
     assert said[4]["report"] == (STORY / "works.expected.txt").read_text()
+    assert said[4]["calendar"] == {"trip": first[-1]["trip"]}
     for after_it in said[5:]:
         assert after_it["name"] == "other.json"
         assert after_it["report"] is None
+        assert after_it["calendar"] is None
         assert after_it["old"] is False
     assert said[-1]["mark"] == "refused"
 

@@ -29,7 +29,7 @@ uv run agloe check examples/a-must/cannot-work.json
 
 With `--answer-first`, the command prints the answer as soon as it is proved, and the report when the check is done.
 
-The view is a page for a person. It shows the COMPILER's answer and report on a FILE, and keeps them up to date while the FILE changes:
+The view is a page for a person. It shows the COMPILER's answer and report on a FILE, with a calendar of the TRIP, and keeps them up to date while the FILE changes:
 
 ```
 uv run agloe view examples/flight-home/works.json

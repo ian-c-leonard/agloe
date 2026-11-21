@@ -5,8 +5,9 @@ is about exactly those bytes, whatever happens to the FILE on disk in the meanti
 written anywhere.
 
 The events: ``answer`` as soon as the answer is proved, then ``report`` with the report in words
-and as JSON. A FILE that does not follow the format has no report, and gets ``refused`` with
-the problems. A report that cannot be written gets ``unwritable``, after its answer.
+and as JSON, and with the TRIP as the page draws it. A FILE that does not follow the format has
+no report, and gets ``refused`` with the problems. A report that cannot be written gets
+``unwritable``, after its answer.
 
 ``python -m agloe.view.check`` reads the content from its input and prints each event as one
 line of JSON. The view runs that in a process of its own, because a check can only be stopped
@@ -22,6 +23,7 @@ from collections.abc import Iterator
 from agloe import compiler, report
 from agloe.answers import Answer
 from agloe.file import FileError, Unwritable, parse
+from agloe.view import trip
 
 type Event = dict[str, object]
 
@@ -45,17 +47,18 @@ def checked(content: bytes) -> Iterator[Event]:
             yield {"kind": "answer", "answer": found.value, "seconds": seconds}
             continue
         try:
-            shown: Event = {
+            event: Event = {
                 "kind": "report",
                 "answer": found.answer.value,
                 "json": report.as_json(file, found),
                 "text": report.as_text(file, found),
+                "trip": trip.shown(file, found),
                 "seconds": seconds,
             }
         except Unwritable:
             yield {"kind": "unwritable"}
             return
-        yield shown
+        yield event
 
 
 if __name__ == "__main__":

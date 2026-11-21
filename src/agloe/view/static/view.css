@@ -28,8 +28,49 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .answer.infeasible .line, .answer.refused .line, .answer.unreadable .line { color: var(--stop); }
 .problems { padding-left: 20px; margin-top: 6px; font: 13px/1.5 var(--mono); color: var(--ink2); display: grid; gap: 3px; }
 
-.report-part { display: grid; gap: 8px; }
-.report-part h2 { font: 600 13px var(--text); color: var(--ink2); }
+.report-part, .calendar-part { display: grid; gap: 8px; }
+.report-part h2, .calendar-part h2 { font: 600 13px var(--text); color: var(--ink2); }
 .report-part pre { margin: 0; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; font: 13px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-/* A report on the FILE as it was before is shown pale until the next report comes. */
-.report-part.old pre { opacity: 0.45; }
+/* A report on the FILE as it was before is shown pale until the next report comes. So is its calendar. */
+.report-part.old pre, .calendar-part.old > :not(h2) { opacity: 0.45; }
+
+/* The calendar: a column for each day, and in it a column for each PERSON. Time runs down. */
+.says { color: var(--muted); font-size: 13.5px; }
+.calendar { display: flex; overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 12px 14px 16px 6px; }
+.hours { flex: none; width: 58px; position: relative; margin-top: 46px; }
+.hours span { position: absolute; right: 8px; transform: translateY(-50%); font: 500 10.5px var(--mono); color: var(--muted); white-space: nowrap; }
+.day { flex: 1 0 calc(var(--people) * 62px); min-width: 130px; padding: 0 6px; border-left: 1px solid var(--line); }
+.day-name { margin: 0; height: 22px; font: 600 13px/22px var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.people { display: flex; height: 24px; }
+.person { flex: 1; min-width: 0; margin: 0 2px 4px; border-bottom: 3px solid var(--hue); font: 500 11.5px/17px var(--text); color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.day-body { position: relative; background-image: repeating-linear-gradient(to bottom, var(--line) 0 1px, transparent 1px var(--hour)); }
+/* A PERSON keeps one colour in every day. Red, orange and yellow are kept for what a report says. */
+.p0 { --hue: #284ba4; } .p1 { --hue: #73a434; } .p2 { --hue: #84266c; } .p3 { --hue: #3e96ea; } .p4 { --hue: #236228; } .p5 { --hue: #cd6aaf; }
+
+.mark { position: absolute; z-index: 1; padding: 0 2px; }
+.block { position: relative; height: 100%; overflow: hidden; border: 1.4px solid var(--ink); border-radius: 5px; background: var(--ink); color: var(--surface); }
+.planned .block { background: var(--surface); color: var(--ink); }
+/* A dashed edge shows the page through its gaps, so that it shows on a dark block too. */
+.goes-on .block, .no-end .block { background-clip: padding-box; }
+.goes-on .block { border-top-style: dashed; border-top-left-radius: 0; border-top-right-radius: 0; }
+.no-end .block { border-bottom-style: dashed; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.stripes { display: flex; gap: 4px; padding: 3px 4px 0; }
+.stripe { flex: 1; height: 3px; border-radius: 2px; background: var(--hue); box-shadow: 0 0 0 0.8px var(--surface); }
+.mark-name { display: block; padding: 2px 6px 0; font: 600 12px/1.25 var(--text); }
+.mark-more { display: block; padding: 0 6px; font: 400 10.5px/1.3 var(--text); opacity: 0.82; }
+/* A WAY is a line down the column of each PERSON who takes it, with its name beside the first.
+   The name stays inside its day, and a block that is in its way covers it. */
+.mark.way { z-index: 0; }
+.way .block { border: 0; border-radius: 0; background: none; }
+.way .stripes { height: 100%; gap: 0; padding: 0; }
+.way .stripe { height: 100%; border-radius: 0; box-shadow: none; background: linear-gradient(var(--hue), var(--hue)) center / 2px 100% no-repeat; }
+.way.no-end .stripe { background-image: linear-gradient(var(--hue) 60%, transparent); }
+.way-name { position: absolute; right: 0; transform: translateY(-50%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; font: 500 10.5px/1.4 var(--mono); color: var(--ink2); text-shadow: 0 0 2px var(--surface), 0 0 2px var(--surface), 0 0 3px var(--surface); }
+
+.key { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 12px; }
+.key span { display: inline-flex; align-items: center; gap: 6px; }
+.key.only-locks .in-a-plan { display: none; }
+.key-box { display: inline-block; width: 22px; height: 11px; border: 1.4px solid var(--ink); border-radius: 3px; }
+.key-box.locked { background: var(--ink); }
+.key-box.cut { border-bottom-style: dashed; border-radius: 3px 3px 0 0; }
+.key-line { display: inline-block; width: 2px; height: 13px; margin: 0 10px; background: var(--ink2); }
