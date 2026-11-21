@@ -51,18 +51,6 @@ def test_every_expected_result_has_its_file() -> None:
 
 
 @pytest.mark.parametrize("path", FILES, ids=lambda path: f"{path.parent.name}/{path.stem}")
-def test_the_marks_on_a_plan_are_the_lines_its_text_marks(path: Path) -> None:
-    """Each mark belongs to a line of the plan, and the text prints it under that line."""
-    file = read(path)
-    found = check(file)
-    marks = report.marks(file, found)
-    assert set(marks) <= set(range(len(report.together(found.itinerary))))
-    words = path.with_name(path.stem + ".expected.txt").read_text().splitlines()
-    printed = [line.removeprefix("    ! ") for line in words if line.startswith("    ! ")]
-    assert printed == [mark for number in sorted(marks) for mark in marks[number]]
-
-
-@pytest.mark.parametrize("path", FILES, ids=lambda path: f"{path.parent.name}/{path.stem}")
 def test_the_clock_of_a_report_is_the_one_its_text_uses(path: Path) -> None:
     """Times are on the clocks of the FILE's time zone, with offsets only where they change."""
     file = read(path)

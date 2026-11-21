@@ -615,7 +615,7 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
         lines = ["FEASIBLE, with a WARNING: this trip works, but not everything is booked yet."]
     else:
         lines = ["FEASIBLE: this trip works."]
-    marked = marks(file, report)
+    marks = _marks(file, report)
     day = None
     for number, (step, _) in enumerate(_lines(report.itinerary)):
         if clock.day(step.start) != day:
@@ -625,7 +625,7 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
         who = _people(file, step.persons)
         what = _name(file, step.option or step.way)
         lines.append(f"  {clock.time(step.start)} to {end}: {what}, {who}")
-        lines += [f"    ! {mark}" for mark in marked.get(number, [])]
+        lines += [f"    ! {mark}" for mark in marks.get(number, [])]
     if not report.itinerary:
         lines += ["", "Nobody has to do anything."]
     relied_on = [fact for fact in file.facts if fact.id in report.relies_on]
@@ -740,7 +740,7 @@ def _lines(itinerary: Itinerary) -> list[tuple[Step, list[int]]]:
     return lines
 
 
-def marks(file: File, report: Report) -> dict[int, list[str]]:
+def _marks(file: File, report: Report) -> dict[int, list[str]]:
     """The WARNINGs about a plan, in words, for each line of the plan.
 
     First who still has to buy a right to an OPTION, and from which OFFER. Then what the plan
@@ -762,7 +762,7 @@ def marks(file: File, report: Report) -> dict[int, list[str]]:
     for found in report.at_worst:
         number = line_of[found.step] if found.step is not None else line_of_option[found.option]
         together.setdefault((number, found.constraint, found.late), []).extend(found.persons)
-    said: dict[int, list[str]] = {}
+    marks: dict[int, list[str]] = {}
     for (option, offer, budget), covers in _to_buy(report).items():
         buyers = [cover.person for cover in covers]
         have = "has" if len(buyers) == 1 else "have"
@@ -774,7 +774,7 @@ def marks(file: File, report: Report) -> dict[int, list[str]]:
         elif price is not None:
             offer = f"{offer}, at no cost"
         mark = f"{_people(file, tuple(buyers))} still {have} to buy a right to this{if_needed}"
-        said.setdefault(line_of_option[option], []).append(f"{mark}, from {offer}.")
+        marks.setdefault(line_of_option[option], []).append(f"{mark}, from {offer}.")
     for (number, constraint, late), persons in together.items():
         who = _people(file, tuple(persons))
         if constraint is Constraint.ARRIVAL and late is not None:
@@ -787,8 +787,8 @@ def marks(file: File, report: Report) -> dict[int, list[str]]:
             mark = f"This would end {_span(late)} after the trip ends."
         else:
             mark = f'This would break the rule "{constraint.value}" for {who}.'
-        said.setdefault(number, []).append(mark)
-    return said
+        marks.setdefault(number, []).append(mark)
+    return marks
 
 
 class _OwnWords(str):
@@ -1151,8 +1151,8 @@ def _names(
 
 def _quoted(name: str, joins: str | None) -> str:
     """A name, in quotes where it could be taken for something else."""
-    parted = any(mark in name for mark in ",:;")  # what a report puts between its own parts
-    splits = parted or (joins is not None and joins in name.casefold().split())
+    marks = any(mark in name for mark in ",:;")  # what a report puts between its own parts
+    splits = marks or (joins is not None and joins in name.casefold().split())
     if splits or '"' in name or _WITH_AN_ID.search(name):
         return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
     return name
