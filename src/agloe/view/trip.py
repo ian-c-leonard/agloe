@@ -12,6 +12,11 @@ Each step names the FACTs and DECISIONs of the FILE that are about its OPTION or
 report names FACTs and DECISIONs too. So the page can mark the steps that a report is about,
 and judges nothing by itself.
 
+The page is also sent the WANTs of the FILE: for whom each is a must or a must-not, the PLACE
+where a WANT has its holders end the TRIP, and each OPTION that a FACT says SATISFIES the WANT
+or does not, with its DEGREE OF SATISFACTION. Whether an ITINERARY SATISFIES a WANT is for the
+COMPILER to say, and the page is not told.
+
 Every time is on the clocks that the report shows times on: those of the FILE's time zone. A
 time is written as those clocks show it, such as 2027-05-15T14:00:00. Each time comes with its
 offset from UTC where the report gives its times with theirs, and where the times sent are not
@@ -55,7 +60,18 @@ _TRIP: _Shape = {
     "starts": (dict, _NONE),
     "ends": (dict, _NONE),
     "steps": list,
+    "wants": list,
 }
+_WANT: _Shape = {
+    "id": str,
+    "name": str,
+    "musts": list,
+    "must_nots": list,
+    "ends_at": (str, _NONE),
+    "complete": (str, _NONE),
+    "options": list,
+}
+_DELIVERY: _Shape = {"option": str, "name": str, "degree": int, "record": str}
 _DAY: _Shape = {"date": str, "offset": (str, _NONE), "opens": int, "closes": int}
 _TIME: _Shape = {"at": str, "offset": (str, _NONE)}
 _BOUND: _Shape = {**_TIME, "day": (int, _NONE), "second": (int, _NONE), "record": str}
@@ -208,9 +224,46 @@ def shown(file: File, report: Report) -> Trip | None:
                 }
                 for step in steps
             ],
+            "wants": _wants(file),
         }
     except Unwritable:
         return None
+
+
+def _wants(file: File) -> list[Trip]:
+    """The WANTs of the FILE, in its order, each with what the FILE says of it.
+
+    ``options`` holds each OPTION that a FACT says SATISFIES the WANT or does not, in the
+    FILE's order of OPTIONs, with the FACT. A DEGREE OF SATISFACTION of zero says that the
+    OPTION does not. ``complete`` is the FACT that the FILE states every OPTION that SATISFIES
+    the WANT, where it holds one.
+    """
+    wants: list[Trip] = []
+    for want in file.wants:
+        complete = file.complete_for(want.id)
+        stated = [(option, file.satisfies(option.id, want.id)) for option in file.options]
+        wants.append(
+            {
+                "id": want.id,
+                "name": want.name,
+                # The PERSONs come in the order of the FILE.
+                "musts": [each.id for each in file.persons if each.id in want.musts],
+                "must_nots": [each.id for each in file.persons if each.id in want.must_nots],
+                "ends_at": want.ends_at,
+                "complete": None if complete is None else complete.id,
+                "options": [
+                    {
+                        "option": option.id,
+                        "name": option.name,
+                        "degree": fact.degree,
+                        "record": fact.id,
+                    }
+                    for option, fact in stated
+                    if fact is not None
+                ],
+            }
+        )
+    return wants
 
 
 def _in_the_itinerary(file: File, report: Report) -> list[_Step]:
@@ -453,10 +506,59 @@ def holds(trip: object) -> bool:
     ):
         return False
     planned = sent["itinerary"] is True
-    return all(_is_a_bound(sent[which], days) for which in ("starts", "ends")) and all(
-        _is_a_step(step, persons, places, days, planned, until is not None)
-        for step in cast("list[object]", sent["steps"])
+    return (
+        all(_is_a_bound(sent[which], days) for which in ("starts", "ends"))
+        and all(
+            _is_a_step(step, persons, places, days, planned, until is not None)
+            for step in cast("list[object]", sent["steps"])
+        )
+        and _are_wants(sent["wants"], persons, places)
     )
+
+
+def _are_wants(wants: object, persons: frozenset[str], places: frozenset[str]) -> bool:
+    """Whether these are the WANTs of such a TRIP, each with an id of its own.
+
+    A WANT is a must for some of the PERSONs and a must-not for others, and for nobody both.
+    It names each OPTION once, with a DEGREE OF SATISFACTION from 0 to 10.
+    """
+    seen: set[str] = set()
+    for want in cast("list[object]", wants):
+        if not _fits(want, _WANT):
+            return False
+        said = cast("dict[str, object]", want)
+        holders = _all_different(
+            [*cast("list[object]", said["musts"]), *_listed(said["must_nots"])]
+        )
+        ends_at = said["ends_at"]
+        if (
+            said["id"] in seen
+            or not cast("str", said["name"]).strip()
+            or holders is None
+            or not holders <= persons
+            or not (ends_at is None or ends_at in places)
+        ):
+            return False
+        seen.add(cast("str", said["id"]))
+        options: list[object] = []
+        for delivery in cast("list[object]", said["options"]):
+            if not _fits(delivery, _DELIVERY):
+                return False
+            stated = cast("dict[str, object]", delivery)
+            if (
+                not cast("str", stated["name"]).strip()
+                or not 0 <= cast("int", stated["degree"]) <= 10
+            ):
+                return False
+            options.append(stated["option"])
+        if _all_different(options) is None:
+            return False
+    return True
+
+
+def _listed(value: object) -> list[object]:
+    """A list as it is, read as a list of anything."""
+    return cast("list[object]", value)
 
 
 def _fits(value: object, shape: _Shape) -> bool:

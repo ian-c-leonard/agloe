@@ -3,7 +3,7 @@
 // The answer and the report need nothing but state.js. The calendar is loaded beside them, so
 // that a calendar that fails to load or to draw leaves the answer and the report on the page.
 // So is what ties each line of the report to the step or the record that it is about, and so
-// is the strip above the calendar.
+// are the strip above the calendar and the WANTs of the FILE.
 import { after, says, start } from "./state.js";
 
 const PER_MINUTE = 0.8; // pixels down the calendar for each minute
@@ -19,6 +19,8 @@ let state = start();
 let lay = null; // what lays a calendar out, once the page has loaded it: false where it cannot
 let tie = null; // what ties the lines of a report to steps and records, once the page has loaded it
 let turn = null; // what turns a calendar into the strip above it, once the page has loaded it
+let list = null; // what puts the WANTs of a FILE in words, once the page has loaded it
+let wanted; // the TRIP whose WANTs are on the page
 let onStrip = null; // the calendar that the strip on the page is of
 let stripRoom = 0; // pixels: how wide the page was when the strip was laid out
 let drawn; // the TRIP that the calendar on the page is of
@@ -263,6 +265,38 @@ function drawStrip(laid) {
   part("strip-says").textContent = strip.says;
 }
 
+/**
+ * The WANTs of the FILE: each with for whom it is a must or a must-not, and under it the
+ * OPTIONs that the FILE says SATISFY it or do not, with who takes part in each. An OPTION that
+ * the calendar holds is tied to its step, so pointing at it lights up that step.
+ */
+function drawWants(shown) {
+  const box = part("wants");
+  box.replaceChildren();
+  part("wants-part").hidden = !shown.wants.length;
+  part("wants-says").textContent = shown.says;
+  const edges = (each) => `${each.clash.length ? " clash" : ""}${each.cases.length ? " asked" : ""}`;
+  const marks = (each) => [...(each.finds ? [each.finds] : []), ...each.asks];
+  for (const want of shown.wants) {
+    const card = Object.assign(made("article", `want${edges(want)}`), { title: marks(want).join("\n") });
+    card.dataset.records = tiesOf(want).join(" ");
+    card.append(made("h3", "want-name", want.name));
+    for (const words of [want.holds, want.ends]) if (words) card.append(made("p", "want-holds", words));
+    const options = made("ul", "want-options");
+    for (const option of want.options) {
+      const item = made("li", `delivers${option.degree > 0 ? "" : " not"}${edges(option)}`);
+      item.title = [option.name, option.says, option.takes, ...marks(option)].join("\n");
+      item.dataset.records = tiesOf(option).join(" ");
+      if (option.step !== null) item.dataset.step = option.step;
+      item.append(made("b", "delivers-name", option.name), made("span", "delivers-says", option.says), made("span", "delivers-takes", option.takes));
+      options.append(item);
+    }
+    if (want.options.length) card.append(options);
+    if (want.whole) card.append(made("p", "want-whole", want.whole));
+    box.append(card);
+  }
+}
+
 /** The calendar part says this, and shows no calendar. */
 function noCalendar(words) {
   drawStrip(null);
@@ -333,6 +367,22 @@ function show() {
   }
   part("report-part").hidden = said.report === null;
   part("report-part").classList.toggle("old", said.old);
+  // The WANTs of the FILE are put on the page once for each TRIP, like the calendar. They
+  // need no calendar, and a fault in them leaves the rest of the page as it is.
+  part("wants-part").classList.toggle("old", said.old);
+  if (said.calendar === null || list === null) part("wants-part").hidden = true;
+  else if (said.calendar.trip !== wanted) {
+    wanted = said.calendar.trip;
+    try {
+      drawWants(list(wanted, said.calendar.report, tied ? tie.casesOf(tied) : null));
+      lightAgain();
+    } catch (problem) {
+      part("wants-part").hidden = true;
+      queueMicrotask(() => {
+        throw problem;
+      });
+    }
+  }
   // The answer and the report are on the page before the calendar is drawn. The calendar is
   // drawn once for each TRIP, so it stays as the reader left it while the page says more.
   part("calendar-part").hidden = said.calendar === null || lay === null;
@@ -393,13 +443,20 @@ import("./calendar.js").then(
 );
 import("./lines.js").then(
   (loaded) => {
-    // The report is written again with its lines tied, and the calendar is drawn with what
-    // the report warns of.
+    // The report is written again with its lines tied, and the calendar and the WANTs are
+    // drawn with what the report says of them.
     tie = loaded;
-    drawn = undefined;
+    drawn = wanted = undefined;
     show();
   },
   () => {}, // The report stays on the page as it is, and nothing lights up.
+);
+import("./wants.js").then(
+  (loaded) => {
+    list = loaded.wants;
+    show();
+  },
+  () => {}, // The page goes on without the WANTs of the FILE.
 );
 // The strip is laid out again when the page has more room for it, or less.
 if (typeof ResizeObserver === "function") {
