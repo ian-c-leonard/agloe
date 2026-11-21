@@ -380,12 +380,14 @@ def test_the_answer_reaches_a_page_while_the_check_goes_on(tmp_path: Path) -> No
         (
             """echo '{"kind": "report", "answer": "FEASIBLE", "json": {"answer": "FEASIBLE"}, """
             """"text": "", "seconds": 1, "trip": {"zone": "UTC", "persons": [], "places": [], """
-            """"itinerary": false, "steps": []}}'"""
+            """"itinerary": false, "days": [], "left_out": 0, "starts": null, "ends": null, """
+            """"steps": []}}'"""
         ),
         (
             """echo '{"kind": "report", "answer": "FEASIBLE", "json": {"answer": "FEASIBLE"}, """
             """"text": "", "seconds": 1, "trip": {"zone": "UTC", "persons": [], "places": [], """
-            """"itinerary": true, "steps": [{}]}}'"""
+            """"itinerary": true, "days": [], "left_out": 0, "starts": null, "ends": null, """
+            """"steps": [{}]}}'"""
         ),
         """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": true}'""",
         """echo '{"kind": "answer", "answer": "FEASIBLE", "seconds": NaN}'""",
@@ -417,7 +419,11 @@ def test_a_check_that_ends_without_a_report_has_stopped(does: str | None, tmp_pa
 
 @pytest.mark.parametrize(
     "trip",
-    ["null", '{"zone": "UTC", "persons": [], "places": [], "itinerary": true, "steps": []}'],
+    [
+        "null",
+        '{"zone": "UTC", "persons": [], "places": [], "itinerary": true, "days": [], '
+        '"left_out": 0, "starts": null, "ends": null, "steps": []}',
+    ],
     ids=["no TRIP", "a TRIP"],
 )
 def test_a_report_reaches_a_page_with_its_trip_or_with_none(trip: str, tmp_path: Path) -> None:
@@ -495,11 +501,11 @@ def test_the_view_serves_its_page_and_nothing_else(tmp_path: Path) -> None:
         # Every file that the page names is served, with a kind of content a browser accepts.
         named = re.findall(r'(?:src|href)="([^"]+)"', page.decode())
         assert named, "the page names no script and no style sheet"
-        # So is every file that one of the page's scripts loads.
+        # So is every file that one of the page's scripts loads, at once or later.
         loaded = {
             name
             for script in STATIC.glob("*.js")
-            for name in re.findall(r'from "\./([^"]+)"', script.read_text())
+            for name in re.findall(r'(?:from |import\()"\./([^"]+)"', script.read_text())
         }
         assert {"state.js", "calendar.js"} <= loaded
         assert {*named, *loaded} == set(PAGE) - {"index.html"}
@@ -558,6 +564,20 @@ def test_the_page_has_every_part_that_its_code_fills() -> None:
     there = set(re.findall(r'id="([^"]+)"', (STATIC / "index.html").read_text()))
     assert {"line", "report", "calendar", "calendar-says"} <= filled
     assert filled <= there
+
+
+def test_the_answer_and_the_report_need_no_calendar() -> None:
+    """The page's code loads the calendar beside them, so that they show without it."""
+    code = (STATIC / "view.js").read_text()
+    assert re.findall(r'^import .* from "\./([^"]+)";$', code, re.MULTILINE) == ["state.js"]
+    assert 'import("./calendar.js")' in code
+    # What the page says in each state needs nothing else at all.
+    assert "import" not in (STATIC / "state.js").read_text()
+
+
+def test_the_page_puts_each_mark_on_the_calendar_by_itself() -> None:
+    """However many marks a day has, no call to the browser takes them all at once."""
+    assert "...day.marks" not in (STATIC / "view.js").read_text()
 
 
 def test_what_the_page_hides_stays_hidden() -> None:
