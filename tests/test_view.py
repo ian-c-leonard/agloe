@@ -21,6 +21,7 @@ import select
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -628,6 +629,19 @@ def test_the_view_takes_a_free_port_that_browsers_open(tmp_path: Path) -> None:
     finally:
         for view in views:
             view.close()
+
+
+def test_the_view_looks_no_name_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A view starts at once on a machine that is slow to answer for a name: it asks for none."""
+
+    def looked_up(*asked: object) -> str:
+        raise AssertionError(f"the view looked a name up: {asked}")
+
+    monkeypatch.setattr(socket, "getfqdn", looked_up)
+    monkeypatch.setattr(socket, "gethostbyaddr", looked_up)
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    View(path).close()
 
 
 def test_the_command_needs_a_file_that_is_there(

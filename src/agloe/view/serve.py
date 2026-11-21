@@ -16,6 +16,7 @@ import math
 import os
 import secrets
 import socket
+import socketserver
 import stat
 import subprocess
 import sys
@@ -301,6 +302,15 @@ class View:
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
     view: View
+
+    def server_bind(self) -> None:
+        """Take the port, and ask the system for no name.
+
+        Python's server looks up a name for its address as it starts. The view never uses that
+        name, and on some machines the answer takes seconds.
+        """
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = "127.0.0.1", self.server_address[1]
 
 
 def _listening(port: int) -> _Server:
