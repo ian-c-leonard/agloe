@@ -12,6 +12,8 @@ const SMALLEST = 3; // pixels: the least height of a mark
 const TICK = 7; // pixels: the height of the tick for a WAY that takes next to no time
 const BESIDE = 18; // pixels from one tick to the next where several are at one place
 const ROW = 20; // pixels: the height of the row of one PERSON on the strip
+const LEAST = 3; // pixels: the least width of a mark on the strip
+const TICK_WIDE = 5; // pixels: the width of the tick on the strip for a WAY that takes next to no time
 
 const part = (id) => document.getElementById(id);
 let state = start();
@@ -47,9 +49,9 @@ function looksOf(mark) {
  * column for a WAY. The name of a WAY stands beside the line of the first PERSON who takes it,
  * as far as its day has room.
  */
-function put(body, mark, people, open, ticks) {
+function put(body, mark, index, people, open, ticks) {
   const box = made("div", `mark ${looksOf(mark)}`);
-  Object.assign(box.dataset, { step: mark.step, records: mark.records.join(" ") });
+  Object.assign(box.dataset, { step: mark.step, records: mark.records.join(" "), mark: index });
   const columns = mark.last - mark.first + 1;
   const when = mark.late ? `${mark.when}, ${mark.late}` : mark.when;
   // A mark is never smaller than the eye can find, and never outside the hours of its column.
@@ -130,7 +132,7 @@ function draw(laid) {
       body.append(band);
     }
     const ticks = new Map();
-    for (const mark of day.marks) put(body, mark, people, day.open, ticks);
+    day.marks.forEach((mark, index) => put(body, mark, index, people, day.open, ticks));
     // Where the TRIP starts and where it ends: a line across the day. Its words stand above
     // the day for the start and below it for the end, so that they cover no step.
     const words = { starts: made("div", "bound-says"), ends: made("div", "bound-says") };
@@ -166,9 +168,9 @@ function draw(laid) {
 }
 
 /**
- * The strip above the calendar: the whole TRIP, with a row for each PERSON and time from left
- * to right. It holds the marks of the calendar. So pointing at a step on it lights up the same
- * step below, and what the report says of it. A calendar that is the whole TRIP has no strip.
+ * The strip above the calendar: all its days, with a row for each PERSON and time from left to
+ * right. It holds the marks of the calendar. So pointing at a step on it lights up the same
+ * step below, and what the report says of it. A calendar of one day has no strip.
  */
 function drawStrip(laid) {
   const strip = turn && laid ? turn(laid) : null;
@@ -180,7 +182,6 @@ function drawStrip(laid) {
   const along = (minutes) => `${(minutes / strip.length) * 100}%`;
   box.style.setProperty("--people", people);
   box.style.setProperty("--row", `${ROW}px`);
-  box.classList.toggle("cut", strip.cut);
   const names = made("div", "strip-people");
   strip.persons.forEach((person, n) => names.append(Object.assign(made("span", `p${n % HUES}`, person.name), { title: person.name })));
   const days = made("div", "strip-days");
@@ -192,25 +193,43 @@ function drawStrip(laid) {
     name.style.width = along(day.width);
     days.append(name);
     if (!day.left) continue;
-    const edge = made("i", "strip-edge");
+    // Where the strip leaves hours out before a day, the line between the days is double.
+    const edge = made("i", day.gap ? "strip-edge gap" : "strip-edge");
     edge.style.left = along(day.left);
     rows.append(edge);
   }
   for (const mark of strip.marks) {
     const bar = Object.assign(made("div", `bar ${looksOf(mark)}`), { title: wordsOf(mark) });
-    Object.assign(bar.dataset, { step: mark.step, records: mark.records.join(" "), day: mark.day });
-    bar.style.left = along(mark.left);
-    bar.style.width = along(mark.width);
+    Object.assign(bar.dataset, { step: mark.step, records: mark.records.join(" "), day: mark.day, mark: mark.index });
+    const day = strip.days[mark.day];
+    const ends = along(day.left + day.width);
+    if (mark.brief) {
+      // A tick sits across the moment of its WAY, and never outside its day.
+      bar.style.left = `clamp(${along(day.left)}, calc(${along(mark.left)} - ${TICK_WIDE / 2}px), calc(${ends} - ${TICK_WIDE}px))`;
+      bar.style.width = `${TICK_WIDE}px`;
+    } else {
+      // A mark is never smaller than the eye can find, and never outside its day.
+      bar.style.left = `min(${along(mark.left)}, calc(${ends} - ${LEAST}px))`;
+      bar.style.width = `max(${along(mark.width)}, ${LEAST}px)`;
+    }
     bar.style.top = `${((mark.first + mark.lane / mark.lanes) / people) * 100}%`;
     bar.style.height = `${((mark.last - mark.first + 1) / mark.lanes / people) * 100}%`;
-    // A block for an OPTION, with its name where there is room. A line along each PERSON's row for a WAY.
+    // A block for an OPTION, with its name where there is room. A line along each PERSON's row
+    // for a WAY, or a tick in that row for a WAY that takes next to no time. Only the tick
+    // itself answers the pointer, so that ticks at one place can each be reached.
     if (mark.kind === "option") bar.append(made("i", "bar-block"), made("b", "bar-name", mark.name));
-    else for (let row = mark.first; row <= mark.last; row += 1) bar.append(made("i", `bar-line p${row % HUES}`));
+    else {
+      for (let row = mark.first; row <= mark.last; row += 1) {
+        const line = made("i", `bar-line p${row % HUES}`);
+        if (mark.brief) line.append(Object.assign(made("b", `strip-tick at${mark.place}`), { title: bar.title }));
+        bar.append(line);
+      }
+    }
     rows.append(bar);
   }
   for (const bound of strip.bounds) {
     const line = Object.assign(made("i", bound.clash ? "strip-bound clash" : "strip-bound"), { title: bound.says });
-    line.style.left = along(bound.left);
+    line.style.left = `min(${along(bound.left)}, calc(100% - 2px))`;
     line.dataset.record = bound.record;
     rows.append(line);
   }
@@ -322,12 +341,13 @@ view.onmessage = (message) => hear(JSON.parse(message.data));
 view.onerror = () => hear({ kind: "lost" });
 document.querySelector("main").addEventListener("mouseover", (event) => light(event.target));
 document.querySelector("main").addEventListener("mouseleave", () => light(null));
-// A click on a step of the strip brings that part of the step into view in the calendar.
+// A click on a mark of the strip brings the same mark of the calendar into view: that part
+// of the step, in the columns of those PERSONs.
 part("strip").addEventListener("click", (event) => {
   const bar = event.target instanceof Element ? event.target.closest(".bar") : null;
   if (bar === null) return;
   const day = part("calendar").querySelectorAll(".day")[bar.dataset.day];
-  day?.querySelector(`.mark[data-step="${bar.dataset.step}"]`)?.scrollIntoView({ block: "nearest", inline: "center" });
+  day?.querySelector(`.mark[data-mark="${bar.dataset.mark}"]`)?.scrollIntoView({ block: "nearest", inline: "center" });
 });
 show();
 import("./calendar.js").then(

@@ -1,4 +1,4 @@
-"""The strip that the page draws above the calendar: the whole TRIP, with a row for each PERSON.
+"""The strip that the page draws above the calendar: all its days, with a row for each PERSON.
 
 ``src/agloe/view/static/strip.js`` takes the calendar as ``calendar.js`` lays it out, and puts
 its days one after another, so that time runs from left to right. It has no page in it, so Node
@@ -17,14 +17,17 @@ from typing import Any, cast
 
 import pytest
 
+from agloe.answers import Answer, Report
+from agloe.reference import Step
 from agloe.view.trip import holds
-from tests.stories import EXAMPLES
+from tests.stories import EXAMPLES, lasts, lock, seconds, starts_at, stays, trip, way_between
 from tests.test_view_calendar import (
     RECORDS,
     alone,
     drawn,
     framed,
     in_words,
+    sent_for,
     some_trip,
     with_its_report,
 )
@@ -32,7 +35,7 @@ from tests.test_view_calendar import (
 STORY = EXAMPLES / "flight-home"
 DAYS = EXAMPLES / "several-days"
 CHICAGO = "[America/Chicago]"
-SAYS = "The whole TRIP, a row for each PERSON."
+SAYS = "All the days of the calendar on one strip, a row for each PERSON."
 CUT = " It leaves out the hours that the calendar does not show."
 CLICK = " Click a step to see it in the calendar."
 
@@ -87,8 +90,13 @@ def places(band: Strip) -> list[tuple[Any, ...]]:
     return [(mark["step"], mark["day"], mark["left"], mark["width"]) for mark in band["marks"]]
 
 
+def gaps(band: Strip) -> list[bool]:
+    """For each day of the strip, whether the strip leaves hours out before it."""
+    return [day["gap"] for day in band["days"]]
+
+
 def test_a_trip_on_one_day_has_no_strip() -> None:
-    """The calendar of one day is the whole TRIP already."""
+    """The calendar of one day shows all of it already."""
     (laid, band) = strips([drawn(STORY / "works.json")])[0]
     assert len(laid["days"]) == 1
     assert band is None
@@ -156,6 +164,8 @@ def test_time_runs_on_from_one_day_to_the_next() -> None:
     first, second, _ = band["marks"]
     assert (first["begins"], first["ends"]) == (True, False)
     assert (second["begins"], second["ends"]) == (False, True)
+    # No hour is left out between the two days, and the strip says nothing of the kind.
+    assert gaps(band) == [False, False]
     assert band["cut"] is False
     assert band["says"] == SAYS + CLICK
 
@@ -171,7 +181,8 @@ def test_days_that_show_some_hours_only_stand_one_after_another() -> None:
     assert band is not None
     assert [(day["left"], day["width"]) for day in band["days"]] == [(0, 140), (140, 140)]
     assert places(band) == [(0, 0, 20, 60), (1, 1, 200, 60)]
-    # The strip says that it leaves the nights out.
+    # The strip leaves the night out, and says so.
+    assert gaps(band) == [False, True]
     assert band["cut"] is True
     assert band["says"] == SAYS + CUT + CLICK
 
@@ -193,6 +204,7 @@ def test_the_strip_shows_when_the_trip_starts_and_ends() -> None:
         (bound["edge"], bound["day"], bound["left"], bound["record"]) for bound in band["bounds"]
     ] == [("starts", 0, 20, "trip-start"), ("ends", 2, 200, "trip-end")]
     assert band["bounds"][0]["says"] == "The TRIP starts at 6:00 pm"
+    assert gaps(band) == [False, True, True]
 
 
 def test_a_day_on_which_the_clocks_change_takes_the_room_of_its_hours() -> None:
@@ -208,7 +220,77 @@ def test_a_day_on_which_the_clocks_change_takes_the_room_of_its_hours() -> None:
     # The second part starts where the first ends: the hour that the clocks show twice is
     # on the strip twice.
     assert places(band) == [(0, 0, 20, 55), (0, 1, 75, 15)]
-    assert band["cut"] is True
+    # The calendar shows two hours of each column only. Still no time is left out between
+    # these two: the first is shown to its last moment, and the second from its first.
+    assert gaps(band) == [False, False]
+    assert band["cut"] is False
+    assert band["says"] == SAYS + CLICK
+    # So it is where the clocks go forward, from 2:00 am to 3:00 am on 14 March 2027.
+    band = a_strip(alone((f"2027-03-14T01:55:00-06:00{CHICAGO}", 70 * 60)))
+    assert [(day["short"], day["left"], day["width"]) for day in band["days"]] == [
+        ("Sun 14 (UTC-6)", 0, 25),
+        ("Sun 14 (UTC-5)", 25, 85),
+    ]
+    assert places(band) == [(0, 0, 20, 5), (0, 1, 25, 65)]
+    assert gaps(band) == [False, False]
+
+
+def test_each_mark_of_the_strip_says_which_mark_of_the_calendar_it_is() -> None:
+    """Alex and Jo are at a concert, and Sam's row is between theirs."""
+    file = trip(
+        ["alex", "sam", "jo"],
+        ["hall"],
+        [stays("concert", "hall")],
+        [starts_at("concert", 20), lasts("concert", "PT2H")],
+        [
+            lock("concert", "alex", "jo"),
+            {"id": "trip-end", "trip_ends_at": f"2027-05-16T12:00:00-05:00{CHICAGO}"},
+        ],
+    )
+    ((laid, band),) = strips([sent_for(file, Report(Answer.UNDETERMINED))])
+    assert band is not None
+    on_the_day = laid["days"][0]["marks"]
+    assert [(mark["first"], mark["last"]) for mark in on_the_day] == [(0, 0), (2, 2)]
+    # The concert is one step and two marks. A click on Jo's goes to Jo's on the calendar.
+    assert [
+        (mark["step"], mark["day"], mark["index"], mark["first"]) for mark in band["marks"]
+    ] == [
+        (0, 0, 0, 0),
+        (0, 0, 1, 2),
+    ]
+
+
+def test_ways_that_take_next_to_no_time_close_together_each_have_a_place() -> None:
+    """Alex and Sam go through a door. A minute later Alex takes the stairs, and at 6:00 pm back.
+
+    Each WAY takes a minute, so each is a tick. Two ticks that would lie on each other in one
+    PERSON's row each get a place of their own in that row.
+    """
+    file = trip(
+        ["alex", "sam"],
+        ["hotel", "foyer", "museum"],
+        [stays("visit", "museum")],
+        [starts_at("visit", 12), lasts("visit", "PT1H")],
+        [],
+        ways=[way_between("door", "hotel", "foyer"), way_between("stairs", "foyer", "museum")],
+    )
+    day = 24 * 3600
+    plan = (
+        Step(None, "hotel", "foyer", ("alex", "sam"), seconds(12), seconds(12, 1), way="door"),
+        Step(None, "foyer", "museum", ("alex",), seconds(12, 1), seconds(12, 2), way="stairs"),
+        Step(None, "museum", "foyer", ("alex",), seconds(18), seconds(18, 1), way="stairs"),
+        Step("visit", "museum", "museum", ("alex",), seconds(12) + day, seconds(13) + day),
+    )
+    band = a_strip(sent_for(file, Report(Answer.FEASIBLE, itinerary=plan)))
+    assert [
+        (mark["name"], mark["brief"], mark["first"], mark["last"], mark.get("place"))
+        for mark in band["marks"]
+    ] == [
+        ("door", True, 0, 1, 0),
+        ("stairs", True, 0, 0, 1),
+        ("stairs", True, 0, 0, 0),
+        ("visit", False, 0, 0, None),
+    ]
 
 
 def test_whatever_calendar_the_page_draws_has_a_strip_or_needs_none() -> None:
@@ -239,13 +321,23 @@ def test_whatever_calendar_the_page_draws_has_a_strip_or_needs_none() -> None:
             assert day["width"] >= 0
             at += day["width"]
         assert band["length"] == at > 0
+        # These TRIPs have whole days. So the strip leaves hours out between all its days, or
+        # between none.
+        whole = laid["hours"] == {"from": 0, "to": 24 * 60}
+        assert gaps(band) == [False] + [not whole] * (len(band["days"]) - 1)
+        assert band["cut"] is not whole
         # Each mark of the calendar is on the strip once, inside its day.
         assert len(band["marks"]) == len(on_the_calendar)
-        before = -1
+        before, index = -1, 0
         for mark in band["marks"]:
             day = band["days"][mark["day"]]
             assert before <= mark["day"]
+            # A mark says which mark of its day on the calendar it is.
+            index = index + 1 if mark["day"] == before else 0
+            assert mark["index"] == index
             before = mark["day"]
+            # Only a mark that is a tick has a place in its row.
+            assert ("place" in mark) is mark["brief"]
             assert mark["width"] >= 0
             assert day["left"] <= mark["left"], (sent, mark)
             end = day["left"] + day["width"]

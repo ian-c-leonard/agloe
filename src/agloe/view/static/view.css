@@ -80,7 +80,7 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 /* The hours of a column that its clocks do not show, on a day when they change. */
 .shut { position: absolute; left: 0; right: 0; background: repeating-linear-gradient(-45deg, transparent 0 5px, var(--line) 5px 6px); }
 
-/* The strip above the calendar: the whole TRIP, with a row for each PERSON. Time runs from left to right. */
+/* The strip above the calendar: all its days, with a row for each PERSON. Time runs from left to right. */
 .strip { display: grid; grid-template-columns: 58px minmax(0, 1fr); background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 8px 14px 10px 6px; }
 .strip-days { position: relative; height: 18px; }
 .strip-day { position: absolute; top: 0; padding-left: 5px; overflow: hidden; white-space: nowrap; font: 600 10.5px/18px var(--text); color: var(--ink2); }
@@ -89,28 +89,40 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .strip-rows { position: relative; height: calc(var(--people) * var(--row)); background-image: repeating-linear-gradient(to bottom, transparent 0 calc(var(--row) - 1px), var(--line) calc(var(--row) - 1px) var(--row)); }
 /* Where one day ends and the next starts. A double line where the strip leaves hours out between them. */
 .strip-edge { position: absolute; top: -18px; bottom: 0; border-left: 1px solid var(--line); }
-.strip.cut .strip-edge { border-left: 3px double var(--muted); }
-.bar { position: absolute; z-index: 1; min-width: 3px; padding: 2px 0; cursor: pointer; container-type: inline-size; }
+.strip-edge.gap { border-left: 3px double var(--muted); }
+.bar { position: absolute; z-index: 1; padding: 2px 0; cursor: pointer; container-type: size; }
 .bar-block { display: block; height: 100%; border: 1.2px solid var(--ink); border-radius: 3px; background: var(--ink); }
 .bar.planned .bar-block { background: var(--surface); }
 .bar.goes-on .bar-block, .bar.no-end .bar-block { background-clip: padding-box; }
 .bar.goes-on .bar-block { border-left-style: dashed; border-top-left-radius: 0; border-bottom-left-radius: 0; }
 .bar.no-end .bar-block { border-right-style: dashed; border-top-right-radius: 0; border-bottom-right-radius: 0; }
-/* The name of an OPTION is on its block where the block has room for some of it. */
+/* The name of an OPTION is on its block where the block has room for a line of it. */
 .bar-name { display: none; position: absolute; inset: 2px 5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 600 10px/calc(var(--row) - 4px) var(--text); color: var(--surface); pointer-events: none; }
 .bar.planned .bar-name { color: var(--ink); }
-@container (min-width: 46px) { .bar-name { display: block; } }
-/* A WAY is a line along the row of each PERSON who takes it. One that takes next to no time is a tick. */
+@container (min-width: 46px) and (min-height: 14px) { .bar-name { display: block; } }
+/* A WAY is a line along the row of each PERSON who takes it. It fades where it may not end there. */
 .bar.way { z-index: 0; display: flex; flex-direction: column; padding: 0; }
 .bar-line { flex: 1; background: linear-gradient(var(--hue), var(--hue)) center / 100% 2px no-repeat; }
-.bar.way.brief { z-index: 3; margin-left: -1.5px; }
-.bar.way.brief .bar-line { background-size: 3px 60%; }
+.bar.way.no-end .bar-line { background-image: linear-gradient(to right, var(--hue) 60%, transparent); }
+/* A WAY that takes next to no time is a tick across its moment, on top of what is beside it.
+   Ticks that would lie on each other in one row each have a place of their own in it. */
+.bar.way.brief { z-index: 3; pointer-events: none; }
+.bar.way.brief .bar-line { position: relative; background: none; }
+.strip-tick { position: absolute; left: 0; right: 0; top: 35%; height: 30%; border-radius: 2px; background: var(--hue); box-shadow: 0 0 0 1px var(--surface); pointer-events: auto; cursor: pointer; }
+.strip-tick.at1 { top: 3%; }
+.strip-tick.at2 { top: 67%; }
 .bar.warned .bar-block, .bar.way.warned { box-shadow: 0 0 0 1.5px var(--warn); }
 .bar.warned .bar-block { border-color: var(--warn); }
 .bar.clash .bar-block, .bar.way.clash { box-shadow: 0 0 0 1.5px var(--stop); }
 .bar.clash .bar-block { border-color: var(--stop); }
 .bar.lit .bar-block { outline: 2px solid var(--ink); outline-offset: 1.5px; }
 .bar.way.lit { outline: 1.5px solid var(--ink); outline-offset: 1px; }
+/* A tick has its edge and its light on the tick itself. */
+.bar.way.brief.warned, .bar.way.brief.clash { box-shadow: none; }
+.bar.way.brief.warned .strip-tick { box-shadow: 0 0 0 2px var(--warn); }
+.bar.way.brief.clash .strip-tick { box-shadow: 0 0 0 2px var(--stop); }
+.bar.way.brief.lit { outline: 0; }
+.bar.way.brief.lit .strip-tick { outline: 1.5px solid var(--ink); outline-offset: 2px; }
 /* Where the TRIP starts and where it ends: a dotted line down the strip. */
 .strip-bound { position: absolute; top: -3px; bottom: -3px; z-index: 2; border-left: 1.5px dotted var(--ink2); }
 .strip-bound.clash { border-left-color: var(--stop); }

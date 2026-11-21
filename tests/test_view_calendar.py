@@ -653,10 +653,11 @@ def test_a_step_that_goes_on_after_the_clocks_change_is_shown_to_its_end() -> No
     assert laid["hours"] == {"from": 60, "to": 5 * 60}
     assert marks(laid, 0) == [(0, "planned", 0, 0, 55, 5, True, False)]
     assert marks(laid, 1) == [(0, "planned", 0, 0, 120, 65, False, True)]
-    # Each column says which of the hours shown its clocks run in.
+    # Each column says which of the hours shown its clocks run in, and whether those hold
+    # its first moment and its last. Here no time is left out between the two columns.
     assert [day["open"] for day in laid["days"]] == [
-        {"top": 0, "bottom": 60},
-        {"top": 120, "bottom": 240},
+        {"top": 0, "bottom": 60, "first": False, "last": True},
+        {"top": 120, "bottom": 240, "first": True, "last": False},
     ]
     assert laid["days"][0]["shut"] == [{"top": 60, "height": 180}]
     assert laid["days"][1]["shut"] == [{"top": 0, "height": 120}]
