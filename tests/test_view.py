@@ -29,6 +29,7 @@ import time
 import urllib.request
 from collections.abc import Generator
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 from typing import Any, cast
 
@@ -416,6 +417,9 @@ EMPTY = (
         (', "trip": true', False),
         (f', "trip": {EMPTY.replace("true", "false")}', False),
         (f', "trip": {EMPTY.replace('"steps": []', '"steps": [{}]')}', False),
+        # One with a number that no page can read, and one with a number that is none.
+        (f', "trip": {EMPTY.replace('"days": []', '"days": [1e400]')}', False),
+        (f', "trip": {EMPTY.replace("null", "NaN", 1)}', False),
     ],
     ids=[
         "a TRIP",
@@ -427,6 +431,8 @@ EMPTY = (
         "a yes",
         "another answer",
         "half",
+        "too large a number",
+        "no number",
     ],
 )
 def test_a_report_reaches_a_page_whatever_its_trip_is(
@@ -466,6 +472,15 @@ def test_a_fault_in_what_makes_the_drawing_costs_the_calendar_and_not_the_report
     (said,) = page_says([[file, answer, report]])
     assert said[-1]["line"] == "FEASIBLE: this trip works."
     assert said[-1]["calendar"] == {"trip": None}
+
+    # So it is where what is made cannot be printed.
+    def unprintable(*given: object) -> dict[str, date]:
+        return {"day": date(2027, 5, 15)}
+
+    monkeypatch.setattr("agloe.view.trip.shown", unprintable)
+    *_, report = sent_for((STORY / "works.json").read_bytes())
+    assert (report["kind"], report["trip"]) == ("report", None)
+    assert report["text"] == (STORY / "works.expected.txt").read_text()
 
 
 def test_a_pipe_in_the_place_of_the_file_cannot_hold_the_view_up(tmp_path: Path) -> None:

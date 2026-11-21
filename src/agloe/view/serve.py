@@ -80,6 +80,20 @@ def _finite(written: str) -> float:
     return number
 
 
+def _without_its_trip(line: bytes) -> object:
+    """What a check printed, without the TRIP, where the line is no event as it stands.
+
+    What is wrong may be in the TRIP alone: a number that no page can read. The rest is then
+    read again as strictly as any event. Raises ValueError where the rest is no event either.
+    """
+    loose: object = json.loads(line.decode())
+    if not isinstance(loose, dict) or "trip" not in loose:
+        raise ValueError("a check printed something that is no event")
+    rest = {name: held for name, held in cast("Event", loose).items() if name != "trip"}
+    again = json.dumps(rest, allow_nan=False)
+    return json.loads(again, parse_constant=_no_number, parse_float=_finite)
+
+
 def _said(line: bytes) -> Event:
     """One line that a check printed, as the event it is. Raises ValueError where it is none.
 
@@ -90,7 +104,10 @@ def _said(line: bytes) -> Event:
     where that is one a page can draw, and with none where it is not: what is wrong with a
     calendar never costs the reader the report.
     """
-    said: object = json.loads(line.decode(), parse_constant=_no_number, parse_float=_finite)
+    try:
+        said: object = json.loads(line.decode(), parse_constant=_no_number, parse_float=_finite)
+    except ValueError:
+        said = _without_its_trip(line)
     if not isinstance(said, dict):
         raise ValueError("a check printed something that is no event")
     event = cast("Event", said)

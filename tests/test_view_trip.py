@@ -641,8 +641,11 @@ def test_a_date_that_a_time_zone_left_out_is_no_day() -> None:
     """Samoa went from 29 December 2011 to 31 December: its clocks never showed the 30th."""
     sent = alone(("2011-12-29T23:00:00-10:00[Pacific/Apia]", 2 * HOUR))
     assert sent["zone"] == "Pacific/Apia"
-    # Each of the two dates is one stretch, so neither needs to say which stretch it is.
-    assert sent["days"] == [day("2011-12-29"), day("2011-12-31")]
+    # The clocks change as the one day ends and the other starts, so each says its offset.
+    assert sent["days"] == [
+        day("2011-12-29", offset="UTC-10"),
+        day("2011-12-31", offset="UTC+14"),
+    ]
     (stay,) = sent["steps"]
     assert (stay["start"], stay["end"]) == (
         time("2011-12-29T23:00:00", "UTC-10"),
@@ -661,8 +664,11 @@ def test_a_day_that_starts_late_starts_where_its_clocks_do() -> None:
     That day has no first hour. A stay through that night is on it from 1:00 am.
     """
     sent = alone(("2027-03-27T23:00:00+02:00[Asia/Beirut]", 3 * HOUR))
-    # The stretch that is less than a whole day says its offset from UTC.
-    assert sent["days"] == [day("2027-03-27"), day("2027-03-28", HOUR, 24 * HOUR, "UTC+3")]
+    # The clocks change between the two days, so each says its offset from UTC.
+    assert sent["days"] == [
+        day("2027-03-27", offset="UTC+2"),
+        day("2027-03-28", HOUR, 24 * HOUR, "UTC+3"),
+    ]
     (stay,) = sent["steps"]
     assert (clock(stay["start"]), clock(stay["end"])) == (
         "2027-03-27T23:00:00",
@@ -698,6 +704,10 @@ def test_a_day_that_ends_late_has_its_last_hour_in_a_stretch_of_its_own() -> Non
         part(2, 0, HOUR, begins=False),
     ]
     assert holds(sent)
+    # A stretch says its offset because the clocks change at its end, whatever else is sent.
+    lone = alone(("2027-10-30T23:10:00+03:00[Asia/Beirut]", 300))
+    assert lone["days"] == [day("2027-10-30", 0, 24 * HOUR, "UTC+3")]
+    assert lone["steps"][0]["start"] == time("2027-10-30T23:10:00")
     # A stay of an hour from the first 11:10 pm ends, by the clock, where it started.
     (short,) = alone(("2027-10-30T23:10:00+03:00[Asia/Beirut]", HOUR))["steps"]
     assert (short["start"], short["end"]) == (
@@ -734,11 +744,12 @@ def test_clocks_that_go_back_over_midnight_show_a_date_again() -> None:
     assert holds(sent)
     # A stay from the evening before to the morning after is in all four stretches.
     night = alone(("2009-10-31T22:00:00-02:30[America/St_Johns]", 4 * HOUR))
+    # The two stretches with the change between them say their offsets from UTC.
     assert night["days"] == [
-        day("2009-10-31", 0, 24 * HOUR, "UTC-2:30"),
+        day("2009-10-31"),
         day("2009-11-01", 0, 60, "UTC-2:30"),
         day("2009-10-31", 23 * HOUR + 60, 24 * HOUR, "UTC-3:30"),
-        day("2009-11-01", 0, 24 * HOUR, "UTC-3:30"),
+        day("2009-11-01"),
     ]
     assert [(each["from"], each["to"]) for each in night["steps"][0]["parts"]] == [
         (22 * HOUR, 24 * HOUR),
@@ -815,6 +826,42 @@ def test_a_trip_that_takes_no_time_starts_and_ends_on_one_day() -> None:
     sent = sent_for(trip(["alex"], ["museum"], [], [], [first]), Report(Answer.FEASIBLE))
     assert dates(sent) == ["0001-01-01"]
     assert sent["ends"] == bound("0001-01-01T00:00:00", 0, 0)
+    assert holds(sent)
+
+
+def test_a_trip_that_takes_no_time_is_on_one_day_whatever_is_before_it() -> None:
+    """The FILE says that the TRIP starts and ends at midnight, and LOCKs a visit the day before."""
+    file = trip(
+        ["alex"],
+        ["museum"],
+        [stays("visit", "museum")],
+        [starts_at("visit", 14), lasts("visit", "PT1H")],
+        [
+            lock("visit", "alex"),
+            {"id": "trip-start", "trip_starts_at": at(0, day=16)},
+            {"id": "trip-end", "trip_ends_at": at(0, day=16)},
+        ],
+    )
+    sent = sent_for(file, Report(Answer.INFEASIBLE))
+    assert dates(sent) == ["2027-05-15", "2027-05-16"]
+    assert sent["starts"] == sent["ends"] == bound("2027-05-16T00:00:00", 1, 0)
+    assert holds(sent)
+
+
+def test_the_first_day_that_can_be_written_is_a_whole_day() -> None:
+    """In a zone five hours ahead of UTC, the first time that can be written is 5:00 am.
+
+    No clock changes there. So that day is a day like any other, and says no offset.
+    """
+    first = {"id": "trip-start", "trip_starts_at": "0001-01-01T05:00:00+05:00[Etc/GMT-5]"}
+    sent = sent_for(trip(["alex"], ["museum"], [], [], [first]), Report(Answer.FEASIBLE))
+    assert sent["days"] == [day("0001-01-01")]
+    assert sent["starts"] == bound("0001-01-01T05:00:00", 0, 5 * HOUR)
+    assert holds(sent)
+    last = {"id": "trip-end", "trip_ends_at": "9999-12-31T18:59:59-05:00[Etc/GMT+5]"}
+    sent = sent_for(trip(["alex"], ["museum"], [], [], [last]), Report(Answer.FEASIBLE))
+    assert sent["days"] == [day("9999-12-31")]
+    assert sent["ends"] == bound("9999-12-31T18:59:59", 0, 19 * HOUR - 1)
     assert holds(sent)
 
 

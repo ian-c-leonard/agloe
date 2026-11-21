@@ -67,9 +67,11 @@ def _to_draw(file: File, found: Report) -> object:
     calendar, and never the report.
     """
     try:
-        return trip.shown(file, found)
+        sent = trip.shown(file, found)
+        json.dumps(sent)  # what cannot be printed is no TRIP to send
     except Exception:  # whatever goes wrong in making the drawing, the report goes out
         return None
+    return sent
 
 
 if __name__ == "__main__":

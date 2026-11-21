@@ -66,9 +66,9 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .way .stripe { height: 100%; border-radius: 0; box-shadow: none; background: linear-gradient(var(--hue), var(--hue)) center / 2px 100% no-repeat; }
 .way.no-end .stripe { background-image: linear-gradient(var(--hue) 60%, transparent); }
 /* A WAY that takes next to no time: a tick across its moment, on top of what is beside it. */
-.mark.way.brief { z-index: 3; }
+.mark.way.brief { z-index: 3; pointer-events: none; }
 .way.brief .stripe { display: flex; align-items: center; justify-content: center; background: none; }
-.way.brief .stripe::after { content: ""; width: 14px; height: 5px; border-radius: 3px; background: var(--hue); box-shadow: 0 0 0 1.5px var(--surface); }
+.tick { flex: none; width: 14px; height: 5px; border-radius: 3px; background: var(--hue); box-shadow: 0 0 0 1.5px var(--surface); pointer-events: auto; }
 .way-name { position: absolute; right: 0; transform: translateY(-50%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; font: 500 10.5px/1.4 var(--mono); color: var(--ink2); text-shadow: 0 0 2px var(--surface), 0 0 2px var(--surface), 0 0 3px var(--surface); }
 
 /* Where the TRIP starts and where it ends: a dotted line across the day, with its words outside the TRIP. */

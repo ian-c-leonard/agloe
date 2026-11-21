@@ -30,14 +30,16 @@ function hourName(minute) {
  * column for a WAY. The name of a WAY stands beside the line of the first PERSON who takes it,
  * as far as its day has room.
  */
-function put(body, mark, people, tall) {
+function put(body, mark, people, open) {
   const box = made("div", `mark ${mark.state}${mark.begins ? "" : " goes-on"}${mark.ends ? "" : " no-end"}${mark.brief ? " brief" : ""}`);
   const columns = mark.last - mark.first + 1;
   const when = mark.late ? `${mark.when}, ${mark.late}` : mark.when;
-  // A mark is never smaller than the eye can find, and never outside its day. The tick of a
-  // WAY that takes next to no time sits across the moment it happens at.
-  const height = mark.brief ? TICK : Math.max(mark.height * PER_MINUTE, SMALLEST);
-  const top = Math.min(Math.max(mark.top * PER_MINUTE - (mark.brief ? TICK / 2 : 0), 0), tall - height);
+  // A mark is never smaller than the eye can find, and never outside the hours of its column.
+  // The tick of a WAY that takes next to no time sits across the moment it happens at.
+  const room = Math.max((open.bottom - open.top) * PER_MINUTE, 1);
+  const height = Math.min(mark.brief ? TICK : Math.max(mark.height * PER_MINUTE, SMALLEST), room);
+  const least = open.top * PER_MINUTE;
+  const top = Math.min(Math.max(mark.top * PER_MINUTE - (mark.brief ? TICK / 2 : 0), least), least + room - height);
   box.style.left = `${((mark.first + mark.lane / mark.lanes) / people) * 100}%`;
   box.style.width = `${(columns / mark.lanes / people) * 100}%`;
   box.style.top = `${top}px`;
@@ -45,7 +47,16 @@ function put(body, mark, people, tall) {
   box.title = [mark.name, when, mark.where, mark.who, mark.lock ?? "A WAY in the plan of the report."].join("\n");
   const block = made("div", "block");
   const stripes = made("div", "stripes");
-  for (let column = mark.first; column <= mark.last; column += 1) stripes.append(made("i", `stripe p${column % HUES}`));
+  for (let column = mark.first; column <= mark.last; column += 1) {
+    const stripe = made("i", `stripe p${column % HUES}`);
+    if (mark.brief) {
+      // Only the tick itself answers the pointer, so that what it sits on can be reached too.
+      const tick = Object.assign(made("b", "tick"), { title: box.title });
+      tick.style.marginLeft = `${mark.beside * 36}px`;
+      stripe.append(tick);
+    }
+    stripes.append(stripe);
+  }
   block.append(stripes);
   if (mark.kind === "option") block.append(made("b", "mark-name", mark.name), made("span", "mark-more", `${when} · ${mark.where}`));
   box.append(block);
@@ -87,7 +98,7 @@ function draw(laid) {
       band.style.height = `${shut.height * PER_MINUTE}px`;
       body.append(band);
     }
-    for (const mark of day.marks) put(body, mark, people, tall);
+    for (const mark of day.marks) put(body, mark, people, day.open);
     for (const bound of day.bounds) {
       const line = made("div", "bound");
       const down = bound.top * PER_MINUTE;

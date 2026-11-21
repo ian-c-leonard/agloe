@@ -95,7 +95,7 @@ class _Day:
 
     It runs from ``start`` up to ``end``, which is the first moment of the next stretch. At
     ``start`` the clocks show ``opens`` seconds into the day. ``offset`` is how far they are
-    ahead of UTC.
+    ahead of UTC. ``changes`` says that the clocks change as the stretch starts or as it ends.
     """
 
     date: date
@@ -103,6 +103,7 @@ class _Day:
     start: int
     end: int
     opens: int
+    changes: bool
 
 
 def shown(file: File, report: Report) -> Trip | None:
@@ -134,8 +135,11 @@ def shown(file: File, report: Report) -> Trip | None:
     ]
     held += [] if starts is None else [starts.at]
     # A TRIP that takes any time ends as its last moment does. One that ends as a day starts
-    # does not reach that day.
-    closes = ends is not None and any(moment < ends.at for moment in held)
+    # does not reach that day. Where the FILE says when the TRIP starts, that says whether it
+    # takes any time. Where it does not, anything before its end does.
+    closes = ends is not None and (
+        any(moment < ends.at for moment in held) if starts is None else ends.at > starts.at
+    )
     held += [] if ends is None else [ends.at - 1 if closes else ends.at]
     try:
         days, until = _days(file, held)
@@ -144,15 +148,6 @@ def shown(file: File, report: Report) -> Trip | None:
         def time(moment: int | None) -> Trip | None:
             return None if moment is None else _time(file, moment, offsets)
 
-        # A stretch says its offset where it is less than a day from midnight to midnight, or
-        # one of several of its date: that is a day on which the clocks change.
-        in_part = {
-            day
-            for day in days
-            if day.opens > 0
-            or day.opens + (day.end - day.start) < _A_DAY
-            or sum(other.date == day.date for other in days) > 1
-        }
         return {
             "zone": file.zone,
             "persons": [{"id": each.id, "name": each.name} for each in file.persons],
@@ -161,7 +156,8 @@ def shown(file: File, report: Report) -> Trip | None:
             "days": [
                 {
                     "date": day.date.isoformat(),
-                    "offset": _offset(day.offset) if day in in_part else None,
+                    # A stretch with a change of the clocks at one end says its offset.
+                    "offset": _offset(day.offset) if day.changes else None,
                     "opens": day.opens,
                     "closes": day.opens + (day.end - day.start),
                 }
@@ -306,12 +302,35 @@ def _days(file: File, held: list[int]) -> tuple[list[_Day], date | None]:
     while True:
         today, offset = _clocks(file, start)
         end = _where_the_stretch_ends(file, start)
-        days.append(_Day(today, offset, start, end, _seconds_into_the_day(file, start)))
+        opens = _seconds_into_the_day(file, start)
+        changes = _the_clocks_change(file, start) or _the_clocks_change(file, end)
+        # The first and the last day that can be written are whole days too: no clock
+        # changes where the times that can be written start or end.
+        first = start if _can_be_written(file, start - 1) else start - opens
+        after = end if _can_be_written(file, end) else first + _A_DAY
+        days.append(_Day(today, offset, first, after, 0 if first < start else opens, changes))
         if end > last:
             return days, None
         if len(days) == MOST_DAYS:
             return days, local(last, file.zone).date()
         start = end
+
+
+def _can_be_written(file: File, moment: int) -> bool:
+    """Whether a moment is in the years 0001 to 9999 on the clocks of the FILE's time zone."""
+    try:
+        local(moment, file.zone)
+    except Unwritable:
+        return False
+    return True
+
+
+def _the_clocks_change(file: File, moment: int) -> bool:
+    """Whether the clocks are at another offset from UTC at this moment than just before it."""
+    try:
+        return _clocks(file, moment - 1)[1] != _clocks(file, moment)[1]
+    except Unwritable:
+        return False
 
 
 def _where_the_stretch_ends(file: File, moment: int) -> int:
