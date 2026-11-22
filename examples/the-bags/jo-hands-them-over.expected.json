@@ -1,0 +1,125 @@
+{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "museum-visit",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T13:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T14:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "museum-tickets",
+        "sam": "museum-tickets"
+      }
+    },
+    {
+      "option": "coffee",
+      "persons": [
+        "alex",
+        "sam",
+        "jo"
+      ],
+      "start": "2027-05-15T14:30:00-05:00[America/Chicago]",
+      "end": "2027-05-15T14:50:00-05:00[America/Chicago]",
+      "hands_over": {
+        "bags": "alex"
+      }
+    },
+    {
+      "way": "blue-line",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T14:50:00-05:00[America/Chicago]",
+      "end": "2027-05-15T15:50:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "blue-line",
+      "persons": [
+        "sam"
+      ],
+      "start": "2027-05-15T14:50:00-05:00[America/Chicago]",
+      "end": "2027-05-15T15:50:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "flight",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T17:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T19:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "flight-tickets",
+        "sam": "flight-tickets"
+      }
+    }
+  ],
+  "relies_on": [
+    "alex-start",
+    "sam-start",
+    "jo-start",
+    "visit-time",
+    "visit-length",
+    "visit-arrival",
+    "visit-needs-a-ticket",
+    "museum-tickets",
+    "coffee-time",
+    "coffee-length",
+    "coffee-arrival",
+    "coffee-is-walk-up",
+    "flight-time",
+    "flight-length",
+    "bag-drop",
+    "flight-needs-a-ticket",
+    "flight-tickets",
+    "blue-line-length",
+    "where-the-bags-start",
+    "flight-needs-the-bags",
+    "jo-can-pass-the-bags",
+    "every-use-of-the-bags",
+    "trip-start",
+    "lock-visit",
+    "lock-coffee",
+    "lock-flight"
+  ],
+  "robust": true,
+  "objects": [
+    {
+      "object": "bags",
+      "path": [
+        {
+          "where": [
+            {
+              "person": "jo"
+            }
+          ],
+          "since": null,
+          "how": null
+        },
+        {
+          "where": [
+            {
+              "person": "alex"
+            }
+          ],
+          "since": "coffee",
+          "how": "handed over"
+        }
+      ],
+      "required_by": [
+        {
+          "option": "flight",
+          "stated": true,
+          "where": [
+            {
+              "person": "alex"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

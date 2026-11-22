@@ -18,7 +18,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from itertools import groupby
 
-from agloe.answers import Answer, CapRow, Cover, Missing, Plan, Report
+from agloe.answers import Answer, CapRow, Carried, Cover, Missing, Plan, Report
 from agloe.file import (
     Booking,
     Budget,
@@ -27,7 +27,9 @@ from agloe.file import (
     Complete,
     CompleteFor,
     CompleteRequires,
+    CompleteRequiresObject,
     CompleteRights,
+    CompleteTransfers,
     Cutoff,
     Duration,
     File,
@@ -35,12 +37,15 @@ from agloe.file import (
     Lock,
     Money,
     NeedsRight,
+    Object,
+    ObjectStarts,
     Offer,
     Option,
     Payment,
     Person,
     Place,
     Requires,
+    RequiresObject,
     Satisfies,
     Start,
     StartsFrom,
@@ -48,11 +53,12 @@ from agloe.file import (
     TripStart,
     Want,
     Way,
+    WithObject,
     length_written,
     local,
     written,
 )
-from agloe.reference import Broken, Constraint, Itinerary, Step
+from agloe.reference import Broken, Constraint, Itinerary, Step, Where
 
 _WITH_AN_ID = re.compile(r" \([a-z0-9]+(-[a-z0-9]+)*\)$")  # how a name ends when its id is shown
 _DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
@@ -91,7 +97,7 @@ _AHEAD = {
     Answer.UNDETERMINED: [
         "UNDETERMINED: the FILE does not say enough to tell.",
         "",
-        "The check is still working out which missing FACTs would be enough.",
+        "The check is still working out what the FILE would have to say for the trip to work.",
     ],
 }
 
@@ -120,6 +126,7 @@ def as_json(file: File, report: Report) -> dict[str, object]:
                 "start": written(step.start, file.zone),
                 "end": None if step.end is None else written(step.end, file.zone),
                 **({"rights": rights[step.option]} if step.option in rights else {}),
+                **({"hands_over": dict(step.handed)} if step.handed else {}),
             }
             for step in report.itinerary
         ]
@@ -134,6 +141,29 @@ def as_json(file: File, report: Report) -> dict[str, object]:
                     "persons": list(supply.persons),
                 }
                 for supply in report.supplies
+            ]
+        if report.objects:
+            out["objects"] = [
+                {
+                    "object": carried.object,
+                    "path": [
+                        {
+                            "where": [_where_as_json(each) for each in stay.where],
+                            "since": stay.since,
+                            "how": stay.how,
+                        }
+                        for stay in carried.stays
+                    ],
+                    "required_by": [
+                        {
+                            "option": use.option,
+                            "stated": use.stated,
+                            "where": [_where_as_json(each) for each in use.where],
+                        }
+                        for use in carried.uses
+                    ],
+                }
+                for carried in report.objects
             ]
         if _to_buy(report):
             out["to_buy"] = [
@@ -346,6 +376,11 @@ def _to_buy(report: Report) -> dict[tuple[str, str, str | None], list[Cover]]:
     return buyers
 
 
+def _where_as_json(where: Where) -> dict[str, str | None]:
+    """Where an OBJECT is: the PERSON who has it, or the PLACE where it lies."""
+    return {"person": where.person} if where.person is not None else {"place": where.place}
+
+
 def _money_as_json(price: Money | None) -> dict[str, str] | None:
     return None if price is None else {"amount": str(price.amount), "currency": price.currency}
 
@@ -390,6 +425,18 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
     if unknown.what == "has":
         out["capability"] = unknown.about
         return out
+    if unknown.what in _ABOUT_AN_OBJECT:
+        out["object"] = unknown.about
+        if unknown.place is not None:
+            out["place"] = unknown.place
+        if unknown.what == "another transfer":
+            # The OPTIONs for which the OBJECT has to be at hand in one plan. Nobody has
+            # worked out whether another transfer can bring it there.
+            out["at_hand_for"] = [
+                {"option": option, "stated": stated} for option, stated in needed.at_hand_for
+            ]
+            out["settled"] = False
+        return out
     if unknown.about is not None:
         out["booking" if unknown.what == "charged" else "offer"] = unknown.about
     if needed.buys:
@@ -404,6 +451,17 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
         ]
     out["at_most"] = None if needed.at_most is None else length_written(needed.at_most)
     return out
+
+
+_ABOUT_AN_OBJECT = (
+    "does not require",
+    "keeps",
+    "does not keep",
+    "hands over",
+    "starts with",
+    "starts at",
+    "another transfer",
+)
 
 
 @dataclass(frozen=True)
@@ -513,16 +571,28 @@ def as_text(file: File, report: Report) -> str:
         lines = ["UNDETERMINED: the FILE does not say enough to tell.", ""]
         cases = [_case(file, enough) for enough in report.missing]
         plans = [_plan_in_words(file, plan) for plan in report.plans] or [[] for _ in cases]
+        asked = [needed.unknown for enough in report.missing for needed in enough]
+        kinds = {unknown.what for unknown in asked}
+        # A set with another transfer is not settled, and a report lists such sets only
+        # where it lists no other.
+        works = "might work" if "another transfer" in kinds else "works"
         if len(cases) == 1:
-            lines.append(f"The trip works if {cases[0]}.")
+            lines.append(f"The trip {works} if {cases[0]}.")
             lines += [f"  {line}" for line in plans[0]]
         else:
-            lines.append("The trip works in any of these cases:")
+            lines.append(f"The trip {works} in any of these cases:")
             for number, (case, plan) in enumerate(zip(cases, plans, strict=True), 1):
                 lines.append(f"  {number}. {_with_a_capital(case)}.")
                 lines += [f"     {line}" for line in plan]
-        asked = [needed.unknown for enough in report.missing for needed in enough]
-        kinds = {unknown.what for unknown in asked}
+        if "another transfer" in kinds:
+            moved = {unknown.about for unknown in asked if unknown.what == "another transfer"}
+            names = [_names(file.objects)[each.id] for each in file.objects if each.id in moved]
+            this = "That is" if len(cases) == 1 else "These cases are"
+            lines += [
+                "",
+                f"{this} not settled. Nothing that the FILE lists brings {_listed(names)}"
+                " there, and the COMPILER has not worked out whether another transfer can.",
+            ]
         # A BOOKING can stand in for that answer, for an OPTION whose rights are not COMPLETE.
         might_be_booked = {
             unknown.option
@@ -626,6 +696,9 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
         what = _name(file, step.option or step.way)
         lines.append(f"  {clock.time(step.start)} to {end}: {what}, {who}")
         lines += [f"    ! {mark}" for mark in marks.get(number, [])]
+        for thing, person in step.handed:
+            taker = _people(file, (person,))
+            lines.append(f"    {taker} takes {_names(file.objects)[thing]} here.")
     if not report.itinerary:
         lines += ["", "Nobody has to do anything."]
     relied_on = [fact for fact in file.facts if fact.id in report.relies_on]
@@ -679,6 +752,10 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
                 whom = "one PERSON" if supply.of == "one" else "each PERSON"
                 meet = "meets" if one else "meet"
                 lines.append(f"  {name} requires {what} of {whom}. {who} {meet} that requirement.")
+    if report.objects:
+        lines += ["", "Where each OBJECT is:"]
+        for carried in report.objects:
+            lines += _carried_in_words(file, clock, report.itinerary, carried)
     money = _money(file, report)
     if money is not None:
         people, pots = _names(file.persons, "and"), _names(file.budgets)
@@ -707,6 +784,54 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
     if report.caps:
         lines += ["", "The caps:", *(f"  {_cap_in_words(file, row)}" for row in report.caps)]
     return lines
+
+
+def _carried_in_words(
+    file: File, clock: Clock, itinerary: Itinerary, carried: Carried
+) -> list[str]:
+    """One OBJECT of a plan in words: where it is throughout, then each OPTION that requires it.
+
+    A time has its date where it is not on the day the plan starts.
+    """
+    thing = _names(file.objects)[carried.object]
+    starts = {step.option: step.start for step in itinerary if step.option is not None}
+    first_day = clock.day(itinerary[0].start)
+    stays: list[str] = []
+    for stay in carried.stays:
+        where = _where(file, stay.where)
+        if stay.since is None:
+            stays.append(f"{where} when the TRIP starts")
+            continue
+        name = _name(file, stay.since)
+        how = {
+            "handed over": f"handed over in {name}",
+            "kept": f"kept by {name}",
+            "might be kept": f"the FILE does not say what {name} does with {thing}",
+        }[stay.how or ""]
+        stays.append(f"{where} from {clock.time(starts[stay.since], first_day)} ({how})")
+    lines = [f"  {thing}: {'; '.join(stays)}"]
+    for use in carried.uses:
+        name, where = _name(file, use.option), _where(file, use.where)
+        if use.stated:
+            lines.append(f"    {name} requires {thing}. At its start: {where}.")
+        else:
+            silent = f"The FILE does not say whether {name} requires {thing}"
+            lines.append(f"    {silent}. At its start: {where}, so the plan holds if it does.")
+    return lines
+
+
+def _where(file: File, where: Sequence[Where]) -> str:
+    """Where an OBJECT is, or each place it might be: with Alex or at the Art Institute."""
+    people, places = _names(file.persons, "or"), _names(file.places, "or")
+    return _listed(
+        [
+            f"with {people[each.person]}"
+            if each.person is not None
+            else f"at {places[each.place or '']}"
+            for each in where
+        ],
+        "or",
+    )
 
 
 def _kinds(file: File, records: Sequence[str]) -> str:
@@ -824,6 +949,15 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
         elif unknown.what == "needs no right":
             names = [_name(file, needed.unknown.option, "or") for needed in group]
             parts.append(_OwnWords(f"nobody needs a right to take part in {_listed(names, 'or')}"))
+        elif unknown.what == "another transfer":
+            thing = _names(file.objects)[unknown.about or ""]
+            stated = [_name(file, option, "and") for option, said in group[0].at_hand_for if said]
+            might = [_name(file, each, "and") for each, said in group[0].at_hand_for if not said]
+            for_these = [f"for {_listed(stated)}"] if stated else []
+            if might:
+                they = "it requires" if len(might) == 1 else "they require"
+                for_these.append(f"for {_listed(might)} if {they} {thing}")
+            parts.append(f"{thing} can be at hand some other way {', and '.join(for_these)}")
         elif unknown.what == "another right":
             # A right that is found is one more than the places on OFFER, and the words say so.
             places = file.places_on_offer(unknown.option or "")
@@ -879,6 +1013,19 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
     if unknown.what == "has":
         what = _names(file.capabilities)[unknown.about or ""]
         return f"{_people(file, (unknown.person or '',))} has the CAPABILITY {what}"
+    if unknown.what in _ABOUT_AN_OBJECT:
+        thing = _names(file.objects)[unknown.about or ""]
+        if unknown.what == "starts with":
+            return f"{_people(file, (unknown.person or '',))} has {thing} when the TRIP starts"
+        if unknown.what == "starts at":
+            return f"{_names(file.places)[unknown.place or '']} has {thing} when the TRIP starts"
+        name = _name(file, unknown.option)
+        return {
+            "does not require": f"{name} does not require {thing}",
+            "keeps": f"{name} keeps {thing}",
+            "does not keep": f"{name} does not keep {thing}",
+            "hands over": f"{name} hands over {thing}",
+        }[unknown.what]
     if unknown.what == "price":
         buyers = tuple(cover.person for cover in needed.buys)
         each = " each" if len(buyers) > 1 else ""
@@ -993,6 +1140,44 @@ def _record(file: File, clock: Clock, record: str) -> str:
             return f"{_name(file, found.option)} does not require {what}"
         whom = "one PERSON" if found.of == "one" else "each PERSON"
         return f"{_name(file, found.option)} requires {what} of {whom} who takes part"
+    if isinstance(found, ObjectStarts):
+        thing = _names(file.objects)[found.object]
+        if found.person is not None:
+            return f"{_people(file, (found.person,))} has {thing} when the TRIP starts"
+        return f"{_names(file.places)[found.place or '']} has {thing} when the TRIP starts"
+    if isinstance(found, RequiresObject):
+        does = "requires" if found.needed else "does not require"
+        return f"{_name(file, found.option)} {does} {_names(file.objects)[found.object]}"
+    if isinstance(found, WithObject):
+        thing = _names(file.objects)[found.object]
+        return {
+            "hands_over": f"{_name(file, found.option)} hands over {thing}",
+            "keeps": f"{_name(file, found.option)} keeps {thing}",
+            "nothing": f"{_name(file, found.option)} leaves {thing} alone",
+        }[found.does]
+    if isinstance(found, CompleteRequiresObject):
+        which = [
+            _name(file, fact.option, "and")
+            for fact in file.facts
+            if isinstance(fact, RequiresObject) and fact.object == found.object and fact.needed
+        ]
+        thing = _names(file.objects)[found.object]
+        if not which:
+            return f"no OPTION in this FILE requires {thing}"
+        verb = "requires" if len(which) == 1 else "require"
+        return f"of the OPTIONs in this FILE, only {_listed(which)} {verb} {thing}"
+    if isinstance(found, CompleteTransfers):
+        which = [
+            _name(file, fact.option, "and")
+            for fact in file.facts
+            if isinstance(fact, WithObject) and fact.object == found.object
+            if fact.does != "nothing"
+        ]
+        thing = _names(file.objects)[found.object]
+        if not which:
+            return f"nothing hands over or keeps {thing}, in this FILE or outside it"
+        verb = "hands over or keeps" if len(which) == 1 else "hand over or keep"
+        return f"only {_listed(which)} {verb} {thing}, and nothing outside this FILE does"
     name = _name(file, found.option)
     if isinstance(found, Lock):
         verb = "takes" if len(found.persons) == 1 else "take"
@@ -1124,7 +1309,7 @@ def _starts_at(file: File, option: str | None) -> str:
 
 
 def _names(
-    records: Sequence[Person | Place | Option | Way | Want | Budget | Capability],
+    records: Sequence[Person | Place | Option | Way | Want | Budget | Capability | Object],
     joins: str | None = None,
 ) -> dict[str, str]:
     """The name to show for each record, so that no two records show the same.

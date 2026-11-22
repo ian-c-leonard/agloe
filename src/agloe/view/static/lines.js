@@ -20,10 +20,10 @@ const STEP = /^ {2}\d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+, .+$/;
 /** A line under a step that says what the report warns of there. */
 const WARNING = /^ {4}! /;
 
-/** How the line starts that states the one case in which a trip works. */
-const ONE_CASE = "The trip works if ";
-/** The line above the cases in which a trip works, where the report lists several. */
-const CASES = "The trip works in any of these cases:";
+/** How the line starts that states the one case in which a trip works, or might work. */
+const ONE_CASE = /^The trip (?:works|might work) if /;
+/** The line above the cases in which a trip works or might, where the report lists several. */
+const CASES = /^The trip (?:works|might work) in any of these cases:$/;
 /** A warning that says who still has to buy a right, and from which OFFER. */
 const TO_BUY = /^ {4}! .+ still ha(?:s|ve) to buy a right to this(?: if it needs one)?, from (.+)\.$/;
 /** How the line starts that gives one plan for a case: who buys which place. */
@@ -94,10 +94,10 @@ export function lines(text, report, trip) {
   const cases = casesIn(report);
   const free = (line) => line !== undefined && line.step === null && line.record === null;
   if (cases.length === 1) {
-    const states = found.filter((line) => line.text.startsWith(ONE_CASE));
+    const states = found.filter((line) => ONE_CASE.test(line.text));
     if (states.length === 1 && free(states[0])) states[0].case = 0;
   } else if (cases.length > 1) {
-    const heads = found.flatMap((line, at) => (line.text === CASES ? [at] : []));
+    const heads = found.flatMap((line, at) => (CASES.test(line.text) ? [at] : []));
     const numbered = [];
     for (let at = heads[0] + 1; heads.length === 1 && at < found.length; at += 1) {
       if (/^ {2}\d+\. /.test(found[at].text)) numbered.push(at);
@@ -143,7 +143,8 @@ export function casesOf(tied) {
   for (const line of tied) {
     if (line.case !== null) cases[line.case] = line.text.trim();
   }
-  return { heading: cases.length > 1 ? CASES : null, cases };
+  const heading = tied.find((line) => CASES.test(line.text));
+  return { heading: cases.length > 1 && heading !== undefined ? heading.text : null, cases };
 }
 
 /**

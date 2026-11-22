@@ -130,7 +130,9 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
         depends += bool(missing)
         for line in states:
             assert line["step"] is None and line["record"] is None, name
-            starts = "The trip works if " if len(missing) == 1 else f"  {line['case'] + 1}. "
+            # One case is a sentence. It says that the trip works, or that it might.
+            one = ("The trip works if ", "The trip might work if ")
+            starts = one if len(missing) == 1 else (f"  {line['case'] + 1}. ",)
             assert line["text"].startswith(starts), name
     assert plans > 10
     assert depends > 10

@@ -95,6 +95,14 @@ class Capability:
 
 
 @dataclass(frozen=True)
+class Object:
+    """A physical thing that OPTIONs may require, hand over or keep: a bag, a passport, a key."""
+
+    id: str
+    name: str
+
+
+@dataclass(frozen=True)
 class Place:
     id: str
     name: str
@@ -358,6 +366,73 @@ class CompleteRequires:
     capability: str
 
 
+@dataclass(frozen=True)
+class ObjectStarts:
+    """A FACT: where an OBJECT is when the TRIP starts.
+
+    A PERSON has it, or it lies at a PLACE: one of the two is stated, and the other is None.
+    """
+
+    id: str
+    object: str
+    person: str | None = None
+    place: str | None = None
+
+
+@dataclass(frozen=True)
+class RequiresObject:
+    """A FACT: whether an OPTION requires an OBJECT.
+
+    Where it does, the OBJECT is at hand just before the OPTION starts: it lies at the PLACE
+    where the OPTION starts, or a PERSON who takes part has it.
+    """
+
+    id: str
+    option: str
+    object: str
+    needed: bool
+
+
+@dataclass(frozen=True)
+class WithObject:
+    """A FACT: what an OPTION does with an OBJECT.
+
+    ``does`` is "hands_over" where a PERSON who takes part can have the OBJECT from the start
+    of the OPTION, if it is at hand. It is "keeps" where the OBJECT lies at the PLACE where the
+    OPTION starts from then on, if a PERSON who takes part has it. It is "nothing" where the
+    OPTION leaves the OBJECT alone.
+    """
+
+    id: str
+    option: str
+    object: str
+    does: str
+
+
+@dataclass(frozen=True)
+class CompleteRequiresObject:
+    """A FACT: the FILE states every one of its OPTIONs that requires this OBJECT.
+
+    Each has a FACT that it does. So an OPTION of the FILE with no FACT about that does not
+    require it.
+    """
+
+    id: str
+    object: str
+
+
+@dataclass(frozen=True)
+class CompleteTransfers:
+    """A FACT: the FILE states every OPTION that hands this OBJECT over or keeps it.
+
+    Each is in the FILE, with a FACT that says so. So an OPTION of the FILE with no FACT about
+    that leaves the OBJECT alone, and nothing outside the FILE transfers it.
+    """
+
+    id: str
+    object: str
+
+
 type Fact = (
     Start
     | Duration
@@ -373,6 +448,11 @@ type Fact = (
     | Has
     | Requires
     | CompleteRequires
+    | ObjectStarts
+    | RequiresObject
+    | WithObject
+    | CompleteRequiresObject
+    | CompleteTransfers
 )
 type Decision = Lock | TripStart | TripEnd | Cap
 
@@ -391,6 +471,7 @@ class File:
     zone: str = "UTC"  # the time zone of the first time in the FILE; reports show times in it
     budgets: tuple[Budget, ...] = ()
     capabilities: tuple[Capability, ...] = ()
+    objects: tuple[Object, ...] = ()
 
     @property
     def locks(self) -> tuple[Lock, ...]:
@@ -645,6 +726,95 @@ class File:
     @cached_property
     def _requires_complete(self) -> dict[str, CompleteRequires]:
         return {fact.capability: fact for fact in self.facts if isinstance(fact, CompleteRequires)}
+
+    def object_starts(self, object: str) -> ObjectStarts | None:
+        """The FACT about where this OBJECT is when the TRIP starts, if there is one."""
+        return self._object_starts.get(object)
+
+    def object_requirement(self, option: str, object: str) -> RequiresObject | None:
+        """The FACT about whether this OPTION requires this OBJECT, if there is one."""
+        return self._object_requirements.get((option, object))
+
+    def requires_object(self, option: str, object: str) -> bool | None:
+        """Whether this OPTION requires this OBJECT, as far as the FILE says.
+
+        None where the FILE does not say. A FACT about the two settles it. Without one, a FACT
+        that the set of the OBJECT's requirements is COMPLETE settles it too: the OPTION does
+        not require it. That FACT is about the OPTIONs of the FILE only, so the answer is None
+        for anything else.
+        """
+        stated = self._object_requirements.get((option, object))
+        if stated is not None:
+            return stated.needed
+        listed = option in self._options_listed
+        whole = listed and self.object_requirements_complete(object) is not None
+        return False if whole else None
+
+    def object_requirements_complete(self, object: str) -> CompleteRequiresObject | None:
+        """The FACT that the FILE states every OPTION that requires this OBJECT, if any."""
+        return self._object_requirements_complete.get(object)
+
+    def action(self, option: str, object: str) -> WithObject | None:
+        """The FACT about what this OPTION does with this OBJECT, if there is one."""
+        return self._actions.get((option, object))
+
+    def does_with(self, option: str, object: str) -> str | None:
+        """What this OPTION does with this OBJECT, as far as the FILE says.
+
+        "hands_over", "keeps" or "nothing", and None where the FILE does not say. A FACT about
+        the two settles it. Without one, a FACT that the set of the OBJECT's transfers is
+        COMPLETE settles it too: the OPTION leaves the OBJECT alone. That FACT is about the
+        OPTIONs of the FILE, so the answer is None for anything else.
+        """
+        stated = self._actions.get((option, object))
+        if stated is not None:
+            return stated.does
+        listed = option in self._options_listed
+        whole = listed and self.transfers_complete(object) is not None
+        return "nothing" if whole else None
+
+    def transfers_complete(self, object: str) -> CompleteTransfers | None:
+        """The FACT that the FILE states every transfer of this OBJECT, if any."""
+        return self._transfers_complete.get(object)
+
+    def objects_asked_for(self) -> tuple[Object, ...]:
+        """The OBJECTs that some OPTION of the FILE requires or might, in the FILE's order.
+
+        Nothing turns on any other OBJECT: no OPTION of the FILE needs it at hand.
+        """
+        return tuple(
+            each
+            for each in self.objects
+            if any(self.requires_object(option.id, each.id) is not False for option in self.options)
+        )
+
+    @cached_property
+    def _object_starts(self) -> dict[str, ObjectStarts]:
+        return {fact.object: fact for fact in self.facts if isinstance(fact, ObjectStarts)}
+
+    @cached_property
+    def _object_requirements(self) -> dict[tuple[str, str], RequiresObject]:
+        return {
+            (fact.option, fact.object): fact
+            for fact in self.facts
+            if isinstance(fact, RequiresObject)
+        }
+
+    @cached_property
+    def _object_requirements_complete(self) -> dict[str, CompleteRequiresObject]:
+        return {
+            fact.object: fact for fact in self.facts if isinstance(fact, CompleteRequiresObject)
+        }
+
+    @cached_property
+    def _actions(self) -> dict[tuple[str, str], WithObject]:
+        return {
+            (fact.option, fact.object): fact for fact in self.facts if isinstance(fact, WithObject)
+        }
+
+    @cached_property
+    def _transfers_complete(self) -> dict[str, CompleteTransfers]:
+        return {fact.object: fact for fact in self.facts if isinstance(fact, CompleteTransfers)}
 
     def without(self, record: str) -> File:
         """The same FILE with one FACT, WANT or DECISION left out.
@@ -925,6 +1095,10 @@ def load(document: object) -> File:
     for index, capability in enumerate(capabilities):
         claim(f"/capabilities/{index}", capability.id)
     capability_ids = {capability.id for capability in capabilities}
+    objects = tuple(Object(each["id"], each["name"]) for each in raw.get("objects", ()))
+    for index, thing in enumerate(objects):
+        claim(f"/objects/{index}", thing.id)
+    object_ids = {thing.id for thing in objects}
     options: list[Option] = []
     for index, option in enumerate(raw["options"]):
         where = f"/options/{index}"
@@ -976,6 +1150,8 @@ def load(document: object) -> File:
     satisfied: set[tuple[str, str]] = set()
     able: set[tuple[str, str]] = set()  # each PERSON and CAPABILITY that a FACT is about
     required: set[tuple[str, str]] = set()  # each OPTION and CAPABILITY that a FACT is about
+    needed: set[tuple[str, str]] = set()  # each OPTION and OBJECT with a FACT about a requirement
+    acted: set[tuple[str, str]] = set()  # each OPTION and OBJECT with a FACT about what it does
     offered: list[tuple[str, str, str]] = []  # where an OFFER is, its id and its OPTION
     closures: list[tuple[str, str, tuple[str, ...]]] = []  # the same for a COMPLETE set of rights
     for index, fact in enumerate(raw["facts"]):
@@ -1000,6 +1176,17 @@ def load(document: object) -> File:
                     problems.append(f"{where}: another FACT already states this about {about}")
                 stated.add((about, CompleteRequires))
                 facts.append(CompleteRequires(fact["id"], about))
+                continue
+            if "requires_object" in whole or "transfers" in whole:
+                if "requires_object" in whole:
+                    about, kind = whole["requires_object"], CompleteRequiresObject
+                else:
+                    about, kind = whole["transfers"], CompleteTransfers
+                known(where, about, "OBJECT", object_ids)
+                if (about, kind) in stated:
+                    problems.append(f"{where}: another FACT already states this about {about}")
+                stated.add((about, kind))
+                facts.append(kind(fact["id"], about))
                 continue
             if "rights_to" in whole:
                 about = whole["rights_to"]
@@ -1069,6 +1256,19 @@ def load(document: object) -> File:
             able.add((fact["person"], fact["capability"]))
             facts.append(Has(fact["id"], fact["person"], fact["capability"], fact["has"]))
             continue
+        if "object" in fact:
+            about = fact["object"]
+            known(where, about, "OBJECT", object_ids)
+            if (about, ObjectStarts) in stated:
+                problems.append(f"{where}: another FACT already states this about {about}")
+            stated.add((about, ObjectStarts))
+            if "starts_with" in fact:
+                known(where, fact["starts_with"], "PERSON", person_ids)
+                facts.append(ObjectStarts(fact["id"], about, person=fact["starts_with"]))
+            else:
+                known(where, fact["starts_at"], "PLACE", place_ids)
+                facts.append(ObjectStarts(fact["id"], about, place=fact["starts_at"]))
+            continue
         if "person" in fact:
             known(where, fact["person"], "PERSON", person_ids)
             known(where, fact["starts_from"], "PLACE", place_ids)
@@ -1108,12 +1308,31 @@ def load(document: object) -> File:
             continue
         if "requires" in fact:
             asked = fact["requires"]
+            if "object" in asked:
+                known(where, asked["object"], "OBJECT", object_ids)
+                if (fact["option"], asked["object"]) in needed:
+                    both = f"{fact['option']} and {asked['object']}"
+                    problems.append(f"{where}: another FACT already states this about {both}")
+                needed.add((fact["option"], asked["object"]))
+                facts.append(
+                    RequiresObject(fact["id"], fact["option"], asked["object"], asked["needed"])
+                )
+                continue
             known(where, asked["capability"], "CAPABILITY", capability_ids)
             if (fact["option"], asked["capability"]) in required:
                 both = f"{fact['option']} and {asked['capability']}"
                 problems.append(f"{where}: another FACT already states this about {both}")
             required.add((fact["option"], asked["capability"]))
             facts.append(Requires(fact["id"], fact["option"], asked["capability"], asked["of"]))
+            continue
+        if "with_object" in fact:
+            done = fact["with_object"]
+            known(where, done["object"], "OBJECT", object_ids)
+            if (fact["option"], done["object"]) in acted:
+                both = f"{fact['option']} and {done['object']}"
+                problems.append(f"{where}: another FACT already states this about {both}")
+            acted.add((fact["option"], done["object"]))
+            facts.append(WithObject(fact["id"], fact["option"], done["object"], done["does"]))
             continue
         if "starts_at" in fact:
             made = Start(fact["id"], fact["option"], when(where, fact["starts_at"]))
@@ -1201,6 +1420,7 @@ def load(document: object) -> File:
         zone,
         tuple(budgets),
         capabilities,
+        objects,
     )
 
 
@@ -1235,8 +1455,8 @@ def _describe(error: ValidationError, shapes: dict[str, dict[str, object]]) -> s
     The closest miss is the one for the shape the record was meant to have: the shape whose
     required keys the record has most of. So a key that belongs to that shape is never named as
     the problem. ``shapes`` holds each shape of the schema by its name. A FACT with ``complete``
-    is about travel, about a WANT or about the rights to an OPTION, and what is inside
-    ``complete`` says which.
+    is about one kind of set, and what is inside ``complete`` says which. A FACT with
+    ``requires`` is about a CAPABILITY or about an OBJECT, and what is inside says which.
     """
     where = "".join(_inside("", part) for part in error.absolute_path) or "the FILE"
     if not error.context:
@@ -1267,13 +1487,20 @@ def _describe(error: ValidationError, shapes: dict[str, dict[str, object]]) -> s
                 "complete_for_a_want": "satisfies" in keys,
                 "complete_rights": bool(keys & {"rights_to", "offers"}),
                 "complete_for_a_capability": "requires" in keys,
+                "complete_for_an_object": "requires_object" in keys,
+                "complete_transfers": "transfers" in keys,
             }
             meant = [kind for kind, there in kinds.items() if there] or ["complete_set"]
             if len(meant) > 1:
                 return (
                     f"{where}: a COMPLETE set is of one kind: travel, the OPTIONs that SATISFY"
-                    " a WANT, the rights to an OPTION, or the OPTIONs that require a CAPABILITY"
+                    " a WANT, the rights to an OPTION, the OPTIONs that require a CAPABILITY,"
+                    " the OPTIONs that require an OBJECT, or the transfers of an OBJECT"
                 )
             misses = [miss for miss in misses if name(miss) == meant[0]] or misses
+        asked = record.get("requires")
+        if isinstance(asked, dict) and list(error.absolute_path)[:1] == ["facts"]:
+            inside = "requires_object" if "object" in asked else "requires_capability"
+            misses = [miss for miss in misses if name(miss) == inside] or misses
     closest = max(misses, key=lambda miss: len(miss.absolute_path))
     return f"{where}: fits no known shape; the closest miss: {closest.message}"

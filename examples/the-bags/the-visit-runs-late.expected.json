@@ -1,0 +1,18 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "visit-time",
+    "visit-length",
+    "flight-time",
+    "bag-drop",
+    "walk-length",
+    "blue-line-length",
+    "every-way",
+    "where-the-bags-start",
+    "flight-needs-the-bags",
+    "everything-that-moves-the-bags",
+    "trip-start",
+    "lock-visit",
+    "lock-flight"
+  ]
+}

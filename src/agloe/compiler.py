@@ -78,7 +78,13 @@ def reports(file: File, ahead: bool = True) -> Iterator[Answer | Report]:
     Where the numbers of a FILE do not fit the solver, the reference checker starts over. Both
     are exact, so its answer is the one the solver proved. What was given before is not given
     again.
+
+    The solver's model has no OBJECTs. So the reference checker checks a FILE in which some
+    OPTION requires an OBJECT or might.
     """
+    if file.objects_asked_for():
+        yield from answers.reports(file, ahead=ahead)
+        return
     given: list[Answer | Report] = []
     try:
         asked: _Asked = {}

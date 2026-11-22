@@ -417,7 +417,7 @@ def test_an_answer_ahead_in_words() -> None:
     assert report.answer_as_text(Answer.UNDETERMINED).splitlines() == [
         "UNDETERMINED: the FILE does not say enough to tell.",
         "",
-        "The check is still working out which missing FACTs would be enough.",
+        "The check is still working out what the FILE would have to say for the trip to work.",
     ]
 
 

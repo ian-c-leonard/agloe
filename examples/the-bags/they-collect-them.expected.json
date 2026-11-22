@@ -1,0 +1,138 @@
+{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "museum-visit",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T13:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T14:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "museum-tickets",
+        "sam": "museum-tickets"
+      }
+    },
+    {
+      "way": "walk",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T14:30:00-05:00[America/Chicago]",
+      "end": "2027-05-15T14:45:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "blue-line",
+      "persons": [
+        "sam"
+      ],
+      "start": "2027-05-15T14:30:00-05:00[America/Chicago]",
+      "end": "2027-05-15T15:30:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "collect-bags",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T14:45:00-05:00[America/Chicago]",
+      "end": "2027-05-15T14:50:00-05:00[America/Chicago]",
+      "hands_over": {
+        "bags": "alex"
+      }
+    },
+    {
+      "way": "walk",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T14:50:00-05:00[America/Chicago]",
+      "end": "2027-05-15T15:05:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "blue-line",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T15:05:00-05:00[America/Chicago]",
+      "end": "2027-05-15T16:05:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "flight",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T17:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T19:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "flight-tickets",
+        "sam": "flight-tickets"
+      }
+    }
+  ],
+  "relies_on": [
+    "alex-start",
+    "sam-start",
+    "visit-time",
+    "visit-length",
+    "visit-arrival",
+    "visit-needs-a-ticket",
+    "museum-tickets",
+    "collect-time",
+    "collect-length",
+    "collect-arrival",
+    "collect-is-walk-up",
+    "flight-time",
+    "flight-length",
+    "bag-drop",
+    "flight-needs-a-ticket",
+    "flight-tickets",
+    "walk-length",
+    "blue-line-length",
+    "where-the-bags-start",
+    "flight-needs-the-bags",
+    "hotel-releases-the-bags",
+    "every-use-of-the-bags",
+    "trip-start",
+    "lock-visit",
+    "lock-flight"
+  ],
+  "robust": true,
+  "objects": [
+    {
+      "object": "bags",
+      "path": [
+        {
+          "where": [
+            {
+              "place": "hotel"
+            }
+          ],
+          "since": null,
+          "how": null
+        },
+        {
+          "where": [
+            {
+              "person": "alex"
+            }
+          ],
+          "since": "collect-bags",
+          "how": "handed over"
+        }
+      ],
+      "required_by": [
+        {
+          "option": "flight",
+          "stated": true,
+          "where": [
+            {
+              "person": "alex"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

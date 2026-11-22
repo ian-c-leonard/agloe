@@ -1,0 +1,33 @@
+{
+  "answer": "UNDETERMINED",
+  "missing": [
+    [
+      {
+        "what": "starts with",
+        "person": "alex",
+        "object": "bags"
+      }
+    ],
+    [
+      {
+        "what": "starts with",
+        "person": "sam",
+        "object": "bags"
+      }
+    ],
+    [
+      {
+        "what": "starts at",
+        "object": "bags",
+        "place": "hotel"
+      }
+    ],
+    [
+      {
+        "what": "starts at",
+        "object": "bags",
+        "place": "ohare"
+      }
+    ]
+  ]
+}
