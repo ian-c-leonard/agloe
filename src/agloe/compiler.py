@@ -19,7 +19,7 @@ reference checker's own search then answers for the whole TRIP. That search trie
 so it is meant for small TRIPs.
 """
 
-from collections.abc import Iterable, Iterator, Sequence, Set
+from collections.abc import Iterable, Iterator, Mapping, Sequence, Set
 from dataclasses import replace
 from hashlib import sha256
 from itertools import combinations
@@ -430,6 +430,7 @@ class _Search:
         # the choice that takes the route, the route and the place of the WAY in it.
         self.moments: dict[tuple[int, reference.Route, int], cp_model.IntVar] = {}
         self.known = reference.Routes(file, world)
+        self._crossing: dict[tuple[str, str], int] | None = None
         self._worth_trying: dict[tuple[str, str, bool], list[reference.Route]] = {}
         for number in range(len(file.persons)):
             self._lay_out_path(number)
@@ -719,6 +720,7 @@ class _Search:
         start_of_trip = len(matter)
         untouched = model.new_bool_var(f"nothing touches {thing}")
         arcs: list[tuple[int, int, cp_model.LiteralT]] = [(start_of_trip, start_of_trip, untouched)]
+        handed: dict[int, cp_model.IntVar] = {}  # the choice that it is handed over in an OPTION
         for index in matter:
             arcs.append((node[index], node[index], self.used[index].negated()))
             first = model.new_bool_var(f"{thing} first {options[index].id}")
@@ -736,8 +738,111 @@ class _Search:
                 _when(model.add(self.start[other] >= self.start[index]), then)
                 for n in range(len(spots)):
                     _when(model.add(before[other][n] == after[index][n]), then)
-            self._pass_through(thing, index, spots, before[index], after[index])
+            given = self._pass_through(thing, index, spots, before[index], after[index])
+            if given is not None:
+                handed[index] = given
         model.add_circuit(arcs)
+        self._leave_time_to_cross(thing, matter, handed)
+
+    def _leave_time_to_cross(
+        self, thing: str, matter: Sequence[int], handed: Mapping[int, cp_model.IntVar]
+    ) -> None:
+        """An OBJECT is at hand in two PLACEs only with the time to get from one to the other.
+
+        ``handed`` holds, for each OPTION that can hand the OBJECT over, the choice that it
+        does. The path of the OBJECT already says all of this. Said outright, the solver need
+        not find it out by trying.
+
+        The OBJECT is at the PLACE where an OPTION starts, at the time it starts, where the
+        OPTION requires it and where it is handed over in it: it lies there, or a PERSON who
+        takes part has it. It gets from PLACE to PLACE only with a PERSON. So between two
+        such OPTIONs at different PLACEs lies at least the least time anything needs from
+        the one to the other, as ``_crossings`` gives it.
+
+        An OBJECT that lies at a PLACE leaves it only by a hand-over in an OPTION that
+        starts there. Whoever takes it stays in that OPTION until it is over. So where the
+        OBJECT is at hand at another PLACE, some such OPTION hands it over, early enough to
+        be over and across by then. The same holds for an OBJECT that is nowhere the FILE
+        knows of: nothing hands it over, and it is at hand nowhere.
+        """
+        model, world, options = self.model, self.world, self.file.options
+        crossing = self._crossings()
+        at_hand = [
+            (index, self.used[index])
+            for index in matter
+            if (options[index].id, thing) in world.needs
+        ]
+        at_hand += list(handed.items())
+        for (one, here), (other, there) in combinations(at_hand, 2):
+            if options[one].origin == options[other].origin:
+                continue
+            ahead = crossing.get((options[one].origin, options[other].origin))
+            back = crossing.get((options[other].origin, options[one].origin))
+            first = model.new_bool_var(f"{thing} in {options[one].id} before {options[other].id}")
+            if ahead is None:
+                model.add_bool_or([here.negated(), there.negated(), first.negated()])
+            else:
+                apart = self.start[other] >= self.start[one] + ahead
+                _when(model.add(apart), here, there, first)
+            if back is None:
+                model.add_bool_or([here.negated(), there.negated(), first])
+            else:
+                apart = self.start[one] >= self.start[other] + back
+                _when(model.add(apart), here, there, first.negated())
+        start = world.starts.get(thing, Where())
+        if (thing in world.starts_anywhere and thing not in world.starts) or start.person:
+            return  # the solver picks where it starts, or a PERSON has it
+        for index, here in at_hand:
+            if options[index].origin == start.place:
+                continue
+            early_enough: list[cp_model.IntVar] = []
+            for source, given in handed.items():
+                across = crossing.get((options[source].destination, options[index].origin))
+                if options[source].origin != start.place or source == index or across is None:
+                    continue
+                over, by = self.terms[source].fixed_start, self.terms[index].fixed_start
+                if over is None or by is None or over + self.lasts[source] + across <= by:
+                    early_enough.append(given)
+            model.add_bool_or([here.negated(), *early_enough])
+
+    def _crossings(self) -> dict[tuple[str, str], int]:
+        """The least time anything needs from one PLACE to another in this world.
+
+        A pair of PLACEs is left out where nothing gets from the one to the other. A PERSON
+        changes PLACE by a WAY or by an OPTION that moves, and an OBJECT only with a PERSON.
+        Each takes at least its shortest time. When a WAY can leave is not looked at, so
+        the real time can be longer and is never shorter.
+        """
+        if self._crossing is None:
+            file, world = self.file, self.world
+            places = [place.id for place in file.places]
+            least: dict[tuple[str, str], int] = {(place, place): 0 for place in places}
+
+            def joins(origin: str, destination: str, takes: int) -> None:
+                if takes < least.get((origin, destination), inf):
+                    least[origin, destination] = takes
+
+            for way in file.ways:
+                shortest = world.takes[way.id][0]
+                joins(way.origin, way.destination, shortest)
+                if way.both_ways:
+                    joins(way.destination, way.origin, shortest)
+            for origin in places:
+                for destination in places:
+                    if world.unlisted is None or (origin, destination) in world.unlisted:
+                        joins(origin, destination, world.unlisted_takes)
+            for index, option in enumerate(file.options):
+                if self.moves[index] and self.usable[index]:
+                    joins(option.origin, option.destination, self.lasts[index])
+            for through in places:
+                for origin in places:
+                    for destination in places:
+                        first = least.get((origin, through))
+                        then = least.get((through, destination))
+                        if first is not None and then is not None:
+                            joins(origin, destination, first + then)
+            self._crossing = least
+        return self._crossing
 
     def _pass_through(
         self,
@@ -746,12 +851,13 @@ class _Search:
         spots: Sequence[Where],
         before: Sequence[cp_model.IntVar],
         after: Sequence[cp_model.IntVar],
-    ) -> None:
+    ) -> cp_model.IntVar | None:
         """What one OPTION that happens asks of an OBJECT, and where the OBJECT is after it.
 
         ``before`` and ``after`` say, for each of ``spots``, whether the OBJECT might be
         there just before the OPTION starts, and from its start on. The first spots are the
-        PERSONs, in the FILE's order.
+        PERSONs, in the FILE's order. The result is the choice that the OBJECT is handed over
+        in the OPTION, or None where the OPTION hands nothing over.
 
         The OPTION first checks what it requires, then keeps what it keeps, and then the
         OBJECT is handed over in it. One that might keep the OBJECT leaves it in both places:
@@ -778,6 +884,7 @@ class _Search:
         # What is left to choose: which PERSON has the OBJECT handed over, where the OPTION
         # hands it over, and whether the OPTION keeps it, where it might do anything.
         gives: list[cp_model.IntVar] = []
+        given: cp_model.IntVar | None = None
         quiet: list[cp_model.LiteralT] = [used]  # the OPTION happens, with no hand-over in it
         if action in ("hands_over", "any"):
             gives = [model.new_bool_var(f"{thing} to {n} in {option.id}") for n in persons]
@@ -828,6 +935,7 @@ class _Search:
                 joined(n, *quiet)
             else:
                 same(n, *quiet)
+        return given
 
     def _rule_out(self, number: int, index: int) -> None:
         """This PERSON takes no part in this OPTION, whatever else is chosen.
