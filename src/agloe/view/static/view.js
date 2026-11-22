@@ -284,15 +284,18 @@ function drawStrip(laid) {
 }
 
 /**
- * An OPTION on the card of a WANT or of a CAPABILITY: its name, what the FILE says of the two,
- * and who is in it. `does` says whether the OPTION SATISFIES the WANT or requires the
- * CAPABILITY. The entry is a drawing of the OPTION, tied to the one FACT about the two.
+ * An entry on a card: an OPTION on the card of a WANT or of a CAPABILITY, or a BOOKING or an
+ * OFFER on the card of the rights to an OPTION. It has its name, what the FILE says of it, and
+ * who is in it or uses it, where the page says so. `of` says what the entry is a drawing of,
+ * and it is tied to its one FACT. `plain` says that the entry is drawn full: the OPTION
+ * SATISFIES the WANT or requires the CAPABILITY, or the BOOKING secures a right.
  */
-function entry(option, does, who) {
-  const item = made("li", `entry${does ? "" : " not"}${edges(option)}`);
-  item.title = [option.name, option.says, who, ...marks(option)].join("\n");
-  Object.assign(item.dataset, { of: drawingOf(option, option.option), records: tiesOf(option).join(" ") });
-  item.append(made("b", "entry-name", option.name), made("span", "entry-says", option.says), made("span", "entry-takes", who));
+function entry(thing, of, plain, who) {
+  const item = made("li", `entry${plain ? "" : " not"}${edges(thing)}`);
+  item.title = [thing.name, thing.says, ...(who ? [who] : []), ...marks(thing)].join("\n");
+  Object.assign(item.dataset, { of, records: tiesOf(thing).join(" ") });
+  item.append(made("b", "entry-name", thing.name), made("span", "entry-says", thing.says));
+  if (who) item.append(made("span", "entry-takes", who));
   return item;
 }
 
@@ -312,7 +315,7 @@ function drawWants(shown) {
     card.append(made("h3", "card-name", want.name));
     for (const words of [want.holds, want.ends]) if (words) card.append(made("p", "card-holds", words));
     const options = made("ul", "card-options");
-    for (const option of want.options) options.append(entry(option, option.degree > 0, option.takes));
+    for (const option of want.options) options.append(entry(option, drawingOf(option, option.option), option.degree > 0, option.takes));
     if (want.options.length) card.append(options);
     if (want.whole) card.append(made("p", "card-whole", want.whole));
     box.append(card);
@@ -363,7 +366,30 @@ function drawOptions(shown) {
   box.replaceChildren();
   part("options-part").hidden = !shown.options.length;
   part("options-says").textContent = shown.says;
-  for (const option of shown.options) box.append(item(option, drawingOf(option, option.id), [[option.when, option.takes, option.arrive], [option.lock, option.plan]]));
+  for (const option of shown.options) box.append(item(option, drawingOf(option, option.id), [[option.when, option.takes, option.arrive, option.right], [option.lock, option.plan]]));
+}
+
+/**
+ * The rights to the OPTIONs of the FILE: a card for each OPTION that needs a right or has one
+ * in the FILE, with its BOOKINGs and its OFFERs. A BOOKING secures a right, and is drawn full.
+ * An OFFER is a place that can still be bought. Each is a thing of its own, tied to its FACT.
+ */
+function drawRights(shown) {
+  const box = part("rights");
+  box.replaceChildren();
+  part("rights-part").hidden = !shown.rights.length;
+  part("rights-says").textContent = shown.says;
+  for (const rights of shown.rights) {
+    const card = Object.assign(made("article", `card${edges(rights)}`), { title: marks(rights).join("\n") });
+    Object.assign(card.dataset, { of: `rights:${rights.option}`, records: tiesOf(rights).join(" ") });
+    card.append(made("h3", "card-name", rights.name), made("p", "card-holds", rights.needs));
+    const entries = made("ul", "card-options");
+    for (const booking of rights.bookings) entries.append(entry(booking, `booking:${booking.id}`, true, booking.uses));
+    for (const offer of rights.offers) entries.append(entry(offer, `offer:${offer.id}`, false, offer.uses));
+    if (entries.children.length) card.append(entries);
+    card.append(made("p", "card-whole", rights.whole));
+    box.append(card);
+  }
 }
 
 /**
@@ -415,7 +441,7 @@ function drawCapabilities(shown) {
     }
     card.append(people);
     const options = made("ul", "card-options");
-    for (const option of capability.options) options.append(entry(option, option.of !== "none", option.meets ? `${option.takes} ${option.meets}` : option.takes));
+    for (const option of capability.options) options.append(entry(option, drawingOf(option, option.option), option.of !== "none", option.meets ? `${option.takes} ${option.meets}` : option.takes));
     if (capability.options.length) card.append(options);
     if (capability.whole) card.append(made("p", "card-whole", capability.whole));
     box.append(card);
@@ -431,6 +457,7 @@ const held = [
   { id: "persons-part", load: () => import("./persons.js"), name: "persons", draw: drawPersons, words: null, of: undefined },
   { id: "wants-part", load: () => import("./wants.js"), name: "wants", draw: drawWants, words: null, of: undefined },
   { id: "options-part", load: () => import("./options.js"), name: "options", draw: drawOptions, words: null, of: undefined },
+  { id: "rights-part", load: () => import("./rights.js"), name: "rights", draw: drawRights, words: null, of: undefined },
   { id: "ways-part", load: () => import("./ways.js"), name: "ways", draw: drawWays, words: null, of: undefined },
   { id: "capabilities-part", load: () => import("./capabilities.js"), name: "capabilities", draw: drawCapabilities, words: null, of: undefined },
 ];
@@ -452,7 +479,10 @@ function write(text, tied) {
   report.replaceChildren();
   tied.forEach((line, n) => {
     const words = made("span", line.warns ? "row warns" : "row", line.text);
-    if (line.step !== null) words.dataset.of = line.step;
+    // A line is about the step that it shows or warns of, and about each OFFER that it says
+    // somebody buys a place of.
+    const about = [...(line.step === null ? [] : [line.step]), ...line.offers.map((id) => `offer:${id}`)];
+    if (about.length) words.dataset.of = about.join(" ");
     if (line.record !== null) words.dataset.record = line.record;
     if (line.case !== null) words.dataset.record = `case:${line.case}`;
     report.append(words, n + 1 < tied.length ? "\n" : "");
@@ -467,8 +497,8 @@ function write(text, tied) {
  * has the one FACT about the two, so pointing at it picks out that FACT. Pointing lights up no
  * drawing of another thing, though a record or a case may be about both. `data-of` says what a
  * drawing is of: a step of the TRIP, an OPTION or a WAY that is no step, a PERSON, a WANT, a
- * CAPABILITY, what the FILE says of one PERSON and one CAPABILITY, or a FACT that the FILE
- * lists every way of some travel. A WAY that somebody takes several times is a drawing of each
+ * CAPABILITY, what the FILE says of one PERSON and one CAPABILITY, the rights to an OPTION, a
+ * BOOKING, an OFFER, or a FACT that the FILE lists every way of some travel. A WAY that somebody takes several times is a drawing of each
  * of those steps.
  *
  * The line of a record or of a case, and a time of the TRIP, are of no thing. Pointing at one

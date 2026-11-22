@@ -13,7 +13,7 @@
 //
 // Nothing here judges a TRIP. It finds what the report already says, line by line.
 
-import { casesIn, requirementsIn } from "./named.js";
+import { boughtIn, casesIn, requirementsIn, toBuyIn } from "./named.js";
 
 /** A line that shows one step of a plan: "  2:00 pm to 3:00 pm: Museum visit, Alex and Sam". */
 const STEP = /^ {2}\d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+, .+$/;
@@ -24,6 +24,10 @@ const WARNING = /^ {4}! /;
 const ONE_CASE = "The trip works if ";
 /** The line above the cases in which a trip works, where the report lists several. */
 const CASES = "The trip works in any of these cases:";
+/** A warning that says who still has to buy a right, and from which OFFER. */
+const TO_BUY = /^ {4}! .+ still ha(?:s|ve) to buy a right to this(?: if it needs one)?, from (.+)\.$/;
+/** How the line starts that gives one plan for a case: who buys which place. */
+const ONE_PLAN = "One plan that works then: ";
 /** The line above who meets what the OPTIONs of a plan require. */
 const MEETS = "Who meets the requirements:";
 
@@ -38,7 +42,8 @@ function listsOf(report) {
  * the record that it names, and the case that it states, as its place in `missing` of the
  * report as JSON. `step`, `record` and `case` are null where a line has none. `warns` says
  * that the line is a warning under its step. `meets` is null, or the place in `requirements`
- * of the report as JSON of the requirement that the line says somebody meets.
+ * of the report as JSON of the requirement that the line says somebody meets. `offers` holds
+ * the OFFERs that the line says somebody buys a place of.
  *
  * The lines of a plan are tied to steps only where there is one line for each step that the
  * view sent, in the same order: then the two are the same plan. Lines are tied to records only
@@ -46,7 +51,9 @@ function listsOf(report) {
  * only starts like an id, such as the total in a currency, is tied to nothing. Lines are tied
  * to cases only where the words state as many cases as the report as JSON holds. A line that
  * says who meets a requirement is tied to the step that its OPTION is, only where the words
- * hold one line for each requirement of the report as JSON.
+ * hold one line for each requirement of the report as JSON. A line that says who buys a place
+ * is tied to the OFFER only where the report as JSON names that OFFER for the same step, or
+ * for the same case.
  */
 export function lines(text, report, trip) {
   const all = text.split("\n");
@@ -54,16 +61,26 @@ export function lines(text, report, trip) {
   const tied = trip !== null && trip.itinerary && plan === trip.steps.length;
   let step = -1;
   let under = false; // whether this line can still be a warning under the step above it
+  const one = (text, at = null, warns = false) => ({ text, step: at, warns, record: null, case: null, meets: null, offers: [] });
   const found = all.map((line) => {
     if (tied && STEP.test(line)) {
       step += 1;
       under = true;
-      return { text: line, step, warns: false, record: null, case: null, meets: null };
+      return one(line, step);
     }
-    if (under && WARNING.test(line)) return { text: line, step, warns: true, record: null, case: null, meets: null };
+    if (under && WARNING.test(line)) return one(line, step, true);
     under = false;
-    return { text: line, step: null, warns: false, record: null, case: null, meets: null };
+    return one(line);
   });
+  // A warning that says who still has to buy a right names its OFFER after "from". It is tied
+  // to that OFFER where the report as JSON has the plan buy a place of it for the same step.
+  for (const line of found) {
+    const from = line.warns ? TO_BUY.exec(line.text) : null;
+    if (from === null) continue;
+    const named = (offer) => from[1] === offer || from[1].startsWith(`${offer}, `);
+    const bought = toBuyIn(report).filter((buy) => buy.option === trip.steps[line.step].option && named(buy.offer));
+    line.offers = [...new Set(bought.map((buy) => buy.offer))];
+  }
   for (const ids of listsOf(report)) {
     // The first place where the lines name these ids one after another.
     const names = (at) => ids.every((id, n) => at + n < found.length && found[at + n].step === null && found[at + n].record === null && found[at + n].text.startsWith(`  ${id}: `));
@@ -90,6 +107,16 @@ export function lines(text, report, trip) {
       numbered.forEach((at, n) => (found[at].case = n));
     }
   }
+  // The one plan that the report gives for a case is under the line of the case, further in.
+  // It is tied to the OFFERs that somebody buys a place of in that plan.
+  const bought = boughtIn(report);
+  found.forEach((line, at) => {
+    if (line.case === null || bought[line.case] === undefined) return;
+    const inset = (text) => text.length - text.trimStart().length;
+    for (let next = at + 1; next < found.length && found[next].text.trim() !== "" && inset(found[next].text) > inset(line.text); next += 1) {
+      if (free(found[next]) && found[next].text.trimStart().startsWith(ONE_PLAN)) found[next].offers = bought[line.case];
+    }
+  });
   // Who meets what each OPTION of the plan requires: the lines under their heading, up to the
   // first line that is not set in. A line starts with the name of its OPTION, whatever that
   // name starts with. Each is about the step that its OPTION is.

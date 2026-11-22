@@ -4,8 +4,8 @@
 // A report on a TRIP that cannot work names the FACTs, WANTs and DECISIONs that rule out every
 // plan. A report on a TRIP that depends on what the FILE does not say names, for each case in
 // which the trip works, the things that the case needs. A report that shows a plan names who
-// meets what each OPTION of the plan requires. Each part of the page marks what it shows of
-// those. Nothing here judges a TRIP: it reads what the report as JSON already holds.
+// meets what each OPTION of the plan requires, and which right each PERSON uses. Each part of
+// the page marks what it shows of those. Nothing here judges a TRIP: it reads what the report as JSON already holds.
 
 /** Names as a sentence joins them: Alex, Sam and Jo. */
 export function listed(names) {
@@ -49,6 +49,44 @@ export function requirementsIn(report) {
   const isText = (id) => typeof id === "string";
   const isOne = (each) => each !== null && typeof each === "object" && isText(each.option) && isText(each.capability) && Array.isArray(each.persons) && each.persons.every(isText);
   return Array.isArray(stated) && stated.every(isOne) ? stated : [];
+}
+
+/**
+ * Which right each PERSON uses for each OPTION of a plan, as a report states it: for each use
+ * its OPTION, its PERSON, and the BOOKING or the OFFER that gives the right (`by`). Only a
+ * report that shows a plan holds any, and a step that states none in that shape has none.
+ */
+export function usesIn(report) {
+  const steps = report !== null && typeof report === "object" && report.answer === "FEASIBLE" && Array.isArray(report.itinerary) ? report.itinerary : [];
+  const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
+  return steps.flatMap((step) => {
+    if (!isRecord(step) || typeof step.option !== "string" || !isRecord(step.rights)) return [];
+    return Object.entries(step.rights).flatMap(([person, by]) => (typeof by === "string" ? [{ option: step.option, person, by }] : []));
+  });
+}
+
+/**
+ * The places that a plan still buys, as a report states them: for each its OPTION, its OFFER,
+ * and whether somebody buys it only if the OPTION turns out to need a right. Only a report
+ * that shows a plan holds any, and a list that is not of that shape is none.
+ */
+export function toBuyIn(report) {
+  const stated = report !== null && typeof report === "object" && report.answer === "FEASIBLE" ? report.to_buy : null;
+  const isOne = (each) => each !== null && typeof each === "object" && typeof each.option === "string" && typeof each.offer === "string";
+  return Array.isArray(stated) && stated.every(isOne) ? stated : [];
+}
+
+/**
+ * The OFFERs that somebody buys a place of in the one plan that a report gives for each case
+ * in which the trip works: a list for each case, at the place of the case. Only a report with
+ * one plan for each of its cases holds any.
+ */
+export function boughtIn(report) {
+  const cases = casesIn(report);
+  const plans = cases.length && Array.isArray(report.plans) && report.plans.length === cases.length ? report.plans : [];
+  const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
+  if (!plans.every((plan) => isRecord(plan) && Array.isArray(plan.buys) && plan.buys.every((buy) => isRecord(buy) && typeof buy.offer === "string"))) return [];
+  return plans.map((plan) => [...new Set(plan.buys.map((buy) => buy.offer))]);
 }
 
 /** The OPTIONs that one of those things names: its own, and each that somebody has to buy a place for. */

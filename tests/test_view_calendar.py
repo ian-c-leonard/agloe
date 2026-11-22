@@ -1324,6 +1324,7 @@ def made(times: list[tuple[str, str | None]]) -> Trip:
         "starts_from": [],
         "ways": [],
         "complete_travel": [],
+        "rights": [],
         "capabilities": [],
         "steps": [
             {
@@ -1445,6 +1446,7 @@ def some_trip(chosen: random.Random) -> Trip:
         "starts_from": [],
         "ways": [a_way("w", "A name", places[0])],
         "complete_travel": [],
+        "rights": [],
         "capabilities": [],
         "starts": bound("trip-start"),
         "ends": bound("trip-end"),

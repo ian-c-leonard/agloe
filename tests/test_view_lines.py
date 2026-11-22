@@ -64,7 +64,7 @@ def lines_of(asked: list[dict[str, Any]]) -> list[list[Line]]:
 def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None:
     """For every example: nothing of the report is lost, and each tie is one the report makes."""
     asked = [asked_of(path) for path in FILES]
-    plans = depends = requirements = 0
+    plans = depends = requirements = purchases = 0
     for path, each, found in zip(FILES, asked, lines_of(asked), strict=True):
         name = f"{path.parent.name}/{path.stem}"
         assert "\n".join(line["text"] for line in found) == each["text"], name
@@ -115,6 +115,14 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
             # Where the FILE does not say what the OPTION requires, the line says that first.
             assert f"{step['name']} requires " in line["text"], name
             assert line["record"] is None and line["case"] is None and not line["warns"], name
+        # Each place that the plan still buys has a warning that is tied to its OFFER, and no
+        # line is tied to an OFFER that the report as JSON does not have somebody buy from.
+        to_buy = {buy["offer"] for buy in said.get("to_buy", [])}
+        in_plans = {buy["offer"] for plan in said.get("plans", []) for buy in plan["buys"]}
+        tied_to = {offer for line in found for offer in line["offers"]}
+        assert tied_to <= to_buy | in_plans, name
+        assert to_buy <= tied_to, name
+        purchases += bool(tied_to)
         # Each case in which the trip works has one line, in the order of the report as JSON.
         missing = said.get("missing", [])
         states = [line for line in found if line["case"] is not None]
@@ -127,6 +135,7 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
     assert plans > 10
     assert depends > 10
     assert requirements > 2
+    assert purchases > 2
 
 
 def test_a_line_about_a_requirement_is_tied_whatever_the_name_of_its_option_starts_with(
@@ -143,6 +152,50 @@ def test_a_line_about_a_requirement_is_tied_whatever_the_name_of_its_option_star
     meets = [line for line in found if line["meets"] is not None]
     assert [(line["meets"], line["step"]) for line in meets] == [(0, 0), (1, 1)]
     assert meets[1]["text"].startswith("  Drive back to the hotel requires ")
+
+
+def test_a_line_that_says_who_buys_a_place_is_tied_to_the_offer() -> None:
+    """Sam still has to buy a right to the Skydeck visit, from the OFFER skydeck-tickets."""
+    asked = asked_of(EXAMPLES / "a-ticket" / "not-bought-yet.json")
+    (found,) = lines_of([asked])
+    buys = [line for line in found if line["offers"]]
+    assert [(line["offers"], line["step"], line["warns"]) for line in buys] == [
+        (["skydeck-tickets"], 0, True)
+    ]
+    assert buys[0]["text"].startswith("    ! Sam still has to buy a right to this, from ")
+    # A report that names another OFFER for that step, or none, leaves the line tied to none.
+    odd: list[Any] = [
+        [{**asked["report"]["to_buy"][0], "offer": "skydeck"}],
+        [{**asked["report"]["to_buy"][0], "option": "lunch"}],
+        "skydeck-tickets",
+        [],
+    ]
+    for to_buy in odd:
+        (other,) = lines_of([{**asked, "report": {**asked["report"], "to_buy": to_buy}}])
+        assert all(line["offers"] == [] for line in other)
+    # A warning about something else names no OFFER.
+    (late,) = lines_of([asked_of(EXAMPLES / "flight-home" / "works-but-risky.json")])
+    assert any(line["warns"] for line in late)
+    assert all(line["offers"] == [] for line in late)
+
+
+def test_the_plan_that_a_report_gives_for_a_case_is_tied_to_the_offers_it_buys_from() -> None:
+    """The trip works if the FILE states what a BOOKING paid. Then Sam buys a place."""
+    asked = asked_of(EXAMPLES / "a-ticket" / "depends-on-the-receipt.json")
+    (found,) = lines_of([asked])
+    buys = [line for line in found if line["offers"]]
+    assert [(line["offers"], line["case"], line["step"]) for line in buys] == [
+        (["skydeck-tickets"], None, None)
+    ]
+    assert buys[0]["text"].startswith("  One plan that works then: Sam buys a place from ")
+    # The line of the case is above it, and is tied to the case alone.
+    (case,) = [line for line in found if line["case"] is not None]
+    assert (case["case"], case["offers"]) == (0, [])
+    # A report with no plan for each of its cases ties no line to an OFFER.
+    odd: list[Any] = [[], "x", [{"buys": [{"offer": 1}]}], [{}, {}]]
+    for plans in odd:
+        (other,) = lines_of([{**asked, "report": {**asked["report"], "plans": plans}}])
+        assert all(line["offers"] == [] for line in other)
 
 
 def test_a_warning_is_tied_to_the_step_above_it() -> None:

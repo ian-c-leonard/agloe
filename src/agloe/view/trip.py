@@ -34,6 +34,11 @@ The page is sent every WAY of the FILE: the PLACEs it goes between, whether a PE
 take it in both directions, and how long it takes. It is sent each FACT that the FILE lists
 every way of some travel: from which PLACE, to which, and within which span of time.
 
+The page is sent what the FILE says of the rights to each OPTION: whether a PERSON needs a
+right to take part, each BOOKING with the PERSONs it covers, each OFFER with its places and
+the price of one, and the FACT that the FILE lists every right to the OPTION. Who uses which
+right in a plan is for the COMPILER to say, and the page reads it from the report.
+
 The page is sent the CAPABILITIES of the FILE as well: each PERSON of whom a FACT says that
 they have the CAPABILITY or do not, each OPTION of which a FACT says what it requires of the
 CAPABILITY, and the FACT that the FILE states every one of its OPTIONs that requires it.
@@ -68,6 +73,7 @@ from agloe.file import (
     Complete,
     Duration,
     File,
+    NeedsRight,
     Option,
     Person,
     Place,
@@ -105,6 +111,7 @@ _TRIP: _Shape = {
     "options": list,
     "ways": list,
     "complete_travel": list,
+    "rights": list,
     "capabilities": list,
 }
 _WAY: _Shape = {
@@ -147,6 +154,20 @@ _WANT: _Shape = {
     "options": list,
 }
 _DELIVERY: _Shape = {"option": str, "name": str, "degree": int, "record": str}
+_RIGHTS: _Shape = {
+    "option": str,
+    "name": str,
+    "needs": (dict, _NONE),
+    "bookings": list,
+    "offers": list,
+    "complete": (dict, _NONE),
+}
+_NEEDS: _Shape = {"needed": bool, "record": str}
+_BOOKING: _Shape = {"id": str, "covers": list}
+_OFFER: _Shape = {"id": str, "places": int, "price": (dict, _NONE)}
+_MONEY: _Shape = {"amount": str, "currency": str}
+_ALL_RIGHTS: _Shape = {"record": str, "offers": list}
+_AMOUNT = re.compile(r"[0-9]+(\.[0-9]+)?")  # an amount of money, as a FILE writes one
 _CAPABILITY: _Shape = {
     "id": str,
     "name": str,
@@ -364,6 +385,7 @@ def shown(file: File, report: Report) -> Trip | None:
                 }
                 for fact in listed
             ],
+            "rights": _rights(file, names),
             "capabilities": _capabilities(file, names),
         }
     except Unwritable:
@@ -479,6 +501,57 @@ def _wants(file: File, names: Mapping[str, str]) -> list[Trip]:
             }
         )
     return wants
+
+
+def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
+    """What the FILE says of the rights to its OPTIONs, in its order of OPTIONs.
+
+    One for each OPTION of which the FILE says anything about rights. ``needs`` is the FACT
+    about whether a PERSON needs a right to take part. ``bookings`` holds each BOOKING for the
+    OPTION with the PERSONs it covers, and ``offers`` each OFFER with its places and the price
+    of one place, each in the FILE's order. ``complete`` is the FACT that the FILE lists every
+    right to the OPTION, with the OFFERs that it names. Each is None, or empty, where the FILE
+    is silent.
+    """
+    needs = {fact.option: fact for fact in file.facts if isinstance(fact, NeedsRight)}
+    rights: list[Trip] = []
+    for option in file.options:
+        need, complete = needs.get(option.id), file.rights_complete(option.id)
+        bookings, offers = file.bookings(option.id), file.offers(option.id)
+        if need is None and complete is None and not bookings and not offers:
+            continue
+        rights.append(
+            {
+                "option": option.id,
+                "name": names[option.id],
+                "needs": None if need is None else {"needed": need.needed, "record": need.id},
+                "bookings": [
+                    {
+                        "id": booking.id,
+                        # The PERSONs come in the order of the FILE, as they do in the report.
+                        "covers": [each.id for each in file.persons if each.id in booking.covers],
+                    }
+                    for booking in bookings
+                ],
+                "offers": [
+                    {
+                        "id": offer.id,
+                        "places": offer.places,
+                        "price": None
+                        if offer.price is None
+                        else {
+                            "amount": str(offer.price.amount),
+                            "currency": offer.price.currency,
+                        },
+                    }
+                    for offer in offers
+                ],
+                "complete": None
+                if complete is None
+                else {"record": complete.id, "offers": list(complete.offers)},
+            }
+        )
+    return rights
 
 
 def _capabilities(file: File, names: Mapping[str, str]) -> list[Trip]:
@@ -790,6 +863,7 @@ def holds(trip: object) -> bool:
             for step in cast("list[dict[str, object]]", steps)
         )
         and _are_wants(sent["wants"], persons, places, options)
+        and _are_rights(sent["rights"], persons, options)
         and _are_capabilities(sent["capabilities"], persons, options)
     )
 
@@ -900,6 +974,68 @@ def _is_travel_listed_in_full(travel: object, places: frozenset[str]) -> bool:
             return False
         records.append(said["record"])
     return _all_different(records) is not None
+
+
+def _are_rights(rights: object, persons: frozenset[str], options: frozenset[str]) -> bool:
+    """Whether this is what such a TRIP says of the rights to its OPTIONs.
+
+    Each OPTION of the TRIP is there once at most, and each BOOKING and each OFFER once. A
+    BOOKING covers PERSONs of the TRIP, each once. An OFFER has one place at least, and a price
+    that is an amount in a currency. A FACT that the FILE lists every right to an OPTION names
+    OFFERs for that OPTION.
+    """
+    which: list[object] = []
+    ids: list[object] = []
+    for each in cast("list[object]", rights):
+        if not _fits(each, _RIGHTS):
+            return False
+        said = cast("dict[str, object]", each)
+        needs, complete = said["needs"], said["complete"]
+        if not cast("str", said["name"]).strip():
+            return False
+        if needs is not None and (
+            not _fits(needs, _NEEDS) or not cast("dict[str, object]", needs)["record"]
+        ):
+            return False
+        on_offer: list[object] = []
+        for booking in cast("list[object]", said["bookings"]):
+            if not _fits(booking, _BOOKING):
+                return False
+            stated = cast("dict[str, object]", booking)
+            covered = _all_different(stated["covers"])
+            if not stated["id"] or covered is None or not covered or not covered <= persons:
+                return False
+            ids.append(stated["id"])
+        for offer in cast("list[object]", said["offers"]):
+            if not _fits(offer, _OFFER):
+                return False
+            stated = cast("dict[str, object]", offer)
+            if not stated["id"] or cast("int", stated["places"]) < 1:
+                return False
+            if not _is_money(stated["price"]):
+                return False
+            ids.append(stated["id"])
+            on_offer.append(stated["id"])
+        if complete is not None:
+            if not _fits(complete, _ALL_RIGHTS):
+                return False
+            closed = cast("dict[str, object]", complete)
+            named = _all_different(closed["offers"])
+            if not closed["record"] or named is None or not named <= set(on_offer):
+                return False
+        which.append(said["option"])
+    found = _all_different(which)
+    return found is not None and found <= options and _all_different(ids) is not None
+
+
+def _is_money(money: object) -> bool:
+    """Whether this is an amount of money in a currency, or None where the FILE states none."""
+    if money is None:
+        return True
+    if not _fits(money, _MONEY):
+        return False
+    said = cast("dict[str, str]", money)
+    return bool(_AMOUNT.fullmatch(said["amount"])) and bool(said["currency"].strip())
 
 
 def _are_capabilities(

@@ -61,8 +61,9 @@ FITTED = """() => {
 }"""
 # What is lit on the page: the steps of the calendar, the steps with no time beside it, the
 # marks of the strip, the lines of the report, the PERSONs, the WANTs with the OPTIONs under
-# them, the OPTIONs of the FILE, its WAYs, the travel that it lists in full, and the
-# CAPABILITIES with the PERSONs and the OPTIONs under them.
+# them, the OPTIONs of the FILE, the rights to them with their BOOKINGs and OFFERs, its WAYs,
+# the travel that it lists in full, and the CAPABILITIES with the PERSONs and the OPTIONs
+# under them.
 LIT = """() => {
   const first = (each) => each.title.split("\\n")[0];
   const all = (which) => [...document.querySelectorAll(which)];
@@ -74,6 +75,7 @@ LIT = """() => {
     wants: all("#wants .lit").map((each) => each.querySelector("h3, b").textContent),
     options: all("#options .item.lit").map((each) => each.querySelector("h3").textContent),
     persons: all("#persons .item.lit").map((each) => each.querySelector("h3").textContent),
+    rights: all("#rights .lit").map((each) => each.querySelector("h3, b").textContent),
     ways: all("#ways .item.lit").map((each) => each.querySelector("h3").textContent),
     travel: all("#travel .in-full.lit").map((each) => each.textContent),
     capabilities: all("#capabilities .lit").map((each) => each.querySelector("h3, b").textContent),
@@ -390,6 +392,7 @@ def test_pointing_ties_an_option_to_the_calendar_and_the_report(chromium: Browse
             "Can start at any time.",
             "The FILE does not say how long it takes.",
             "The FILE does not say how early people must be there.",
+            "Nobody needs a right to take part.",
             "No LOCK names it.",
         ]
         # A row shows a time, so the part says whose clocks show it.
@@ -495,6 +498,100 @@ def test_pointing_ties_a_person_to_the_report(chromium: Browser) -> None:
         case.wait_for()
         case.hover()
         lit(page, persons=["Alex"], capabilities=["driving a manual car", "Alex:"])
+
+
+def test_pointing_ties_a_booking_and_an_offer_to_the_report(chromium: Browser) -> None:
+    """Alex has a BOOKING for the Skydeck, and Sam still has to buy one of two places."""
+    with opened(chromium, EXAMPLES / "a-ticket" / "not-bought-yet.json") as page:
+        card = page.locator("#rights .card")
+        card.wait_for()
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        assert card.locator(".card-name").text_content() == "Skydeck visit"
+        assert card.locator(".card-holds").text_content() == "People need a right to take part."
+        entries = card.locator(".entry")
+        assert entries.locator(".entry-name").all_text_contents() == [
+            "alex-skydeck-ticket",
+            "skydeck-tickets",
+        ]
+        assert entries.first.locator("span").all_text_contents() == [
+            "a BOOKING that covers Alex",
+            "In the plan: Alex uses it.",
+        ]
+        assert entries.nth(1).locator("span").all_text_contents() == [
+            "an OFFER with 2 places that can still be bought, for 32.00 USD each",
+            "In the plan: Sam takes a place of it.",
+        ]
+        # The row of the OPTION says whether people need a right to it.
+        visit = page.locator("#options .item").first
+        assert (
+            "People need a right to take part." in visit.locator(".item-said p").all_text_contents()
+        )
+        # A BOOKING is a thing of its own: pointing at it lights up its lines in the report,
+        # and no step.
+        entries.first.hover()
+        found = lit(page, rights=["alex-skydeck-ticket"], marks=[], options=[])
+        assert set(ids_of(found["rows"])) == {"alex-skydeck-ticket"}
+        # The line of the BOOKING is about its OPTION too: it lights up every drawing of it.
+        page.locator("#report .row[data-record='alex-skydeck-ticket']").first.hover()
+        lit(
+            page,
+            rights=["alex-skydeck-ticket"],
+            marks=["Skydeck visit"],
+            options=["Skydeck visit"],
+        )
+        page.locator("#report .row[data-record='skydeck-tickets']").first.hover()
+        lit(page, rights=["skydeck-tickets"], marks=["Skydeck visit"])
+        # The FACT that people need a right is about the OPTION and about the rights to it.
+        page.locator("#report .row[data-record='skydeck-needs-a-ticket']").hover()
+        lit(page, rights=["Skydeck visit"], marks=["Skydeck visit"], options=["Skydeck visit"])
+        # The warning that Sam still has to buy a right is about the step and about the OFFER.
+        warning = page.locator("#report .row.warns")
+        said = warning.text_content() or ""
+        assert said.startswith("    ! Sam still has to buy a right to this, from skydeck-tickets")
+        warning.hover()
+        lit(page, rights=["skydeck-tickets"], marks=["Skydeck visit"], options=["Skydeck visit"])
+        entries.nth(1).hover()
+        found = lit(page, rights=["skydeck-tickets"], marks=[])
+        assert said in found["rows"]
+
+
+def test_the_rights_have_the_edges_of_what_the_report_names(chromium: Browser) -> None:
+    """Only Alex has a BOOKING, and a FACT says that the FILE lists every right to the visit."""
+    with opened(chromium, EXAMPLES / "a-ticket" / "cannot-work.json") as page:
+        page.locator("#rights .card.clash").wait_for()
+        clash = page.locator("#rights .entry.clash")
+        assert clash.locator(".entry-name").all_text_contents() == ["alex-skydeck-ticket"]
+        assert page.text_content("#rights .card-whole") == (
+            "The FILE lists every right to it: nobody on the trip holds another or can get one."
+        )
+        # The report shows no plan, so the page says nothing of who uses the BOOKING.
+        assert clash.locator("span").all_text_contents() == ["a BOOKING that covers Alex"]
+    # The trip works if a right is found for Sam, or if a place has a price that Sam can pay.
+    with opened(chromium, EXAMPLES / "a-ticket" / "depends-on-the-price.json") as page:
+        page.locator("#rights .card.asked").wait_for()
+        asked = page.locator("#rights .entry.asked")
+        assert asked.locator(".entry-name").all_text_contents() == ["skydeck-tickets"]
+        case = page.locator("#report .row[data-record='case:1']")
+        case.wait_for()
+        case.hover()
+        lit(page, rights=["Skydeck visit", "skydeck-tickets"])
+    # The trip works if the FILE states what a BOOKING paid. In the one plan that the report
+    # gives for that case, Sam buys a place of the OFFER.
+    with opened(chromium, EXAMPLES / "a-ticket" / "depends-on-the-receipt.json") as page:
+        page.locator("#rights .entry.asked").wait_for()
+        plan = page.locator("#report .row", has_text="One plan that works then:")
+        plan.wait_for()
+        plan.hover()
+        lit(page, rights=["skydeck-tickets"])
+        # The FILE says all there is to say of the OFFER: it has no yellow edge.
+        asked = page.locator("#rights .entry.asked")
+        assert asked.locator(".entry-name").all_text_contents() == ["alex-skydeck-ticket"]
+    # A FILE that says only that nobody needs a right has no such part on its page.
+    with opened(chromium, EXAMPLES / "a-driver" / "works.json") as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#options .item").first.wait_for()
+        assert page.locator("#rights-part").is_hidden()
 
 
 def test_pointing_ties_a_way_to_the_calendar_and_the_report(chromium: Browser) -> None:
