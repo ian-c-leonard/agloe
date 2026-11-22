@@ -16,13 +16,14 @@ import { whoIsIn } from "./who.js";
 
 /**
  * For whom a WANT is a must, and for whom a must-not. A WANT about where the TRIP ends says
- * what it asks of each: another WANT can ask other PERSONs to end somewhere else.
+ * what it asks of its holders: another WANT can ask other PERSONs to end somewhere else. It
+ * is a must for each of them.
  */
 function holdsOf(want, name, place) {
+  if (want.ends_at !== null) return `${listed(want.musts.map(name))} must end the TRIP at ${place(want.ends_at)}.`;
   const said = [];
-  const ends = want.ends_at === null ? null : ` end the TRIP at ${place(want.ends_at)}.`;
-  if (want.musts.length) said.push(ends === null ? `A must for ${listed(want.musts.map(name))}.` : `${listed(want.musts.map(name))} must${ends}`);
-  if (want.must_nots.length) said.push(ends === null ? `A must-not for ${listed(want.must_nots.map(name))}.` : `${listed(want.must_nots.map(name))} must not${ends}`);
+  if (want.musts.length) said.push(`A must for ${listed(want.musts.map(name))}.`);
+  if (want.must_nots.length) said.push(`A must-not for ${listed(want.must_nots.map(name))}.`);
   return said.join(" ");
 }
 
