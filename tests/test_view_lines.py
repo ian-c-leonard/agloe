@@ -224,6 +224,56 @@ def test_the_plan_that_a_report_gives_for_a_case_is_tied_to_the_offers_it_buys_f
     assert pot["text"] == "  the trip money: for Alex and Sam; it holds USD"
 
 
+def renamed(asked: dict[str, Any], old: str, new: str) -> dict[str, Any]:
+    """The same report, in words and as JSON, with another id in the place of one."""
+    report = json.loads(json.dumps(asked["report"]).replace(f'"{old}"', f'"{new}"'))
+    return {**asked, "text": asked["text"].replace(old, new), "report": report}
+
+
+def test_a_list_of_records_is_read_under_its_own_heading() -> None:
+    """An id can start a line about something else: here a cap has the id of a currency."""
+    asked = renamed(asked_of(EXAMPLES / "a-ticket" / "within-the-cap.json"), "trip-cap", "USD")
+    assert "\n  USD: 32.00 paid; 32.00 still to buy (skydeck-tickets)\n" in asked["text"]
+    (found,) = lines_of([asked])
+    assert [line["text"][:30] for line in found if line["record"] == "USD"] == [
+        "  USD: the TRIP spends at most",
+        "  USD: at most 200.00 USD from",
+    ]
+    # A BOOKING has the id that an earlier line starts with: here a line about an OBJECT.
+    asked = asked_of(EXAMPLES / "a-ticket" / "not-bought-yet.json")
+    first, rest = asked["text"].split("\nWhat the BOOKINGs state that they paid:\n")
+    other = "\nWhere each OBJECT is:\n  alex-skydeck-ticket: with Alex when the TRIP starts\n"
+    text = f"{first}{other}\nWhat the BOOKINGs state that they paid:\n{rest}"
+    (found,) = lines_of([{**asked, "text": text}])
+    tied = [line["text"] for line in found if line["record"] == "alex-skydeck-ticket"]
+    assert tied == [
+        "  alex-skydeck-ticket: a BOOKING for Skydeck visit covers Alex",
+        "  alex-skydeck-ticket: 32.00 USD, paid by Alex, from the trip money",
+    ]
+    # A list under no heading, or under a heading that is there twice, is tied to nothing.
+    for text in (asked["text"].replace("What the BOOKINGs state that they paid:", "Paid:"),):
+        (found,) = lines_of([{**asked, "text": text}])
+        assert [line["text"] for line in found if line["record"] == "alex-skydeck-ticket"] == [
+            "  alex-skydeck-ticket: a BOOKING for Skydeck visit covers Alex"
+        ]
+
+
+def test_the_line_of_a_budget_is_tied_though_the_page_shows_its_name_with_its_id() -> None:
+    """Two BUDGETs whose names look alike on a page come with their ids there."""
+    asked = asked_of(EXAMPLES / "a-ticket" / "depends-on-the-receipt.json")
+    trip = json.loads(json.dumps(asked["trip"]))
+    (money,) = trip["budgets"]
+    assert money["name"] == "the trip money"
+    money["name"] = "the trip money (trip-money)"
+    (found,) = lines_of([{**asked, "trip": trip}])
+    (pot,) = [line for line in found if line["about"] == ["budget:trip-money"]]
+    assert pot["text"] == "  the trip money: for Alex and Sam; it holds USD"
+    # The words hold one line for each BUDGET that the view sent, or none is tied.
+    trip["budgets"].append({**money, "id": "kitty", "name": "the kitty"})
+    (found,) = lines_of([{**asked, "trip": trip}])
+    assert all(line["about"] == [] for line in found if line["text"].startswith("  the trip"))
+
+
 def test_a_report_on_a_plan_states_each_cap_once_more_and_both_lines_are_tied_to_it() -> None:
     """The TRIP spends at most 200.00 USD from the trip money, and the plan stays under it."""
     asked = asked_of(EXAMPLES / "a-ticket" / "within-the-cap.json")

@@ -351,7 +351,7 @@ function drawPersons(shown) {
   part("persons-part").hidden = !shown.persons.length;
   part("persons-says").textContent = shown.says;
   shown.persons.forEach((person, n) => {
-    const row = item(person, `person:${person.id}`, [person.ends, [person.pays]]);
+    const row = item(person, `person:${person.id}`, [person.ends, person.pays]);
     row.classList.add("of-a-person", `p${n % HUES}`);
     box.append(row);
   });

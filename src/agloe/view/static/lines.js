@@ -33,12 +33,23 @@ const BUDGETS = " The BUDGETs of this FILE:";
 /** The line above who meets what the OPTIONs of a plan require. */
 const MEETS = "Who meets the requirements:";
 
-/** The lists of ids that a report as JSON names one after another in its words. */
+/**
+ * The lists of ids that a report as JSON names one after another in its words, each with what
+ * says that a line is the heading over that list. An id can be the id of two things, or start
+ * a line about something else: a currency, the name of an OBJECT. So a list is read only
+ * under its own heading.
+ */
 function listsOf(report) {
   const paid = Array.isArray(report?.money?.paid) ? report.money.paid.map((each) => each?.booking) : null;
   // A report on a plan states each cap once more, with what is charged to it.
   const caps = report?.answer === "FEASIBLE" && Array.isArray(report.caps) ? report.caps.map((each) => each?.cap) : null;
-  return [report?.relies_on, report?.conflict, paid, caps].filter((list) => Array.isArray(list) && list.length && list.every((id) => typeof id === "string"));
+  const lists = [
+    [report?.relies_on, (text) => /^The plan relies on these .+:$/.test(text)],
+    [report?.conflict, (text) => /^These .+ rule out every plan/.test(text)],
+    [paid, (text) => text === "What the BOOKINGs state that they paid:"],
+    [caps, (text) => text === "The caps:"],
+  ];
+  return lists.filter(([list]) => Array.isArray(list) && list.length && list.every((id) => typeof id === "string"));
 }
 
 /**
@@ -52,8 +63,9 @@ function listsOf(report) {
  *
  * The lines of a plan are tied to steps only where there is one line for each step that the
  * view sent, in the same order: then the two are the same plan. Lines are tied to records only
- * where they name a whole list of the report as JSON, one id after another. So a line that
- * only starts like an id, such as the total in a currency, is tied to nothing. Lines are tied
+ * where they name a whole list of the report as JSON, one id after another, under the heading
+ * of that list. So a line that only starts like an id, such as the total in a currency, is
+ * tied to nothing. Lines are tied
  * to cases only where the words state as many cases as the report as JSON holds. A line that
  * says who meets a requirement is tied to the step that its OPTION is, only where the words
  * hold one line for each requirement of the report as JSON. A line that says who buys a place
@@ -86,11 +98,12 @@ export function lines(text, report, trip) {
     const bought = toBuyIn(report).filter((buy) => buy.option === trip.steps[line.step].option && named(buy.offer));
     line.about = [...new Set(bought.map((buy) => `offer:${buy.offer}`))];
   }
-  for (const ids of listsOf(report)) {
-    // The first place where the lines name these ids one after another.
-    const names = (at) => ids.every((id, n) => at + n < found.length && found[at + n].step === null && found[at + n].record === null && found[at + n].text.startsWith(`  ${id}: `));
-    const at = found.findIndex((_, n) => names(n));
-    if (at >= 0) ids.forEach((id, n) => (found[at + n].record = id));
+  for (const [ids, isHeading] of listsOf(report)) {
+    // The lines under the one heading of this list, where they name its ids one after another.
+    const heads = found.flatMap((line, n) => (isHeading(line.text) ? [n] : []));
+    const at = heads.length === 1 ? heads[0] + 1 : found.length;
+    const names = ids.every((id, n) => at + n < found.length && found[at + n].step === null && found[at + n].record === null && found[at + n].text.startsWith(`  ${id}: `));
+    if (names) ids.forEach((id, n) => (found[at + n].record = id));
   }
   // The cases in which the trip works. One case is the only sentence that starts so. Several
   // are under their heading, each on a line with its number. What the report says of a case
@@ -123,14 +136,15 @@ export function lines(text, report, trip) {
     }
   });
   // The BUDGETs of the FILE, where the report states them: one to a line under their heading,
-  // in the FILE's order, each starting with its name. They are tied only where the words hold
-  // one line for each BUDGET that the view sent.
+  // in the FILE's order. They are tied only where the words hold one line for each BUDGET that
+  // the view sent. A line starts with the name of its BUDGET as the FILE spells it, which the
+  // page can show with its id added, so the names are not compared.
   const pots = trip === null ? [] : trip.budgets;
   const over = found.flatMap((line, at) => (line.text.endsWith(BUDGETS) ? [at] : []));
   if (pots.length && over.length === 1) {
     const stated = [];
     for (let at = over[0] + 1; at < found.length && found[at].text.startsWith("  "); at += 1) stated.push(at);
-    if (stated.length === pots.length && stated.every((at, n) => free(found[at]) && found[at].text.startsWith(`  ${pots[n].name}: `))) {
+    if (stated.length === pots.length && stated.every((at) => free(found[at]))) {
       stated.forEach((at, n) => (found[at].about = [`budget:${pots[n].id}`]));
     }
   }

@@ -60,7 +60,7 @@ def test_a_person_says_where_they_start_from_and_where_a_want_has_them_end() -> 
         "where": "Starts from the hotel.",
         "ends": ["Must end the TRIP at Denver."],
         # This FILE has no BUDGET, so the page says nothing of who pays.
-        "pays": None,
+        "pays": [],
         # The FACT about where Alex starts from.
         "records": ["alex-start"],
         "clash": [],
@@ -90,15 +90,23 @@ def test_a_person_says_which_budgets_they_may_draw_on() -> None:
     shown = persons_of("a-ticket/not-bought-yet")
     assert shown["says"] == PAYS
     assert [(person["name"], person["pays"]) for person in shown["persons"]] == [
-        ("Alex", "May draw on the trip money."),
-        ("Sam", "May draw on the trip money."),
-        ("Jo", "No BUDGET of the FILE lists this PERSON."),
+        ("Alex", ["May draw on the trip money."]),
+        ("Sam", ["May draw on the trip money."]),
+        ("Jo", ["No BUDGET of the FILE lists this PERSON."]),
     ]
-    # Two BUDGETs that list one PERSON are named together.
+    # Each BUDGET has a sentence of its own. So one BUDGET named "Meals and tickets" never
+    # reads like two BUDGETs named "Meals" and "tickets".
     sent = drawn(EXAMPLES / "a-ticket" / "not-bought-yet.json")
-    sent["budgets"].append({**sent["budgets"][0], "id": "kitty", "name": "the kitty"})
+    (money,) = sent["budgets"]
+    money["name"], money["persons"] = "Meals and tickets", ["alex"]
+    sent["budgets"] += [
+        {**money, "id": "meals", "name": "Meals", "persons": ["sam"]},
+        {**money, "id": "tickets", "name": "tickets", "persons": ["sam"]},
+    ]
     (shown,) = all_persons([sent])
-    assert shown["persons"][0]["pays"] == "May draw on the trip money and the kitty."
+    alex, sam, _ = shown["persons"]
+    assert alex["pays"] == ["May draw on Meals and tickets."]
+    assert sam["pays"] == ["May draw on Meals.", "May draw on tickets."]
 
 
 def test_a_person_who_must_not_end_the_trip_at_a_place_says_so() -> None:

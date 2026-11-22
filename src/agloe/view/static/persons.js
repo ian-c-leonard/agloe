@@ -9,7 +9,7 @@
 // Nothing here judges a TRIP. Where a PERSON's path begins and ends in a plan is for the
 // COMPILER to say: the page shows what the FILE states about the two.
 
-import { listed, marksBy } from "./named.js";
+import { marksBy } from "./named.js";
 
 /**
  * What the page shows of the PERSONs of a TRIP as the view sends it, or of no TRIP where the
@@ -17,7 +17,8 @@ import { listed, marksBy } from "./named.js";
  *
  * Each PERSON has their name, `where` they start from as far as the FILE says, and in `ends` a
  * sentence for each WANT that has them end the TRIP at a PLACE, or not end it there. `pays`
- * names the BUDGETs that they may draw on, and is null where the FILE has no BUDGET.
+ * holds a sentence for each BUDGET that they may draw on, or one that says no BUDGET lists
+ * them, and is empty where the FILE has no BUDGET.
  *
  * `report` is the report as JSON, where the page has one. `clash` on a PERSON holds the FACT
  * about where they start from, where the report names it as ruling out every plan, and `finds`
@@ -38,12 +39,13 @@ export function persons(trip, report = null, stated = null) {
       const at = places.get(want.ends_at);
       return want.musts.includes(id) ? [`Must end the TRIP at ${at}.`] : want.must_nots.includes(id) ? [`Must not end the TRIP at ${at}.`] : [];
     });
-  // The BUDGETs that list a PERSON can pay for what they still have to buy. A FILE with no
-  // BUDGET says nothing of who pays.
+  // The BUDGETs that list a PERSON can pay for what they still have to buy. Each has a
+  // sentence of its own: a name can hold the word that would join two. A FILE with no BUDGET
+  // says nothing of who pays.
   const paysOf = (id) => {
-    if (!trip.budgets.length) return null;
-    const pots = trip.budgets.filter((budget) => budget.persons.includes(id)).map((budget) => budget.name);
-    return pots.length ? `May draw on ${listed(pots)}.` : "No BUDGET of the FILE lists this PERSON.";
+    if (!trip.budgets.length) return [];
+    const pots = trip.budgets.filter((budget) => budget.persons.includes(id));
+    return pots.length ? pots.map((budget) => `May draw on ${budget.name}.`) : ["No BUDGET of the FILE lists this PERSON."];
   };
   const shown = trip.persons.map(({ id, name }) => {
     const fact = start.get(id) ?? null;
