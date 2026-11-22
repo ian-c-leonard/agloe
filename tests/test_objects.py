@@ -3303,14 +3303,17 @@ def a_stay_with_a_voucher(
     rights: bool = False,
     wants: Sequence[Document] = (),
     capabilities: Sequence[str] = (),
+    others: Sequence[Document] = (),
+    locks: Sequence[Document] = (),
 ) -> File:
     """Alex is LOCKed into an appointment at the hotel that requires the voucher. Sam starts
     at the station and has nothing to do. An hour before, the desk of the hotel is open.
 
     ``desk`` says when the desk is open, where that is not 9:00 am. With ``rights``, the
-    story says whether the desk needs a right.
+    story says whether the desk needs a right. ``others`` holds other OPTIONs, and ``locks``
+    other LOCKs.
     """
-    options = [stays("appointment", "hotel"), stays("desk", "hotel")]
+    options = [stays("appointment", "hotel"), stays("desk", "hotel"), *others]
     facts = [
         *at("appointment", 10),
         *(at("desk", 9) if desk is None else desk),
@@ -3326,13 +3329,12 @@ def a_stay_with_a_voucher(
     ]
     ways = [way_between("walk", "hotel", "station")]
     places = ["hotel", "station"]
-    locks = [lock("appointment", "alex")]
     return trip(
         ["alex", "sam"],
         places,
         options,
         facts,
-        locks,
+        [lock("appointment", "alex"), *locks],
         ways,
         wants,
         rights=rights,
@@ -3752,7 +3754,7 @@ def test_an_order_is_given_up_at_the_first_option_where_the_object_is_not_at_han
     for deposit_last in (False, True):
         gone = 0
         file = five_at_each_hour(deposit_last)
-        assert compiler.works(file, worst_case(file))
+        assert reference.any_works(file, worst_case(file))
         assert gone < 100
 
 
@@ -3830,5 +3832,58 @@ def test_the_first_answer_checks_the_plan_in_the_order_the_solver_found(
     for file in (a_register_and_a_voucher(), a_key_check_after_breakfast()):
         timed = gone = 0
         assert compiler.works(file, worst_case(file))
-        assert timed < 5
+        assert timed == 1
         assert gone < 100
+    # The reference checker works out the hand-overs for the solver's order itself. Here
+    # Alex has to take the voucher at the desk of the hotel, and that is found at once too.
+    carried = a_stay_with_a_voucher(
+        hands_over("desk", "voucher"),
+        *at("visit", 11),
+        requires_object("visit", "voucher"),
+        start=lies_at("voucher", "hotel"),
+        others=[stays("visit", "station")],
+        locks=[lock("visit", "alex")],
+    )
+    timed = 0
+    assert compiler.works(carried, worst_case(carried))
+    assert timed == 1
+    found = checked(carried)
+    assert [(step.option, step.handed) for step in found.itinerary if step.handed] == [
+        ("desk", (("voucher", "alex"),))
+    ]
+
+
+def test_the_first_hand_overs_are_taken_wherever_they_leave_the_object() -> None:
+    """The key lies on the desk, and the last stay requires it at the office. Two ways bring
+    it there, and they leave it with different PERSONs. The search keeps one way for each
+    PERSON, and then takes the way that the rules put first: the fewest hand-overs, and not
+    the way that starts in the OPTION listed first, or the way that was found first."""
+    base = worst_case(trip(["alex", "sam", "jo"], ["desk"], [stays("stay", "desk")], [], []))
+    names = ["first", "second", "third", "use"]
+    world = replace(
+        base,
+        needs=frozenset({("use", "key")}),
+        does={(name, "key"): "hands_over" for name in names[:3]},
+    )
+    people = ["alex", "sam", "jo"]
+
+    def by_position(option: str, person: str) -> tuple[int, int]:
+        return (names.index(option), people.index(person))
+
+    def first_hand_overs(third: tuple[str, ...], use: tuple[str, ...]) -> object:
+        visits = [
+            ("first", ("sam",), "desk"),
+            ("second", ("alex",), "desk"),
+            ("third", third, "lobby"),
+            ("use", use, "office"),
+        ]
+        return reference._first_hand_overs(  # pyright: ignore[reportPrivateUsage]
+            world, "key", visits, [Where(place="desk")], by_position
+        )
+
+    # Alex takes it in the second stay and brings it: one hand-over. Or Sam takes it in the
+    # first stay and hands it to Jo in the third: two, and they start in the stay listed first.
+    assert first_hand_overs(("sam", "jo"), ("alex", "jo")) == ((1, 0),)
+    # Sam takes it in the first stay and brings it: one hand-over. Or Alex takes it in the
+    # second and hands it to Jo in the third: two, and that way is found before the other.
+    assert first_hand_overs(("alex", "jo"), ("sam", "jo")) == ((0, 1),)

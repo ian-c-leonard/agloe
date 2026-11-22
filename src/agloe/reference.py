@@ -1938,28 +1938,18 @@ def _ordered_by(
     happening: Sequence[int],
     thing: str,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    """The OPTIONs of a plan that have to do with one OBJECT, and those it puts in an order.
+    """The OPTIONs of a plan that require one OBJECT, and those that it puts in an order.
 
-    The first are the OPTIONs that require it or do something with it, as the FILE lists
-    them. The second are those that require it or can move it. An OBJECT that no OPTION of
-    the plan can move stays where it starts. So the order of the OPTIONs that require it
-    changes nothing, and it puts none in an order.
+    Both are by position in the FILE. The second are the OPTIONs that require it or can
+    move it. An OBJECT that no OPTION of the plan can move stays where it starts. So the
+    order of the OPTIONs that require it changes nothing, and it puts none in an order.
     """
     options = file.options
-    touched = tuple(
-        index
-        for index in happening
-        if (options[index].id, thing) in world.needs or (options[index].id, thing) in world.does
-    )
+    requiring = tuple(index for index in happening if (options[index].id, thing) in world.needs)
     can_move = _can_move(file, world, who, happening, thing)
     if not can_move:
-        return touched, ()
-    matters = tuple(
-        index
-        for index in happening
-        if (options[index].id, thing) in world.needs or index in can_move
-    )
-    return touched, matters
+        return requiring, ()
+    return requiring, tuple(index for index in happening if index in requiring or index in can_move)
 
 
 def _as_chain(
@@ -2006,7 +1996,7 @@ def _chain_in_order(
     gaps: list[tuple[int, int, int]] = []
     ranked: list[_Ranked] = []
     for thing in required:
-        touched, matters = _ordered_by(file, world, who, happening, thing)
+        requiring, matters = _ordered_by(file, world, who, happening, thing)
         order = sorted(matters, key=place.__getitem__)
         gaps += [(before, after, 0) for before, after in pairwise(order)]
         if thing in world.brought:
@@ -2014,7 +2004,7 @@ def _chain_in_order(
             continue
         visits = [
             (options[index].id, who[index], options[index].origin)
-            for index in (order if matters else touched)
+            for index in (order if matters else requiring)
         ]
         found = _first_hand_overs(world, thing, visits, _begins(file, world, thing), by_position)
         if found is None:
@@ -2041,7 +2031,7 @@ def _orders_together(
     people = {person.id: number for number, person in enumerate(file.persons)}
     place_of = {option.id: number for number, option in enumerate(options)}
     each = [_ordered_by(file, world, who, happening, thing) for thing in required]
-    touched = [theirs for theirs, _ in each]
+    requiring = [theirs for theirs, _ in each]
     matters = [theirs for _, theirs in each]
     moved = [bool(theirs) for theirs in matters]
 
@@ -2110,7 +2100,7 @@ def _orders_together(
             yield from go((), matters[number], begins)
             return
         if number not in unordered:
-            visits = [visit(index) for index in touched[number]]
+            visits = [visit(index) for index in requiring[number]]
             starts = _begins(file, world, thing)
             found = _first_hand_overs(world, thing, visits, starts, by_position)
             unordered[number] = () if brought else found
