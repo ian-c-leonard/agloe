@@ -371,11 +371,13 @@ function write(text, tied) {
 }
 
 /**
- * Pointing at a drawing lights up every drawing of the same thing and what the report says of
- * it: the marks of a step, its line in the plan, what the report warns of there, and the lines
- * of the records and of the cases that are about it. It lights up no drawing of another thing,
- * though a record or a case may be about both. `data-of` says what a drawing is of: a step of
- * the TRIP, an OPTION that is no step, or a WANT.
+ * Pointing at a drawing lights up every drawing of the same thing, and the lines of the report
+ * that the drawing pointed at is tied to: the line of its step in the plan, what the report
+ * warns of there, and the lines of its own records and cases. A drawing has the records of
+ * what it shows. A mark and a row have every record about their OPTION. An OPTION under a WANT
+ * has the one FACT about the two, so pointing at it picks out that FACT. Pointing lights up no
+ * drawing of another thing, though a record or a case may be about both. `data-of` says what a
+ * drawing is of: a step of the TRIP, an OPTION that is no step, or a WANT.
  *
  * The line of a record or of a case, and a time of the TRIP, are of no thing. Pointing at one
  * lights up everything that is tied to it. A drawing that is tied to it is a drawing of what
