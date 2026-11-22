@@ -7,11 +7,11 @@
 //     of each case in which it says the trip works, as on the page.
 import { readFileSync } from "node:fs";
 import { calendar } from "../src/agloe/view/static/calendar.js";
-import { casesOf, lines, warningsOf } from "../src/agloe/view/static/lines.js";
+import { statedIn, lines, warningsOf } from "../src/agloe/view/static/lines.js";
 
 const asked = JSON.parse(readFileSync(0, "utf8"));
 const laid = asked.map(({ trip, report, text }) => {
   const tied = text === null ? [] : lines(text, report, trip);
-  return calendar(trip, report, warningsOf(tied), casesOf(tied));
+  return calendar(trip, report, warningsOf(tied), statedIn(tied));
 });
 process.stdout.write(JSON.stringify(laid));
