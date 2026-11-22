@@ -18,12 +18,13 @@
     <ul class="problems" id="problems" hidden></ul>
     <p class="note" id="note"></p>
   </section>
+  <div class="drawings" id="drawings" tabindex="0" aria-label="What the page draws of the FILE">
   <section class="calendar-part" id="calendar-part" hidden>
     <h2>Calendar</h2>
     <p class="says" id="calendar-says"></p>
     <div class="strip" id="strip" hidden></div>
     <p class="says" id="strip-says" hidden></p>
-    <div class="calendar" id="calendar" hidden></div>
+    <div class="calendar" id="calendar" tabindex="0" aria-label="The calendar" hidden></div>
     <p class="says" id="calendar-untimed" hidden></p>
     <p class="key" id="calendar-key" hidden>
       <span><i class="key-box locked"></i>a LOCK names the PERSON</span>
@@ -76,9 +77,10 @@
     <p class="says" id="objects-says"></p>
     <div class="cards" id="objects"></div>
   </section>
+  </div>
   <section class="report-part" id="report-part" hidden>
-    <h2>The COMPILER's report</h2>
-    <pre id="report"></pre>
+    <h2 id="report-heading">The COMPILER's report</h2>
+    <pre id="report" tabindex="0" aria-labelledby="report-heading"></pre>
   </section>
 </main>
 </body>

@@ -131,6 +131,30 @@ INSIDE = """(name) => {
     down: mark.top >= -1 && mark.bottom <= innerHeight + 1,
   };
 }"""
+# Where the report and the drawings are in the window, and which lines of the report that are
+# lit are wholly inside the box of the report.
+PLACED = """() => {
+  const box = (id) => document.getElementById(id).getBoundingClientRect();
+  const sides = ({ left, right, top, bottom }) => ({ left, right, top, bottom });
+  const report = box("report");
+  const lit = [...document.querySelectorAll("#report .row.lit")];
+  // A line is shown where it is inside the box of the report and inside the window.
+  const inside = (row) => {
+    const at = row.getBoundingClientRect();
+    return at.top >= Math.max(report.top, 0) && at.bottom <= Math.min(report.bottom, innerHeight);
+  };
+  const text = document.getElementById("report");
+  return {
+    report: sides(box("report-part")),
+    drawings: sides(box("drawings")),
+    lit: lit.length,
+    shown: lit.filter(inside).length,
+    tall: innerHeight,
+    scrolls: text.scrollHeight > text.clientHeight,
+    page: scrollY,
+    at: text.scrollTop,
+  };
+}"""
 # Whether what is lit on the page is what a test expects of it.
 IS_LIT = f"""(expected) => {{
   const lit = ({LIT})();
@@ -751,6 +775,151 @@ def test_pointing_ties_an_object_to_the_calendar_and_the_report(chromium: Browse
         page.locator("#report .row").first.wait_for()
         page.locator("#options .item").first.wait_for()
         assert page.locator("#objects-part").is_hidden()
+
+
+def test_on_a_wide_window_the_report_stays_beside_the_drawings(chromium: Browser) -> None:
+    """The page fills the window, and the drawings and the report each scroll by themselves."""
+    path = EXAMPLES / "the-bags" / "they-collect-them.json"
+    to_its_end = (
+        "() => { const r = document.getElementById('report'); r.scrollTop = r.scrollHeight; }"
+    )
+    with opened(chromium, path, wide=1728, tall=700) as page:
+        page.locator("#objects .card").wait_for()
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        placed = page.evaluate(PLACED)
+        # The report is to the right of the drawings, and both are in the window from top to
+        # bottom. The page itself does not scroll.
+        assert placed["report"]["left"] >= placed["drawings"]["right"]
+        assert abs(placed["report"]["top"] - placed["drawings"]["top"]) < 2
+        for pane in (placed["report"], placed["drawings"]):
+            assert pane["top"] >= 0 and pane["bottom"] <= placed["tall"]
+        assert page.evaluate("() => document.documentElement.scrollHeight <= innerHeight")
+        # The drawings scroll by themselves: the last of them comes into view, and the report
+        # and the answer stay where they are.
+        page.locator("#objects .card-name").scroll_into_view_if_needed()
+        assert page.locator("#objects .card-name").is_visible()
+        assert page.evaluate("() => document.getElementById('drawings').scrollTop") > 0
+        assert page.evaluate(PLACED)["report"] == placed["report"]
+        assert page.locator("#line").bounding_box() is not None
+        # The report is scrolled to its end, where no line about where Alex starts from is.
+        # Pointing at Alex brings that line into view there.
+        page.evaluate(to_its_end)
+        page.locator("#persons .item").first.hover()
+        found = lit(page, persons=["Alex"])
+        assert ids_of(found["rows"]) == ["alex-start"]
+        page.wait_for_function(f"() => ({PLACED})().shown === 1")
+        # Pointing at the OBJECT lights up six lines. One is in view already, so nothing moves.
+        before = page.evaluate(PLACED)["at"]
+        page.locator("#objects .card-name").hover()
+        lit(page, objects=["the bags"])
+        placed = page.evaluate(PLACED)
+        assert (placed["lit"], placed["shown"] > 0, placed["at"]) == (6, True, before)
+        # A line of the report that is pointed at stays where it is.
+        row = page.locator("#report .row[data-record='flight-needs-the-bags']")
+        row.scroll_into_view_if_needed()
+        before = row.bounding_box()
+        row.hover()
+        lit(page, objects=["Flight home"], marks=["Flight home"])
+        assert row.bounding_box() == before
+    # On a shorter and narrower window that is still wide, pointing at where the TRIP starts
+    # brings its line into view. Only the report moves, so what is under the pointer is still
+    # what was pointed at.
+    with opened(chromium, path, wide=1400, tall=700) as page:
+        page.locator("#report .row").first.wait_for()
+        starts = page.locator("#calendar .bound-says").first
+        starts.wait_for()
+        starts.hover()
+        page.wait_for_function(f"() => ({PLACED})().shown === 1")
+        placed = page.evaluate(PLACED)
+        assert (placed["lit"], placed["page"]) == (1, 0)
+        assert page.evaluate("() => [...document.querySelectorAll(':hover')].pop().className") == (
+            "bound-says lit"
+        )
+        # The reader scrolls the report to its end. Moving on within the same drawing leaves
+        # the report where the reader put it.
+        alex = page.locator("#persons .item").first
+        alex.locator(".item-name").hover()
+        lit(page, persons=["Alex"])
+        page.wait_for_function(f"() => ({PLACED})().shown === 1")
+        page.evaluate(to_its_end)
+        end = page.evaluate(PLACED)["at"]
+        assert end > 0
+        alex.locator(".item-where").hover()
+        lit(page, persons=["Alex"])
+        assert page.evaluate(PLACED)["at"] == end
+        # The keyboard reaches both panes, and End takes the report to its last line.
+        for pane in ("#drawings", "#report", "#calendar"):
+            assert page.locator(pane).get_attribute("tabindex") == "0"
+        page.evaluate("() => { document.getElementById('report').scrollTop = 0; }")
+        page.locator("#drawings").focus()
+        for _ in range(4):
+            page.keyboard.press("Tab")
+            if page.evaluate("() => document.activeElement.id") == "report":
+                break
+        assert page.evaluate("() => document.activeElement.id") == "report"
+        page.keyboard.press("End")
+        page.wait_for_function(
+            "() => { const r = document.getElementById('report');"
+            " return r.scrollTop + r.clientHeight >= r.scrollHeight - 1; }"
+        )
+    # The line of a WAY and its name beside it are one drawing. On a short window no line
+    # about the WAY is in view at the end of the report. The reader's scrolling stands while
+    # the pointer moves from the name to the line.
+    with opened(chromium, path, wide=1400, tall=500) as page:
+        page.locator("#report .row").first.wait_for()
+        name = page.locator("#calendar .way-name").first
+        name.hover()
+        page.wait_for_function("() => document.querySelector('#calendar .way-name.lit') !== null")
+        page.evaluate(to_its_end)
+        placed = page.evaluate(PLACED)
+        assert (placed["shown"], placed["at"] > 0) == (0, True)
+        line = page.locator(f"#calendar .mark.way[data-of='{name.get_attribute('data-of')}']")
+        line.locator(".stripe").first.hover()
+        page.wait_for_function("() => document.querySelector('#calendar .stripe:hover') !== null")
+        assert page.locator("#calendar .way-name.lit").count() == 1
+        assert page.evaluate(PLACED)["at"] == placed["at"]
+    # A shallow window keeps panes that a reader can use: the whole of it scrolls instead.
+    with opened(chromium, path, wide=1400, tall=260) as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        placed = page.evaluate(PLACED)
+        assert placed["drawings"]["bottom"] - placed["drawings"]["top"] >= 300
+        page.locator("#calendar .mark").first.hover()
+        lit(page, marks=["Museum visit"])
+    # A short report, at the top of the page: the one line about where the TRIP starts is
+    # shown in the window once it is pointed at.
+    with opened(chromium, EXAMPLES / "the-times-of-the-trip" / "works.json", 1400, 700) as page:
+        page.locator("#report .row").first.wait_for()
+        starts = page.locator("#calendar .bound-says").first
+        starts.wait_for()
+        starts.hover()
+        page.wait_for_function(f"() => ({PLACED})().shown === 1")
+        assert page.evaluate(PLACED)["page"] == 0
+    # On a narrower window the page scrolls as a whole: the report is below the drawings, and
+    # has no scrolling of its own.
+    with opened(chromium, path, wide=1280, tall=700) as page:
+        page.locator("#objects .card").wait_for()
+        page.locator("#report .row").first.wait_for()
+        placed = page.evaluate(PLACED)
+        assert placed["report"]["top"] >= placed["drawings"]["bottom"]
+        assert placed["scrolls"] is False
+        assert page.evaluate("() => document.documentElement.scrollHeight > innerHeight")
+
+
+def test_the_keyboard_moves_a_calendar_that_is_wider_than_its_room(
+    chromium: Browser, tmp_path: Path
+) -> None:
+    """A train just after midnight, and brunch two weeks later: more days than fit side by side."""
+    with opened(chromium, written(tmp_path, crowded()), wide=1400, tall=700) as page:
+        calendar = page.locator("#calendar")
+        page.locator("#calendar .mark").first.wait_for()
+        assert calendar.get_attribute("aria-label") == "The calendar"
+        box = "document.getElementById('calendar')"
+        assert page.evaluate(f"() => {box}.scrollWidth > {box}.clientWidth")
+        calendar.focus()
+        page.keyboard.press("ArrowRight")
+        page.wait_for_function(f"() => {box}.scrollLeft > 0")
 
 
 def test_pointing_ties_a_way_to_the_calendar_and_the_report(chromium: Browser) -> None:
