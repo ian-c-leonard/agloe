@@ -205,10 +205,29 @@ def test_every_example_is_sent_as_a_trip_that_a_page_can_draw(path: Path) -> Non
         rights = said_of[each.id]
         assert (None if rights["needs"] is None else rights["needs"]["needed"]) is needed
         assert [booking["id"] for booking in rights["bookings"]] == [fact.id for fact in bookings]
+        for booking, fact in zip(rights["bookings"], bookings, strict=True):
+            assert booking["paid"] == (
+                None
+                if fact.paid is None
+                else {
+                    "amount": str(fact.paid.money.amount),
+                    "currency": fact.paid.money.currency,
+                    "budget": fact.paid.budget,
+                    "by": fact.paid.by,
+                }
+            )
         assert [(offer["id"], offer["places"]) for offer in rights["offers"]] == [
             (fact.id, fact.places) for fact in offers
         ]
         assert (rights["complete"] is None) is (complete is None)
+    # Every BUDGET of the FILE is sent, in the FILE's order, with each cap on it.
+    assert [budget["id"] for budget in sent["budgets"]] == [each.id for each in file.budgets]
+    for budget, pot in zip(sent["budgets"], file.budgets, strict=True):
+        assert budget["persons"] == [each.id for each in file.persons if each.id in pot.persons]
+        assert budget["currencies"] == list(pot.currencies)
+        assert [(cap["id"], cap["limit"]["currency"]) for cap in budget["caps"]] == [
+            (cap.id, currency) for (id, currency), cap in file.caps.items() if id == pot.id
+        ]
     # Every CAPABILITY of the FILE is sent, in the FILE's order, with each FACT about it.
     assert [each["id"] for each in sent["capabilities"]] == [each.id for each in file.capabilities]
     for capability in sent["capabilities"]:
@@ -604,7 +623,19 @@ def test_the_rights_to_each_option_are_sent_as_far_as_the_file_says() -> None:
         "option": "skydeck",
         "name": "Skydeck visit",
         "needs": {"needed": True, "record": "skydeck-needs-a-ticket"},
-        "bookings": [{"id": "alex-skydeck-ticket", "covers": ["alex"]}],
+        "bookings": [
+            {
+                "id": "alex-skydeck-ticket",
+                "covers": ["alex"],
+                # What the BOOKING paid, from which BUDGET, and who paid.
+                "paid": {
+                    "amount": "32.00",
+                    "currency": "USD",
+                    "budget": "trip-money",
+                    "by": "alex",
+                },
+            }
+        ],
         "offers": [
             {"id": "skydeck-tickets", "places": 2, "price": {"amount": "32.00", "currency": "USD"}}
         ],
@@ -624,6 +655,34 @@ def test_the_rights_to_each_option_are_sent_as_far_as_the_file_says() -> None:
     # An OPTION of which the FILE says nothing about rights is not among them.
     file = trip(["alex"], ["pier"], [stays("swim", "pier")], [], [], rights=True)
     assert sent_for(file, Report(Answer.UNDETERMINED))["rights"] == []
+
+
+def test_the_budgets_of_the_file_are_sent_with_their_caps() -> None:
+    """The trip money is for Alex and Sam, and the TRIP spends at most 200.00 USD from it."""
+    sent = drawn(EXAMPLES / "a-ticket" / "within-the-cap.json")
+    assert sent["budgets"] == [
+        {
+            "id": "trip-money",
+            "name": "the trip money",
+            "persons": ["alex", "sam"],
+            "currencies": ["USD"],
+            "caps": [{"id": "trip-cap", "limit": {"amount": "200.00", "currency": "USD"}}],
+        }
+    ]
+    # A BUDGET with no cap has none, and a FILE with no BUDGET is sent none.
+    (money,) = drawn(EXAMPLES / "a-ticket" / "not-bought-yet.json")["budgets"]
+    assert money["caps"] == []
+    assert drawn(EXAMPLES / "flight-home" / "works.json")["budgets"] == []
+    # A BOOKING that states no payment has none, and one can leave out the BUDGET and who paid.
+    (skydeck, *_) = drawn(EXAMPLES / "a-ticket" / "depends-on-the-receipt.json")["rights"]
+    assert [booking["paid"] for booking in skydeck["bookings"]] == [None]
+    (skydeck, *_) = drawn(EXAMPLES / "a-ticket" / "works.json")["rights"]
+    assert skydeck["bookings"][0]["paid"] == {
+        "amount": "32.00",
+        "currency": "USD",
+        "budget": None,
+        "by": "alex",
+    }
 
 
 def test_the_capabilities_of_the_file_are_sent_with_who_has_each_and_what_requires_it() -> None:
@@ -1744,7 +1803,7 @@ RIGHTS: dict[str, Any] = {
     "option": "night",
     "name": "night",
     "needs": {"needed": True, "record": "night-needs-a-room"},
-    "bookings": [{"id": "room", "covers": ["alex"]}],
+    "bookings": [{"id": "room", "covers": ["alex"], "paid": None}],
     "offers": [{"id": "rooms", "places": 2, "price": {"amount": "120.00", "currency": "USD"}}],
     "complete": {"record": "every-room", "offers": ["rooms"]},
 }
@@ -1752,6 +1811,63 @@ RIGHTS: dict[str, Any] = {
 
 # The same OPTION once more, with no BOOKING and no OFFER.
 NO_MORE_RIGHTS: dict[str, Any] = {**RIGHTS, "bookings": [], "offers": [], "complete": None}
+
+
+BUDGET: dict[str, Any] = {
+    "id": "pot",
+    "name": "the pot",
+    "persons": ["alex", "sam"],
+    "currencies": ["USD", "EUR"],
+    "caps": [{"id": "pot-cap", "limit": {"amount": "500.00", "currency": "USD"}}],
+}
+BUDGET_WITH_NO_CAP: dict[str, Any] = {**BUDGET, "caps": []}
+PAID: dict[str, Any] = {"amount": "120.00", "currency": "USD", "budget": "pot", "by": "alex"}
+
+
+def _budget(**other: object) -> Callable[[Trip], None]:
+    """The TRIP gets one BUDGET, which is good but for these parts."""
+    return _set("budgets", to=[{**BUDGET, **other}])
+
+
+def _paid(**other: object) -> Callable[[Trip], None]:
+    """The TRIP gets one BUDGET, and a BOOKING whose payment is good but for these parts."""
+
+    def change(sent: Trip) -> None:
+        _budget()(sent)
+        _booking(paid={**PAID, **other})(sent)
+
+    return change
+
+
+def _paid_is(other: object) -> Callable[[Trip], None]:
+    """The TRIP gets one BUDGET, and a BOOKING with this in the place of what it paid."""
+
+    def change(sent: Trip) -> None:
+        _budget()(sent)
+        _booking(paid=other)(sent)
+
+    return change
+
+
+def test_a_trip_with_a_budget_and_a_payment_is_a_trip() -> None:
+    sent = good()
+    # The FILE has one BUDGET, for Alex and Sam, with no cap.
+    (money,) = sent["budgets"]
+    assert (money["id"], money["persons"], money["caps"]) == ("money", ["alex", "sam"], [])
+    _budget()(sent)
+    assert holds(sent)
+    # A BUDGET that lists nobody, and has no cap.
+    _budget(persons=[], caps=[])(sent)
+    assert holds(sent)
+    # A cap in each currency that the BUDGET holds.
+    euros = {"id": "pot-cap-eur", "limit": {"amount": "300", "currency": "EUR"}}
+    _budget(caps=[BUDGET["caps"][0], euros])(sent)
+    assert holds(sent)
+    # A payment from the BUDGET, and one that names no BUDGET and nobody who paid.
+    _paid()(sent)
+    assert holds(sent)
+    _paid(budget=None, by=None)(sent)
+    assert holds(sent)
 
 
 def _rights(**other: object) -> Callable[[Trip], None]:
@@ -2033,6 +2149,32 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "a fact that the rights are all listed that names an offer twice": _rights(
         complete={"record": "every-room", "offers": ["rooms", "rooms"]}
     ),
+    "no budgets": _drop("budgets"),
+    "budgets that are no list": _set("budgets", to={}),
+    "a budget that is no record": _set("budgets", to=["pot"]),
+    "a budget with one thing more": _budget(more=1),
+    "a budget with a blank name": _budget(name=" "),
+    "two budgets with one id": _set("budgets", to=[BUDGET, BUDGET_WITH_NO_CAP]),
+    "a budget for a person the trip does not have": _budget(persons=["jo"]),
+    "a budget that lists a person twice": _budget(persons=["alex", "alex"]),
+    "a budget that holds no currency": _budget(currencies=[]),
+    "a budget that holds a currency twice": _budget(currencies=["USD", "USD"]),
+    "a budget that holds a blank currency": _budget(currencies=[" "]),
+    "caps that are no list": _budget(caps={}),
+    "a cap that is no record": _budget(caps=["pot-cap"]),
+    "a cap with no id": _budget(caps=[{**BUDGET["caps"][0], "id": ""}]),
+    "a cap with no limit": _budget(caps=[{"id": "pot-cap", "limit": None}]),
+    "a cap with a limit that is no amount": _budget(
+        caps=[{"id": "pot-cap", "limit": {"amount": "lots", "currency": "USD"}}]
+    ),
+    "two caps in one currency": _budget(
+        caps=[BUDGET["caps"][0], {**BUDGET["caps"][0], "id": "pot-cap-2"}]
+    ),
+    "a payment that is a number": _paid_is(120),
+    "a payment with one thing more": _paid(more=1),
+    "a payment that is no amount": _paid(amount="-1"),
+    "a payment from a budget the trip does not have": _paid(budget="purse"),
+    "a payment by a person the trip does not have": _paid(by="jo"),
     "no capabilities": _drop("capabilities"),
     "capabilities that are no list": _set("capabilities", to={}),
     "a capability that is no record": _set("capabilities", to=["driving"]),

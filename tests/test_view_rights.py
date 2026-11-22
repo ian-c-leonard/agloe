@@ -65,7 +65,11 @@ def test_the_rights_to_an_option_say_who_has_one_and_what_is_on_offer() -> None:
         {
             "id": "alex-skydeck-ticket",
             "name": "alex-skydeck-ticket",
-            "says": "a BOOKING that covers Alex",
+            # What the BOOKING paid, who paid, and the BUDGET that the money came from.
+            "says": (
+                "a BOOKING that covers Alex; its payment: 32.00 USD, paid by Alex,"
+                " from the trip money"
+            ),
             # The report says which right each PERSON uses, and the page says the same.
             "uses": "In the plan: Alex uses it.",
             "records": ["alex-skydeck-ticket"],
@@ -194,6 +198,40 @@ def test_who_uses_a_right_is_said_only_where_the_report_names_them() -> None:
         ] * 2
 
 
+def test_a_booking_says_what_it_paid_as_far_as_the_file_says() -> None:
+    def said(name: str) -> list[str]:
+        (skydeck,) = rights_of(f"a-ticket/{name}")["rights"]
+        return [booking["says"] for booking in skydeck["bookings"]]
+
+    # A payment that names who paid, and no BUDGET.
+    assert said("works") == [
+        "a BOOKING that covers Alex; its payment: 32.00 USD, paid by Alex",
+        "a BOOKING that covers Sam; its payment: 32.00 USD, paid by Sam",
+    ]
+    # The FILE has a cap, and the BOOKING states no payment: no cap can be shown to hold.
+    assert said("depends-on-the-receipt") == ["a BOOKING that covers Alex; it states no payment"]
+    # A FILE with no cap says nothing of a payment that a BOOKING does not state.
+    sent = drawn(STORY / "depends-on-the-receipt.json")
+    for budget in sent["budgets"]:
+        budget["caps"] = []
+    (shown,) = all_rights([sent])
+    assert [booking["says"] for booking in shown["rights"][0]["bookings"]] == [
+        "a BOOKING that covers Alex"
+    ]
+    # A payment of nothing says so.
+    sent = drawn(STORY / "works.json")
+    sent["rights"][0]["bookings"][0]["paid"] = {
+        "amount": "0.00",
+        "currency": "USD",
+        "budget": None,
+        "by": None,
+    }
+    (shown,) = all_rights([sent])
+    assert shown["rights"][0]["bookings"][0]["says"] == (
+        "a BOOKING that covers Alex; its payment: nothing"
+    )
+
+
 def test_a_place_bought_only_if_the_option_needs_a_right_says_so(tmp_path: Path) -> None:
     """The FILE does not say whether the Skydeck needs a right. Sam has none."""
     content = json.loads((STORY / "not-bought-yet.json").read_text())
@@ -237,7 +275,7 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report() -> None:
         [found for _, found, _ in asked],
         [words for _, _, words in asked],
     )
-    bookings = offers = sets = uses = 0
+    bookings = offers = sets = uses = payments = 0
     for path, (sent, found, words), each in zip(FILES, asked, shown, strict=True):
         file = read(path)
         name = f"{path.parent.name}/{path.stem}"
@@ -268,9 +306,18 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report() -> None:
                 # Where the report has a line about this BOOKING, the page says the same.
                 if f"  {booking['id']}: a BOOKING" in words:
                     bookings += 1
-                    covered = booking["says"][len("a BOOKING that covers ") :]
+                    said = booking["says"][len("a BOOKING that covers ") :]
+                    covered, _, payment = said.partition("; ")
                     stated = f"  {booking['id']}: a BOOKING for {called} covers {covered}"
                     assert stated in words, name
+                    # A report on a FILE with a cap says what the BOOKING paid on that line.
+                    if file.caps:
+                        assert f"{stated}; {payment}" in words, name
+                # Where the report lists what the BOOKINGs paid, the page says the same.
+                paid = booking["says"].partition("; its payment: ")[2]
+                if paid and "What the BOOKINGs state that they paid:" in words:
+                    payments += 1
+                    assert f"  {booking['id']}: {paid}" in words, name
             for offer in rights["offers"]:
                 if f"  {offer['id']}: an OFFER" in words:
                     offers += 1
@@ -293,5 +340,6 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report() -> None:
                 assert f"  {complete.id}: t{said[1:-1]}" in words, name
         assert set(by_option) <= {option.id for option in file.options}, name
     assert min(bookings, uses) > 5
+    assert payments > 2
     # Few examples have an OFFER, or a FACT that the FILE lists every right.
     assert min(offers, sets) > 1

@@ -19,6 +19,11 @@ FILES = sorted(
     path for path in EXAMPLES.rglob("*.json") if not path.name.endswith(".expected.json")
 )
 SAYS = "Every PERSON of the FILE, with where the FILE says they start from."
+# In a FILE that has a BUDGET.
+PAYS = (
+    "Every PERSON of the FILE, with where the FILE says they start from and which BUDGETs they"
+    " may draw on."
+)
 ENDS = " Where a WANT has a PERSON end the TRIP at a PLACE, the row says so."
 RED = " A red edge marks what the report names among what rules out every plan."
 YELLOW = " A yellow edge marks what the report names in what the FILE does not say."
@@ -54,6 +59,8 @@ def test_a_person_says_where_they_start_from_and_where_a_want_has_them_end() -> 
         "name": "Alex",
         "where": "Starts from the hotel.",
         "ends": ["Must end the TRIP at Denver."],
+        # This FILE has no BUDGET, so the page says nothing of who pays.
+        "pays": None,
         # The FACT about where Alex starts from.
         "records": ["alex-start"],
         "clash": [],
@@ -76,6 +83,22 @@ def test_a_person_of_whom_the_file_says_nothing_says_so() -> None:
         ("Sam", UNSAID, []),
     ]
     assert all(person["records"] == [] for person in shown["persons"])
+
+
+def test_a_person_says_which_budgets_they_may_draw_on() -> None:
+    """The trip money is for Alex and Sam. No BUDGET lists Jo."""
+    shown = persons_of("a-ticket/not-bought-yet")
+    assert shown["says"] == PAYS
+    assert [(person["name"], person["pays"]) for person in shown["persons"]] == [
+        ("Alex", "May draw on the trip money."),
+        ("Sam", "May draw on the trip money."),
+        ("Jo", "No BUDGET of the FILE lists this PERSON."),
+    ]
+    # Two BUDGETs that list one PERSON are named together.
+    sent = drawn(EXAMPLES / "a-ticket" / "not-bought-yet.json")
+    sent["budgets"].append({**sent["budgets"][0], "id": "kitty", "name": "the kitty"})
+    (shown,) = all_persons([sent])
+    assert shown["persons"][0]["pays"] == "May draw on the trip money and the kitty."
 
 
 def test_a_person_who_must_not_end_the_trip_at_a_place_says_so() -> None:

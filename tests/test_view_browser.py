@@ -61,9 +61,9 @@ FITTED = """() => {
 }"""
 # What is lit on the page: the steps of the calendar, the steps with no time beside it, the
 # marks of the strip, the lines of the report, the PERSONs, the WANTs with the OPTIONs under
-# them, the OPTIONs of the FILE, the rights to them with their BOOKINGs and OFFERs, its WAYs,
-# the travel that it lists in full, and the CAPABILITIES with the PERSONs and the OPTIONs
-# under them.
+# them, the OPTIONs of the FILE, the rights to them with their BOOKINGs and OFFERs, the
+# BUDGETs with their caps and payments, its WAYs, the travel that it lists in full, and the
+# CAPABILITIES with the PERSONs and the OPTIONs under them.
 LIT = """() => {
   const first = (each) => each.title.split("\\n")[0];
   const all = (which) => [...document.querySelectorAll(which)];
@@ -76,6 +76,7 @@ LIT = """() => {
     options: all("#options .item.lit").map((each) => each.querySelector("h3").textContent),
     persons: all("#persons .item.lit").map((each) => each.querySelector("h3").textContent),
     rights: all("#rights .lit").map((each) => each.querySelector("h3, b").textContent),
+    budgets: all("#budgets .lit").map((each) => each.querySelector("h3, b").textContent),
     ways: all("#ways .item.lit").map((each) => each.querySelector("h3").textContent),
     travel: all("#travel .in-full.lit").map((each) => each.textContent),
     capabilities: all("#capabilities .lit").map((each) => each.querySelector("h3, b").textContent),
@@ -515,7 +516,7 @@ def test_pointing_ties_a_booking_and_an_offer_to_the_report(chromium: Browser) -
             "skydeck-tickets",
         ]
         assert entries.first.locator("span").all_text_contents() == [
-            "a BOOKING that covers Alex",
+            "a BOOKING that covers Alex; its payment: 32.00 USD, paid by Alex, from the trip money",
             "In the plan: Alex uses it.",
         ]
         assert entries.nth(1).locator("span").all_text_contents() == [
@@ -592,6 +593,70 @@ def test_the_rights_have_the_edges_of_what_the_report_names(chromium: Browser) -
         page.locator("#report .row").first.wait_for()
         page.locator("#options .item").first.wait_for()
         assert page.locator("#rights-part").is_hidden()
+
+
+def test_pointing_ties_a_budget_its_caps_and_its_payments_to_the_report(chromium: Browser) -> None:
+    """The trip money is for Alex and Sam, and the TRIP spends at most 200.00 USD from it."""
+    with opened(chromium, EXAMPLES / "a-ticket" / "within-the-cap.json") as page:
+        card = page.locator("#budgets .card")
+        card.wait_for()
+        page.locator("#report .row").first.wait_for()
+        page.locator("#rights .entry").first.wait_for()
+        assert card.locator(".card-name").text_content() == "the trip money"
+        assert card.locator(".card-holds").text_content() == "For Alex and Sam. It holds USD."
+        entries = card.locator(".entry")
+        assert entries.locator(".entry-name").all_text_contents() == [
+            "trip-cap",
+            "alex-skydeck-ticket",
+        ]
+        assert entries.locator(".entry-says").all_text_contents() == [
+            "the TRIP spends at most 200.00 USD from it",
+            "32.00 USD, paid by Alex",
+        ]
+        # The row of a PERSON names the BUDGETs that list them.
+        assert page.locator("#persons .item-said p").all_text_contents() == [
+            "May draw on the trip money.",
+            "May draw on the trip money.",
+            "No BUDGET of the FILE lists this PERSON.",
+        ]
+        # A cap is a thing of its own. The report states it twice on a plan: among what the
+        # plan relies on, and with what is charged to it. Both lines are its lines.
+        entries.first.hover()
+        found = lit(page, budgets=["trip-cap"], marks=[], rights=[])
+        assert [row.strip()[:25] for row in found["rows"]] == [
+            "trip-cap: the TRIP spends",
+            "trip-cap: at most 200.00 ",
+        ]
+        page.locator("#report .row[data-record='trip-cap']").nth(1).hover()
+        lit(page, budgets=["trip-cap"], marks=[])
+        # A payment is a drawing of its BOOKING: pointing at it lights up the BOOKING among
+        # the rights, and its lines in the report.
+        entries.nth(1).hover()
+        found = lit(page, budgets=["alex-skydeck-ticket"], rights=["alex-skydeck-ticket"], marks=[])
+        assert set(ids_of(found["rows"])) == {"alex-skydeck-ticket"}
+    # Two BOOKINGs paid more from the trip money than its cap allows.
+    with opened(chromium, EXAMPLES / "a-ticket" / "already-overspent.json") as page:
+        page.locator("#budgets .entry.clash").first.wait_for()
+        clash = page.locator("#budgets .entry.clash")
+        assert clash.locator(".entry-name").all_text_contents() == [
+            "trip-cap",
+            "alex-skydeck-ticket",
+            "jo-talk-ticket",
+        ]
+        # The report states the BUDGETs of the FILE. The line of each lights up its card.
+        line = page.locator("#report .row", has_text="the trip money: for Alex and Sam")
+        line.wait_for()
+        line.hover()
+        lit(page, budgets=["the trip money"], marks=[])
+        page.locator("#budgets .card-name").hover()
+        found = lit(page, budgets=["the trip money"], marks=[])
+        assert found["rows"] == ["  the trip money: for Alex and Sam; it holds USD"]
+    # A FILE with no BUDGET has no such part on its page.
+    with opened(chromium, EXAMPLES / "flight-home" / "works.json") as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#options .item").first.wait_for()
+        assert page.locator("#budgets-part").is_hidden()
+        assert page.locator("#persons .item-said p").count() == 0
 
 
 def test_pointing_ties_a_way_to_the_calendar_and_the_report(chromium: Browser) -> None:

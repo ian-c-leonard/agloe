@@ -31,6 +31,11 @@ FILES = sorted(
 type Line = dict[str, Any]
 
 
+def offers_of(line: Line) -> list[str]:
+    """The OFFERs that a line is tied to: those that it says somebody buys a place of."""
+    return [thing[len("offer:") :] for thing in line["about"] if thing.startswith("offer:")]
+
+
 def asked_of(path: Path) -> dict[str, Any]:
     """The report on this FILE in words and as JSON, and the TRIP that the view sends with it."""
     file = read(path)
@@ -64,7 +69,7 @@ def lines_of(asked: list[dict[str, Any]]) -> list[list[Line]]:
 def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None:
     """For every example: nothing of the report is lost, and each tie is one the report makes."""
     asked = [asked_of(path) for path in FILES]
-    plans = depends = requirements = purchases = 0
+    plans = depends = requirements = purchases = stated = 0
     for path, each, found in zip(FILES, asked, lines_of(asked), strict=True):
         name = f"{path.parent.name}/{path.stem}"
         assert "\n".join(line["text"] for line in found) == each["text"], name
@@ -119,10 +124,25 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
         # line is tied to an OFFER that the report as JSON does not have somebody buy from.
         to_buy = {buy["offer"] for buy in said.get("to_buy", [])}
         in_plans = {buy["offer"] for plan in said.get("plans", []) for buy in plan["buys"]}
-        tied_to = {offer for line in found for offer in line["offers"]}
+        tied_to = {offer for line in found for offer in offers_of(line)}
         assert tied_to <= to_buy | in_plans, name
         assert to_buy <= tied_to, name
         purchases += bool(tied_to)
+        # Where the report states the BUDGETs of the FILE, each has its line, in the FILE's
+        # order, and that line starts with its name.
+        pots = [
+            line for line in found if any(thing.startswith("budget:") for thing in line["about"])
+        ]
+        if any(line["text"].endswith(" The BUDGETs of this FILE:") for line in found):
+            stated += 1
+            assert [line["about"] for line in pots] == [
+                [f"budget:{budget['id']}"] for budget in trip["budgets"]
+            ], name
+            for line, budget in zip(pots, trip["budgets"], strict=True):
+                assert line["text"].startswith(f"  {budget['name']}: "), name
+                assert line["step"] is None and line["record"] is None, name
+        else:
+            assert pots == [], name
         # Each case in which the trip works has one line, in the order of the report as JSON.
         missing = said.get("missing", [])
         states = [line for line in found if line["case"] is not None]
@@ -138,6 +158,7 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
     assert depends > 10
     assert requirements > 2
     assert purchases > 2
+    assert stated > 2
 
 
 def test_a_line_about_a_requirement_is_tied_whatever_the_name_of_its_option_starts_with(
@@ -160,9 +181,9 @@ def test_a_line_that_says_who_buys_a_place_is_tied_to_the_offer() -> None:
     """Sam still has to buy a right to the Skydeck visit, from the OFFER skydeck-tickets."""
     asked = asked_of(EXAMPLES / "a-ticket" / "not-bought-yet.json")
     (found,) = lines_of([asked])
-    buys = [line for line in found if line["offers"]]
-    assert [(line["offers"], line["step"], line["warns"]) for line in buys] == [
-        (["skydeck-tickets"], 0, True)
+    buys = [line for line in found if offers_of(line)]
+    assert [(line["about"], line["step"], line["warns"]) for line in buys] == [
+        (["offer:skydeck-tickets"], 0, True)
     ]
     assert buys[0]["text"].startswith("    ! Sam still has to buy a right to this, from ")
     # A report that names another OFFER for that step, or none, leaves the line tied to none.
@@ -174,30 +195,45 @@ def test_a_line_that_says_who_buys_a_place_is_tied_to_the_offer() -> None:
     ]
     for to_buy in odd:
         (other,) = lines_of([{**asked, "report": {**asked["report"], "to_buy": to_buy}}])
-        assert all(line["offers"] == [] for line in other)
+        assert all(line["about"] == [] for line in other)
     # A warning about something else names no OFFER.
     (late,) = lines_of([asked_of(EXAMPLES / "flight-home" / "works-but-risky.json")])
     assert any(line["warns"] for line in late)
-    assert all(line["offers"] == [] for line in late)
+    assert all(line["about"] == [] for line in late)
 
 
 def test_the_plan_that_a_report_gives_for_a_case_is_tied_to_the_offers_it_buys_from() -> None:
     """The trip works if the FILE states what a BOOKING paid. Then Sam buys a place."""
     asked = asked_of(EXAMPLES / "a-ticket" / "depends-on-the-receipt.json")
     (found,) = lines_of([asked])
-    buys = [line for line in found if line["offers"]]
-    assert [(line["offers"], line["case"], line["step"]) for line in buys] == [
-        (["skydeck-tickets"], None, None)
+    buys = [line for line in found if offers_of(line)]
+    assert [(line["about"], line["case"], line["step"]) for line in buys] == [
+        (["offer:skydeck-tickets"], None, None)
     ]
     assert buys[0]["text"].startswith("  One plan that works then: Sam buys a place from ")
     # The line of the case is above it, and is tied to the case alone.
     (case,) = [line for line in found if line["case"] is not None]
-    assert (case["case"], case["offers"]) == (0, [])
+    assert (case["case"], case["about"]) == (0, [])
     # A report with no plan for each of its cases ties no line to an OFFER.
     odd: list[Any] = [[], "x", [{"buys": [{"offer": 1}]}], [{}, {}]]
     for plans in odd:
         (other,) = lines_of([{**asked, "report": {**asked["report"], "plans": plans}}])
-        assert all(line["offers"] == [] for line in other)
+        assert all(offers_of(line) == [] for line in other)
+    # The report states the BUDGETs of the FILE under that case. The line of each is tied to it.
+    (pot,) = [line for line in found if line["about"] == ["budget:trip-money"]]
+    assert pot["text"] == "  the trip money: for Alex and Sam; it holds USD"
+
+
+def test_a_report_on_a_plan_states_each_cap_once_more_and_both_lines_are_tied_to_it() -> None:
+    """The TRIP spends at most 200.00 USD from the trip money, and the plan stays under it."""
+    asked = asked_of(EXAMPLES / "a-ticket" / "within-the-cap.json")
+    (found,) = lines_of([asked])
+    capped = [line["text"] for line in found if line["record"] == "trip-cap"]
+    assert capped == [
+        "  trip-cap: the TRIP spends at most 200.00 USD from the trip money",
+        "  trip-cap: at most 200.00 USD from the trip money: 32.00 paid; 32.00 still to buy;"
+        " 136.00 left",
+    ]
 
 
 def test_a_warning_is_tied_to_the_step_above_it() -> None:
