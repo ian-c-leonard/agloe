@@ -60,7 +60,8 @@ FITTED = """() => {
   return Math.abs(rows.getBoundingClientRect().width - room) < 1;
 }"""
 # What is lit on the page: the steps of the calendar, the steps with no time beside it, the
-# marks of the strip, the lines of the report, the PERSONs, the WANTs with the OPTIONs under
+# marks of the strip, the lines of the report, the PERSONs, the PLACEs with the OPTIONs and
+# the WAYs under them, the WANTs with the OPTIONs under
 # them, the OPTIONs of the FILE, the rights to them with their BOOKINGs and OFFERs, the
 # BUDGETs with their caps and payments, its WAYs, the travel that it lists in full, the
 # CAPABILITIES with the PERSONs and the OPTIONs under them, and the OBJECTs with the OPTIONs
@@ -76,6 +77,7 @@ LIT = """() => {
     wants: all("#wants .lit").map((each) => each.querySelector("h3, b").textContent),
     options: all("#options .item.lit").map((each) => each.querySelector("h3").textContent),
     persons: all("#persons .item.lit").map((each) => each.querySelector("h3").textContent),
+    places: all("#places .lit").map((each) => each.querySelector("h3, b").textContent),
     rights: all("#rights .lit").map((each) => each.querySelector("h3, b").textContent),
     budgets: all("#budgets .lit").map((each) => each.querySelector("h3, b").textContent),
     objects: all("#objects .lit").map((each) => each.querySelector("h3, b").textContent),
@@ -836,6 +838,105 @@ def test_pointing_ties_an_object_to_the_calendar_and_the_report(
         page.locator("#report .row").first.wait_for()
         page.locator("#options .item").first.wait_for()
         assert page.locator("#objects-part").is_hidden()
+
+
+def test_pointing_ties_a_place_to_the_calendar_and_the_report(chromium: Browser) -> None:
+    """Alex and Sam start from the hotel, walk to the museum, and fly from O'Hare to Denver."""
+    walk = "the walk between the hotel and the Art Institute"
+    with opened(chromium, EXAMPLES / "ending-in-denver" / "works.json") as page:
+        cards = page.locator("#places .card")
+        cards.first.wait_for()
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        assert cards.locator(".card-name").all_text_contents() == [
+            "the hotel",
+            "the Art Institute",
+            "O'Hare",
+            "Denver",
+        ]
+        hotel, museum, ohare, denver = (cards.nth(n) for n in range(4))
+        assert hotel.locator(".card-holds").all_text_contents() == ["Alex and Sam start from here."]
+        assert hotel.locator(".entry-name").all_text_contents() == [walk]
+        assert hotel.locator(".entry-says").all_text_contents() == [
+            "between here and the Art Institute, in both directions"
+        ]
+        assert hotel.locator(".entry-takes").all_text_contents() == ["Takes 15 min."]
+        assert museum.locator(".entry-name").all_text_contents() == [
+            "Museum visit",
+            "Blue Line to O'Hare",
+            walk,
+        ]
+        assert museum.locator(".entry-says").all_text_contents() == [
+            "happens here",
+            "goes from here to O'Hare",
+            "between here and the hotel, in both directions",
+        ]
+        assert ohare.locator(".entry-says").all_text_contents() == [
+            "comes here from the Art Institute",
+            "goes from here to Denver",
+        ]
+        assert denver.locator(".card-holds").all_text_contents() == [
+            "Alex and Sam must end the TRIP here."
+        ]
+        # Pointing at a PLACE lights up the lines of its own records: here the FACTs about
+        # who starts from it. It lights up no step and no PERSON.
+        hotel.locator(".card-name").hover()
+        found = lit(page, places=["the hotel"], marks=[], persons=[])
+        assert ids_of(found["rows"]) == ["alex-start", "sam-start"]
+        # The line of such a FACT is about the PERSON and about the PLACE.
+        page.locator("#report .row[data-record='alex-start']").hover()
+        lit(page, places=["the hotel"], persons=["Alex"])
+        # A WANT about where the TRIP ends is about its PLACE too.
+        denver.locator(".card-name").hover()
+        found = lit(page, places=["Denver"], wants=[])
+        assert ids_of(found["rows"]) == ["ending-in-denver"]
+        page.locator("#report .row[data-record='ending-in-denver']").hover()
+        lit(page, places=["Denver"], wants=["ending the trip in Denver"])
+        # An OPTION under a PLACE is its step: pointing at it lights up that step, and the
+        # OPTION under each PLACE that it is at.
+        museum.locator(".entry").nth(1).hover()
+        lit(page, places=["Blue Line to O'Hare"] * 2, marks=["Blue Line to O'Hare"])
+        # A WAY under a PLACE is each step in which somebody takes it.
+        hotel.locator(".entry").hover()
+        lit(page, places=[walk, walk], marks=[walk], ways=[walk])
+        # Pointing at a step lights up what is under the PLACEs, and no PLACE.
+        page.locator("#calendar .mark", has_text="Museum visit").first.hover()
+        lit(page, places=["Museum visit"], marks=["Museum visit"])
+    # A WAY that nobody takes is a drawing of the WAY: here the report shows no plan. So
+    # pointing at it under a PLACE lights up its row among the WAYs, and it under each of its
+    # two PLACEs, and no other WAY. The other way round too.
+    line = "the Blue Line to O'Hare"
+    with opened(chromium, EXAMPLES / "the-bags" / "nobody-collects-them.json") as page:
+        cards = page.locator("#places .card")
+        cards.first.wait_for()
+        page.locator("#ways .item").first.wait_for()
+        cards.first.locator(".entry", has_text=walk).hover()
+        lit(page, places=[walk, walk], ways=[walk], marks=[])
+        page.locator("#ways .item", has_text=line).hover()
+        lit(page, places=[line, line], ways=[line], marks=[])
+    # The trip works if there are other WAYs from the Art Institute to O'Hare: the report
+    # names the two PLACEs, and each has the yellow edge.
+    with opened(chromium, EXAMPLES / "flight-home" / "depends-on-another-way.json") as page:
+        asked = page.locator("#places .card.asked")
+        asked.first.wait_for()
+        assert asked.locator(".card-name").all_text_contents() == ["the Art Institute", "O'Hare"]
+        assert "A yellow edge marks" in (page.text_content("#places-says") or "")
+        case = page.locator("#report .row[data-record='case:0']")
+        case.wait_for()
+        case.hover()
+        lit(page, places=["the Art Institute", "O'Hare"])
+        asked.first.locator(".card-name").hover()
+        found = lit(page, places=["the Art Institute"])
+        assert [row.strip()[:40] for row in found["rows"]] == [
+            "The trip works if there are other WAYs f"
+        ]
+    # Alex and Sam cannot end the TRIP in Denver: the report names the WANT, and its PLACE
+    # has the red edge.
+    with opened(chromium, EXAMPLES / "ending-in-denver" / "cannot-work.json") as page:
+        clash = page.locator("#places .card.clash")
+        clash.first.wait_for()
+        assert clash.locator(".card-name").all_text_contents() == ["Denver"]
+        assert page.locator("#places .entry.clash").count() == 0
 
 
 def test_on_a_wide_window_the_report_stays_beside_the_drawings(chromium: Browser) -> None:
