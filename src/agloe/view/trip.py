@@ -27,6 +27,10 @@ The page is sent every OPTION of the FILE too, whether or not a LOCK names it or
 it: where it is, when the FILE says it starts, how long it takes, how early people must be
 there, and whom a LOCK names for it. What the FILE does not say is sent as nothing.
 
+The page is sent every WAY of the FILE: the PLACEs it goes between, whether a PERSON can
+take it in both directions, and how long it takes. It is sent each FACT that the FILE lists
+every way of some travel: from which PLACE, to which, and within which span of time.
+
 The page is sent the CAPABILITIES of the FILE as well: each PERSON of whom a FACT says that
 they have the CAPABILITY or do not, each OPTION of which a FACT says what it requires of the
 CAPABILITY, and the FACT that the FILE states every one of its OPTIONs that requires it.
@@ -58,6 +62,8 @@ from agloe import report as reports
 from agloe.answers import Answer, Report
 from agloe.file import (
     Capability,
+    Complete,
+    Duration,
     File,
     Option,
     Person,
@@ -93,7 +99,25 @@ _TRIP: _Shape = {
     "steps": list,
     "wants": list,
     "options": list,
+    "ways": list,
+    "complete_travel": list,
     "capabilities": list,
+}
+_WAY: _Shape = {
+    "id": str,
+    "name": str,
+    "from": str,
+    "to": str,
+    "both_ways": bool,
+    "length": (dict, _NONE),
+    "records": list,
+}
+_TRAVEL: _Shape = {
+    "record": str,
+    "from": (str, _NONE),
+    "to": (str, _NONE),
+    "earliest": dict,
+    "latest": dict,
 }
 _OPTION: _Shape = {
     "id": str,
@@ -215,6 +239,9 @@ def shown(file: File, report: Report) -> Trip | None:
     # The time that the FILE states for an OPTION is sent too, whether or not it is a step.
     stated = {option.id: file.start(option.id) for option in file.options}
     times += [start.at for start in stated.values() if start is not None and start.at is not None]
+    # So are the two ends of each span in which the FILE lists every way of some travel.
+    listed = [fact for fact in file.facts if isinstance(fact, Complete)]
+    times += [moment for fact in listed for moment in (fact.earliest, fact.latest)]
     held = [
         moment
         for step in steps
@@ -301,6 +328,31 @@ def shown(file: File, report: Report) -> Trip | None:
                 }
                 for option in file.options
             ],
+            "ways": [
+                {
+                    "id": way.id,
+                    "name": names[way.id],
+                    "from": way.origin,
+                    "to": way.destination,
+                    "both_ways": way.both_ways,
+                    "length": _length(file.duration(way.id)),
+                    "records": about.get(way.id, []),
+                }
+                for way in file.ways
+            ],
+            # Each FACT that the FILE lists every OPTION and WAY that goes straight from one
+            # PLACE to another and leaves within a span of time. A PLACE that the FACT leaves
+            # out stands for every PLACE.
+            "complete_travel": [
+                {
+                    "record": fact.id,
+                    "from": fact.origin,
+                    "to": fact.destination,
+                    "earliest": time(fact.earliest),
+                    "latest": time(fact.latest),
+                }
+                for fact in listed
+            ],
             "capabilities": _capabilities(file, names),
         }
     except Unwritable:
@@ -314,22 +366,30 @@ def _said_of(
 
     ``start`` is the time that the FILE states. ``any_time`` says that the FILE lets it start
     at any time, which is not a time. With neither, the FILE does not say when it starts.
-    ``length`` is in seconds, from the shortest to the longest it can take. It is ``contingent``
-    where the FILE states it as a range, in which the world decides. ``margin`` is how many
-    seconds before its start people must be there. Each is None where the FILE is silent.
+    ``length`` is how long it takes. ``margin`` is how many seconds before its start people
+    must be there. Each is None where the FILE is silent.
     """
-    length, margin = file.duration(option), file.cutoff(option)
+    margin = file.cutoff(option)
     return {
         "start": time(None if stated is None else stated.at),
         "any_time": stated is not None and stated.at is None,
-        "length": None
-        if length is None
-        else {
-            "shortest": length.shortest,
-            "longest": length.longest,
-            "contingent": length.contingent,
-        },
+        "length": _length(file.duration(option)),
         "margin": None if margin is None else margin.margin,
+    }
+
+
+def _length(stated: Duration | None) -> Trip | None:
+    """How long an OPTION or a WAY takes, as the FILE states it, or None where it does not.
+
+    In seconds, from the shortest to the longest. It is ``contingent`` where the FILE states it
+    as a range, in which the world decides.
+    """
+    if stated is None:
+        return None
+    return {
+        "shortest": stated.shortest,
+        "longest": stated.longest,
+        "contingent": stated.contingent,
     }
 
 
@@ -698,16 +758,23 @@ def holds(trip: object) -> bool:
         return False
     planned = sent["itinerary"] is True
     options = _the_options(sent["options"], persons, places)
+    ways = _the_ways(sent["ways"], places)
     steps = cast("list[object]", sent["steps"])
     return (
         options is not None
+        and ways is not None
+        # An OPTION and a WAY never have one id: ids are unique across the FILE.
+        and not options & ways
+        and _is_travel_listed_in_full(sent["complete_travel"], places)
         and all(_is_a_bound(sent[which], days) for which in ("starts", "ends"))
         and all(
             _is_a_step(step, persons, places, days, planned, until is not None) for step in steps
         )
-        # Each step that is an OPTION is one of the OPTIONs of the FILE.
+        # Each step that is an OPTION is one of the OPTIONs of the FILE, and each that is a
+        # WAY which the FILE lists is one of its WAYs.
         and all(
-            step["option"] is None or step["option"] in options
+            (step["option"] is None or step["option"] in options)
+            and (step["way"] is None or step["way"] in ways)
             for step in cast("list[dict[str, object]]", steps)
         )
         and _are_wants(sent["wants"], persons, places, options)
@@ -720,9 +787,7 @@ def _the_options(
 ) -> frozenset[str] | None:
     """The ids of the OPTIONs of such a TRIP, or None where these are not its OPTIONs.
 
-    Each has an id of its own. It has a time or can start at any time, and never both. It
-    takes no less than no time, and no longer at its shortest than at its longest. Only a
-    length that the world decides in a range has two ends that differ.
+    Each has an id of its own. It has a time or can start at any time, and never both.
     """
     ids: list[object] = []
     for option in cast("list[object]", options):
@@ -742,16 +807,66 @@ def _the_options(
             or not (margin is None or cast("int", margin) >= 0)
         ):
             return None
-        if length is not None:
-            if not _fits(length, _LENGTH):
-                return None
-            span = cast("dict[str, int]", length)
-            if not 0 <= span["shortest"] <= span["longest"]:
-                return None
-            if span["shortest"] != span["longest"] and not span["contingent"]:
-                return None
+        if not _is_a_length(length):
+            return None
         ids.append(said["id"])
     return _all_different(ids)
+
+
+def _is_a_length(length: object) -> bool:
+    """Whether this is how long an OPTION or a WAY takes, or None where the FILE does not say.
+
+    It takes no less than no time, and no longer at its shortest than at its longest. Only a
+    length that the world decides in a range has two ends that differ.
+    """
+    if length is None:
+        return True
+    if not _fits(length, _LENGTH):
+        return False
+    span = cast("dict[str, int]", length)
+    return 0 <= span["shortest"] <= span["longest"] and (
+        span["shortest"] == span["longest"] or bool(span["contingent"])
+    )
+
+
+def _the_ways(ways: object, places: frozenset[str]) -> frozenset[str] | None:
+    """The ids of the WAYs of such a TRIP, or None where these are not its WAYs."""
+    ids: list[object] = []
+    for way in cast("list[object]", ways):
+        if not _fits(way, _WAY):
+            return None
+        said = cast("dict[str, object]", way)
+        if (
+            not cast("str", said["name"]).strip()
+            or said["from"] not in places
+            or said["to"] not in places
+            or _all_different(said["records"]) is None
+            or not _is_a_length(said["length"])
+        ):
+            return None
+        ids.append(said["id"])
+    return _all_different(ids)
+
+
+def _is_travel_listed_in_full(travel: object, places: frozenset[str]) -> bool:
+    """Whether these are the FACTs of such a TRIP that the FILE lists every way of some travel.
+
+    Each is a FACT of its own. It names a PLACE of the TRIP, or none for every PLACE, at each
+    end, and a span between two times.
+    """
+    records: list[object] = []
+    for fact in cast("list[object]", travel):
+        if not _fits(fact, _TRAVEL):
+            return False
+        said = cast("dict[str, object]", fact)
+        if (
+            not said["record"]
+            or not all(said[end] is None or said[end] in places for end in ("from", "to"))
+            or not all(_is_a_time(said[end]) for end in ("earliest", "latest"))
+        ):
+            return False
+        records.append(said["record"])
+    return _all_different(records) is not None
 
 
 def _are_capabilities(

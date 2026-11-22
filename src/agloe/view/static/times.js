@@ -50,6 +50,17 @@ export function clocksOf(zone) {
   return ` Times are on the clocks of ${zone}.`;
 }
 
+/**
+ * How long an OPTION or a WAY takes, as far as the FILE says. A length that the world decides
+ * in a range is worded as a range, as the report words it, also where the two ends are the
+ * same.
+ */
+export function lasts(length) {
+  if (length === null) return "The FILE does not say how long it takes.";
+  const { shortest, longest, contingent } = length;
+  return contingent ? `Takes between ${span(shortest)} and ${span(longest)}.` : `Takes ${span(shortest)}.`;
+}
+
 /** A length of time as the report writes it: 45 min, 1 h, 2 h 30 min. */
 export function span(seconds) {
   const parts = [[Math.floor(seconds / 3600), "h"], [Math.floor(seconds / 60) % 60, "min"], [seconds % 60, "s"]];

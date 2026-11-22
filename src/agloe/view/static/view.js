@@ -320,6 +320,24 @@ function drawWants(shown) {
 }
 
 /**
+ * A row for an OPTION or a WAY of the FILE: its name and where it is, and then what the page
+ * says of it, in columns. `of` says what the row is a drawing of.
+ */
+function item(thing, of, columns) {
+  const row = Object.assign(made("article", `item${edges(thing)}`), { title: marks(thing).join("\n") });
+  Object.assign(row.dataset, { of, records: tiesOf(thing).join(" ") });
+  const head = made("div", "item-head");
+  head.append(made("h3", "item-name", thing.name), made("p", "item-where", thing.where));
+  row.append(head);
+  for (const column of columns) {
+    const said = made("div", "item-said");
+    for (const words of column) if (words) said.append(made("p", "", words));
+    row.append(said);
+  }
+  return row;
+}
+
+/**
  * Every OPTION of the FILE, a row for each: where it is, what the FILE says of its start and
  * its length, and who is in it. An OPTION that the calendar holds is tied to its step, so
  * pointing at it lights up that step.
@@ -329,17 +347,29 @@ function drawOptions(shown) {
   box.replaceChildren();
   part("options-part").hidden = !shown.options.length;
   part("options-says").textContent = shown.says;
-  for (const option of shown.options) {
-    const row = Object.assign(made("article", `option${edges(option)}`), { title: marks(option).join("\n") });
-    Object.assign(row.dataset, { of: drawingOf(option, option.id), records: tiesOf(option).join(" ") });
-    const head = made("div", "option-head");
-    head.append(made("h3", "option-name", option.name), made("p", "option-where", option.where));
-    const said = made("div", "option-said");
-    for (const words of [option.when, option.takes, option.arrive]) if (words) said.append(made("p", "", words));
-    const who = made("div", "option-said");
-    for (const words of [option.lock, option.plan]) if (words) who.append(made("p", "", words));
-    row.append(head, said, who);
-    box.append(row);
+  for (const option of shown.options) box.append(item(option, drawingOf(option, option.id), [[option.when, option.takes, option.arrive], [option.lock, option.plan]]));
+}
+
+/**
+ * Every WAY of the FILE, a row for each: where it goes, how long it takes, and who takes it in
+ * the plan. A WAY is tied to each step in which somebody takes it, so pointing at it lights up
+ * those steps. Under the WAYs comes each FACT that the FILE lists every way of some travel: a
+ * thing of its own.
+ */
+function drawWays(shown) {
+  const box = part("ways");
+  const travel = part("travel");
+  box.replaceChildren();
+  travel.replaceChildren();
+  part("ways-part").hidden = !shown.ways.length && !shown.travel.length;
+  part("ways-says").textContent = shown.says;
+  box.hidden = !shown.ways.length;
+  travel.hidden = !shown.travel.length;
+  for (const way of shown.ways) box.append(item(way, way.steps.length ? way.steps.join(" ") : `way:${way.id}`, [[way.takes], way.plan]));
+  for (const fact of shown.travel) {
+    const line = Object.assign(made("li", `in-full${fact.clash.length ? " clash" : ""}`, fact.says), { title: fact.finds ?? "" });
+    Object.assign(line.dataset, { of: `travel:${fact.record}`, records: fact.records.join(" ") });
+    travel.append(line);
   }
 }
 
@@ -384,6 +414,7 @@ function drawCapabilities(shown) {
 const held = [
   { id: "wants-part", load: () => import("./wants.js"), name: "wants", draw: drawWants, words: null, of: undefined },
   { id: "options-part", load: () => import("./options.js"), name: "options", draw: drawOptions, words: null, of: undefined },
+  { id: "ways-part", load: () => import("./ways.js"), name: "ways", draw: drawWays, words: null, of: undefined },
   { id: "capabilities-part", load: () => import("./capabilities.js"), name: "capabilities", draw: drawCapabilities, words: null, of: undefined },
 ];
 
@@ -418,8 +449,9 @@ function write(text, tied) {
  * what it shows. A mark and a row have every record about their OPTION. An OPTION under a WANT
  * has the one FACT about the two, so pointing at it picks out that FACT. Pointing lights up no
  * drawing of another thing, though a record or a case may be about both. `data-of` says what a
- * drawing is of: a step of the TRIP, an OPTION that is no step, a WANT, a CAPABILITY, or what
- * the FILE says of one PERSON and one CAPABILITY.
+ * drawing is of: a step of the TRIP, an OPTION or a WAY that is no step, a WANT, a CAPABILITY,
+ * what the FILE says of one PERSON and one CAPABILITY, or a FACT that the FILE lists every way
+ * of some travel. A WAY that somebody takes several times is a drawing of each of those steps.
  *
  * The line of a record or of a case, and a time of the TRIP, are of no thing. Pointing at one
  * lights up everything that is tied to it. A drawing that is tied to it is a drawing of what

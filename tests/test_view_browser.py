@@ -61,7 +61,8 @@ FITTED = """() => {
 }"""
 # What is lit on the page: the steps of the calendar, the steps with no time beside it, the
 # marks of the strip, the lines of the report, the WANTs with the OPTIONs under them, the
-# OPTIONs of the FILE, and the CAPABILITIES with the PERSONs and the OPTIONs under them.
+# OPTIONs of the FILE, its WAYs, the travel that it lists in full, and the CAPABILITIES with
+# the PERSONs and the OPTIONs under them.
 LIT = """() => {
   const first = (each) => each.title.split("\\n")[0];
   const all = (which) => [...document.querySelectorAll(which)];
@@ -71,7 +72,9 @@ LIT = """() => {
     bars: [...new Set(all("#strip .bar.lit").map(first))],
     rows: all("#report .row.lit").map((row) => row.textContent),
     wants: all("#wants .lit").map((each) => each.querySelector("h3, b").textContent),
-    options: all("#options .option.lit").map((each) => each.querySelector("h3").textContent),
+    options: all("#options .item.lit").map((each) => each.querySelector("h3").textContent),
+    ways: all("#ways .item.lit").map((each) => each.querySelector("h3").textContent),
+    travel: all("#travel .in-full.lit").map((each) => each.textContent),
     capabilities: all("#capabilities .lit").map((each) => each.querySelector("h3, b").textContent),
   };
 }"""
@@ -376,13 +379,13 @@ def test_pointing_ties_an_option_to_the_calendar_and_the_report(chromium: Browse
         case.wait_for()
         said = case.text_content()
         assert said == "The trip works if Cab to O'Hare takes 45 min or less."
-        rows = page.locator("#options .option")
+        rows = page.locator("#options .item")
         rows.first.wait_for()
         assert rows.count() == 4
-        cab = page.locator("#options .option.asked")
+        cab = page.locator("#options .item.asked")
         assert cab.count() == 1
-        assert cab.locator(".option-name").text_content() == "Cab to O'Hare"
-        assert cab.locator(".option-said p").all_text_contents() == [
+        assert cab.locator(".item-name").text_content() == "Cab to O'Hare"
+        assert cab.locator(".item-said p").all_text_contents() == [
             "Can start at any time.",
             "The FILE does not say how long it takes.",
             "The FILE does not say how early people must be there.",
@@ -406,8 +409,8 @@ def test_pointing_ties_an_option_to_the_calendar_and_the_report(chromium: Browse
     # In a plan, an OPTION is its step: pointing at it lights up its line in the plan too.
     with opened(chromium, EXAMPLES / "flight-home" / "works.json") as page:
         page.locator("#report .row").first.wait_for()
-        train = page.locator("#options .option").nth(1)
-        assert train.locator(".option-name").text_content() == "Blue Line to O'Hare"
+        train = page.locator("#options .item").nth(1)
+        assert train.locator(".item-name").text_content() == "Blue Line to O'Hare"
         train.hover()
         found = lit(page, options=["Blue Line to O'Hare"], marks=["Blue Line to O'Hare"])
         assert found["rows"][0].endswith(": Blue Line to O'Hare, Alex and Sam")
@@ -429,9 +432,9 @@ def test_pointing_at_an_option_lights_up_no_other_that_its_case_names(
         said = case.text_content() or ""
         assert "Flight home" in said and "Cab to O'Hare" in said
         page.locator("#calendar .mark").first.wait_for()
-        asked = page.locator("#options .option.asked")
+        asked = page.locator("#options .item.asked")
         asked.first.wait_for()
-        assert asked.locator(".option-name").all_text_contents() == ["Flight home", "Cab to O'Hare"]
+        assert asked.locator(".item-name").all_text_contents() == ["Flight home", "Cab to O'Hare"]
         # The cab is no step of the calendar. Pointing at it lights up the case, and not the
         # flight: not its row, and not its step.
         asked.nth(1).hover()
@@ -444,6 +447,136 @@ def test_pointing_at_an_option_lights_up_no_other_that_its_case_names(
         # Pointing at the line of the case lights up both: the case is about both.
         case.hover()
         lit(page, options=["Flight home", "Cab to O'Hare"], marks=["Flight home"], rows=[said])
+
+
+def test_pointing_ties_a_way_to_the_calendar_and_the_report(chromium: Browser) -> None:
+    """Alex walks from the tower to the park, between the Skydeck visit and lunch."""
+    walk = "the walk between Willis Tower and Millennium Park"
+    with opened(chromium, EXAMPLES / "a-must-not" / "works.json") as page:
+        row = page.locator("#ways .item")
+        row.wait_for()
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        assert row.locator(".item-name").text_content() == walk
+        assert row.locator(".item-where").text_content() == (
+            "Between Willis Tower and Millennium Park, in both directions."
+        )
+        assert row.locator(".item-said p").all_text_contents() == [
+            "Takes 20 min.",
+            "In the plan: Alex takes it at 11:30 am on Saturday 15 May 2027.",
+        ]
+        assert page.locator("#travel").is_hidden()
+        # Pointing at the WAY lights up the step in which Alex takes it, its line in the plan,
+        # and the line of the FACT about how long it takes.
+        row.hover()
+        found = lit(page, ways=[walk], marks=[walk])
+        assert found["rows"] == [
+            f"  11:30 am to 11:50 am: {walk}, Alex",
+            f"  walk-from-tower-length: {walk} takes 20 min",
+        ]
+        # Pointing at the step, or at the line of the FACT, lights up the WAY.
+        page.locator("#calendar .mark.way").first.hover()
+        lit(page, ways=[walk], marks=[walk])
+        page.locator("#report .row[data-record='walk-from-tower-length']").hover()
+        lit(page, ways=[walk], marks=[walk])
+        # Pointing at an OPTION lights up no WAY.
+        page.locator("#options .item").first.hover()
+        lit(page, ways=[], marks=["Skydeck visit"])
+
+
+def test_a_way_that_somebody_takes_twice_is_tied_to_both_steps(
+    chromium: Browser, tmp_path: Path
+) -> None:
+    """Alex walks to the pier for a swim, and back to the hotel for dinner."""
+    content = {
+        "persons": named("alex"),
+        "places": named("hotel", "pier"),
+        "budgets": [budget("money", "alex")],
+        "options": [stays("swim", "pier"), stays("dinner", "hotel")],
+        "ways": [way_between("walk", "hotel", "pier")],
+        "wants": [],
+        "facts": [
+            *at("swim", "2027-05-15T10:00:00", "PT1H"),
+            *at("dinner", "2027-05-15T18:00:00", "PT1H"),
+            takes("walk", "PT10M"),
+            starts("alex", "hotel"),
+        ],
+        "decisions": [lock("swim", "alex"), lock("dinner", "alex")],
+    }
+    with opened(chromium, written(tmp_path, content)) as page:
+        row = page.locator("#ways .item")
+        row.wait_for()
+        page.locator("#report .row").first.wait_for()
+        walks = page.locator("#calendar .mark.way")
+        walks.first.wait_for()
+        assert walks.count() == 2
+        assert len(row.locator(".item-said").nth(1).locator("p").all_text_contents()) == 2
+        # Pointing at the WAY lights up both steps, and the line of each in the plan.
+        row.hover()
+        page.wait_for_function(
+            "() => document.querySelectorAll('#calendar .mark.way.lit').length === 2"
+        )
+        found = lit(page, ways=["walk"])
+        assert [line.strip().split(": ")[1] for line in found["rows"][:2]] == ["walk, alex"] * 2
+        # Pointing at one of the steps lights up the WAY, and not the other step.
+        walks.first.hover()
+        page.wait_for_function(
+            "() => document.querySelectorAll('#calendar .mark.way.lit').length === 1"
+        )
+        lit(page, ways=["walk"])
+        # The line of the FACT about its length is about the WAY: both steps light up.
+        page.locator("#report .row[data-record='walk-length']").hover()
+        page.wait_for_function(
+            "() => document.querySelectorAll('#calendar .mark.way.lit').length === 2"
+        )
+        lit(page, ways=["walk"])
+
+
+def test_a_way_and_travel_listed_in_full_have_the_edges_of_what_the_report_names(
+    chromium: Browser,
+) -> None:
+    """The walk to the dock takes too long, and the FILE lists every way of that day."""
+    dock = "the walk between Millennium Park and the Riverwalk dock"
+    with opened(chromium, EXAMPLES / "a-day" / "cannot-work.json") as page:
+        clash = page.locator("#ways .item.clash")
+        clash.wait_for()
+        assert clash.locator(".item-name").all_text_contents() == [dock]
+        assert clash.get_attribute("title") == (
+            "The report names walk-to-dock-length among what rules out every plan."
+        )
+        in_full = page.locator("#travel .in-full")
+        said = (
+            "Every way from one PLACE straight to another that leaves between 12:00 am on"
+            " Friday 14 May 2027 and 11:59 pm is listed."
+        )
+        assert in_full.all_text_contents() == [said]
+        assert page.locator("#travel .in-full.clash").count() == 1
+        # Pointing at the line of that FACT lights up what the page says of it, and no WAY.
+        line = page.locator("#report .row[data-record='all-ways']")
+        line.wait_for()
+        line.hover()
+        lit(page, travel=[said], ways=[], marks=[])
+        in_full.hover()
+        found = lit(page, travel=[said], ways=[], marks=[])
+        assert ids_of(found["rows"]) == ["all-ways"]
+    # The trip depends on how long the walk to the dock takes.
+    with opened(chromium, EXAMPLES / "a-day" / "depends-on-the-walk.json") as page:
+        asked = page.locator("#ways .item.asked")
+        asked.wait_for()
+        assert asked.locator(".item-name").all_text_contents() == [dock]
+        assert asked.locator(".item-said p").all_text_contents() == [
+            "The FILE does not say how long it takes."
+        ]
+        case = page.locator("#report .row[data-record='case:0']")
+        case.wait_for()
+        assert asked.get_attribute("title") == case.text_content()
+        case.hover()
+        lit(page, ways=[dock])
+    # A FILE with no WAY, and no travel that it lists in full, has no such part on its page.
+    with opened(chromium, EXAMPLES / "flight-home" / "works.json") as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#options .item").first.wait_for()
+        assert page.locator("#ways-part").is_hidden()
 
 
 def test_pointing_ties_a_capability_to_the_calendar_and_the_report(chromium: Browser) -> None:
@@ -534,7 +667,7 @@ def test_a_capability_has_the_edges_of_what_the_report_names(chromium: Browser) 
     # A FILE with no CAPABILITY has no such part on its page.
     with opened(chromium, EXAMPLES / "flight-home" / "works.json") as page:
         page.locator("#report .row").first.wait_for()
-        page.locator("#options .option").first.wait_for()
+        page.locator("#options .item").first.wait_for()
         assert page.locator("#capabilities-part").is_hidden()
 
 
@@ -798,7 +931,7 @@ def test_the_page_shows_what_it_can_without_a_part_that_cannot_load(chromium: Br
         page.wait_for_function("() => window.faults > 0")
         assert page.locator("#wants-part").is_hidden()
         assert page.locator("#calendar .mark").count() == 3
-        assert page.locator("#options .option").count() == 2
+        assert page.locator("#options .item").count() == 2
         assert page.text_content("#report") == expected
     assert faults and all("a fault in the WANTs" in fault for fault in faults)
     path = EXAMPLES / "several-days" / "works-but-risky.json"

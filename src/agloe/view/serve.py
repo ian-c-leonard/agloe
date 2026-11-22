@@ -47,6 +47,7 @@ PAGE = (
     "options.js",
     "who.js",
     "capabilities.js",
+    "ways.js",
 )  # the page and its files
 NEEDED = PAGE[:4]  # those that the answer and the report need: the page shows them without the rest
 KINDS = {".html": "text/html", ".css": "text/css", ".js": "text/javascript"}
