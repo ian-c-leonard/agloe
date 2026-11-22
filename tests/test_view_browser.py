@@ -60,8 +60,8 @@ FITTED = """() => {
   return Math.abs(rows.getBoundingClientRect().width - room) < 1;
 }"""
 # What is lit on the page: the steps of the calendar, the steps with no time beside it, the
-# marks of the strip, the lines of the report, the WANTs with the OPTIONs under them, and
-# the OPTIONs of the FILE.
+# marks of the strip, the lines of the report, the WANTs with the OPTIONs under them, the
+# OPTIONs of the FILE, and the CAPABILITIES with the PERSONs and the OPTIONs under them.
 LIT = """() => {
   const first = (each) => each.title.split("\\n")[0];
   const all = (which) => [...document.querySelectorAll(which)];
@@ -72,6 +72,7 @@ LIT = """() => {
     rows: all("#report .row.lit").map((row) => row.textContent),
     wants: all("#wants .lit").map((each) => each.querySelector("h3, b").textContent),
     options: all("#options .option.lit").map((each) => each.querySelector("h3").textContent),
+    capabilities: all("#capabilities .lit").map((each) => each.querySelector("h3, b").textContent),
   };
 }"""
 # For each mark of the strip, how many of 15 by 9 points of it answer the pointer for it.
@@ -289,13 +290,13 @@ def test_pointing_ties_the_strip_the_calendar_and_the_report(chromium: Browser) 
 def test_pointing_ties_a_want_to_the_calendar_and_the_report(chromium: Browser) -> None:
     """Alex must have a view from high up, and Jo must not. Only Alex goes up the tower."""
     with opened(chromium, EXAMPLES / "a-must-not" / "works.json") as page:
-        page.locator("#wants .want").wait_for()
+        page.locator("#wants .card").wait_for()
         page.locator("#report .row").first.wait_for()
-        assert page.text_content("#wants .want-name") == "a view from high up"
-        assert page.text_content("#wants .want-holds") == "A must for Alex. A must-not for Jo."
+        assert page.text_content("#wants .card-name") == "a view from high up"
+        assert page.text_content("#wants .card-holds") == "A must for Alex. A must-not for Jo."
         # Pointing at an OPTION under the WANT lights up its step on the calendar, its line in
         # the plan, and the line of the FACT that it SATISFIES the WANT.
-        page.locator("#wants .delivers").first.hover()
+        page.locator("#wants .entry").first.hover()
         found = lit(page, marks=["Skydeck visit"], wants=["Skydeck visit"])
         assert found["rows"][0] == "  10:00 am to 11:30 am: Skydeck visit, Alex"
         assert ids_of(found["rows"][1:]) == ["skydeck-is-high-up"]
@@ -303,7 +304,7 @@ def test_pointing_ties_a_want_to_the_calendar_and_the_report(chromium: Browser) 
         page.locator("#calendar .mark.planned").first.hover()
         lit(page, marks=["Skydeck visit"], wants=["Skydeck visit"])
         # Pointing at the WANT lights up its line in the report, and the other way round.
-        page.locator("#wants .want-name").hover()
+        page.locator("#wants .card-name").hover()
         found = lit(page, marks=[], wants=["a view from high up"])
         assert ids_of(found["rows"]) == ["view"]
         page.locator("#report .row[data-record='view']").hover()
@@ -324,17 +325,17 @@ def test_an_option_under_a_want_that_is_lit_is_not_lit_itself(chromium: Browser)
     """
     grounds = """() => {
       const ground = (each) => getComputedStyle(each).backgroundColor;
-      const entries = [...document.querySelectorAll("#wants .delivers")];
+      const entries = [...document.querySelectorAll("#wants .entry")];
       return {
-        want: ground(document.querySelector("#wants .want.lit")),
+        want: ground(document.querySelector("#wants .card.lit")),
         unlit: entries.filter((each) => !each.classList.contains("lit")).map(ground),
       };
     }"""
     with opened(chromium, EXAMPLES / "a-must-not" / "depends-on-the-lunch.json") as page:
         case = page.locator("#report .row[data-record='case:0']")
         case.wait_for()
-        page.locator("#wants .delivers").first.wait_for()
-        assert page.locator("#wants .delivers-name").all_text_contents() == ["Skydeck visit"]
+        page.locator("#wants .entry").first.wait_for()
+        assert page.locator("#wants .entry-name").all_text_contents() == ["Skydeck visit"]
         case.hover()
         lit(page, wants=["a view from high up"], options=["Lunch on the rooftop"])
         found = page.evaluate(grounds)
@@ -346,7 +347,7 @@ def test_an_option_under_a_want_that_is_lit_is_not_lit_itself(chromium: Browser)
 def test_a_want_has_the_red_edge_of_what_the_report_names(chromium: Browser) -> None:
     """Alex must have deep-dish pizza, and a LOCK names the blues show at the dinner's time."""
     with opened(chromium, EXAMPLES / "a-must" / "cannot-work.json") as page:
-        want = page.locator("#wants .want.clash")
+        want = page.locator("#wants .card.clash")
         want.wait_for()
         assert want.get_attribute("title") == (
             "The report names deep-dish and every-deep-dish-place among what rules out every plan."
@@ -355,9 +356,9 @@ def test_a_want_has_the_red_edge_of_what_the_report_names(chromium: Browser) -> 
             " A red edge marks what the report names among what rules out every plan."
         )
         # The OPTION under it has no red edge: the report does not name its FACT.
-        assert page.locator("#wants .delivers").count() == 1
-        assert page.locator("#wants .delivers.clash").count() == 0
-        assert page.text_content("#wants .delivers-takes") == "No LOCK names it."
+        assert page.locator("#wants .entry").count() == 1
+        assert page.locator("#wants .entry.clash").count() == 0
+        assert page.text_content("#wants .entry-takes") == "No LOCK names it."
     # A FILE with no WANT has no such part on its page.
     with opened(chromium, EXAMPLES / "flight-home" / "works.json") as page:
         page.locator("#report .row").first.wait_for()
@@ -445,6 +446,98 @@ def test_pointing_at_an_option_lights_up_no_other_that_its_case_names(
         lit(page, options=["Flight home", "Cab to O'Hare"], marks=["Flight home"], rows=[said])
 
 
+def test_pointing_ties_a_capability_to_the_calendar_and_the_report(chromium: Browser) -> None:
+    """Two drives require driving a manual car of one PERSON. Sam has it, and takes both."""
+    with opened(chromium, EXAMPLES / "a-driver" / "every-drive-is-stated.json") as page:
+        page.locator("#capabilities .card").wait_for()
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        assert page.text_content("#capabilities .card-name") == "driving a manual car"
+        assert page.locator("#capabilities .has").all_text_contents() == [
+            "Alex:does not have it",
+            "Sam:has it",
+            "Jo:does not have it",
+        ]
+        drive = page.locator("#capabilities .entry").first
+        assert drive.locator("span").all_text_contents() == [
+            "requires it of one PERSON who takes part",
+            "In the plan: Alex and Sam take part. Sam meets that requirement.",
+        ]
+        # Pointing at an OPTION under the CAPABILITY lights up its step, its row, its line in
+        # the plan, the line that says who meets what it requires, and the line of the FACT.
+        drive.hover()
+        found = lit(
+            page,
+            marks=["Drive to the dunes"],
+            options=["Drive to the dunes"],
+            capabilities=["Drive to the dunes"],
+        )
+        assert found["rows"] == [
+            "  8:00 am to 9:00 am: Drive to the dunes, Alex and Sam",
+            "  drive-out-needs-a-driver: Drive to the dunes requires driving a manual car"
+            " of one PERSON who takes part",
+            "  Drive to the dunes requires driving a manual car of one PERSON."
+            " Sam meets that requirement.",
+        ]
+        # Pointing at the line that says who meets it lights up every drawing of the drive.
+        page.locator("#report .row", has_text="Sam meets that requirement.").first.hover()
+        lit(
+            page,
+            marks=["Drive to the dunes"],
+            options=["Drive to the dunes"],
+            capabilities=["Drive to the dunes"],
+        )
+        # The FACT that these are all the OPTIONs that require it is about the CAPABILITY.
+        page.locator("#report .row[data-record='every-drive-that-needs-a-driver']").hover()
+        lit(page, marks=[], options=[], capabilities=["driving a manual car"])
+        page.locator("#capabilities .card-name").hover()
+        found = lit(page, marks=[], options=[], capabilities=["driving a manual car"])
+        assert ids_of(found["rows"]) == ["every-drive-that-needs-a-driver"]
+        # What the FILE says of Sam and driving is a thing of its own.
+        page.locator("#capabilities .has").nth(1).hover()
+        found = lit(page, marks=[], options=[], capabilities=["Sam:"])
+        assert ids_of(found["rows"]) == ["sam-drives-manual"]
+        page.locator("#report .row[data-record='sam-drives-manual']").hover()
+        lit(page, marks=[], options=[], capabilities=["Sam:"])
+
+
+def test_a_capability_has_the_edges_of_what_the_report_names(chromium: Browser) -> None:
+    """The trip works if Alex can drive a manual car, or if Sam can."""
+    with opened(chromium, EXAMPLES / "a-driver" / "depends-on-who-can-drive.json") as page:
+        asked = page.locator("#capabilities .has.asked")
+        asked.first.wait_for()
+        assert asked.all_text_contents() == [
+            "Alex:the FILE does not say",
+            "Sam:the FILE does not say",
+        ]
+        assert asked.first.get_attribute("title") == (
+            "Alex: the FILE does not say\n"
+            "The trip works in any of these cases:\n"
+            "1. Alex has the CAPABILITY driving a manual car."
+        )
+        assert page.locator("#capabilities .card.asked").count() == 1
+        assert (page.text_content("#capabilities-says") or "").endswith(
+            " A yellow edge marks what the report names in what the FILE does not say."
+        )
+        # Pointing at the line of a case lights up the PERSON it is about, and the CAPABILITY.
+        case = page.locator("#report .row[data-record='case:1']")
+        case.wait_for()
+        case.hover()
+        lit(page, marks=[], capabilities=["driving a manual car", "Sam:"])
+    # Nobody of the FILE can drive a manual car, and the drive back requires it.
+    with opened(chromium, EXAMPLES / "a-driver" / "cannot-work.json") as page:
+        page.locator("#capabilities .has.clash").first.wait_for()
+        assert page.locator("#capabilities .has.clash").count() == 3
+        clash = page.locator("#capabilities .entry.clash")
+        assert clash.locator(".entry-name").all_text_contents() == ["Drive back to the hotel"]
+        assert page.locator("#capabilities .card.clash").count() == 0
+    # A FILE with no CAPABILITY has no such part on its page.
+    with opened(chromium, EXAMPLES / "flight-home" / "works.json") as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#options .option").first.wait_for()
+        assert page.locator("#capabilities-part").is_hidden()
+
+
 def test_a_long_name_under_a_want_lies_on_nothing(chromium: Browser, tmp_path: Path) -> None:
     """What the FILE says of an OPTION goes below its name where the two do not fit on a line."""
     content = json.loads((EXAMPLES / "a-must-not" / "works.json").read_text())
@@ -452,13 +545,13 @@ def test_a_long_name_under_a_want_lies_on_nothing(chromium: Browser, tmp_path: P
     content["options"][0]["name"] = "Neuschwanstein Castle"
     content["options"][1]["name"] = "Lunch at the Hohenschwangau village restaurant"
     # Where the words of each are on the page, whatever box holds them.
-    apart = """() => [...document.querySelectorAll("#wants .delivers")].map((item) => {
+    apart = """() => [...document.querySelectorAll("#wants .entry")].map((item) => {
       const words = (which) => {
         const range = document.createRange();
         range.selectNodeContents(item.querySelector(which));
         return range.getBoundingClientRect();
       };
-      const [name, says] = [words(".delivers-name"), words(".delivers-says")];
+      const [name, says] = [words(".entry-name"), words(".entry-says")];
       const box = item.getBoundingClientRect();
       const across = name.right <= says.left + 0.5 || says.right <= name.left + 0.5;
       const down = name.bottom <= says.top + 0.5 || says.bottom <= name.top + 0.5;
@@ -466,7 +559,7 @@ def test_a_long_name_under_a_want_lies_on_nothing(chromium: Browser, tmp_path: P
       return (across || down) && inside;
     })"""
     with opened(chromium, written(tmp_path, content)) as page:
-        page.locator("#wants .delivers").first.wait_for()
+        page.locator("#wants .entry").first.wait_for()
         for wide in [1280, 980, 700]:
             page.set_viewport_size({"width": wide, "height": 1000})
             assert page.evaluate(apart) == [True, True], wide
@@ -483,14 +576,14 @@ def test_a_long_word_in_the_name_of_a_want_stays_on_its_card(
         {**view, "name": f"Visit {long}"},
         {**view, "id": "air", "name": "Eat outdoors"},
     ]
-    inside = """() => [...document.querySelectorAll("#wants .want")].map((card) => {
+    inside = """() => [...document.querySelectorAll("#wants .card")].map((card) => {
       const range = document.createRange();
-      range.selectNodeContents(card.querySelector(".want-name"));
+      range.selectNodeContents(card.querySelector(".card-name"));
       return range.getBoundingClientRect().right <= card.getBoundingClientRect().right + 0.5;
     })"""
     with opened(chromium, written(tmp_path, content)) as page:
-        page.locator("#wants .want").first.wait_for()
-        assert page.locator("#wants .want").count() == 2
+        page.locator("#wants .card").first.wait_for()
+        assert page.locator("#wants .card").count() == 2
         for wide in [1280, 700, 420]:
             page.set_viewport_size({"width": wide, "height": 1000})
             assert page.evaluate(inside) == [True, True], wide
@@ -693,7 +786,7 @@ def test_the_page_shows_what_it_can_without_a_part_that_cannot_load(chromium: Br
     # Without the OPTIONs: the same, and the WANTs are there.
     with opened(chromium, path, without=("options.js",)) as page:
         page.locator("#report .row").first.wait_for()
-        page.locator("#wants .want").first.wait_for()
+        page.locator("#wants .card").first.wait_for()
         assert page.locator("#options-part").is_hidden()
         assert page.text_content("#report") == expected
     # With a fault in the WANTs: the same, and the fault is not swallowed.

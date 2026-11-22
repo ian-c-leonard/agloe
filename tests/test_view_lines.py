@@ -64,7 +64,7 @@ def lines_of(asked: list[dict[str, Any]]) -> list[list[Line]]:
 def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None:
     """For every example: nothing of the report is lost, and each tie is one the report makes."""
     asked = [asked_of(path) for path in FILES]
-    plans = depends = 0
+    plans = depends = requirements = 0
     for path, each, found in zip(FILES, asked, lines_of(asked), strict=True):
         name = f"{path.parent.name}/{path.stem}"
         assert "\n".join(line["text"] for line in found) == each["text"], name
@@ -81,7 +81,11 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
                 assert line["text"].startswith(f"  {line['record']}: "), name
                 assert line["step"] is None, name
         # Each step of a plan has one line, in the plan's order, and that line names the step.
-        shows = [line for line in found if line["step"] is not None and not line["warns"]]
+        shows = [
+            line
+            for line in found
+            if line["step"] is not None and not line["warns"] and line["meets"] is None
+        ]
         if said["answer"] == "FEASIBLE":
             plans += 1
             assert [line["step"] for line in shows] == list(range(len(trip["steps"]))), name
@@ -99,6 +103,18 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
                 assert above[-1]["step"] == line["step"], name
         warnings = sum(1 for line in each["text"].split("\n") if line.startswith("    ! "))
         assert sum(1 for line in found if line["warns"]) == warnings, name
+        # Each requirement that the report says somebody meets has one line, in the order of
+        # the report as JSON, and that line is about the step that its OPTION is.
+        met = said.get("requirements", [])
+        meets = [line for line in found if line["meets"] is not None]
+        assert [line["meets"] for line in meets] == list(range(len(met))), name
+        requirements += bool(met)
+        for line in meets:
+            step = trip["steps"][line["step"]]
+            assert step["option"] == met[line["meets"]]["option"], name
+            # Where the FILE does not say what the OPTION requires, the line says that first.
+            assert f"{step['name']} requires " in line["text"], name
+            assert line["record"] is None and line["case"] is None and not line["warns"], name
         # Each case in which the trip works has one line, in the order of the report as JSON.
         missing = said.get("missing", [])
         states = [line for line in found if line["case"] is not None]
@@ -110,6 +126,7 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
             assert line["text"].startswith(starts), name
     assert plans > 10
     assert depends > 10
+    assert requirements > 2
 
 
 def test_a_warning_is_tied_to_the_step_above_it() -> None:

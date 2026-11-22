@@ -284,6 +284,19 @@ function drawStrip(laid) {
 }
 
 /**
+ * An OPTION on the card of a WANT or of a CAPABILITY: its name, what the FILE says of the two,
+ * and who is in it. `does` says whether the OPTION SATISFIES the WANT or requires the
+ * CAPABILITY. The entry is a drawing of the OPTION, tied to the one FACT about the two.
+ */
+function entry(option, does, who) {
+  const item = made("li", `entry${does ? "" : " not"}${edges(option)}`);
+  item.title = [option.name, option.says, who, ...marks(option)].join("\n");
+  Object.assign(item.dataset, { of: drawingOf(option, option.option), records: tiesOf(option).join(" ") });
+  item.append(made("b", "entry-name", option.name), made("span", "entry-says", option.says), made("span", "entry-takes", who));
+  return item;
+}
+
+/**
  * The WANTs of the FILE: each with for whom it is a must or a must-not, and under it the
  * OPTIONs that the FILE says SATISFY it or do not, with who takes part in each. An OPTION that
  * the calendar holds is tied to its step, so pointing at it lights up that step.
@@ -294,20 +307,14 @@ function drawWants(shown) {
   part("wants-part").hidden = !shown.wants.length;
   part("wants-says").textContent = shown.says;
   for (const want of shown.wants) {
-    const card = Object.assign(made("article", `want${edges(want)}`), { title: marks(want).join("\n") });
+    const card = Object.assign(made("article", `card${edges(want)}`), { title: marks(want).join("\n") });
     Object.assign(card.dataset, { of: `want:${want.id}`, records: tiesOf(want).join(" ") });
-    card.append(made("h3", "want-name", want.name));
-    for (const words of [want.holds, want.ends]) if (words) card.append(made("p", "want-holds", words));
-    const options = made("ul", "want-options");
-    for (const option of want.options) {
-      const item = made("li", `delivers${option.degree > 0 ? "" : " not"}${edges(option)}`);
-      item.title = [option.name, option.says, option.takes, ...marks(option)].join("\n");
-      Object.assign(item.dataset, { of: drawingOf(option, option.option), records: tiesOf(option).join(" ") });
-      item.append(made("b", "delivers-name", option.name), made("span", "delivers-says", option.says), made("span", "delivers-takes", option.takes));
-      options.append(item);
-    }
+    card.append(made("h3", "card-name", want.name));
+    for (const words of [want.holds, want.ends]) if (words) card.append(made("p", "card-holds", words));
+    const options = made("ul", "card-options");
+    for (const option of want.options) options.append(entry(option, option.degree > 0, option.takes));
     if (want.options.length) card.append(options);
-    if (want.whole) card.append(made("p", "want-whole", want.whole));
+    if (want.whole) card.append(made("p", "card-whole", want.whole));
     box.append(card);
   }
 }
@@ -337,6 +344,39 @@ function drawOptions(shown) {
 }
 
 /**
+ * The CAPABILITIES of the FILE: each with every PERSON and what the FILE says of them, and
+ * under it the OPTIONs that the FILE says require it or do not, with who takes part in each
+ * and who meets what it requires. An OPTION that the calendar holds is tied to its step, so
+ * pointing at it lights up that step.
+ */
+function drawCapabilities(shown) {
+  const box = part("capabilities");
+  box.replaceChildren();
+  part("capabilities-part").hidden = !shown.capabilities.length;
+  part("capabilities-says").textContent = shown.says;
+  for (const capability of shown.capabilities) {
+    const card = Object.assign(made("article", `card${edges(capability)}`), { title: marks(capability).join("\n") });
+    Object.assign(card.dataset, { of: `capability:${capability.id}`, records: tiesOf(capability).join(" ") });
+    card.append(made("h3", "card-name", capability.name));
+    const people = made("ul", "able");
+    for (const person of capability.people) {
+      const item = made("li", `has${person.has === true ? " yes" : person.has === false ? " no" : " unsaid"}${edges(person)}`);
+      item.title = [`${person.name}: ${person.says}`, ...marks(person)].join("\n");
+      // What the FILE says of one PERSON and one CAPABILITY is a thing of its own.
+      Object.assign(item.dataset, { of: `capability:${capability.id}:${person.person}`, records: tiesOf(person).join(" ") });
+      item.append(made("b", "has-name", `${person.name}:`), made("span", "has-says", person.says));
+      people.append(item);
+    }
+    card.append(people);
+    const options = made("ul", "card-options");
+    for (const option of capability.options) options.append(entry(option, option.of !== "none", option.meets ? `${option.takes} ${option.meets}` : option.takes));
+    if (capability.options.length) card.append(options);
+    if (capability.whole) card.append(made("p", "card-whole", capability.whole));
+    box.append(card);
+  }
+}
+
+/**
  * The parts of the page that show what the FILE holds, beside its calendar. Each is loaded by
  * itself and put on the page once for each TRIP. `words` is what puts the part in words, once
  * the page has loaded it, and `of` is the TRIP that the part on the page is of.
@@ -344,6 +384,7 @@ function drawOptions(shown) {
 const held = [
   { id: "wants-part", load: () => import("./wants.js"), name: "wants", draw: drawWants, words: null, of: undefined },
   { id: "options-part", load: () => import("./options.js"), name: "options", draw: drawOptions, words: null, of: undefined },
+  { id: "capabilities-part", load: () => import("./capabilities.js"), name: "capabilities", draw: drawCapabilities, words: null, of: undefined },
 ];
 
 /** The calendar part says this, and shows no calendar. */
@@ -377,7 +418,8 @@ function write(text, tied) {
  * what it shows. A mark and a row have every record about their OPTION. An OPTION under a WANT
  * has the one FACT about the two, so pointing at it picks out that FACT. Pointing lights up no
  * drawing of another thing, though a record or a case may be about both. `data-of` says what a
- * drawing is of: a step of the TRIP, an OPTION that is no step, or a WANT.
+ * drawing is of: a step of the TRIP, an OPTION that is no step, a WANT, a CAPABILITY, or what
+ * the FILE says of one PERSON and one CAPABILITY.
  *
  * The line of a record or of a case, and a time of the TRIP, are of no thing. Pointing at one
  * lights up everything that is tied to it. A drawing that is tied to it is a drawing of what

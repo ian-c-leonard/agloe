@@ -19,16 +19,23 @@ COMPILER to say, and the page is not told.
 
 Every time is on the clocks that the report shows times on: those of the FILE's time zone. A
 time is written as those clocks show it, such as 2027-05-15T14:00:00. Each time comes with its
-offset from UTC where the report gives its times with theirs, and where the times sent are not
-all at one offset. The offset is written as the report writes it.
+offset from UTC where the report gives its times with theirs, where the times sent are not all
+at one offset, and where the clocks show one of them twice. The offset is written as the
+report writes it.
 
 The page is sent every OPTION of the FILE too, whether or not a LOCK names it or a plan uses
 it: where it is, when the FILE says it starts, how long it takes, how early people must be
 there, and whom a LOCK names for it. What the FILE does not say is sent as nothing.
 
-Each name is sent as the report shows it. A PERSON, a PLACE, an OPTION, a WAY or a WANT whose
-name another of its kind has comes with its id, and a name that could be taken for something
-else comes in quotes. So the page tells two apart where the report does, in the same words.
+The page is sent the CAPABILITIES of the FILE as well: each PERSON of whom a FACT says that
+they have the CAPABILITY or do not, each OPTION of which a FACT says what it requires of the
+CAPABILITY, and the FACT that the FILE states every one of its OPTIONs that requires it.
+Whether the PERSONs in an OPTION meet what it requires is for the COMPILER to say.
+
+Each name is sent as the report shows it. A PERSON, a PLACE, an OPTION, a WAY, a WANT or a
+CAPABILITY whose name another of its kind has comes with its id, and a name that could be
+taken for something else comes in quotes. So the page tells two apart where the report does,
+in the same words.
 A page shows two names alike that a report in words does not: those that differ only in how
 an accent is put on a letter, or in how many spaces they hold. Those come with their ids too.
 
@@ -49,7 +56,18 @@ from typing import cast
 
 from agloe import report as reports
 from agloe.answers import Answer, Report
-from agloe.file import File, Option, Person, Place, Start, Unwritable, Want, Way, local
+from agloe.file import (
+    Capability,
+    File,
+    Option,
+    Person,
+    Place,
+    Start,
+    Unwritable,
+    Want,
+    Way,
+    local,
+)
 
 type Trip = dict[str, object]
 type _Shape = Mapping[str, type | tuple[type, ...]]
@@ -75,6 +93,7 @@ _TRIP: _Shape = {
     "steps": list,
     "wants": list,
     "options": list,
+    "capabilities": list,
 }
 _OPTION: _Shape = {
     "id": str,
@@ -99,6 +118,16 @@ _WANT: _Shape = {
     "options": list,
 }
 _DELIVERY: _Shape = {"option": str, "name": str, "degree": int, "record": str}
+_CAPABILITY: _Shape = {
+    "id": str,
+    "name": str,
+    "has": list,
+    "complete": (str, _NONE),
+    "options": list,
+}
+_ABILITY: _Shape = {"person": str, "has": bool, "record": str}
+_REQUIREMENT: _Shape = {"option": str, "name": str, "of": str, "record": str}
+_OF = frozenset({"none", "one", "each"})  # of whom an OPTION requires a CAPABILITY
 _DAY: _Shape = {"date": str, "offset": (str, _NONE), "opens": int, "closes": int}
 _TIME: _Shape = {"at": str, "offset": (str, _NONE)}
 _BOUND: _Shape = {**_TIME, "day": (int, _NONE), "second": (int, _NONE), "record": str}
@@ -272,6 +301,7 @@ def shown(file: File, report: Report) -> Trip | None:
                 }
                 for option in file.options
             ],
+            "capabilities": _capabilities(file, names),
         }
     except Unwritable:
         return None
@@ -304,7 +334,8 @@ def _said_of(
 
 
 def _names(
-    records: Sequence[Person | Place | Option | Way | Want], joins: str | None = None
+    records: Sequence[Person | Place | Option | Way | Want | Capability],
+    joins: str | None = None,
 ) -> dict[str, str]:
     """The name to show for each record, as the report shows it, so that no two show the same.
 
@@ -377,6 +408,47 @@ def _wants(file: File, names: Mapping[str, str]) -> list[Trip]:
             }
         )
     return wants
+
+
+def _capabilities(file: File, names: Mapping[str, str]) -> list[Trip]:
+    """The CAPABILITIES of the FILE, in its order, each with what the FILE says of it.
+
+    ``has`` holds each PERSON of whom a FACT says that they have the CAPABILITY or do not, in
+    the FILE's order of PERSONs, with the FACT. ``options`` holds each OPTION of which a FACT
+    says what it requires of the CAPABILITY, in the FILE's order of OPTIONs, with the FACT:
+    ``of`` is "one" PERSON who takes part, "each" of them, or "none". ``complete`` is the FACT
+    that the FILE states every one of its OPTIONs that requires the CAPABILITY, where it holds
+    one.
+    """
+    capabilities: list[Trip] = []
+    called = _names(file.capabilities)
+    for capability in file.capabilities:
+        complete = file.requires_complete(capability.id)
+        able = [(person, file.ability(person.id, capability.id)) for person in file.persons]
+        asked = [(option, file.requirement(option.id, capability.id)) for option in file.options]
+        capabilities.append(
+            {
+                "id": capability.id,
+                "name": called[capability.id],
+                "has": [
+                    {"person": person.id, "has": fact.has, "record": fact.id}
+                    for person, fact in able
+                    if fact is not None
+                ],
+                "complete": None if complete is None else complete.id,
+                "options": [
+                    {
+                        "option": option.id,
+                        "name": names[option.id],
+                        "of": fact.of,
+                        "record": fact.id,
+                    }
+                    for option, fact in asked
+                    if fact is not None
+                ],
+            }
+        )
+    return capabilities
 
 
 def _in_the_itinerary(file: File, report: Report) -> list[_Step]:
@@ -638,7 +710,8 @@ def holds(trip: object) -> bool:
             step["option"] is None or step["option"] in options
             for step in cast("list[dict[str, object]]", steps)
         )
-        and _are_wants(sent["wants"], persons, places)
+        and _are_wants(sent["wants"], persons, places, options)
+        and _are_capabilities(sent["capabilities"], persons, options)
     )
 
 
@@ -681,12 +754,49 @@ def _the_options(
     return _all_different(ids)
 
 
-def _are_wants(wants: object, persons: frozenset[str], places: frozenset[str]) -> bool:
+def _are_capabilities(
+    capabilities: object, persons: frozenset[str], options: frozenset[str]
+) -> bool:
+    """Whether these are the CAPABILITIES of such a TRIP, each with an id of its own.
+
+    A CAPABILITY names each PERSON once, and each OPTION once: an OPTION of the TRIP, with
+    whether it requires the CAPABILITY of one PERSON, of each, or of none.
+    """
+    seen: set[str] = set()
+    for capability in cast("list[object]", capabilities):
+        if not _fits(capability, _CAPABILITY):
+            return False
+        said = cast("dict[str, object]", capability)
+        if said["id"] in seen or not cast("str", said["name"]).strip():
+            return False
+        seen.add(cast("str", said["id"]))
+        able: list[object] = []
+        for ability in cast("list[object]", said["has"]):
+            if not _fits(ability, _ABILITY):
+                return False
+            able.append(cast("dict[str, object]", ability)["person"])
+        asked: list[object] = []
+        for requirement in cast("list[object]", said["options"]):
+            if not _fits(requirement, _REQUIREMENT):
+                return False
+            stated = cast("dict[str, object]", requirement)
+            if not cast("str", stated["name"]).strip() or stated["of"] not in _OF:
+                return False
+            asked.append(stated["option"])
+        who, which = _all_different(able), _all_different(asked)
+        if who is None or which is None or not who <= persons or not which <= options:
+            return False
+    return True
+
+
+def _are_wants(
+    wants: object, persons: frozenset[str], places: frozenset[str], options: frozenset[str]
+) -> bool:
     """Whether these are the WANTs of such a TRIP, each with an id of its own.
 
     A WANT is a must for some of the PERSONs and a must-not for others, and for nobody both.
     Somebody holds it. No OPTION delivers a WANT about where the TRIP ends.
-    It names each OPTION once, with a DEGREE OF SATISFACTION from 0 to 10.
+    It names each OPTION once, an OPTION of the TRIP, with a DEGREE OF SATISFACTION from 0 to 10.
     """
     seen: set[str] = set()
     for want in cast("list[object]", wants):
@@ -706,7 +816,7 @@ def _are_wants(wants: object, persons: frozenset[str], places: frozenset[str]) -
         ):
             return False
         seen.add(cast("str", said["id"]))
-        options: list[object] = []
+        delivered: list[object] = []
         for delivery in cast("list[object]", said["options"]):
             if not _fits(delivery, _DELIVERY):
                 return False
@@ -716,8 +826,9 @@ def _are_wants(wants: object, persons: frozenset[str], places: frozenset[str]) -
                 or not 0 <= cast("int", stated["degree"]) <= 10
             ):
                 return False
-            options.append(stated["option"])
-        if _all_different(options) is None:
+            delivered.append(stated["option"])
+        which = _all_different(delivered)
+        if which is None or not which <= options:
             return False
     return True
 

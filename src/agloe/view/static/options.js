@@ -11,8 +11,9 @@
 // Nothing here judges a TRIP. An OPTION that no LOCK names and no plan uses is shown like any
 // other: it is in the FILE.
 
-import { casesAbout, casesIn, findsOf, listed, optionsOf, ruledOut, saidOf } from "./named.js";
+import { casesAbout, casesIn, findsOf, optionsOf, ruledOut, saidOf } from "./named.js";
 import { clock, clocksOf, dateName, span } from "./times.js";
+import { whoIsIn } from "./who.js";
 
 /** When an OPTION starts, as far as the FILE says. */
 function whenOf(option) {
@@ -55,14 +56,12 @@ function arriveOf(option) {
  */
 export function options(trip, report = null, stated = null) {
   if (trip === null || !trip.options.length) return { says: "", clash: false, asked: false, options: [] };
-  const person = new Map(trip.persons.map((each) => [each.id, each.name]));
   const place = new Map(trip.places.map((each) => [each.id, each.name]));
+  const who = whoIsIn(trip);
   const ruled = ruledOut(report);
   const needed = casesIn(report);
   const shown = trip.options.map((option) => {
-    const step = trip.steps.findIndex((each) => each.option === option.id);
-    const locked = option.locked.map((id) => person.get(id));
-    const takers = step < 0 ? [] : trip.steps[step].persons.map((id) => person.get(id));
+    const { step, lock, plan } = who(option.id);
     const clash = option.records.filter((id) => ruled.has(id));
     const cases = casesAbout(needed, (need) => optionsOf(need).includes(option.id));
     return {
@@ -72,10 +71,9 @@ export function options(trip, report = null, stated = null) {
       when: whenOf(option),
       takes: takesOf(option),
       arrive: arriveOf(option),
-      // One LOCK can name several PERSONs, and several LOCKs one each: the words fit both.
-      lock: locked.length ? `${listed(locked)} ${locked.length === 1 ? "is" : "are each"} named by a LOCK.` : "No LOCK names it.",
-      plan: !trip.itinerary ? null : takers.length ? `In the plan: ${listed(takers)} ${takers.length === 1 ? "takes" : "take"} part.` : "Not in the plan.",
-      step: step < 0 ? null : step,
+      lock,
+      plan,
+      step,
       records: option.records,
       clash,
       finds: findsOf(clash),

@@ -3,23 +3,17 @@
 The view sends the WANTs with each report: for whom each is a must or a must-not, and each
 OPTION that a FACT says SATISFIES it or does not. ``src/agloe/view/static/wants.js`` puts them
 in words, says who takes part in each of those OPTIONs, and marks what the report names. It
-has no page in it, so Node runs it here, through ``view_wants.mjs``.
+has no page in it, so Node runs it here, through ``view_part.mjs``.
 
 Nothing in it judges a TRIP. Whether an ITINERARY SATISFIES a WANT is for the COMPILER to say.
 """
 
 import json
-import os
-import shutil
-import subprocess
-from pathlib import Path
 from typing import Any
-
-import pytest
 
 from agloe.file import read
 from tests.stories import EXAMPLES
-from tests.test_view_calendar import drawn, in_words, with_its_report
+from tests.test_view_calendar import drawn, in_words, parts, with_its_report
 
 FILES = sorted(
     path for path in EXAMPLES.rglob("*.json") if not path.name.endswith(".expected.json")
@@ -40,27 +34,7 @@ def all_wants(
     texts: list[str | None] | None = None,
 ) -> list[Wants]:
     """What the page shows of the WANTs of each TRIP, by the page's own code."""
-    with_them = reports if reports is not None else [None] * len(trips)
-    in_their_words = texts if texts is not None else [None] * len(trips)
-    asked = [
-        {"trip": sent, "report": found, "text": words}
-        for sent, found, words in zip(trips, with_them, in_their_words, strict=True)
-    ]
-    node = shutil.which("node")
-    if node is None:
-        if os.environ.get("CI"):
-            pytest.fail("the tests of the view need Node")
-        pytest.skip("needs Node")
-    done = subprocess.run(
-        [node, str(Path(__file__).parent / "view_wants.mjs")],
-        input=json.dumps(asked),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert done.returncode == 0, done.stderr
-    shown: list[Wants] = json.loads(done.stdout)
-    return shown
+    return parts("wants", trips, reports, texts)
 
 
 def wants_of(name: str, words: bool = True) -> Wants:

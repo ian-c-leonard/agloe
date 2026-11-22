@@ -3,8 +3,9 @@
 //
 // A report on a TRIP that cannot work names the FACTs, WANTs and DECISIONs that rule out every
 // plan. A report on a TRIP that depends on what the FILE does not say names, for each case in
-// which the trip works, the things that the case needs. Each part of the page marks what it
-// shows of those. Nothing here judges a TRIP: it reads what the report as JSON already holds.
+// which the trip works, the things that the case needs. A report that shows a plan names who
+// meets what each OPTION of the plan requires. Each part of the page marks what it shows of
+// those. Nothing here judges a TRIP: it reads what the report as JSON already holds.
 
 /** Names as a sentence joins them: Alex, Sam and Jo. */
 export function listed(names) {
@@ -36,6 +37,18 @@ export function casesIn(report) {
   const isNeed = (need) => need !== null && typeof need === "object" && !Array.isArray(need);
   const isCase = (needs) => Array.isArray(needs) && needs.length > 0 && needs.every(isNeed);
   return Array.isArray(missing) && missing.every(isCase) ? missing : [];
+}
+
+/**
+ * What the OPTIONs of a plan require, and who meets it, as a report states it: for each
+ * requirement its OPTION, its CAPABILITY and the PERSONs who meet it. Only a report that shows
+ * a plan holds any, and a list that is not of that shape is none.
+ */
+export function requirementsIn(report) {
+  const stated = report !== null && typeof report === "object" && report.answer === "FEASIBLE" ? report.requirements : null;
+  const isText = (id) => typeof id === "string";
+  const isOne = (each) => each !== null && typeof each === "object" && isText(each.option) && isText(each.capability) && Array.isArray(each.persons) && each.persons.every(isText);
+  return Array.isArray(stated) && stated.every(isOne) ? stated : [];
 }
 
 /** The OPTIONs that one of those things names: its own, and each that somebody has to buy a place for. */

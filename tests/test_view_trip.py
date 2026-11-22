@@ -37,10 +37,12 @@ from tests.stories import (
     EXAMPLES,
     any_time,
     at,
+    can,
     lasts,
     lasts_between,
     lock,
     moves,
+    requires,
     seconds,
     starts_at,
     stays,
@@ -168,6 +170,21 @@ def test_every_example_is_sent_as_a_trip_that_a_page_can_draw(path: Path) -> Non
         assert option["margin"] == (None if margin is None else margin.margin)
         named = {person for lock in file.locks if lock.option == each.id for person in lock.persons}
         assert option["locked"] == [person.id for person in file.persons if person.id in named]
+    # Every CAPABILITY of the FILE is sent, in the FILE's order, with each FACT about it.
+    assert [each["id"] for each in sent["capabilities"]] == [each.id for each in file.capabilities]
+    for capability in sent["capabilities"]:
+        able = [(person.id, file.ability(person.id, capability["id"])) for person in file.persons]
+        assert capability["has"] == [
+            {"person": person, "has": fact.has, "record": fact.id}
+            for person, fact in able
+            if fact is not None
+        ]
+        asked = [(each.id, file.requirement(each.id, capability["id"])) for each in file.options]
+        assert [(each["option"], each["of"], each["record"]) for each in capability["options"]] == [
+            (option, fact.of, fact.id) for option, fact in asked if fact is not None
+        ]
+        complete = file.requires_complete(capability["id"])
+        assert capability["complete"] == (None if complete is None else complete.id)
     # Each step that is an OPTION is one of them.
     ids = {option["id"] for option in sent["options"]}
     assert {step["option"] for step in sent["steps"]} - {None} <= ids
@@ -456,6 +473,73 @@ def test_a_want_says_for_whom_it_is_a_must_not_and_whether_its_options_are_all_s
     (pizza,) = wants_of(EXAMPLES / "a-must" / "cannot-work.json")
     assert pizza["complete"] == "every-deep-dish-place"
     assert [each["option"] for each in pizza["options"]] == ["dinner-pizzeria"]
+
+
+def test_the_capabilities_of_the_file_are_sent_with_who_has_each_and_what_requires_it() -> None:
+    """Two drives require driving a manual car of one PERSON. Sam has it, and the others do not."""
+    sent = drawn(EXAMPLES / "a-driver" / "every-drive-is-stated.json")
+    assert sent["capabilities"] == [
+        {
+            "id": "drive-manual",
+            "name": "driving a manual car",
+            # Each PERSON of whom a FACT says so, in the FILE's order of PERSONs.
+            "has": [
+                {"person": "alex", "has": False, "record": "alex-does-not-drive-manual"},
+                {"person": "sam", "has": True, "record": "sam-drives-manual"},
+                {"person": "jo", "has": False, "record": "jo-does-not-drive-manual"},
+            ],
+            # A FACT says that the FILE states every one of its OPTIONs that requires it.
+            "complete": "every-drive-that-needs-a-driver",
+            # Each OPTION of which a FACT says what it requires, in the FILE's order of OPTIONs.
+            "options": [
+                {
+                    "option": "drive-out",
+                    "name": "Drive to the dunes",
+                    "of": "one",
+                    "record": "drive-out-needs-a-driver",
+                },
+                {
+                    "option": "drive-back",
+                    "name": "Drive back to the hotel",
+                    "of": "one",
+                    "record": "drive-back-needs-a-driver",
+                },
+            ],
+        }
+    ]
+    # The FILE says only of Jo whether they drive, and not that these are all the drives.
+    (driving,) = drawn(EXAMPLES / "a-driver" / "depends-on-who-can-drive.json")["capabilities"]
+    assert (driving["has"], driving["complete"]) == (
+        [{"person": "jo", "has": False, "record": "jo-does-not-drive-manual"}],
+        None,
+    )
+    # A FILE with no CAPABILITY is sent none.
+    assert drawn(EXAMPLES / "flight-home" / "works.json")["capabilities"] == []
+
+
+def test_a_capability_says_what_each_option_requires_of_it() -> None:
+    """Of each PERSON who takes part, of one of them, or of none."""
+    file = trip(
+        ["alex", "sam"],
+        ["pier"],
+        [stays(each, "pier") for each in ("swim", "tour", "picnic", "walk")],
+        [
+            requires("picnic", "swimming", "none"),
+            requires("tour", "swimming"),
+            requires("swim", "swimming", "each"),
+            can("sam", "swimming"),
+        ],
+        [],
+        capabilities=["swimming", "rowing"],
+    )
+    swimming, rowing = sent_for(file, Report(Answer.UNDETERMINED))["capabilities"]
+    assert [(each["option"], each["of"]) for each in swimming["options"]] == [
+        ("swim", "each"),
+        ("tour", "one"),
+        ("picnic", "none"),
+    ]
+    assert swimming["has"] == [{"person": "sam", "has": True, "record": "sam-swimming"}]
+    assert rowing == {"id": "rowing", "name": "rowing", "has": [], "complete": None, "options": []}
 
 
 def test_a_want_about_where_the_trip_ends_names_the_place() -> None:
@@ -1423,6 +1507,47 @@ OPTION: dict[str, Any] = {
 }
 
 
+CAPABILITY: dict[str, Any] = {
+    "id": "driving",
+    "name": "driving",
+    "has": [
+        {"person": "alex", "has": True, "record": "alex-drives"},
+        {"person": "sam", "has": False, "record": "sam-does-not-drive"},
+    ],
+    "complete": "every-drive",
+    "options": [{"option": "night", "name": "night", "of": "one", "record": "night-needs-it"}],
+}
+
+
+def _capability(**other: object) -> Callable[[Trip], None]:
+    """The TRIP gets one CAPABILITY, which is good but for these parts."""
+    return _set("capabilities", to=[{**CAPABILITY, **other}])
+
+
+def _ability(**other: object) -> Callable[[Trip], None]:
+    """The TRIP gets one CAPABILITY, whose first PERSON is good but for these parts."""
+    return _capability(has=[{**CAPABILITY["has"][0], **other}])
+
+
+def _requirement(**other: object) -> Callable[[Trip], None]:
+    """The TRIP gets one CAPABILITY, whose one OPTION is good but for these parts."""
+    return _capability(options=[{**CAPABILITY["options"][0], **other}])
+
+
+def test_a_trip_with_a_capability_is_a_trip() -> None:
+    sent = good()
+    assert sent["capabilities"] == []
+    _capability()(sent)
+    assert holds(sent)
+    # A CAPABILITY of which the FILE says nothing.
+    _capability(has=[], complete=None, options=[])(sent)
+    assert holds(sent)
+    # An OPTION requires it of one PERSON who takes part, of each, or of none.
+    for of in ("one", "each", "none"):
+        _requirement(of=of)(sent)
+        assert holds(sent)
+
+
 def _option(**other: object) -> Callable[[Trip], None]:
     """The TRIP gets one more OPTION, which is good but for these parts."""
 
@@ -1548,6 +1673,29 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "an option of a want with a blank name": _delivery(name=""),
     "an option of a want with no fact": _delivery(record=None),
     "a want that names an option twice": _want(options=[WANT["options"][0]] * 2),
+    "an option of a want that the trip does not have": _delivery(option="dinner"),
+    "no capabilities": _drop("capabilities"),
+    "capabilities that are no list": _set("capabilities", to={}),
+    "a capability that is no record": _set("capabilities", to=["driving"]),
+    "a capability with one thing more": _capability(more=1),
+    "a capability with a blank name": _capability(name=" "),
+    "a capability with an id that is no text": _capability(id=7),
+    "two capabilities with one id": _set("capabilities", to=[CAPABILITY, CAPABILITY]),
+    "a capability whose complete set is no id": _capability(complete=7),
+    "a capability whose persons are no list": _capability(has={}),
+    "a capability of a person the trip does not have": _ability(person="jo"),
+    "a capability that names a person twice": _capability(has=[CAPABILITY["has"][0]] * 2),
+    "a person of a capability who is no record": _capability(has=["alex"]),
+    "a person of a capability with a has that is a number": _ability(has=1),
+    "a person of a capability with no fact": _ability(record=None),
+    "a capability whose options are no list": _capability(options={}),
+    "an option of a capability that is no record": _capability(options=["night"]),
+    "an option of a capability that the trip does not have": _requirement(option="dinner"),
+    "an option of a capability with a blank name": _requirement(name=""),
+    "an option of a capability that requires it of two": _requirement(of="two"),
+    "an option of a capability that requires it of a number": _requirement(of=1),
+    "an option of a capability with no fact": _requirement(record=None),
+    "a capability that names an option twice": _capability(options=[CAPABILITY["options"][0]] * 2),
     "no zone": _drop("zone"),
     "one thing more": _set("more", to=1),
     "a zone that is no text": _set("zone", to=5),

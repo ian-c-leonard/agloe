@@ -122,6 +122,40 @@ def calendars(
     return laid
 
 
+def parts(
+    name: str,
+    trips: list[Trip | None],
+    reports: list[dict[str, Any] | None] | None = None,
+    texts: list[str | None] | None = None,
+) -> list[dict[str, Any]]:
+    """What one part of the page shows of each TRIP, by the page's own code.
+
+    ``name`` is the part: wants, options or capabilities. The report is as JSON, and in words
+    where the part is to say what the report says of a case.
+    """
+    with_them = reports if reports is not None else [None] * len(trips)
+    in_their_words = texts if texts is not None else [None] * len(trips)
+    asked = [
+        {"trip": sent, "report": found, "text": words}
+        for sent, found, words in zip(trips, with_them, in_their_words, strict=True)
+    ]
+    node = shutil.which("node")
+    if node is None:
+        if os.environ.get("CI"):
+            pytest.fail("the tests of the view need Node")
+        pytest.skip("needs Node")
+    done = subprocess.run(
+        [node, str(Path(__file__).parent / "view_part.mjs"), name],
+        input=json.dumps(asked),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    shown: list[dict[str, Any]] = json.loads(done.stdout)
+    return shown
+
+
 def calendar(
     sent: Trip | None, found: dict[str, Any] | None = None, words: str | None = None
 ) -> Calendar:
@@ -1274,6 +1308,7 @@ def made(times: list[tuple[str, str | None]]) -> Trip:
         "ends": None,
         "wants": [],
         "options": [an_option("stay", "Stay", "pier")],
+        "capabilities": [],
         "steps": [
             {
                 "option": "stay",
@@ -1391,6 +1426,7 @@ def some_trip(chosen: random.Random) -> Trip:
         "until": chosen.choice([None, None, "2030-01-01"]),
         "wants": [],
         "options": [an_option("o", "A name", places[0])],
+        "capabilities": [],
         "starts": bound("trip-start"),
         "ends": bound("trip-end"),
         "steps": steps,

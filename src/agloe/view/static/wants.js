@@ -12,6 +12,7 @@
 // the page puts the WANT, its OPTIONs and who takes part side by side, and says no more.
 
 import { casesAbout, casesIn, findsOf, listed, ruledOut, saidOf } from "./named.js";
+import { whoIsIn } from "./who.js";
 
 /**
  * For whom a WANT is a must, and for whom a must-not. A WANT about where the TRIP ends says
@@ -58,6 +59,7 @@ export function wants(trip, report = null, stated = null) {
   const person = new Map(trip.persons.map((each) => [each.id, each.name]));
   const place = new Map(trip.places.map((each) => [each.id, each.name]));
   const name = (id) => person.get(id);
+  const who = whoIsIn(trip);
   const ruled = ruledOut(report);
   const needed = casesIn(report);
   const marked = (records, about, otherwise) => {
@@ -74,20 +76,16 @@ export function wants(trip, report = null, stated = null) {
     // A WANT's own records: itself, and the FACT that the FILE states every OPTION for it.
     ...marked([want.id, ...(want.complete === null ? [] : [want.complete])], (need) => need.want === want.id, "The report names this WANT in what the FILE does not say."),
     options: want.options.map((option) => {
-      const step = trip.steps.findIndex((each) => each.option === option.option);
       // In a plan, those who take part. With no plan, those whom a LOCK names.
-      const takers = step < 0 ? [] : (trip.itinerary ? trip.steps[step].persons : trip.steps[step].locked).map(name);
-      const none = trip.itinerary ? "Not in the plan." : "No LOCK names it.";
-      // One LOCK can name several PERSONs, and several LOCKs one each: the words fit both.
-      const some = trip.itinerary ? `In the plan: ${listed(takers)} ${takers.length === 1 ? "takes" : "take"} part.` : `${listed(takers)} ${takers.length === 1 ? "is" : "are each"} named by a LOCK.`;
+      const { step, takes } = who(option.option);
       return {
         option: option.option,
         name: option.name,
         degree: option.degree,
         // The report says a DEGREE OF SATISFACTION so: 9 out of 10.
         says: option.degree > 0 ? `SATISFIES it, ${option.degree} out of 10` : "does not SATISFY it",
-        takes: takers.length ? some : none,
-        step: step < 0 ? null : step,
+        takes,
+        step,
         ...marked([option.record], (need) => need.want === want.id && need.option === option.option, "The report names this OPTION and this WANT in what the FILE does not say."),
       };
     }),

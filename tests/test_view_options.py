@@ -3,24 +3,19 @@
 The view sends each OPTION with what the FILE says of it. ``src/agloe/view/static/options.js``
 puts that in words, as the report words it, and says plainly what the FILE does not say. It
 says who takes part in an OPTION in the plan of the report, and marks what the report names.
-It has no page in it, so Node runs it here, through ``view_options.mjs``.
+It has no page in it, so Node runs it here, through ``view_part.mjs``.
 
 Nothing in it judges a TRIP. An OPTION that no LOCK names and no plan uses is shown like any
 other: it is in the FILE.
 """
 
 import json
-import os
-import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from agloe.file import read
 from tests.stories import EXAMPLES
-from tests.test_view_calendar import drawn, in_words, with_its_report
+from tests.test_view_calendar import drawn, in_words, parts, with_its_report
 
 STORY = EXAMPLES / "flight-home"
 FILES = sorted(
@@ -42,27 +37,7 @@ def all_options(
     texts: list[str | None] | None = None,
 ) -> list[Options]:
     """What the page shows of the OPTIONs of each TRIP, by the page's own code."""
-    with_them = reports if reports is not None else [None] * len(trips)
-    in_their_words = texts if texts is not None else [None] * len(trips)
-    asked = [
-        {"trip": sent, "report": found, "text": words}
-        for sent, found, words in zip(trips, with_them, in_their_words, strict=True)
-    ]
-    node = shutil.which("node")
-    if node is None:
-        if os.environ.get("CI"):
-            pytest.fail("the tests of the view need Node")
-        pytest.skip("needs Node")
-    done = subprocess.run(
-        [node, str(Path(__file__).parent / "view_options.mjs")],
-        input=json.dumps(asked),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert done.returncode == 0, done.stderr
-    shown: list[Options] = json.loads(done.stdout)
-    return shown
+    return parts("options", trips, reports, texts)
 
 
 def options_of(path: Path) -> Options:
