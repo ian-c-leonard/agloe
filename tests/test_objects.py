@@ -56,6 +56,7 @@ from tests.stories import (
     complete,
     cutoff,
     does_with,
+    ends_at,
     every,
     every_right,
     every_transfer,
@@ -2505,10 +2506,11 @@ def test_whether_anything_works_is_settled_by_the_first_plan_found(
         fixed: dict[int, int],
         not_before: dict[int, int],
         no_later: dict[int, int],
+        over_by: dict[int, int] | None = None,
     ) -> list[int] | None:
         nonlocal timed
         timed += 1
-        return its_own(count, gaps, fixed, not_before, no_later)
+        return its_own(count, gaps, fixed, not_before, no_later, over_by)
 
     monkeypatch.setattr(reference, "_times", counted)
     assert reference.any_works(file, world)
@@ -2590,7 +2592,7 @@ def test_the_orders_of_two_objects_are_combined_only_where_they_can_go_together(
         who = tuple((f"person-{number}",) for number in range(checks))
         orders = tuple((number,) for number in range(checks))
         chains = its_own(file, world, who, orders)
-        assert chains is not None and len(chains) == agree
+        assert chains is not None and len(list(chains)) == agree
         assert checked(file).answer is Answer.FEASIBLE
 
 
@@ -2638,10 +2640,11 @@ def test_a_way_is_tried_only_in_the_openings_that_the_times_of_the_trip_leave(
         fixed: dict[int, int],
         not_before: dict[int, int],
         no_later: dict[int, int],
+        over_by: dict[int, int] | None = None,
     ) -> list[int] | None:
         nonlocal timed
         timed += 1
-        return its_own(count, gaps, fixed, not_before, no_later)
+        return its_own(count, gaps, fixed, not_before, no_later, over_by)
 
     monkeypatch.setattr(reference, "_times", counted)
     assert reference.any_works(file, world)
@@ -2665,3 +2668,141 @@ def test_an_order_that_the_fixed_starts_rule_out_is_not_tried() -> None:
     assert chains is not None
     assert [gaps for gaps, _, _ in chains] == [[(2, 1, 0), (1, 0, 0)]]
     assert [step.option for step in checked(file).itinerary] == ["check-2", "check-1", "check-0"]
+
+
+# What the fourth review's FILEs showed.
+
+
+def test_an_opening_that_a_way_cannot_leave_in_times_nothing_else() -> None:
+    """Alex takes a train to the desk at 10:00 am, joins Sam's meeting there, and has to be
+    back in the park when the TRIP ends at 10:35 am. Sam has five minutes of prep before the
+    meeting. Only an unlisted WAY leads back, and none leaves from 9:00 am to 9:05 am. Alex
+    cannot leave before that span, so it times nothing: the prep is at 10:25 am, after the
+    train starts. The train and the prep cost 1 USD each, and the cash has 1 USD. The
+    purchases go in the order of the steps, so Alex's train takes the cash."""
+    options = [moves("train", "park", "desk"), stays("prep", "desk"), stays("meeting", "desk")]
+    span = {
+        "from": "desk",
+        "to": "park",
+        "leaving": {"earliest": moment(9), "latest": moment(9, 5)},
+    }
+    facts = [
+        *at("train", 10),
+        *whenever("prep"),
+        *whenever("meeting"),
+        starts_from("alex", "park"),
+        starts_from("sam", "desk"),
+        {"id": "ways", "complete": span},
+        needs_right("train"),
+        offer("train", 1, price="1.00 USD"),
+        needs_right("prep"),
+        offer("prep", 1, price="1.00 USD"),
+        needs_no_right("meeting"),
+        lies_at("key", "desk"),
+        requires_object("meeting", "key"),
+        every_use("key"),
+        every_transfer("key"),
+    ]
+    decisions = [
+        trip_ends(10, 35),
+        lock("train", "alex"),
+        lock("prep", "sam"),
+        lock("meeting", "alex", "sam"),
+        cap("cash", "1.00 USD"),
+    ]
+    file = trip(
+        ["alex", "sam"],
+        ["park", "desk"],
+        options,
+        facts,
+        decisions,
+        wants=[ends_at("park", "alex")],
+        rights=True,
+        budgets=[budget("cash", "alex", "sam"), budget("card", "alex", "sam")],
+        objects=["key"],
+    )
+    world = with_these_at_best(file, [Unknown("other ways", origin="desk", destination="park")])
+    shown = first_shown(file, world)
+    assert shown is not None
+    assert [(step.option, step.start) for step in shown] == [
+        ("train", seconds(10)),
+        ("prep", seconds(10, 25)),
+        ("meeting", seconds(10, 30)),
+        (None, seconds(10, 35)),
+    ]
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert [(cover.person, cover.option, cover.budget) for cover in found.plans[0].buys] == [
+        ("alex", "train", "cash"),
+        ("sam", "prep", "card"),
+    ]
+
+
+def test_an_opening_does_not_move_a_start_that_is_tied_to_no_fixed_time() -> None:
+    """Sam has a check that takes a second and can start at any time, and has to end at
+    home. The TRIP has no times. Only an unlisted WAY leads home, and none leaves in the first
+    second of 1970. The check starts then, as the rule says, and Sam leaves a second later.
+    Leaving before that second would put the check in 1969, and only a TRIP that ends too
+    soon moves it there."""
+    first_second = "1970-01-01T00:00:00+00:00[UTC]"
+    span = {
+        "from": "desk",
+        "to": "home",
+        "leaving": {"earliest": first_second, "latest": first_second},
+    }
+    facts = [
+        *whenever("check", "PT1S"),
+        starts_from("sam", "desk"),
+        {"id": "ways", "complete": span},
+        lies_at("key", "desk"),
+        requires_object("check", "key"),
+        every_use("key"),
+        every_transfer("key"),
+    ]
+    file = trip(
+        ["sam"], ["desk", "home"], [stays("check", "desk")], facts, [lock("check", "sam")],
+        wants=[ends_at("home", "sam")], objects=["key"],
+    )  # fmt: skip
+    world = with_these_at_best(file, [Unknown("other ways", origin="desk", destination="home")])
+    shown = first_shown(file, world)
+    assert shown is not None
+    assert [(step.option, step.start) for step in shown] == [("check", 0), (None, 1)]
+
+
+def test_very_many_objects_need_no_deep_stack() -> None:
+    """One check with a thousand keys lying on the desk. Nobody said that the check requires
+    them, so at worst it requires each one, and each one has an order of its own."""
+    things = [f"key-{number}" for number in range(1000)]
+    facts = [*at("check", 10, length="PT0S"), *(lies_at(thing, "desk") for thing in things)]
+    file = trip(
+        ["alex"], ["desk"], [stays("check", "desk")], facts, [lock("check", "alex")], objects=things
+    )
+    assert answers.check(file).answer is Answer.FEASIBLE
+
+
+def test_the_first_orders_that_go_together_answer_whether_anything_works(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Seven checks at one instant, each with its own PERSON, and two keys that each check
+    requires. Each key gives the seven an order, and the two orders have to agree. The
+    second is made to go with the first, so the first pair that is made is one that works,
+    and whether anything works is settled by it."""
+    file = keys_on_a_desk(7, 2)
+    timed = 0
+    its_own = reference._times  # pyright: ignore[reportPrivateUsage]
+
+    def counted(
+        count: int,
+        gaps: list[tuple[int, int, int]],
+        fixed: dict[int, int],
+        not_before: dict[int, int],
+        no_later: dict[int, int],
+        over_by: dict[int, int] | None = None,
+    ) -> list[int] | None:
+        nonlocal timed
+        timed += 1
+        return its_own(count, gaps, fixed, not_before, no_later, over_by)
+
+    monkeypatch.setattr(reference, "_times", counted)
+    assert reference.any_works(file, worst_case(file))
+    assert timed == 1

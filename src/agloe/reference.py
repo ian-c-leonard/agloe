@@ -16,7 +16,7 @@ are in ``answers``, which works them out from this module's search or from a fas
 """
 
 from collections import deque
-from collections.abc import Iterable, Iterator, Mapping, Sequence, Sized
+from collections.abc import Iterable, Iterator, Mapping, Sequence, Set, Sized
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from heapq import heapify, heappop, heappush
@@ -1770,11 +1770,39 @@ def whereabouts(
 type _Chain = tuple[list[tuple[int, int, int]], dict[int, _Taken], tuple[int, tuple[_Ranked, ...]]]
 type _Ranked = tuple[tuple[int, int], ...]  # the hand-overs of one OBJECT, by position in the FILE
 _NOTHING_TO_ORDER: list[_Chain] = [([], {}, (0, ()))]  # no OBJECT turns on the order of the steps
+type _Ordered = tuple[
+    Iterator[tuple[int, ...]],
+    dict[int, set[int]],
+    list[tuple[int, int, int]],
+    tuple[_Ranked, ...],
+]
+
+
+class _Kept[T]:
+    """What an iterator gives, kept as it comes, so that it can be gone through more than once.
+
+    Nothing is made before it is asked for, and nothing is made twice.
+    """
+
+    def __init__(self, source: Iterable[T]) -> None:
+        self._source = iter(source)
+        self._kept: list[T] = []
+
+    def __iter__(self) -> Iterator[T]:
+        position = 0
+        while True:
+            if position == len(self._kept):
+                try:
+                    self._kept.append(next(self._source))
+                except StopIteration:
+                    return
+            yield self._kept[position]
+            position += 1
 
 
 def _chains(
     file: File, world: World, who: tuple[tuple[str, ...], ...], orders: tuple[tuple[int, ...], ...]
-) -> list[_Chain] | None:
+) -> Iterator[_Chain] | None:
     """Each order of the OPTIONs that matter to each OBJECT, with the hand-overs that work in it.
 
     Where an OBJECT is turns on the order in which the OPTIONs happen, also among OPTIONs of
@@ -1797,102 +1825,138 @@ def _chains(
     then, for each OBJECT in the FILE's order, its hand-overs by the positions of the OPTION
     and the PERSON in the FILE.
 
-    Two kinds of order are left out, because no start times keep them. One puts an OPTION
-    with a later fixed start before one with an earlier fixed start. The other goes round
-    in a circle with the orders already taken for other OBJECTs, or with what the PERSONs
-    do. Each is seen as an order is added, so the orders of many OBJECTs are never combined
-    where they cannot go together.
+    The results are made one at a time, as they are asked for. The OBJECTs are taken in the
+    FILE's order, and the order of each is made to go with those already taken: it keeps
+    what the PERSONs do and what the earlier orders say comes before what. So two orders
+    that would go round in a circle together are never made. Neither is an order that puts
+    an OPTION with a later fixed start before one with an earlier fixed start: no start
+    times keep it.
 
     Every ITINERARY that works lists its OPTIONs in one order, and that order gives each
-    OBJECT its own, so it is tried. The start times it has keep these gaps, so the rule for
+    OBJECT its own, so it is made. The start times it has keep these gaps, so the rule for
     start times finds times too. Where no OPTION of the plan requires an OBJECT, there is
     nothing to order, and the result is None.
     """
-    options = file.options
     happening = [index for index, persons in enumerate(who) if persons]
     required = [
         thing.id
         for thing in file.objects
-        if any((options[index].id, thing.id) in world.needs for index in happening)
+        if any((file.options[index].id, thing.id) in world.needs for index in happening)
     ]
     if not required:
         return None
-    # The OPTIONs that come after each one: a PERSON does them later, or a chain of PERSONs does.
-    later: dict[int, set[int]] = {index: set() for index in happening}
-    for order in orders:
-        for place, index in enumerate(order):
-            later[index].update(order[place + 1 :])
-    grew = True
-    while grew:
-        grew = False
-        for after in later.values():
-            more = set[int]().union(*(later[index] for index in after)) - after
-            if more:
-                after |= more
-                grew = True
+    return _orders_together(file, world, who, orders, happening, required)
+
+
+def _orders_together(
+    file: File,
+    world: World,
+    who: tuple[tuple[str, ...], ...],
+    orders: tuple[tuple[int, ...], ...],
+    happening: Sequence[int],
+    required: Sequence[str],
+) -> Iterator[_Chain]:
+    """What ``_chains`` gives, for the OPTIONs that happen and the OBJECTs they require.
+
+    It keeps its own list of the orders taken so far, with no call inside a call, so very
+    many OBJECTs need no deep stack.
+    """
+    options = file.options
     fixed = {index: world.terms[options[index].id].fixed_start for index in happening}
-
-    def can_come_first(index: int, left: tuple[int, ...]) -> bool:
-        """Whether nothing else that is left has to come before this OPTION."""
-        mine = fixed[index]
-        for other in left:
-            theirs = fixed[other]
-            if index in later[other] or (mine is not None and theirs is not None and theirs < mine):
-                return False
-        return True
-
-    def in_each_order(done: tuple[int, ...], left: tuple[int, ...]) -> Iterator[tuple[int, ...]]:
-        if not left:
-            yield done
-        for index in left:
-            if can_come_first(index, left):
-                yield from in_each_order((*done, index), tuple(i for i in left if i != index))
-
     people = {person.id: number for number, person in enumerate(file.persons)}
     place_of = {option.id: number for number, option in enumerate(options)}
-    # For each OBJECT, each order of its OPTIONs that works, with its hand-overs.
-    for_each: list[list[tuple[tuple[int, ...], _Ranked]]] = []
-    for thing in required:
-        matter = tuple(
+    matters = [
+        tuple(
             index
             for index in happening
             if (options[index].id, thing) in world.needs or (options[index].id, thing) in world.does
         )
-        working: list[tuple[tuple[int, ...], _Ranked]] = []
-        for order in in_each_order((), matter):
-            if thing in world.brought:
-                working.append((order, ()))
-                continue
+        for thing in required
+    ]
+
+    def closed(later: dict[int, set[int]]) -> dict[int, set[int]]:
+        """What comes after what, with everything that follows from it."""
+        grew = True
+        while grew:
+            grew = False
+            for after in later.values():
+                more = set[int]().union(*(later[index] for index in after)) - after
+                if more:
+                    after |= more
+                    grew = True
+        return later
+
+    def in_each_order(
+        matter: tuple[int, ...], later: Mapping[int, Set[int]]
+    ) -> Iterator[tuple[int, ...]]:
+        """Each order of these OPTIONs that keeps what comes after what and the fixed starts."""
+
+        def can_come_first(index: int, left: tuple[int, ...]) -> bool:
+            mine = fixed[index]
+            for other in left:
+                theirs = fixed[other]
+                sooner = mine is not None and theirs is not None and theirs < mine
+                if index in later[other] or sooner:
+                    return False
+            return True
+
+        def go(done: tuple[int, ...], left: tuple[int, ...]) -> Iterator[tuple[int, ...]]:
+            if not left:
+                yield done
+            for index in left:
+                if can_come_first(index, left):
+                    yield from go((*done, index), tuple(i for i in left if i != index))
+
+        return go((), matter)
+
+    hand_overs: dict[tuple[str, tuple[int, ...]], _Ranked | None] = {}
+
+    def best(thing: str, order: tuple[int, ...]) -> _Ranked | None:
+        """The hand-overs of this OBJECT that the rules put first in this order, if any work."""
+        if thing in world.brought:
+            return ()
+        if (thing, order) not in hand_overs:
             visits = [(options[index].id, who[index], options[index].origin) for index in order]
             ways = [
                 tuple((place_of[option], people[person]) for option, person in run[1])
                 for run in _runs(world, thing, visits, _begins(file, world, thing), None)
             ]
-            if ways:
-                working.append((order, min(ways, key=lambda way: (len(way), way))))
-        if not working:
-            return []
-        for_each.append(working)
+            hand_overs[thing, order] = min(ways, key=lambda way: (len(way), way)) if ways else None
+        return hand_overs[thing, order]
 
-    own = [(before, after, 0) for order in orders for before, after in pairwise(order)]
-    found: list[_Chain] = []
-
-    def together(gaps: list[tuple[int, int, int]], chosen: tuple[_Ranked, ...]) -> None:
-        """Add the order of the next OBJECT to those taken so far, where they can go together."""
-        if len(chosen) == len(for_each):
+    # What comes after each OPTION: a PERSON does it later, or a chain of PERSONs does.
+    own: dict[int, set[int]] = {index: set() for index in happening}
+    for order in orders:
+        for place, index in enumerate(order):
+            own[index].update(order[place + 1 :])
+    closed(own)
+    # The OBJECTs taken so far: the orders still to try for the next one, what comes after
+    # what with the orders taken, their gaps, and their hand-overs.
+    taken: list[_Ordered] = [(in_each_order(matters[0], own), own, [], ())]
+    while taken:
+        ahead, later, gaps, chosen = taken[-1]
+        order = next(ahead, None)
+        if order is None:
+            taken.pop()
+            continue
+        thing = required[len(chosen)]
+        found = best(thing, order)
+        if found is None:
+            continue
+        longer = [*gaps, *((before, after, 0) for before, after in pairwise(order))]
+        ranked = (*chosen, found)
+        if len(ranked) == len(required):
             handed: dict[int, _Taken] = {}
-            for thing, best in zip(required, chosen, strict=True):
-                for index, person in best:
-                    handed[index] = (*handed.get(index, ()), (thing, file.persons[person].id))
-            found.append((gaps, handed, (sum(map(len, chosen)), chosen)))
-            return
-        for order, best in for_each[len(chosen)]:
-            longer = [*gaps, *((before, after, 0) for before, after in pairwise(order))]
-            if not _goes_round(len(options), [*own, *longer]):
-                together(longer, (*chosen, best))
-
-    together([], ())
-    return found
+            for each, theirs in zip(required, ranked, strict=True):
+                for index, person in theirs:
+                    handed[index] = (*handed.get(index, ()), (each, file.persons[person].id))
+            yield longer, handed, (sum(map(len, ranked)), ranked)
+            continue
+        further = {index: set(after) for index, after in later.items()}
+        for place, index in enumerate(order):
+            further[index].update(order[place + 1 :])
+        closed(further)
+        taken.append((in_each_order(matters[len(ranked)], further), further, longer, ranked))
 
 
 # ------------------------------- Which ITINERARY is shown -------------------------------
@@ -2444,8 +2508,9 @@ def _schedules(
     the other PERSONs do. So the routes that are left come in the same order, and the first
     ITINERARY that works is the same one. Every other route is left to the timing.
     """
-    chains = _chains(file, world, who, orders)
-    if chains is not None and not chains:
+    found = _chains(file, world, who, orders)
+    chains: Iterable[_Chain] = _NOTHING_TO_ORDER if found is None else _Kept(found)
+    if next(iter(chains), None) is None:
         return  # an OBJECT is not at hand where it has to be, whatever the WAYs and the times
     # Which PERSON, after which of their OPTIONs, the routes. Before their first OPTION is -1.
     needed: list[tuple[int, int, list[Route]]] = []
@@ -2488,9 +2553,7 @@ def _schedules(
             (number, position): route
             for (number, position, _), route in zip(needed, chosen, strict=True)
         }
-        yield from _timings(
-            file, world, who, orders, hops, None, chains or _NOTHING_TO_ORDER, any_will_do
-        )
+        yield from _timings(file, world, who, orders, hops, None, chains, any_will_do)
 
 
 def _over(terms: Terms) -> int | None:
@@ -2583,7 +2646,7 @@ def _timings(
     orders: tuple[tuple[int, ...], ...],
     hops: Mapping[tuple[int, int], Route],
     falls: Mapping[tuple[int, int, int], int] | None = None,
-    chains: Sequence[_Chain] | None = None,
+    chains: Iterable[_Chain] | None = None,
     any_will_do: bool = False,
 ) -> Iterator[Itinerary]:
     """The ITINERARIES for one choice of PERSONs, orders and routes, one for each timing.
@@ -2611,13 +2674,7 @@ def _timings(
     if chains is None:
         found = _chains(file, world, who, orders)
         chains = _NOTHING_TO_ORDER if found is None else found
-    required = any(
-        (option.id, thing.id) in world.needs
-        for option, persons in zip(file.options, who, strict=True)
-        if persons
-        for thing in file.objects
-    )
-    in_turn = any_will_do or not required
+    in_turn = any_will_do or chains is _NOTHING_TO_ORDER
     listed = len(file.options)
     legs: list[tuple[str, Leg]] = []  # each WAY taken: who takes it, and which one
     lines: list[list[int]] = []  # what each PERSON does in order, the WAYs they take included
@@ -2674,14 +2731,6 @@ def _timings(
     count = listed + len(legs)
     if _goes_round(count, gaps):
         return  # two PERSONs would do the same OPTIONs at one instant in opposite orders
-    # Each order of the OPTIONs that matter to an OBJECT, as more gaps. An order that goes
-    # round in a circle with what the PERSONs do is no order, also where every step in the
-    # circle starts at one instant.
-    ordered = [
-        ([*gaps, *more] if more else gaps, handed, rank)
-        for more, handed, rank in chains
-        if not more or not _goes_round(count, [*gaps, *more])
-    ]
     fixed: dict[int, int] = {}
     for index, option in enumerate(file.options):
         at = world.terms[option.id].fixed_start
@@ -2690,10 +2739,13 @@ def _timings(
 
     # The limits on each start that fix no start themselves. No step starts before the TRIP
     # starts, and a step with a known length starts early enough to be over when the TRIP ends.
+    # An OPTION that does not happen is no step, and has no limit.
     trip_starts, trip_ends = file.trip_start(), file.trip_end()
     not_before: dict[int, int] = {}
     no_later: dict[int, int] = {}
     for node in range(count):
+        if node < listed and not who[node]:
+            continue
         lasts = takes(node)
         if trip_starts is not None:
             not_before[node] = trip_starts.at
@@ -2735,19 +2787,25 @@ def _timings(
             for node, spans in ruled_out
         ]
     working: list[tuple[tuple[int, tuple[_Ranked, ...]], Itinerary]] = []
-    for choice in product(*openings):
-        earliest, latest = dict(not_before), dict(no_later)
-        for (node, spans), opening in zip(ruled_out, choice, strict=True):
-            if opening is None:
-                continue
-            if opening > 0:
-                after = spans[opening - 1][1] + 1
-                earliest[node] = max(after, earliest.get(node, after))
-            if opening < len(spans):
-                before = spans[opening][0] - 1
-                latest[node] = min(before, latest.get(node, before))
-        for all_gaps, handed, rank in ordered:
-            starts = _times(count, all_gaps, fixed, earliest, latest)
+    for more, handed, rank in chains:
+        # Each order of the OPTIONs that matter to an OBJECT is more gaps. An order that goes
+        # round in a circle with what the PERSONs do is no order, also where every step in
+        # the circle starts at one instant.
+        all_gaps = [*gaps, *more] if more else gaps
+        if more and _goes_round(count, all_gaps):
+            continue
+        for choice in product(*openings):
+            earliest, latest = dict(not_before), dict(no_later)
+            for (node, spans), opening in zip(ruled_out, choice, strict=True):
+                if opening is None:
+                    continue
+                if opening > 0:
+                    after = spans[opening - 1][1] + 1
+                    earliest[node] = max(after, earliest.get(node, after))
+                if opening < len(spans):
+                    before = spans[opening][0] - 1
+                    latest[node] = min(before, latest.get(node, before))
+            starts = _times(count, all_gaps, fixed, earliest, latest, no_later)
             if starts is None:
                 continue
             steps: dict[int, Step] = {}
@@ -2861,6 +2919,7 @@ def _times(
     fixed: Mapping[int, int],
     not_before: Mapping[int, int],
     no_later: Mapping[int, int],
+    over_by: Mapping[int, int] | None = None,
 ) -> list[int] | None:
     """Start times that keep every gap and every fixed start, or None when there are none.
 
@@ -2878,10 +2937,19 @@ def _times(
 
     This finds a timing whenever one exists. The gaps and limits say only that one start is at
     least so long after another, or after or before a known time. With starts of that kind, any
-    start chosen inside its own limits leaves room for all the others.
+    start chosen inside its own limits leaves room for all the others. So where a start comes
+    out outside its limits, there is no timing, and the result is None.
+
+    ``over_by`` holds the latest starts that the end of the TRIP gives, where ``no_later``
+    holds more: the opening in which an unlisted WAY leaves. A start that is tied to no fixed
+    start counts from zero, and from earlier only where the TRIP ends too soon for that. An
+    opening does not move it: one that is over before zero has no timing here.
     """
     floor = {node: moment for node, moment in not_before.items() if node not in fixed}
     cap = {node: moment for node, moment in no_later.items() if node not in fixed}
+    ends = cap
+    if over_by is not None:
+        ends = {node: moment for node, moment in over_by.items() if node not in fixed}
     for _ in range(count + 1):
         carried = False
         for before, after, gap in gaps:
@@ -2889,10 +2957,11 @@ def _times(
             if later and (after not in floor or floor[before] + gap > floor[after]):
                 floor[after] = floor[before] + gap
                 carried = True
-            sooner = after in cap and before not in fixed
-            if sooner and (before not in cap or cap[after] - gap < cap[before]):
-                cap[before] = cap[after] - gap
-                carried = True
+            for limit in (cap,) if ends is cap else (cap, ends):
+                sooner = after in limit and before not in fixed
+                if sooner and (before not in limit or limit[after] - gap < limit[before]):
+                    limit[before] = limit[after] - gap
+                    carried = True
         if not carried:
             break
     else:
@@ -2928,11 +2997,15 @@ def _times(
         if len(still) == len(untimed) and all(times[node] is None for node in still):
             for node in still:
                 # From its earliest start. With none, from zero, or from its latest start
-                # where that is before zero: then zero would be too late.
-                times[node] = floor.get(node, min(0, cap.get(node, 0)))
+                # where the TRIP ends before zero: then zero would be too late.
+                times[node] = floor.get(node, min(0, ends.get(node, 0)))
             if not _settle(gaps, times, still, late=False, limit=floor):
                 return None
-    return [moment for moment in times if moment is not None]
+    timed = [moment for moment in times if moment is not None]
+    for node, moment in enumerate(timed):
+        if moment < floor.get(node, moment) or moment > cap.get(node, moment):
+            return None  # a start outside its own limits: nothing fits inside them
+    return timed
 
 
 def _settle(
