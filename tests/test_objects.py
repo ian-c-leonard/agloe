@@ -3916,3 +3916,83 @@ def test_an_object_that_is_out_of_reach_for_good_is_seen_before_anything_is_time
     monkeypatch.setattr(reference, "_times", counted)
     assert not reference.any_works(file, worst_case(file))
     assert timed == 0
+
+
+def conflicts_to_answer(file: File) -> tuple[bool, int]:
+    """Whether anything works in the worst case by the solver's own search, and how many
+    conflicts the solver went through to say so. The solver gives the same count every time."""
+    search = compiler._Search(file, worst_case(file), plain=True)  # pyright: ignore[reportPrivateUsage]
+    solver, status = search.ask()
+    return search.read(solver, status) is not None, solver.num_conflicts
+
+
+def a_register_at_two_places(airport_at: int = 9) -> File:
+    """Eleven guests each have an appointment at the hotel desk at 9:00 am, and a clerk has
+    one at the airport. Every appointment requires the register, which lies at the hotel.
+    Each appointment at the hotel can hand it over. A shuttle takes 15 minutes."""
+    people = [f"guest-{number}" for number in range(11)]
+    desks = [f"{person}-desk" for person in people]
+    options = [*(stays(desk, "hotel") for desk in desks), stays("airport-desk", "airport")]
+    facts = [fact for desk in desks for fact in at(desk, 9)]
+    facts += [*at("airport-desk", airport_at), starts_from("clerk", "airport")]
+    facts += [starts_from(person, "hotel") for person in people]
+    facts += [takes("shuttle", "PT15M"), complete(None, None)]
+    facts += [lies_at("register", "hotel"), requires_object("airport-desk", "register")]
+    for desk in desks:
+        facts += [hands_over(desk, "register"), requires_object(desk, "register")]
+    facts += [every_use("register"), every_transfer("register")]
+    locks = [lock(desk, person) for desk, person in zip(desks, people, strict=True)]
+    locks.append(lock("airport-desk", "clerk"))
+    ways = [way_between("shuttle", "hotel", "airport")]
+    places = ["hotel", "airport"]
+    return trip([*people, "clerk"], places, options, facts, locks, ways, objects=["register"])
+
+
+def a_pass_at_the_hotel(hour: int, minute: int) -> File:
+    """Alex is LOCKed into an admission at the hall at 4:00 pm that requires the pass. The
+    pass lies at the hotel, where a pickup of half an hour hands it over. Nine counters at
+    the hall, each at any time, can hand it over too. The walk takes 15 minutes."""
+    counters = [f"counter-{number}" for number in range(9)]
+    options = [stays("admission", "hall"), stays("pickup", "hotel")]
+    options += [stays(name, "hall") for name in counters]
+    facts = [*at("admission", 16), *at("pickup", hour, minute)]
+    for name in counters:
+        facts += [*whenever(name), hands_over(name, "pass")]
+    facts += [starts_from("alex", "hotel"), takes("walk", "PT15M"), complete(None, None)]
+    facts += [lies_at("pass", "hotel"), hands_over("pickup", "pass")]
+    facts += [requires_object("admission", "pass"), every_use("pass"), every_transfer("pass")]
+    ways = [way_between("walk", "hotel", "hall")]
+    locks = [lock("admission", "alex")]
+    return trip(["alex"], ["hotel", "hall"], options, facts, locks, ways, objects=["pass"])
+
+
+def test_an_object_cannot_be_at_hand_in_two_places_with_no_time_to_cross() -> None:
+    """The register is required at the hotel and at the airport at 9:00 am, and the shuttle
+    takes 15 minutes. The model says outright that the two are at least that far apart, so
+    the solver need not try each guest as the one who carries the register. An hour later
+    at the airport, there is time, and a guest brings it."""
+    works, conflicts = conflicts_to_answer(a_register_at_two_places())
+    assert not works
+    assert conflicts < 1000
+    works, conflicts = conflicts_to_answer(a_register_at_two_places(airport_at=10))
+    assert works
+    assert conflicts < 1000
+
+
+def test_an_object_leaves_the_place_where_it_lies_only_by_a_hand_over_there() -> None:
+    """The pass lies at the hotel, and the admission at the hall requires it at 4:00 pm. A
+    pickup at the hotel at 4:30 pm is too late, and the counters at the hall hand over only
+    what is at hand there. The model says outright that the pass leaves the hotel only by a
+    hand-over there, early enough to be over and across. At 3:15 pm the pickup of half an
+    hour and the walk just fit. A minute later they do not."""
+    works, conflicts = conflicts_to_answer(a_pass_at_the_hotel(16, 30))
+    assert not works
+    assert conflicts < 1000
+    just_in_time = compiler.check(a_pass_at_the_hotel(15, 15))
+    assert just_in_time.answer is Answer.FEASIBLE
+    assert [(step.option, step.handed) for step in just_in_time.itinerary if step.handed] == [
+        ("pickup", (("pass", "alex"),))
+    ]
+    works, conflicts = conflicts_to_answer(a_pass_at_the_hotel(15, 16))
+    assert not works
+    assert conflicts < 1000
