@@ -76,6 +76,14 @@ function drawingOf(option, id) {
 }
 
 /**
+ * What a row or an entry for a WAY is a drawing of: each step of the TRIP in which somebody
+ * takes it, by its number, or the WAY itself where nobody takes it.
+ */
+function drawingOfAWay(way) {
+  return way.steps.length ? way.steps.join(" ") : `way:${way.id}`;
+}
+
+/**
  * One mark of the calendar, put on its day: a block for an OPTION, or a line down each PERSON's
  * column for a WAY. The name of a WAY stands beside the line of the first PERSON who takes it,
  * as far as its day has room.
@@ -361,6 +369,31 @@ function drawPersons(shown) {
 }
 
 /**
+ * Every PLACE of the FILE, a card for each: who starts from it, which OBJECTs are there when
+ * the TRIP starts, and who must end the TRIP there, and under that the OPTIONs and the WAYs
+ * that are at it or go from it or to it. An OPTION that the calendar holds is tied to its
+ * step, and a WAY to each step in which somebody takes it, so pointing at one lights up those
+ * steps.
+ */
+function drawPlaces(shown) {
+  const box = part("places");
+  box.replaceChildren();
+  part("places-part").hidden = !shown.places.length;
+  part("places-says").textContent = shown.says;
+  for (const place of shown.places) {
+    const card = Object.assign(made("article", `card${edges(place)}`), { title: marks(place).join("\n") });
+    Object.assign(card.dataset, { of: `place:${place.id}`, records: tiesOf(place).join(" ") });
+    card.append(made("h3", "card-name", place.name));
+    for (const words of place.holds) card.append(made("p", "card-holds", words));
+    const entries = made("ul", "card-options");
+    for (const option of place.options) entries.append(entry(option, drawingOf(option, option.option), true, option.takes));
+    for (const way of place.ways) entries.append(entry(way, drawingOfAWay(way), true, way.takes));
+    if (entries.children.length) card.append(entries);
+    box.append(card);
+  }
+}
+
+/**
  * Every OPTION of the FILE, a row for each: where it is, what the FILE says of its start and
  * its length, and who is in it. An OPTION that the calendar holds is tied to its step, so
  * pointing at it lights up that step.
@@ -443,7 +476,7 @@ function drawWays(shown) {
   part("ways-says").textContent = shown.says;
   box.hidden = !shown.ways.length;
   travel.hidden = !shown.travel.length;
-  for (const way of shown.ways) box.append(item(way, way.steps.length ? way.steps.join(" ") : `way:${way.id}`, [[way.takes], way.plan]));
+  for (const way of shown.ways) box.append(item(way, drawingOfAWay(way), [[way.takes], way.plan]));
   for (const fact of shown.travel) {
     const line = Object.assign(made("li", `in-full${fact.clash.length ? " clash" : ""}`, fact.says), { title: fact.finds ?? "" });
     Object.assign(line.dataset, { of: `travel:${fact.record}`, records: fact.records.join(" ") });
@@ -514,6 +547,7 @@ function drawObjects(shown) {
  */
 const held = [
   { id: "persons-part", load: () => import("./persons.js"), name: "persons", draw: drawPersons, words: null, of: undefined },
+  { id: "places-part", load: () => import("./places.js"), name: "places", draw: drawPlaces, words: null, of: undefined },
   { id: "wants-part", load: () => import("./wants.js"), name: "wants", draw: drawWants, words: null, of: undefined },
   { id: "options-part", load: () => import("./options.js"), name: "options", draw: drawOptions, words: null, of: undefined },
   { id: "rights-part", load: () => import("./rights.js"), name: "rights", draw: drawRights, words: null, of: undefined },
@@ -557,7 +591,7 @@ function write(text, tied) {
  * what it shows. A mark and a row have every record about their OPTION. An OPTION under a WANT
  * has the one FACT about the two, so pointing at it picks out that FACT. Pointing lights up no
  * drawing of another thing, though a record or a case may be about both. `data-of` says what a
- * drawing is of: a step of the TRIP, an OPTION or a WAY that is no step, a PERSON, a WANT, a
+ * drawing is of: a step of the TRIP, an OPTION or a WAY that is no step, a PERSON, a PLACE, a WANT, a
  * CAPABILITY, what the FILE says of one PERSON and one CAPABILITY, the rights to an OPTION, a
  * BOOKING, an OFFER, a BUDGET, a cap, an OBJECT, or a FACT that the FILE lists every way of
  * some travel. A WAY that somebody takes several times is a drawing of each
