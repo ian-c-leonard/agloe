@@ -11,12 +11,16 @@ import pytest
 from agloe import answers, compiler, reference, report
 from agloe.answers import Answer, Carried, Report, Stay, Use
 from agloe.file import (
+    Capability,
+    CompleteRequires,
     CompleteRequiresObject,
     CompleteTransfers,
     File,
     FileError,
+    Has,
     Object,
     ObjectStarts,
+    Requires,
     RequiresObject,
     WithObject,
     load,
@@ -2989,6 +2993,77 @@ def test_a_way_that_cannot_leave_before_a_span_does_not_time_what_comes_before_i
 # The solver.
 
 
+def with_a_signature(rng: Random, file: File) -> File:
+    """The same FILE, where an OPTION often requires a signature, and mostly one PERSON can sign.
+
+    So whoever fetches the bags often needs the other PERSON there to sign.
+    """
+    people = [person.id for person in file.persons]
+    signer = rng.choice(people)
+    facts: list[Has | Requires | CompleteRequires] = [
+        Has(f"{person}-signing", person, "signing", person == signer)
+        for person in people
+        if rng.random() < 0.9
+    ]
+    for option in file.options:
+        of = rng.choice(["one", "one", "one", "each", "none", None])
+        if of is not None:
+            facts.append(Requires(f"{option.id}-signing", option.id, "signing", of))
+    if rng.random() < 0.7:
+        facts.append(CompleteRequires("every-signing", "signing"))
+    listed = (Capability("signing", "signing"),)
+    return replace(file, capabilities=listed, facts=(*file.facts, *facts))
+
+
+def a_trip_with_a_key_to_sign_for(rng: Random) -> File:
+    """A deposit and a check at a desk, a key, and signatures that the stays require.
+
+    Mostly one PERSON can sign and another has the key. Mostly the check comes last, requires
+    the key and lets in only those who can sign, and the deposit keeps the key and requires
+    one signature. Each of these is otherwise at random, and so is who is LOCKed in. So a
+    stay often happens only for the key, and often needs a PERSON there who can sign and who
+    can never have the key.
+    """
+    people = ["alex", "sam", "jo"][: rng.choice([2, 2, 3])]
+    signers = [rng.choice(people)] if rng.random() < 0.7 else rng.sample(people, 2)
+    others = [person for person in people if person not in signers]
+    names = ["deposit", "counter", "check"] if rng.random() < 0.3 else ["deposit", "check"]
+    options = [stays(name, rng.choice(["desk"] * 5 + ["vault"])) for name in names]
+    facts: list[Document] = [takes("walk", "PT10M"), complete(None, None)]
+    for number, name in enumerate(names):
+        facts += at(name, 9 + number) if rng.random() < 0.8 else whenever(name)
+        last = name == "check"
+        does = rng.choice(
+            [None, "nothing", "keeps"] if last else ["keeps"] * 3 + ["hands_over", None]
+        )
+        if does is not None:
+            facts.append(does_with(name, "key", does))
+        if rng.random() < (0.8 if last else 0.2):
+            facts.append(requires_object(name, "key"))
+        of = rng.choice(["each"] * 3 + ["one", "none"] if last else ["one"] * 3 + ["each", "none"])
+        facts.append(requires(name, "signing", of))
+    holder = has_object(rng.choice(others if others and rng.random() < 0.7 else people), "key")
+    facts.append(rng.choice([holder, holder, holder, lies_at("key", "desk")]))
+    facts += [can(person, "signing", person in signers) for person in people]
+    facts += [every_requirement("signing"), every_use("key")]
+    facts += [every_transfer("key")] if rng.random() < 0.8 else []
+    some = rng.sample(people, rng.randrange(1, len(people)))
+    locks = [lock("check", *(signers if rng.random() < 0.6 else some))]
+    if rng.random() < 0.2:
+        locks.append(lock("deposit", rng.choice(people)))
+    ways = [way_between("walk", "desk", "vault")]
+    return trip(
+        people,
+        ["desk", "vault"],
+        options,
+        facts,
+        locks,
+        ways,
+        capabilities=["signing"],
+        objects=["key"],
+    )
+
+
 def trips_with_objects(rng: Random) -> list[File]:
     """Random trips of every kind the other tests build, each with OBJECTs."""
     trips = [a_trip_with_objects(rng, leave_out=0.12) for _ in range(120)]
@@ -3015,7 +3090,8 @@ def trips_with_objects(rng: Random) -> list[File]:
         for _ in range(60)
     ]
     # A stay that happens for an OBJECT can require a CAPABILITY, and a right.
-    trips += [with_capabilities(rng, a_trip_to_fetch(rng)) for _ in range(80)]
+    trips += [with_a_signature(rng, a_trip_to_fetch(rng)) for _ in range(40)]
+    trips += [a_trip_with_a_key_to_sign_for(rng) for _ in range(150)]
     trips += [
         with_capabilities(
             rng, with_objects(rng, random_trip(rng, 0.1, ["alex", "sam"], with_rights=0.4))
