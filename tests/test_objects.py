@@ -3887,3 +3887,32 @@ def test_the_first_hand_overs_are_taken_wherever_they_leave_the_object() -> None
     # Sam takes it in the first stay and brings it: one hand-over. Or Alex takes it in the
     # second and hands it to Jo in the third: two, and that way is found before the other.
     assert first_hand_overs(("alex", "jo"), ("sam", "jo")) == ((0, 1),)
+
+
+def test_an_object_that_is_out_of_reach_for_good_is_seen_before_anything_is_timed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The key lies at the vault, and nothing hands it over or keeps it. Alex's appointment
+    at the desk requires it. No order and no route changes that, so the choice is given up
+    before any start time is worked out."""
+    options = [stays("appointment", "desk")]
+    facts = [
+        *at("appointment", 10),
+        lies_at("key", "vault"),
+        requires_object("appointment", "key"),
+        every_use("key"),
+        every_transfer("key"),
+    ]
+    locks = [lock("appointment", "alex")]
+    file = trip(["alex"], ["desk", "vault"], options, facts, locks, objects=["key"])
+    timed = 0
+    its_own = reference._times  # pyright: ignore[reportPrivateUsage]
+
+    def counted(*how: object) -> object:
+        nonlocal timed
+        timed += 1
+        return its_own(*how)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(reference, "_times", counted)
+    assert not reference.any_works(file, worst_case(file))
+    assert timed == 0
