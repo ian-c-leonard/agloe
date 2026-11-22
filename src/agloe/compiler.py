@@ -828,8 +828,6 @@ class _Search:
             for source, given in handed.items():
                 if options[source].origin != start.place or source == index:
                     continue
-                if self.endless[source]:
-                    continue  # nothing follows it, so what is taken in it is at hand nowhere
                 # The OBJECT comes from this hand-over: it is over and across by then.
                 name = f"{thing} comes to {options[index].id} from {options[source].id}"
                 from_there = model.new_bool_var(name)

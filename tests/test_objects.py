@@ -4829,3 +4829,71 @@ def test_an_object_with_an_option_at_any_time_leaves_a_choice_of_order() -> None
 
     assert the_one_order(*at("jo-later", 10)) == (0, 1)
     assert the_one_order(*whenever("jo-later")) is None
+
+
+def test_an_unlisted_way_leaves_in_the_first_second_after_the_span() -> None:
+    """The register has to be at the airport at 9:05 am. The FILE lists every way that
+    leaves until 9:05 am, to the second. In the best case an unlisted WAY takes no time, but
+    it leaves a second after the span at the earliest, which is a second too late. The
+    solver sees that at once. With the span over a second sooner, the unlisted WAY leaves
+    at 9:05 am and is there in time."""
+    day = "2027-05-15T{}-05:00[America/Chicago]"
+    to_the_second = [no_way_leaves("ways", day.format("00:00:00"), day.format("09:05:00"))]
+    works, conflicts = conflicts_in_the_best_case(eleven_signatures(spans=to_the_second))
+    assert not works
+    assert conflicts < 1000
+    a_second_sooner = [no_way_leaves("ways", day.format("00:00:00"), day.format("09:04:59"))]
+    works, conflicts = conflicts_in_the_best_case(eleven_signatures(spans=a_second_sooner))
+    assert works
+
+
+def test_an_object_is_not_at_hand_in_two_places_that_nothing_joins() -> None:
+    """The register lies at the hotel and the clerk at the airport requires it an hour
+    after the guests sign. The FILE lists every way, and none joins the hotel and the
+    airport. The model says outright that nothing gets from the one to the other, so the
+    solver need not try each guest as the one who takes the register."""
+    file = a_register_at_two_places(airport_at=10)
+    apart = replace(
+        file,
+        ways=(),
+        facts=tuple(fact for fact in file.facts if fact.id != "shuttle-length"),
+    )
+    works, conflicts = conflicts_to_answer(apart)
+    assert not works
+    assert conflicts < 1000
+
+
+def four_on_a_shuttle_with_a_key(key_at: str) -> File:
+    """The four on the shuttle, and a key as well. Alex's last session requires the key,
+    which lies at the lodge or at the resort. Kim's last session requires the voucher,
+    which lies at the lodge. The shuttle can hand both over."""
+    file = four_on_a_shuttle()
+    key = [
+        ObjectStarts("key-start", "key", place=key_at),
+        RequiresObject("alex-3-requires-key", "alex-3", "key", True),
+        WithObject("shuttle-with-key", "shuttle", "key", "hands_over"),
+        CompleteRequiresObject("every-use-of-key", "key"),
+    ]
+    listed = (*file.objects, Object("key", "key"))
+    return replace(file, objects=listed, facts=(*file.facts, *key))
+
+
+def test_the_search_stops_at_the_hand_overs_that_each_object_needs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the key at the lodge too, Alex has to take the key on the shuttle and Kim the
+    voucher. With the key at the resort, only the voucher changes hands. Either way those
+    are the hand-overs that no order can do without, OBJECT by OBJECT, and the search stops
+    at the plan that has them."""
+    found, timed = timings_for_the_report(monkeypatch, four_on_a_shuttle_with_a_key("lodge"))
+    assert found.answer is Answer.FEASIBLE
+    assert timed < 100
+    assert [(step.option, step.handed) for step in found.itinerary if step.handed] == [
+        ("shuttle", (("voucher", "kim"), ("key", "alex")))
+    ]
+    found, timed = timings_for_the_report(monkeypatch, four_on_a_shuttle_with_a_key("resort"))
+    assert found.answer is Answer.FEASIBLE
+    assert timed < 100
+    assert [(step.option, step.handed) for step in found.itinerary if step.handed] == [
+        ("shuttle", (("voucher", "kim"),))
+    ]
