@@ -2077,15 +2077,17 @@ def test_the_examples_about_the_bags_say_what_the_rules_page_says() -> None:
 # What the reviewer's FILEs showed.
 
 
-def test_all_the_ways_the_timing_can_fall_are_compared_before_a_plan_is_shown() -> None:
+def test_each_order_of_the_steps_is_timed_by_the_rule_before_the_orders_are_compared() -> None:
     """Alex has a check at the hotel at any time, and an appointment in the park at noon that
     requires the key Alex carries. Sam has a check in the park at 10:00 am. Only an unlisted
     WAY joins the hotel to the park, and none leaves from 9:00 am to 10:00 am. Each check
     does something with a key, so the two have an order.
 
-    With Sam's check first, Alex travels at noon or just after 10:00 am. With Alex's first,
-    Alex can also travel just before 9:00 am. That plan has the earliest first step, so it
-    is the one shown, though another one is found first."""
+    With Alex's check first, it is at 10:00 am, as late as it can be, and Alex travels at
+    noon. With Sam's first, Alex's is at 10:00 am too, as early as it can be, and Alex
+    travels just after the span. Both work. Sam's check is listed first in the FILE, so the
+    plan with Sam's check first is the one shown. Nothing moves a step earlier than the
+    rule for start times puts it."""
     options = [stays("sam-check", "park"), stays("alex-check", "hotel"), stays("meeting", "park")]
     span = {"from": "hotel", "to": "park", "leaving": {"earliest": moment(9), "latest": moment(10)}}
     facts = [
@@ -2107,11 +2109,10 @@ def test_all_the_ways_the_timing_can_fall_are_compared_before_a_plan_is_shown() 
     world = with_these_at_best(file, [Unknown("other ways", origin="hotel", destination="park")])
     shown = first_shown(file, world)
     assert shown is not None
-    just_before = seconds(9) - 1
     assert [(step.option, step.start) for step in shown] == [
-        ("alex-check", just_before),
-        (None, just_before),
         ("sam-check", seconds(10)),
+        ("alex-check", seconds(10)),
+        (None, seconds(10) + 1),
         ("meeting", seconds(12)),
     ]
 
@@ -2291,9 +2292,10 @@ def test_what_another_transfer_has_to_do_is_read_off_the_plan_that_the_rules_put
     checks require the bag. Only an unlisted WAY leads to the park, and none leaves from
     9:00 am to 9:30 am. Nothing that the FILE lists brings the bag to the park.
 
-    With the drop just before 9:00 am, the bag is at the hotel for Sam's check. With the
-    drop at 10:00 am, after Sam's check, it is not. The first plan has the earlier first
-    step, so the rules put it first, and the report says that Sam's check is covered."""
+    The drop is at 10:00 am, as late as it can be, in whichever order it comes with Sam's
+    check. Sam's check is listed first in the FILE, so the plan with Sam's check first is
+    the one shown. In it the bag is still with Alex at Sam's check, so the report says that
+    another transfer has to put it at hand for both checks."""
     options = [stays("sam-check", "hotel"), stays("bag-drop", "hotel"), stays("alex-check", "park")]
     span = {
         "from": "hotel",
@@ -2324,7 +2326,7 @@ def test_what_another_transfer_has_to_do_is_read_off_the_plan_that_the_rules_put
         )
     ]
     assert found.missing[0][1].at_hand_for == (
-        ("sam-check", True, True),
+        ("sam-check", True, False),
         ("alex-check", True, False),
     )
 
@@ -2506,11 +2508,10 @@ def test_whether_anything_works_is_settled_by_the_first_plan_found(
         fixed: dict[int, int],
         not_before: dict[int, int],
         no_later: dict[int, int],
-        over_by: dict[int, int] | None = None,
     ) -> list[int] | None:
         nonlocal timed
         timed += 1
-        return its_own(count, gaps, fixed, not_before, no_later, over_by)
+        return its_own(count, gaps, fixed, not_before, no_later)
 
     monkeypatch.setattr(reference, "_times", counted)
     assert reference.any_works(file, world)
@@ -2640,11 +2641,10 @@ def test_a_way_is_tried_only_in_the_openings_that_the_times_of_the_trip_leave(
         fixed: dict[int, int],
         not_before: dict[int, int],
         no_later: dict[int, int],
-        over_by: dict[int, int] | None = None,
     ) -> list[int] | None:
         nonlocal timed
         timed += 1
-        return its_own(count, gaps, fixed, not_before, no_later, over_by)
+        return its_own(count, gaps, fixed, not_before, no_later)
 
     monkeypatch.setattr(reference, "_times", counted)
     assert reference.any_works(file, world)
@@ -2797,12 +2797,78 @@ def test_the_first_orders_that_go_together_answer_whether_anything_works(
         fixed: dict[int, int],
         not_before: dict[int, int],
         no_later: dict[int, int],
-        over_by: dict[int, int] | None = None,
     ) -> list[int] | None:
         nonlocal timed
         timed += 1
-        return its_own(count, gaps, fixed, not_before, no_later, over_by)
+        return its_own(count, gaps, fixed, not_before, no_later)
 
     monkeypatch.setattr(reference, "_times", counted)
     assert reference.any_works(file, worst_case(file))
     assert timed == 1
+
+
+# What the fifth review's FILEs showed.
+
+FIRST_SECOND = "1970-01-01T00:00:00+00:00[UTC]"
+
+
+def the_way_home(*decisions: Document) -> File:
+    """Sam starts at the desk and has to end at home. No WAY is listed, and none leaves in
+    the first second of 1970."""
+    span = {
+        "from": "desk",
+        "to": "home",
+        "leaving": {"earliest": FIRST_SECOND, "latest": FIRST_SECOND},
+    }
+    facts = [starts_from("sam", "desk"), {"id": "ways", "complete": span}]
+    return trip(
+        ["sam"], ["desk", "home"], [], facts, list(decisions), wants=[ends_at("home", "sam")]
+    )
+
+
+def test_the_rule_for_which_start_is_shown_rules_no_start_out() -> None:
+    """The TRIP ends in the first second of 1970, and no WAY leaves in that second. Sam can
+    leave a second earlier. So the TRIP is UNDETERMINED: it turns on other WAYs home."""
+    file = the_way_home({"id": "trip-end", "trip_ends_at": FIRST_SECOND})
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert asked(found) == [(Unknown("other ways", origin="desk", destination="home"),)]
+    world = with_these_at_best(file, [Unknown("other ways", origin="desk", destination="home")])
+    shown = first_shown(file, world)
+    assert shown is not None and [step.start for step in shown] == [-1]
+
+
+def test_the_solvers_choice_of_when_a_way_leaves_is_checked_as_it_chose() -> None:
+    """With no end of the TRIP, Sam can leave before that second or after it. Whichever the
+    solver takes, the reference checker times it there."""
+    file = the_way_home()
+    found = answers.check(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert compiler.check(file) == found
+    world = with_these_at_best(file, [Unknown("other ways", origin="desk", destination="home")])
+    assert compiler.works(file, world)
+
+
+def test_a_span_that_is_over_does_not_move_the_start_that_is_shown() -> None:
+    """Sam goes home for a check that takes a second and requires the key lying there. The
+    TRIP has no times. No WAY leaves three seconds before 1970, and that changes nothing:
+    the WAY and the check start in the first second of 1970, as the rule says."""
+    before = "1969-12-31T23:59:57+00:00[UTC]"
+    span = {"from": "desk", "to": "home", "leaving": {"earliest": before, "latest": before}}
+    facts = [
+        *whenever("check", "PT1S"),
+        starts_from("sam", "desk"),
+        {"id": "ways", "complete": span},
+        lies_at("key", "home"),
+        requires_object("check", "key"),
+        every_use("key"),
+        every_transfer("key"),
+    ]
+    file = trip(
+        ["sam"], ["desk", "home"], [stays("check", "home")], facts, [lock("check", "sam")],
+        objects=["key"],
+    )  # fmt: skip
+    world = with_these_at_best(file, [Unknown("other ways", origin="desk", destination="home")])
+    shown = first_shown(file, world)
+    assert shown is not None
+    assert [(step.option, step.start) for step in shown] == [(None, 0), ("check", 0)]

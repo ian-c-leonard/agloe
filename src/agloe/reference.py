@@ -2662,14 +2662,16 @@ def _timings(
 
     ``chains`` holds what ``_chains`` gives for these PERSONs and orders, where it is already
     worked out. Each takes one order of the OPTIONs that matter to each OBJECT, with its
-    hand-overs. Each is timed and checked, in each way the timing can fall.
+    hand-overs.
 
-    Where an OPTION of the plan requires an OBJECT, the ITINERARIES come in the order of
-    "Which ITINERARY is shown": the fewest hand-overs, then the hand-overs listed first, then
-    the steps that come first with their times. So they are all found before the first is
-    given. That holds too where another transfer brings the OBJECT: which OPTIONs it has to
-    be brought to is read off the ITINERARY that comes first. Where no OPTION requires an
-    OBJECT, or with ``any_will_do``, each ITINERARY is given as soon as it is found.
+    Where an OPTION of the plan requires an OBJECT, each of those orders gives one ITINERARY:
+    it is timed as the rule times it, in the first way the timing can fall that works. The
+    ITINERARIES of the orders then come in the order of "Which ITINERARY is shown": the fewest
+    hand-overs, then the hand-overs listed first, then the steps that come first with their
+    times. So they are all found before the first is given. That holds too where another
+    transfer brings the OBJECT: which OPTIONs it has to be brought to is read off the
+    ITINERARY that comes first. Where no OPTION requires an OBJECT, or with ``any_will_do``,
+    each ITINERARY is given as soon as it is found, for each way the timing can fall.
     """
     if chains is None:
         found = _chains(file, world, who, orders)
@@ -2805,7 +2807,7 @@ def _timings(
                 if opening < len(spans):
                     before = spans[opening][0] - 1
                     latest[node] = min(before, latest.get(node, before))
-            starts = _times(count, all_gaps, fixed, earliest, latest, no_later)
+            starts = _times(count, all_gaps, fixed, earliest, latest)
             if starts is None:
                 continue
             steps: dict[int, Step] = {}
@@ -2837,6 +2839,7 @@ def _timings(
                 yield itinerary
             else:
                 working.append((rank, itinerary))
+                break  # this order is timed: the first way the timing can fall that works
     if len(working) > 1:
         working.sort(
             key=lambda each: (each[0], [_step_in_file_order(file, step) for step in each[1]])
@@ -2919,7 +2922,6 @@ def _times(
     fixed: Mapping[int, int],
     not_before: Mapping[int, int],
     no_later: Mapping[int, int],
-    over_by: Mapping[int, int] | None = None,
 ) -> list[int] | None:
     """Start times that keep every gap and every fixed start, or None when there are none.
 
@@ -2939,17 +2941,9 @@ def _times(
     least so long after another, or after or before a known time. With starts of that kind, any
     start chosen inside its own limits leaves room for all the others. So where a start comes
     out outside its limits, there is no timing, and the result is None.
-
-    ``over_by`` holds the latest starts that the end of the TRIP gives, where ``no_later``
-    holds more: the opening in which an unlisted WAY leaves. A start that is tied to no fixed
-    start counts from zero, and from earlier only where the TRIP ends too soon for that. An
-    opening does not move it: one that is over before zero has no timing here.
     """
     floor = {node: moment for node, moment in not_before.items() if node not in fixed}
     cap = {node: moment for node, moment in no_later.items() if node not in fixed}
-    ends = cap
-    if over_by is not None:
-        ends = {node: moment for node, moment in over_by.items() if node not in fixed}
     for _ in range(count + 1):
         carried = False
         for before, after, gap in gaps:
@@ -2957,11 +2951,10 @@ def _times(
             if later and (after not in floor or floor[before] + gap > floor[after]):
                 floor[after] = floor[before] + gap
                 carried = True
-            for limit in (cap,) if ends is cap else (cap, ends):
-                sooner = after in limit and before not in fixed
-                if sooner and (before not in limit or limit[after] - gap < limit[before]):
-                    limit[before] = limit[after] - gap
-                    carried = True
+            sooner = after in cap and before not in fixed
+            if sooner and (before not in cap or cap[after] - gap < cap[before]):
+                cap[before] = cap[after] - gap
+                carried = True
         if not carried:
             break
     else:
@@ -2997,8 +2990,8 @@ def _times(
         if len(still) == len(untimed) and all(times[node] is None for node in still):
             for node in still:
                 # From its earliest start. With none, from zero, or from its latest start
-                # where the TRIP ends before zero: then zero would be too late.
-                times[node] = floor.get(node, min(0, ends.get(node, 0)))
+                # where that is before zero: then zero would be too late.
+                times[node] = floor.get(node, min(0, cap.get(node, 0)))
             if not _settle(gaps, times, still, late=False, limit=floor):
                 return None
     timed = [moment for moment in times if moment is not None]

@@ -179,7 +179,7 @@ A report shows an ITINERARY that the travelers can use only for a FEASIBLE TRIP.
 10. then one whose hand-overs come first. Going through the OBJECTs in the FILE's order, and through the hand-overs of each in the order they happen, the ITINERARY with the OPTION listed first comes first, and then the one with the PERSON listed first. An OBJECT with no more hand-overs comes before one with more;
 11. then one whose steps come first. Going through the steps in the order the ITINERARY lists them, the ITINERARY with the earlier start comes first, then the one with an OPTION before a WAY, then the FILE's order of OPTIONs, of WAYs, of PERSONs and of PLACEs.
 
-Rules 9 to 11 choose among hand-overs, among orders of the steps, and among the times that go with them. They decide only where an OPTION of the ITINERARY requires an OBJECT.
+Rules 9 to 11 choose among hand-overs and among orders of the steps. Each order has the start times that the rule further on gives it. These rules decide only where an OPTION of the ITINERARY requires an OBJECT.
 
 Where several OPTIONs could meet a must, the same rules choose among them. The DEGREE OF SATISFACTION plays no part: any value above zero meets a must and breaks a must-not.
 
@@ -198,7 +198,7 @@ The start times follow a fixed rule too. It treats each time a PERSON takes a WA
 
 The times of the TRIP are limits, and a FILE can hold either, both or neither. They are no fixed starts: steps 1 to 3 time nothing from them. "As early as it can" and "as late as it can" keep to them, for the OPTION itself and for whatever comes before or after it: a start that leaves no room for the rest inside the TRIP is not one the OPTION can take.
 
-A COMPLETE set of travel can rule an unlisted WAY out for a span of time. So an ITINERARY with such a WAY is timed as above, and then again with one more limit on when the WAY starts: before the first span that rules it out, and after each of those spans. A limit that leaves the WAY no time to start gives no timing. A limit before a span does not make step 4 count from earlier than it says: then there is no timing either. The first of these timings that works is taken. Where an OPTION of the ITINERARY requires an OBJECT, each timing that works is compared with the others, by rules 9 to 11.
+A COMPLETE set of travel can rule an unlisted WAY out for a span of time. So an ITINERARY with such a WAY is timed as above, and then again with one more limit on when the WAY starts: before the first span that rules it out, and after each of those spans. A limit that leaves the WAY no time to start gives no timing. The first of these timings that works is the timing of the ITINERARY.
 
 A ROBUST ITINERARY shows each CONTINGENT duration at its longest value, and any other ITINERARY shows it at its shortest. An OPTION or a WAY with an unknown duration shows no end.
 
