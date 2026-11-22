@@ -1326,7 +1326,8 @@ def _are_wants(
     """Whether these are the WANTs of such a TRIP, each with an id of its own.
 
     A WANT is a must for some of the PERSONs and a must-not for others, and for nobody both.
-    Somebody holds it. No OPTION delivers a WANT about where the TRIP ends.
+    Somebody holds it. No OPTION delivers a WANT about where the TRIP ends, and it is a must
+    for each PERSON who holds it.
     It names each OPTION once, an OPTION of the TRIP, with a DEGREE OF SATISFACTION from 0 to 10.
     """
     seen: set[str] = set()
@@ -1343,7 +1344,10 @@ def _are_wants(
             or not cast("str", said["name"]).strip()
             or not holders
             or not holders <= persons
-            or not (ends_at is None or (ends_at in places and not said["options"]))
+            or not (
+                ends_at is None
+                or (ends_at in places and not said["options"] and not said["must_nots"])
+            )
         ):
             return False
         seen.add(cast("str", said["id"]))

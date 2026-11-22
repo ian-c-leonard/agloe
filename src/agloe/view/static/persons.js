@@ -16,7 +16,7 @@ import { marksBy } from "./named.js";
  * view sends none.
  *
  * Each PERSON has their name, `where` they start from as far as the FILE says, and in `ends` a
- * sentence for each WANT that has them end the TRIP at a PLACE, or not end it there. `pays`
+ * sentence for each WANT that has them end the TRIP at a PLACE. `pays`
  * holds a sentence for each BUDGET that they may draw on, or one that says no BUDGET lists
  * them, and is empty where the FILE has no BUDGET.
  *
@@ -32,12 +32,12 @@ export function persons(trip, report = null, stated = null) {
   const places = new Map(trip.places.map((each) => [each.id, each.name]));
   const start = new Map(trip.starts_from.map((fact) => [fact.person, fact]));
   const marked = marksBy(report, stated);
-  // A WANT about where the TRIP ends is a must for some of its holders, and a must-not for others.
+  // A WANT about where the TRIP ends is a must for each PERSON who holds it.
   const endsOf = (id) =>
     trip.wants.flatMap((want) => {
       if (want.ends_at === null) return [];
       const at = places.get(want.ends_at);
-      return want.musts.includes(id) ? [`Must end the TRIP at ${at}.`] : want.must_nots.includes(id) ? [`Must not end the TRIP at ${at}.`] : [];
+      return want.musts.includes(id) ? [`Must end the TRIP at ${at}.`] : [];
     });
   // The BUDGETs that list a PERSON can pay for what they still have to buy. Each has a
   // sentence of its own: a name can hold the word that would join two. A FILE with no BUDGET

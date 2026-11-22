@@ -2207,8 +2207,9 @@ def test_a_trip_with_a_want_is_a_trip() -> None:
     # A WANT with nobody for whom it is a must-not, and no OPTION.
     _want(must_nots=[], complete=None, options=[])(sent)
     assert holds(sent)
-    # A WANT about where the TRIP ends names a PLACE. No OPTION delivers such a WANT.
-    _want(ends_at="hotel", complete=None, options=[])(sent)
+    # A WANT about where the TRIP ends names a PLACE. No OPTION delivers such a WANT, and
+    # it is a must for each PERSON who holds it.
+    _want(ends_at="hotel", must_nots=[], complete=None, options=[])(sent)
     assert holds(sent)
     # A DEGREE OF SATISFACTION is from 0 to 10, both ends included.
     for degree in (0, 10):
@@ -2260,6 +2261,9 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "a want with an id that is no text": _want(id=7),
     "two wants with one id": _set("wants", to=[WANT, WANT]),
     "a want that is a must for a person the trip does not have": _want(musts=["jo"]),
+    "a want about where the trip ends that is a must-not for somebody": _want(
+        ends_at="hotel", complete=None, options=[]
+    ),
     "a want that names a person twice": _want(musts=["alex", "alex"]),
     "a want that is a must and a must-not for one person": _want(must_nots=["alex"]),
     "a want that is a must or a must-not for nobody": _want(musts=[], must_nots=[]),
