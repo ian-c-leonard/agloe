@@ -19,8 +19,9 @@ FILES = sorted(
     path for path in EXAMPLES.rglob("*.json") if not path.name.endswith(".expected.json")
 )
 SAYS = (
-    "Every PLACE of the FILE, with what the FILE puts there: who starts from it, and the OPTIONs"
-    " and the WAYs that are at it or go from it or to it."
+    "Every PLACE of the FILE, with what the FILE puts there: the PERSONs and the OBJECTs that"
+    " start there, the PERSONs who must end the TRIP there, and the OPTIONs and the WAYs that"
+    " are at it or go from it or to it."
 )
 RED = " A red edge marks what the report names among what rules out every plan."
 YELLOW = " A yellow edge marks what the report names in what the FILE does not say."
@@ -148,19 +149,47 @@ def test_a_place_that_nothing_is_at_says_so() -> None:
     ]
 
 
-def test_a_place_where_somebody_must_not_end_the_trip_says_so() -> None:
+def test_a_want_that_an_option_can_deliver_is_about_no_place() -> None:
     sent = drawn(EXAMPLES / "ending-in-denver" / "works.json")
     (want,) = [want for want in sent["wants"] if want["ends_at"] is not None]
-    want["musts"], want["must_nots"] = ["alex"], ["sam"]
+    # One PERSON of the two holds the WANT about where the TRIP ends.
+    want["musts"] = ["sam"]
     (shown,) = all_places([sent])
-    assert shown["places"][-1]["holds"] == [
-        "Alex must end the TRIP here.",
-        "Sam must not end the TRIP here.",
-    ]
-    # A WANT that an OPTION can deliver is about no PLACE.
+    assert shown["places"][-1]["holds"] == ["Sam must end the TRIP here."]
     want["ends_at"] = None
     (shown,) = all_places([sent])
     assert (shown["places"][-1]["holds"], shown["places"][-1]["records"]) == ([], [])
+
+
+def test_a_place_whose_name_is_the_word_for_the_place_of_the_card_is_in_quotation_marks() -> None:
+    """A card says "here" for its own PLACE. Another PLACE can have that word as its name."""
+    sent = drawn(EXAMPLES / "ending-in-denver" / "works.json")
+    (museum,) = [place for place in sent["places"] if place["id"] == "art-institute"]
+    museum["name"] = "Here"
+    (shown,) = all_places([sent])
+    hotel, here, ohare, _ = shown["places"]
+    assert here["name"] == "Here"
+    assert [way["says"] for way in hotel["ways"]] == ['between here and "Here", in both directions']
+    assert [option["says"] for option in ohare["options"]] == [
+        'comes here from "Here"',
+        "goes from here to Denver",
+    ]
+    assert [option["says"] for option in here["options"]] == [
+        "happens here",
+        "goes from here to O'Hare",
+    ]
+    # Where the page shows the id of such a name, the quotation marks go on before the id.
+    # A name that only holds the word is as it is.
+    museum["name"] = "here (art-institute)"
+    sent["places"][0]["name"] = "Here and there"
+    (shown,) = all_places([sent])
+    hotel, here, ohare, _ = shown["places"]
+    assert [way["says"] for way in hotel["ways"]] == [
+        'between here and "here" (art-institute), in both directions'
+    ]
+    assert [way["says"] for way in here["ways"]] == [
+        "between here and Here and there, in both directions"
+    ]
 
 
 def test_the_places_mark_what_the_report_says_the_file_does_not_say() -> None:

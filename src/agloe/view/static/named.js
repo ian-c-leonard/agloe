@@ -25,10 +25,19 @@ const UNSEEN = /[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
  * looks like it. The quotation marks go on before the id, around the spelling of the FILE.
  */
 export function either(name) {
+  return apart(name, (seen) => seen.split(/\s+/).includes("or"));
+}
+
+/**
+ * A name as the page shows it, in quotation marks where it could be taken for a word of the
+ * sentence around it: where `misleads` says so of the name as a page shows it, in small
+ * letters. A name that is in quotation marks already stays as it is.
+ */
+export function apart(name, misleads) {
   if (name.startsWith('"')) return name;
   const id = name.match(WITH_AN_ID);
   const bare = id === null ? name : name.slice(0, id.index);
-  if (!bare.normalize("NFKC").replace(UNSEEN, "").toLowerCase().split(/\s+/).includes("or")) return name;
+  if (!misleads(bare.normalize("NFKC").replace(UNSEEN, "").toLowerCase())) return name;
   return `"${bare.replace(/\\/g, "\\\\")}"${id === null ? "" : id[0]}`;
 }
 

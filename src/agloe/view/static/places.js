@@ -11,7 +11,7 @@
 // Nothing here judges a TRIP. Who is at a PLACE at a time of a plan is for the COMPILER to
 // say: the calendar shows the plan of the report.
 
-import { listed, marksBy } from "./named.js";
+import { apart, listed, marksBy } from "./named.js";
 import { lasts } from "./times.js";
 import { whoIsIn } from "./who.js";
 
@@ -41,6 +41,9 @@ export function places(trip, report = null, stated = null) {
   if (trip === null || !trip.places.length) return { says: "", clash: false, asked: false, places: [] };
   const people = new Map(trip.persons.map((each) => [each.id, each.name]));
   const named = new Map(trip.places.map((each) => [each.id, each.name]));
+  // Another PLACE, in a sentence that says "here" for the PLACE of the card. A PLACE whose
+  // name is that word is in quotation marks there, so that it is not taken for the card's own.
+  const there = (id) => apart(named.get(id), (seen) => seen.trim() === "here");
   const who = whoIsIn(trip);
   const marked = marksBy(report, stated);
   // An OPTION or a WAY under a PLACE has no FACT about the two: where it is, is part of what
@@ -54,23 +57,20 @@ export function places(trip, report = null, stated = null) {
     const holds = [
       ...(from.length ? [`${listed(from)} ${from.length === 1 ? "starts" : "start"} from here.`] : []),
       ...things.map((thing) => `The TRIP starts with ${thing.name} here.`),
-      // A WANT about where the TRIP ends is a must for some of its holders, and a must-not for others.
-      ...ends.flatMap((want) => [
-        ...(want.musts.length ? [`${listed(want.musts.map((person) => people.get(person)))} must end the TRIP here.`] : []),
-        ...(want.must_nots.length ? [`${listed(want.must_nots.map((person) => people.get(person)))} must not end the TRIP here.`] : []),
-      ]),
+      // A WANT about where the TRIP ends is a must for each PERSON who holds it.
+      ...ends.map((want) => `${listed(want.musts.map((person) => people.get(person)))} must end the TRIP here.`),
     ];
     const options = trip.options
       .filter((option) => option.from === id || option.to === id)
       .map((option) => {
         const { step, takes } = who(option.id);
-        const says = option.from === option.to ? "happens here" : option.from === id ? `goes from here to ${named.get(option.to)}` : `comes here from ${named.get(option.from)}`;
+        const says = option.from === option.to ? "happens here" : option.from === id ? `goes from here to ${there(option.to)}` : `comes here from ${there(option.from)}`;
         return { option: option.id, name: option.name, says, takes, step, ...plain() };
       });
     const ways = trip.ways
       .filter((way) => way.from === id || way.to === id)
       .map((way) => {
-        const other = named.get(way.from === id ? way.to : way.from);
+        const other = there(way.from === id ? way.to : way.from);
         const says = way.both_ways ? `between here and ${other}, in both directions` : way.from === id ? `from here to ${other}, in that direction only` : `from ${other} to here, in that direction only`;
         const steps = trip.steps.flatMap((step, at) => (step.way === way.id ? [at] : []));
         return { way: way.id, name: way.name, says, takes: lasts(way.length), steps, ...plain() };
@@ -94,7 +94,7 @@ export function places(trip, report = null, stated = null) {
   const clash = shown.some((each) => each.clash.length > 0);
   const asked = shown.some((each) => each.cases.length > 0);
   const says =
-    "Every PLACE of the FILE, with what the FILE puts there: who starts from it, and the OPTIONs and the WAYs that are at it or go from it or to it." +
+    "Every PLACE of the FILE, with what the FILE puts there: the PERSONs and the OBJECTs that start there, the PERSONs who must end the TRIP there, and the OPTIONs and the WAYs that are at it or go from it or to it." +
     (clash ? " A red edge marks what the report names among what rules out every plan." : "") +
     (asked ? " A yellow edge marks what the report names in what the FILE does not say." : "");
   return { says, clash, asked, places: shown };

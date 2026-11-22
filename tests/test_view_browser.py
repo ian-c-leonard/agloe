@@ -902,6 +902,18 @@ def test_pointing_ties_a_place_to_the_calendar_and_the_report(chromium: Browser)
         # Pointing at a step lights up what is under the PLACEs, and no PLACE.
         page.locator("#calendar .mark", has_text="Museum visit").first.hover()
         lit(page, places=["Museum visit"], marks=["Museum visit"])
+    # A WAY that nobody takes is a drawing of the WAY: here the report shows no plan. So
+    # pointing at it under a PLACE lights up its row among the WAYs, and it under each of its
+    # two PLACEs, and no other WAY. The other way round too.
+    line = "the Blue Line to O'Hare"
+    with opened(chromium, EXAMPLES / "the-bags" / "nobody-collects-them.json") as page:
+        cards = page.locator("#places .card")
+        cards.first.wait_for()
+        page.locator("#ways .item").first.wait_for()
+        cards.first.locator(".entry", has_text=walk).hover()
+        lit(page, places=[walk, walk], ways=[walk], marks=[])
+        page.locator("#ways .item", has_text=line).hover()
+        lit(page, places=[line, line], ways=[line], marks=[])
     # The trip works if there are other WAYs from the Art Institute to O'Hare: the report
     # names the two PLACEs, and each has the yellow edge.
     with opened(chromium, EXAMPLES / "flight-home" / "depends-on-another-way.json") as page:

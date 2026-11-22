@@ -77,10 +77,10 @@ function drawingOf(option, id) {
 
 /**
  * What a row or an entry for a WAY is a drawing of: each step of the TRIP in which somebody
- * takes it, by its number, or the WAY itself where nobody takes it.
+ * takes it, by its number, or the WAY itself, by its id, where nobody takes it.
  */
-function drawingOfAWay(way) {
-  return way.steps.length ? way.steps.join(" ") : `way:${way.id}`;
+function drawingOfAWay(steps, id) {
+  return steps.length ? steps.join(" ") : `way:${id}`;
 }
 
 /**
@@ -387,7 +387,7 @@ function drawPlaces(shown) {
     for (const words of place.holds) card.append(made("p", "card-holds", words));
     const entries = made("ul", "card-options");
     for (const option of place.options) entries.append(entry(option, drawingOf(option, option.option), true, option.takes));
-    for (const way of place.ways) entries.append(entry(way, drawingOfAWay(way), true, way.takes));
+    for (const way of place.ways) entries.append(entry(way, drawingOfAWay(way.steps, way.way), true, way.takes));
     if (entries.children.length) card.append(entries);
     box.append(card);
   }
@@ -476,7 +476,7 @@ function drawWays(shown) {
   part("ways-says").textContent = shown.says;
   box.hidden = !shown.ways.length;
   travel.hidden = !shown.travel.length;
-  for (const way of shown.ways) box.append(item(way, drawingOfAWay(way), [[way.takes], way.plan]));
+  for (const way of shown.ways) box.append(item(way, drawingOfAWay(way.steps, way.id), [[way.takes], way.plan]));
   for (const fact of shown.travel) {
     const line = Object.assign(made("li", `in-full${fact.clash.length ? " clash" : ""}`, fact.says), { title: fact.finds ?? "" });
     Object.assign(line.dataset, { of: `travel:${fact.record}`, records: fact.records.join(" ") });
