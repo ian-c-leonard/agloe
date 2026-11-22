@@ -3407,8 +3407,9 @@ def test_nobody_can_have_an_object_from_an_option_that_they_are_sure_to_be_out_o
         capabilities=["signing"],
     )  # fmt: skip
     sam_must_not = a_stay_with_a_voucher(
-        handed, satisfies("desk", "queueing"), start=lying, wants=[must_not("queueing", "sam")]
-    )
+        handed, satisfies("desk", "queueing"), every("queueing"), start=lying,
+        wants=[must_not("queueing", "sam")],
+    )  # fmt: skip
     never_open = a_stay_with_a_voucher(handed, start=lying, desk=[])
     for file in (only_alex_has_a_right, sam_cannot_sign, sam_must_not, never_open):
         assert sam_at_the_appointment in left_out_of(file)
@@ -3486,10 +3487,11 @@ def every_way(
 ) -> Iterator[Run]:
     """Each way one OBJECT can go through the OPTIONs of a plan. Nothing is skipped.
 
-    There is a way for each start. Where no hand-over is planned in an OPTION that does
-    whichever thing suits the plan, there is a way in which it leaves the OBJECT alone, and
-    then one in which it keeps it. Each way says what it breaks, and where the OBJECT might
-    be when the TRIP starts and after each OPTION.
+    There is a way for each start. An OPTION that does whichever thing suits the plan gives
+    a way in which it leaves the OBJECT alone, then one in which it keeps it, and then, where
+    the plan has a hand-over there and the OBJECT is at hand, one in which it hands it over.
+    A hand-over of the plan that does not happen is broken. Each way says what it breaks,
+    and where the OBJECT might be when the TRIP starts and after each OPTION.
     """
 
     def go(position: int, places: frozenset[Where], broke: Breaks, trail: Trail) -> Iterator[Run]:
@@ -3502,17 +3504,15 @@ def every_way(
             broke = (*broke, (position, None))
         action = world.does.get((option, thing), "nothing")
         taker = handed.get(option)
-        if taker is None:
-            for does in ("nothing", "keeps") if action == "any" else (action,):
-                after = left_by(does, places, persons, origin)
-                yield from go(position + 1, after, broke, (*trail, after))
-        elif action in ("hands_over", "any") and reach:
+        not_taken = broke if taker is None else (*broke, (position, taker))
+        for does in ("nothing", "keeps") if action == "any" else (action,):
+            if does == "hands_over" and taker is not None and reach:
+                continue  # it is handed over, below
+            after = left_by(does, places, persons, origin)
+            yield from go(position + 1, after, not_taken, (*trail, after))
+        if taker is not None and action in ("hands_over", "any") and reach:
             there = frozenset({Where(person=taker)})
             yield from go(position + 1, there, broke, (*trail, there))
-        else:
-            # It cannot be handed over here. That breaks the plan, and the OPTION does the rest.
-            after = left_by(action, places, persons, origin)
-            yield from go(position + 1, after, (*broke, (position, taker)), (*trail, after))
 
     for start in begins:
         yield from go(0, frozenset({start}), (), (frozenset({start}),))
@@ -3691,3 +3691,66 @@ def test_an_option_that_keeps_an_object_from_whoever_has_it_is_in_the_order() ->
         ("sam-uses", ("sam", "jo")),
         ("alex-leaves", ("alex",)),
     ]
+
+
+def test_a_hand_over_of_the_plan_is_left_undone_where_that_breaks_less() -> None:
+    """The key lies on the desk. The plan hands it to Alex at 9:00 am. At 10:00 am Sam's stay
+    requires it, and the plan hands it to Sam there. In a world where the first stay does
+    whichever thing suits, the least that breaks is one thing: the first stay does not hand
+    the key over, and then Sam finds it on the desk. With it handed to Alex, both of Sam's
+    would break."""
+    base = worst_case(trip(["alex", "sam"], ["desk"], [stays("stay", "desk")], [], []))
+    world = replace(
+        base,
+        needs=frozenset({("at-ten", "key")}),
+        does={("at-nine", "key"): "any", ("at-ten", "key"): "hands_over"},
+    )
+    visits = [("at-nine", ("alex",), "desk"), ("at-ten", ("sam",), "desk")]
+    handed = {"at-nine": "alex", "at-ten": "sam"}
+    on_the_desk = frozenset({Where(place="desk")})
+    broke, trail = reference._least_broken(  # pyright: ignore[reportPrivateUsage]
+        world, "key", visits, [Where(place="desk")], handed
+    )
+    assert broke == ((0, "alex"),)
+    assert trail == (on_the_desk, on_the_desk, frozenset({Where(person="sam")}))
+
+
+def five_at_each_hour(deposit_last: bool) -> File:
+    """Five travelers, each LOCKed into an appointment of their own at one desk at 9:00 am, at
+    10:00 am and at 11:00 am. One traveler has the voucher, and their appointment at 9:00 am
+    keeps it at the desk. Every other appointment requires it. The FILE lists that traveler's
+    appointments first, or with ``deposit_last`` last, among those of each hour."""
+    people = [f"person-{number}" for number in range(5)]
+    listed = [*people[1:], people[0]] if deposit_last else people
+    names = [f"{person}-at-{hour}" for hour in (9, 10, 11) for person in listed]
+    options = [stays(name, "desk") for name in names]
+    facts = [fact for name in names for fact in at(name, int(name.rsplit("-", 1)[1]))]
+    facts += [has_object("person-0", "voucher"), keeps("person-0-at-9", "voucher")]
+    facts += [requires_object(name, "voucher") for name in names if name != "person-0-at-9"]
+    facts += [every_use("voucher"), every_transfer("voucher")]
+    locks = [lock(name, name.split("-at-")[0]) for name in names]
+    return trip(people, ["desk"], options, facts, locks, objects=["voucher"])
+
+
+def test_an_order_is_given_up_at_the_first_option_where_the_object_is_not_at_hand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fifteen appointments, five at each hour. The deposit of the voucher has to come first
+    at 9:00 am: every other appointment requires the voucher on the desk. Where the FILE
+    lists the deposit last of the five, an order that starts with another appointment is
+    given up there, with the millions of orders that start the same way. So the first
+    answer takes as few steps as where the FILE lists the deposit first."""
+    gone = 0
+    its_own = reference._one_further  # pyright: ignore[reportPrivateUsage]
+
+    def counted(*how: object) -> object:
+        nonlocal gone
+        gone += 1
+        return its_own(*how)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(reference, "_one_further", counted)
+    for deposit_last in (False, True):
+        gone = 0
+        file = five_at_each_hour(deposit_last)
+        assert compiler.works(file, worst_case(file))
+        assert gone < 100

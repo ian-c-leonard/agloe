@@ -1675,11 +1675,13 @@ def _least_broken(
 
     Each OPTION first checks what it requires, then keeps what it keeps, and then the OBJECT
     is handed over in it. In a world that leaves nothing to pick there is one way to go. An
-    OPTION that does whichever thing suits the plan gives a way for each, and so does each
-    start the world can pick. Then the result is the way that breaks the least, and among
-    those the first: the start that ``begins`` gives first, and then, going through the
-    OPTIONs in order, the way in which the OPTION leaves the OBJECT alone before the way in
-    which it keeps it.
+    OPTION that does whichever thing suits the plan gives a way for each: it leaves the
+    OBJECT alone, it keeps it, or it hands it over as the plan says. Where it does not hand
+    it over, a hand-over that the plan has there is broken. Each start the world can pick
+    gives a way too. Then the result is the way that breaks the least, and among those the
+    first: the start that ``begins`` gives first, and then, going through the OPTIONs in
+    order, the way in which the OPTION leaves the OBJECT alone, then the way in which it
+    keeps it, then the way in which it hands it over.
 
     Not every way is tried. All that matters about a way so far is where it leaves the
     OBJECT: what can follow turns on nothing else. Take two ways that leave it in the same
@@ -1707,10 +1709,8 @@ def _least_broken(
                         continue  # with no hand-over planned, that is "nothing"
                 elif does == "hands_over" and _within_reach(after, persons, origin):
                     after = frozenset({Where(person=taker)})
-                elif does == "hands_over" or action != "any":
-                    found = (*broken, (position, taker))  # not handed over: it stays
                 else:
-                    continue
+                    found = (*broken, (position, taker))  # not handed over: it stays, or is kept
                 known = following.get(after)
                 if known is None or (len(found), (*picks, pick)) < (len(known[1]), known[0]):
                     following[after] = ((*picks, pick), found, (*trail, after))
@@ -1741,29 +1741,51 @@ def _first_hand_overs(
     choice is kept for each set of places where the OBJECT might be. Those are few, where
     all the choices are as many as the PERSONs of each OPTION multiplied together.
     """
-    reached: dict[frozenset[Where], _Ranked] = {frozenset({start}): () for start in begins}
-    for option, persons, origin in visits:
-        following: dict[frozenset[Where], _Ranked] = {}
+    reached: _Reached = {frozenset({start}): () for start in begins}
+    for visit in visits:
+        reached = _one_further(world, thing, reached, visit, rank)
+    return _first_of(reached)
 
-        def keep(places: frozenset[Where], taken: _Ranked, kept: dict[frozenset[Where], _Ranked]):
-            known = kept.get(places)
-            if known is None or (len(taken), taken) < (len(known), known):
-                kept[places] = taken
 
-        action = world.does.get((option, thing), "nothing")
-        for places, taken in reached.items():
-            if (option, thing) in world.needs and not _within_reach(places, persons, origin):
-                continue
-            for does in ("nothing", "keeps", "hands_over") if action == "any" else (action,):
-                after = _left(does, places, persons, origin)
-                if does != "hands_over" or action != "any":  # with "any" that is "nothing"
-                    keep(after, taken, following)
-                if does == "hands_over" and _within_reach(after, persons, origin):
-                    for person in persons:
-                        there = frozenset({Where(person=person)})
-                        if after != there:  # they have it already
-                            keep(there, (*taken, rank(option, person)), following)
-        reached = following
+def _one_further(
+    world: World,
+    thing: str,
+    reached: _Reached,
+    visit: _Visit,
+    rank: Callable[[str, str], tuple[int, int]],
+) -> _Reached:
+    """The search of ``_first_hand_overs``, one OPTION further.
+
+    ``reached`` holds each set of places where the OBJECT might be before the OPTION, with
+    the first hand-overs that leave it there. The result holds the same for after the OPTION.
+    It is empty where the fourteenth CONSTRAINT cannot be kept, whatever was handed over.
+    """
+    option, persons, origin = visit
+    following: _Reached = {}
+
+    def keep(places: frozenset[Where], taken: _Ranked) -> None:
+        known = following.get(places)
+        if known is None or (len(taken), taken) < (len(known), known):
+            following[places] = taken
+
+    action = world.does.get((option, thing), "nothing")
+    for places, taken in reached.items():
+        if (option, thing) in world.needs and not _within_reach(places, persons, origin):
+            continue
+        for does in ("nothing", "keeps", "hands_over") if action == "any" else (action,):
+            after = _left(does, places, persons, origin)
+            if does != "hands_over" or action != "any":  # with "any" that is "nothing"
+                keep(after, taken)
+            if does == "hands_over" and _within_reach(after, persons, origin):
+                for person in persons:
+                    there = frozenset({Where(person=person)})
+                    if after != there:  # they have it already
+                        keep(there, (*taken, rank(option, person)))
+    return following
+
+
+def _first_of(reached: _Reached) -> _Ranked | None:
+    """The hand-overs that the rules put first among those a search has reached, if any."""
     if not reached:
         return None
     return min(reached.values(), key=lambda taken: (len(taken), taken))
@@ -1823,9 +1845,11 @@ def whereabouts(
 
 type _Chain = tuple[list[tuple[int, int, int]], dict[int, _Taken], tuple[int, tuple[_Ranked, ...]]]
 type _Ranked = tuple[tuple[int, int], ...]  # the hand-overs of one OBJECT, by position in the FILE
+# Each set of places where an OBJECT might be, with the first hand-overs that leave it there.
+type _Reached = dict[frozenset[Where], _Ranked]
 _NOTHING_TO_ORDER: list[_Chain] = [([], {}, (0, ()))]  # no OBJECT turns on the order of the steps
 type _Ordered = tuple[
-    Iterator[tuple[int, ...]],
+    Iterator[tuple[tuple[int, ...], _Ranked]],
     dict[int, set[int]],
     list[tuple[int, int, int]],
     tuple[_Ranked, ...],
@@ -1982,10 +2006,30 @@ def _orders_together(
                     grew = True
         return later
 
+    def by_position(option: str, person: str) -> tuple[int, int]:
+        return (place_of[option], people[person])
+
+    def visit(index: int) -> _Visit:
+        return (options[index].id, who[index], options[index].origin)
+
+    unordered: dict[int, _Ranked | None] = {}
+
     def in_each_order(
-        matter: tuple[int, ...], later: Mapping[int, Set[int]]
-    ) -> Iterator[tuple[int, ...]]:
-        """Each order of these OPTIONs that keeps what comes after what and the fixed starts."""
+        number: int, later: Mapping[int, Set[int]]
+    ) -> Iterator[tuple[tuple[int, ...], _Ranked]]:
+        """Each order of one OBJECT's OPTIONs that works, with the hand-overs the rules put first.
+
+        ``number`` is the place of the OBJECT among those required. An order keeps what
+        comes after what and the fixed starts. The OBJECT is taken through the OPTIONs as
+        the order is made. So an order is given up at the first OPTION where the OBJECT
+        cannot be at hand whatever was handed over, and with it every order that starts the
+        same way. Where another transfer brings the OBJECT, every order works, with no
+        hand-over. An OBJECT that nothing moves has no order, and is taken through the
+        OPTIONs that require it as the FILE lists them.
+        """
+        thing = required[number]
+        brought = thing in world.brought
+        begins: _Reached = {frozenset({start}): () for start in _begins(file, world, thing)}
 
         def can_come_first(index: int, left: tuple[int, ...]) -> bool:
             mine = fixed[index]
@@ -1996,35 +2040,32 @@ def _orders_together(
                     return False
             return True
 
-        def go(done: tuple[int, ...], left: tuple[int, ...]) -> Iterator[tuple[int, ...]]:
+        def go(
+            done: tuple[int, ...], left: tuple[int, ...], reached: _Reached
+        ) -> Iterator[tuple[tuple[int, ...], _Ranked]]:
             if not left:
-                yield done
+                yield done, (() if brought else _first_of(reached) or ())
             for index in left:
-                if can_come_first(index, left):
-                    yield from go((*done, index), tuple(i for i in left if i != index))
+                if not can_come_first(index, left):
+                    continue
+                further = reached
+                if not brought:
+                    further = _one_further(world, thing, reached, visit(index), by_position)
+                    if not further:
+                        continue
+                yield from go((*done, index), tuple(i for i in left if i != index), further)
 
-        return go((), matter)
-
-    hand_overs: dict[tuple[int, tuple[int, ...]], _Ranked | None] = {}
-
-    def by_position(option: str, person: str) -> tuple[int, int]:
-        return (place_of[option], people[person])
-
-    def best(number: int, order: tuple[int, ...]) -> _Ranked | None:
-        """The hand-overs that the rules put first for one OBJECT in this order, if any work.
-
-        ``number`` is its place among the OBJECTs required. An OBJECT that nothing moves has
-        no order, and is taken through the OPTIONs that require it as the FILE lists them.
-        """
-        thing = required[number]
-        if thing in world.brought:
-            return ()
-        if (number, order) not in hand_overs:
-            through = order if moved[number] else touched[number]
-            visits = [(options[index].id, who[index], options[index].origin) for index in through]
-            begins = _begins(file, world, thing)
-            hand_overs[number, order] = _first_hand_overs(world, thing, visits, begins, by_position)
-        return hand_overs[number, order]
+        if moved[number]:
+            yield from go((), matters[number], begins)
+            return
+        if number not in unordered:
+            visits = [visit(index) for index in touched[number]]
+            starts = _begins(file, world, thing)
+            found = _first_hand_overs(world, thing, visits, starts, by_position)
+            unordered[number] = () if brought else found
+        found = unordered[number]
+        if found is not None:
+            yield (), found
 
     # What comes after each OPTION: a PERSON does it later, or a chain of PERSONs does.
     own: dict[int, set[int]] = {index: set() for index in happening}
@@ -2034,16 +2075,14 @@ def _orders_together(
     closed(own)
     # The OBJECTs taken so far: the orders still to try for the next one, what comes after
     # what with the orders taken, their gaps, and their hand-overs.
-    taken: list[_Ordered] = [(in_each_order(matters[0], own), own, [], ())]
+    taken: list[_Ordered] = [(in_each_order(0, own), own, [], ())]
     while taken:
         ahead, later, gaps, chosen = taken[-1]
-        order = next(ahead, None)
-        if order is None:
+        following = next(ahead, None)
+        if following is None:
             taken.pop()
             continue
-        found = best(len(chosen), order)
-        if found is None:
-            continue
+        order, found = following
         longer = [*gaps, *((before, after, 0) for before, after in pairwise(order))]
         ranked = (*chosen, found)
         if len(ranked) == len(required):
@@ -2057,7 +2096,7 @@ def _orders_together(
         for place, index in enumerate(order):
             further[index].update(order[place + 1 :])
         closed(further)
-        taken.append((in_each_order(matters[len(ranked)], further), further, longer, ranked))
+        taken.append((in_each_order(len(ranked), further), further, longer, ranked))
 
 
 # ------------------------------- Which ITINERARY is shown -------------------------------
