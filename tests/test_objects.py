@@ -7,6 +7,7 @@ from itertools import combinations, pairwise, permutations, product
 from random import Random
 
 import pytest
+from ortools.sat.python import cp_model
 
 from agloe import answers, compiler, reference, report
 from agloe.answers import Answer, Carried, Report, Stay, Use
@@ -3973,12 +3974,24 @@ def test_an_object_that_is_out_of_reach_for_good_is_seen_before_anything_is_time
     assert timed == 0
 
 
+def answered_at_once(search: compiler._Search) -> tuple[bool, int]:  # pyright: ignore[reportPrivateUsage]
+    """Whether anything works in a model, and how many conflicts the solver went through.
+
+    The solver gives the same count every time. It gives up after a thousand conflicts,
+    and the test fails here: an answer that takes more is not one the solver sees at once.
+    """
+    solver = compiler._solver(relax=False)  # pyright: ignore[reportPrivateUsage]
+    solver.parameters.max_number_of_conflicts = 1000
+    status = solver.solve(search.model)
+    assert status != cp_model.UNKNOWN, "the solver went through a thousand conflicts"
+    return search.read(solver, status) is not None, solver.num_conflicts
+
+
 def conflicts_to_answer(file: File) -> tuple[bool, int]:
     """Whether anything works in the worst case by the solver's own search, and how many
-    conflicts the solver went through to say so. The solver gives the same count every time."""
+    conflicts the solver went through to say so."""
     search = compiler._Search(file, worst_case(file), plain=True)  # pyright: ignore[reportPrivateUsage]
-    solver, status = search.ask()
-    return search.read(solver, status) is not None, solver.num_conflicts
+    return answered_at_once(search)
 
 
 def a_register_at_two_places(airport_at: int = 9, guests: int = 11) -> File:
@@ -4421,9 +4434,9 @@ def test_the_time_to_cross_counts_the_hours_in_which_no_unlisted_way_leaves() ->
     world, open_pairs = reference.best_case_left(left)
     assert world.unlisted is None or world.unlisted
     search = compiler._Search(file, world, open_pairs, plain=True)  # pyright: ignore[reportPrivateUsage]
-    solver, status = search.ask()
-    assert search.read(solver, status) is None
-    assert solver.num_conflicts < 1000
+    works, conflicts = answered_at_once(search)
+    assert not works
+    assert conflicts < 1000
     assert not compiler.can_work(left)
 
 
@@ -4466,8 +4479,7 @@ def conflicts_in_the_best_case(file: File) -> tuple[bool, int]:
     conflicts the solver went through to say so."""
     world, open_pairs = reference.best_case_left(Remaining(file))
     search = compiler._Search(file, world, open_pairs, plain=True)  # pyright: ignore[reportPrivateUsage]
-    solver, status = search.ask()
-    return search.read(solver, status) is not None, solver.num_conflicts
+    return answered_at_once(search)
 
 
 def eleven_signatures(
