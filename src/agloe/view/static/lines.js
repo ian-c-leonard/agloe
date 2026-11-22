@@ -30,6 +30,8 @@ const TO_BUY = /^ {4}! .+ still ha(?:s|ve) to buy a right to this(?: if it needs
 const ONE_PLAN = "One plan that works then: ";
 /** The line above the sums of a plan in each currency. */
 const SUMS = "The money of this plan, by currency:";
+/** The line above what a plan charges to each cap. */
+const CAPS = "The caps:";
 /** The line above where each OBJECT is in a plan. */
 const OBJECTS = "Where each OBJECT is:";
 /** How the line ends that is above the BUDGETs of the FILE, where a report states them. */
@@ -51,7 +53,7 @@ function listsOf(report) {
     [report?.relies_on, (text) => /^The plan relies on these .+:$/.test(text)],
     [report?.conflict, (text) => /^These .+ rule out every plan/.test(text)],
     [paid, (text) => text === "What the BOOKINGs state that they paid:"],
-    [caps, (text) => text === "The caps:"],
+    [caps, (text) => text === CAPS],
   ];
   return lists.filter(([list]) => Array.isArray(list) && list.length && list.every((id) => typeof id === "string"));
 }
@@ -244,11 +246,14 @@ export function lines(text, report, trip) {
 export function statedIn(tied) {
   const cases = [];
   const charged = {};
+  let capped = false;
   for (const line of tied) {
     if (line.case !== null) cases[line.case] = line.text.trim();
-    // Under "The caps:" a line states the cap with its limit and its BUDGET, and after the
-    // last colon what is charged to it.
-    if (line.record !== null && line.text.startsWith(`  ${line.record}: at most `)) charged[line.record] = line.text.slice(line.text.lastIndexOf(": ") + 2);
+    // Under "The caps:", and nowhere else, a line states the cap with its limit and its
+    // BUDGET, and after the last colon what is charged to it. A line that is not set in ends
+    // what is under a heading.
+    if (!line.text.startsWith("  ")) capped = line.text === CAPS;
+    else if (capped && line.record !== null && line.text.startsWith(`  ${line.record}: at most `)) charged[line.record] = line.text.slice(line.text.lastIndexOf(": ") + 2);
   }
   const heading = tied.find((line) => CASES.test(line.text));
   return { heading: cases.length > 1 && heading !== undefined ? heading.text : null, cases, charged };

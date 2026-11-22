@@ -9,6 +9,8 @@ Nothing in it judges a TRIP, and nothing in it adds up money. Whether a cap hold
 COMPILER to say.
 """
 
+import json
+from pathlib import Path
 from typing import Any
 
 from agloe.file import Booking, read
@@ -80,9 +82,26 @@ def test_a_budget_says_who_may_draw_on_it_its_caps_and_what_was_paid_from_it() -
     assert money["whole"] is None
 
 
-def test_a_cap_says_what_a_plan_charges_to_it_only_where_the_report_says_so() -> None:
+def test_a_cap_says_what_a_plan_charges_to_it_only_where_the_report_says_so(
+    tmp_path: Path,
+) -> None:
     sent, found, words = in_words(STORY / "within-the-cap.json")
     assert "\nThe caps:\n  trip-cap: at most 200.00 USD from the trip money: 32.00 paid;" in words
+    # Each of two caps says what the report says of that cap.
+    content = json.loads((STORY / "within-the-cap.json").read_text())
+    jos = {"id": "jo-money", "name": "Jo's money", "persons": ["jo"], "currencies": ["USD"]}
+    content["budgets"].append(jos)
+    limit = {"amount": "50.00", "currency": "USD"}
+    content["decisions"].append({"id": "jo-cap", "budget": "jo-money", "spend_at_most": limit})
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    (shown,) = all_budgets([sent], [found], [words])
+    caps = [cap for budget in shown["budgets"] for cap in budget["caps"]]
+    assert [(cap["id"], cap["plan"]) for cap in caps] == [
+        ("trip-cap", "In the plan: 32.00 paid; 32.00 still to buy; 136.00 left."),
+        ("jo-cap", "In the plan: 0.00 paid; 0.00 still to buy; 50.00 left."),
+    ]
     # With no report in words, the page has nothing to say of the plan.
     (shown,) = all_budgets([sent], [found])
     assert shown["budgets"][0]["caps"][0]["plan"] is None
@@ -194,8 +213,9 @@ def test_every_example_shows_its_budgets_in_the_words_of_the_report() -> None:
                 if cap["plan"] is not None:
                     charged += 1
                     said = cap["plan"][len("In the plan: ") : -1]
-                    assert f"  {cap['id']}: at most " in words, name
-                    assert f": {said}\n" in f"{words}\n", name
+                    under = words.split("\nThe caps:\n")[1].splitlines()
+                    (row,) = [line for line in under if line.startswith(f"  {cap['id']}: at ")]
+                    assert row.endswith(f": {said}"), name
                 # Where the report names a cap, the page says the same of it.
                 if f"  {cap['id']}: the TRIP spends" in words:
                     caps += 1

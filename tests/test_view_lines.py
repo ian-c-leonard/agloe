@@ -55,15 +55,35 @@ def asked_of(path: Path) -> dict[str, Any]:
     }
 
 
-def lines_of(asked: list[dict[str, Any]]) -> list[list[Line]]:
-    """The lines of each report, by the page's own code."""
-    node = shutil.which("node")
-    if node is None:
+def node() -> str:
+    """Where Node is. The tests of the view need it, and are skipped where it is not."""
+    found = shutil.which("node")
+    if found is None:
         if os.environ.get("CI"):
             pytest.fail("the tests of the view need Node")
         pytest.skip("needs Node")
+    return found
+
+
+def stated_of(asked: dict[str, Any]) -> dict[str, Any]:
+    """What the page keeps of the report's own words, by the page's own code."""
     done = subprocess.run(
-        [node, str(Path(__file__).parent / "view_lines.mjs")],
+        [node(), "--input-type=module", "--eval", STATED],
+        input=json.dumps(asked),
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=Path(__file__).parent,
+    )
+    assert done.returncode == 0, done.stderr
+    stated: dict[str, Any] = json.loads(done.stdout)
+    return stated
+
+
+def lines_of(asked: list[dict[str, Any]]) -> list[list[Line]]:
+    """The lines of each report, by the page's own code."""
+    done = subprocess.run(
+        [node(), str(Path(__file__).parent / "view_lines.mjs")],
         input=json.dumps(asked),
         capture_output=True,
         text=True,
@@ -330,21 +350,31 @@ def test_the_line_about_bookings_that_state_no_payment_is_tied_to_each_of_them(
         assert all(line["about"] == [] for line in other)
 
 
-def test_what_the_report_says_is_charged_to_a_cap_is_kept_in_its_own_words() -> None:
+def test_what_the_report_says_is_charged_to_a_cap_is_kept_in_its_own_words(
+    tmp_path: Path,
+) -> None:
     """For the cards of the BUDGETs, which say it again."""
-    asked = asked_of(EXAMPLES / "a-ticket" / "within-the-cap.json")
-    done = subprocess.run(
-        [shutil.which("node") or "node", "--input-type=module", "--eval", STATED],
-        input=json.dumps(asked),
-        capture_output=True,
-        text=True,
-        check=False,
-        cwd=Path(__file__).parent,
-    )
-    assert done.returncode == 0, done.stderr
-    stated = json.loads(done.stdout)
+    story = EXAMPLES / "a-ticket" / "within-the-cap.json"
+    stated = stated_of(asked_of(story))
     assert stated["charged"] == {"trip-cap": "32.00 paid; 32.00 still to buy; 136.00 left"}
     assert (stated["heading"], stated["cases"]) == (None, [])
+    # Each of two caps keeps its own words. They are read only under the heading of the caps:
+    # a line about a FACT can start as the line of a cap does, after the name of its OPTION.
+    content = json.loads(story.read_text())
+    (skydeck,) = [option for option in content["options"] if option["id"] == "skydeck"]
+    skydeck["name"] = "at most an hour upstairs"
+    jos = {"id": "jo-money", "name": "Jo's money", "persons": ["jo"], "currencies": ["USD"]}
+    content["budgets"].append(jos)
+    limit = {"amount": "50.00", "currency": "USD"}
+    content["decisions"].append({"id": "jo-cap", "budget": "jo-money", "spend_at_most": limit})
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    asked = asked_of(path)
+    assert "\n  skydeck-time: at most an hour upstairs starts at " in asked["text"]
+    assert stated_of(asked)["charged"] == {
+        "trip-cap": "32.00 paid; 32.00 still to buy; 136.00 left",
+        "jo-cap": "0.00 paid; 0.00 still to buy; 50.00 left",
+    }
 
 
 def test_a_report_on_a_plan_states_each_cap_once_more_and_both_lines_are_tied_to_it() -> None:
