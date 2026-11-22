@@ -4794,3 +4794,38 @@ def test_two_uses_away_from_where_an_object_lies_need_the_time_between_them() ->
     assert conflicts < 1000
     works, conflicts = conflicts_to_answer(two_desks(15))
     assert works
+
+
+def test_an_object_with_an_option_at_any_time_leaves_a_choice_of_order() -> None:
+    """Alex and Sam each have an appointment at 9:00 am about the voucher, so the voucher
+    leaves a choice of order. Jo's two stays require the stamp, and one can hand it over.
+    With both of Jo's stays at fixed times, the stamp has one order and moves no start, and
+    the voucher is the one OBJECT that orders the steps. With one of them at any time, the
+    order of the stamp can move that start, so the stamp counts as leaving a choice too."""
+
+    def the_one_order(*later: Document) -> tuple[int, ...] | None:
+        names = ["alex-deposit", "sam-check", "jo-early", "jo-later"]
+        options = [stays(name, "desk") for name in names]
+        facts = [
+            *at("alex-deposit", 9),
+            *at("sam-check", 9),
+            *at("jo-early", 9),
+            *later,
+            has_object("alex", "voucher"),
+            keeps("alex-deposit", "voucher"),
+            requires_object("sam-check", "voucher"),
+            lies_at("stamp", "desk"),
+            requires_object("jo-early", "stamp"),
+            requires_object("jo-later", "stamp"),
+            hands_over("jo-early", "stamp"),
+        ]
+        facts += [every_use(thing) for thing in ("voucher", "stamp")]
+        facts += [every_transfer(thing) for thing in ("voucher", "stamp")]
+        locks = [lock(name, name.split("-")[0]) for name in names]
+        things = ["voucher", "stamp"]
+        file = trip(["alex", "sam", "jo"], ["desk"], options, facts, locks, objects=things)
+        who = (("alex",), ("sam",), ("jo",), ("jo",))
+        return reference._the_one_order(file, worst_case(file), who)  # pyright: ignore[reportPrivateUsage]
+
+    assert the_one_order(*at("jo-later", 10)) == (0, 1)
+    assert the_one_order(*whenever("jo-later")) is None
