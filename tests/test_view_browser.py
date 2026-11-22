@@ -131,6 +131,27 @@ INSIDE = """(name) => {
     down: mark.top >= -1 && mark.bottom <= innerHeight + 1,
   };
 }"""
+# Where the report and the drawings are in the window, and which lines of the report that are
+# lit are wholly inside the box of the report.
+PLACED = """() => {
+  const box = (id) => document.getElementById(id).getBoundingClientRect();
+  const sides = ({ left, right, top, bottom }) => ({ left, right, top, bottom });
+  const report = box("report");
+  const lit = [...document.querySelectorAll("#report .row.lit")];
+  const inside = (row) => {
+    const at = row.getBoundingClientRect();
+    return at.top >= report.top && at.bottom <= report.bottom;
+  };
+  const text = document.getElementById("report");
+  return {
+    report: sides(box("report-part")),
+    drawings: sides(box("drawings")),
+    lit: lit.length,
+    shown: lit.filter(inside).length,
+    tall: innerHeight,
+    scrolls: text.scrollHeight > text.clientHeight,
+  };
+}"""
 # Whether what is lit on the page is what a test expects of it.
 IS_LIT = f"""(expected) => {{
   const lit = ({LIT})();
@@ -751,6 +772,54 @@ def test_pointing_ties_an_object_to_the_calendar_and_the_report(chromium: Browse
         page.locator("#report .row").first.wait_for()
         page.locator("#options .item").first.wait_for()
         assert page.locator("#objects-part").is_hidden()
+
+
+def test_on_a_wide_window_the_report_stays_beside_the_drawings(chromium: Browser) -> None:
+    """So pointing at a drawing far down the page shows its lines in the report."""
+    path = EXAMPLES / "the-bags" / "they-collect-them.json"
+    with opened(chromium, path, wide=1728, tall=700) as page:
+        page.locator("#objects .card").wait_for()
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        placed = page.evaluate(PLACED)
+        # The report is to the right of the drawings, and starts where they do.
+        assert placed["report"]["left"] >= placed["drawings"]["right"]
+        assert abs(placed["report"]["top"] - placed["drawings"]["top"]) < 2
+        # At the end of the page the report is still in the window, from top to bottom.
+        page.locator("#objects .card-name").scroll_into_view_if_needed()
+        page.evaluate("() => scrollTo(0, document.documentElement.scrollHeight)")
+        placed = page.evaluate(PLACED)
+        assert placed["report"]["top"] >= 0 and placed["report"]["bottom"] <= placed["tall"]
+        # The report is scrolled to its end, where no line about where Alex starts from is.
+        # Pointing at Alex brings that line into view there.
+        page.evaluate(
+            "() => { const r = document.getElementById('report'); r.scrollTop = r.scrollHeight; }"
+        )
+        page.locator("#persons .item").first.hover()
+        found = lit(page, persons=["Alex"])
+        assert ids_of(found["rows"]) == ["alex-start"]
+        page.wait_for_function(f"() => ({PLACED})().shown === 1")
+        # Pointing at the OBJECT lights up six lines. One is in view already, so nothing moves.
+        before = page.evaluate("() => document.getElementById('report').scrollTop")
+        page.locator("#objects .card-name").hover()
+        lit(page, objects=["the bags"])
+        placed = page.evaluate(PLACED)
+        assert (placed["lit"], placed["shown"] > 0) == (6, True)
+        assert page.evaluate("() => document.getElementById('report').scrollTop") == before
+        # A line of the report that is pointed at stays where it is.
+        row = page.locator("#report .row[data-record='flight-needs-the-bags']")
+        row.scroll_into_view_if_needed()
+        before = row.bounding_box()
+        row.hover()
+        lit(page, objects=["Flight home"], marks=["Flight home"])
+        assert row.bounding_box() == before
+    # On a narrower window the report is below the drawings, and has no scrolling of its own.
+    with opened(chromium, path, wide=1280, tall=700) as page:
+        page.locator("#objects .card").wait_for()
+        page.locator("#report .row").first.wait_for()
+        placed = page.evaluate(PLACED)
+        assert placed["report"]["top"] >= placed["drawings"]["bottom"]
+        assert placed["scrolls"] is False
 
 
 def test_pointing_ties_a_way_to_the_calendar_and_the_report(chromium: Browser) -> None:

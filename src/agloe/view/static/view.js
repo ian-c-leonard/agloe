@@ -585,6 +585,14 @@ function light(target) {
     const same = ofAThing ? (theirs.length ? ofThese : shares(each)) : shares(each) || (ofThese && !isLine(each));
     each.classList.toggle("lit", from !== null && same);
   }
+  // Where the report scrolls by itself beside the drawings, pointing at a drawing brings the
+  // first of its lines into view there, unless one of them is in view already.
+  const report = part("report");
+  if (from === null || report.contains(from) || report.scrollHeight <= report.clientHeight) return;
+  const box = report.getBoundingClientRect();
+  const inView = (line) => line.getBoundingClientRect().top >= box.top && line.getBoundingClientRect().bottom <= box.bottom;
+  const lines = [...report.querySelectorAll(".row.lit")];
+  if (lines.length && !lines.some(inView)) lines[0].scrollIntoView({ block: "center" });
 }
 
 /** What is under the pointer is lit again, after the page has written or drawn anew. */
