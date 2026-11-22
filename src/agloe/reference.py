@@ -1620,6 +1620,7 @@ type _Visit = tuple[str, tuple[str, ...], str]  # an OPTION: its id, who takes p
 type _Taken = tuple[tuple[str, str], ...]  # each hand-over in one OPTION: an OBJECT and a PERSON
 # One way an OBJECT can go: what it breaks, and where it might be along the way.
 type _Run = tuple[tuple[tuple[int, str | None], ...], tuple[frozenset[Where], ...]]
+type _Way = tuple[tuple[int, ...], *_Run]  # the picks that led somewhere, and what came of them
 
 
 def _begins(file: File, world: World, thing: str) -> list[Where]:
@@ -1655,58 +1656,67 @@ def _left(
     return places
 
 
-def _runs(
+def _least_broken(
     world: World,
     thing: str,
     visits: Sequence[_Visit],
     begins: Sequence[Where],
     handed: Mapping[str, str],
-) -> Iterator[_Run]:
-    """Each way one OBJECT can go through the OPTIONs of a plan, in the order they happen.
+) -> _Run:
+    """How one OBJECT goes through the OPTIONs of a plan, in the order they happen.
 
     ``visits`` holds those OPTIONs in that order. ``handed`` names, for each OPTION that hands
     the OBJECT over in the plan, the PERSON who has it from then on.
 
-    A way says what it breaks: for each OPTION where the OBJECT is not at hand, its position
-    in ``visits``, and the PERSON who was to have the OBJECT, or None where the OPTION requires
-    it. And it says where the OBJECT might be: when the TRIP starts, and then after each
-    OPTION.
+    The result says what the OBJECT breaks: for each OPTION where it is not at hand, the
+    position in ``visits``, and the PERSON who was to have the OBJECT, or None where the
+    OPTION requires it. And it says where the OBJECT might be: when the TRIP starts, and then
+    after each OPTION.
 
     Each OPTION first checks what it requires, then keeps what it keeps, and then the OBJECT
-    is handed over in it. An OPTION that does whichever thing suits the plan gives one way
-    for each, and so does each start the world can pick. In a world that leaves nothing to
-    pick there is one way.
-    """
+    is handed over in it. In a world that leaves nothing to pick there is one way to go. An
+    OPTION that does whichever thing suits the plan gives a way for each, and so does each
+    start the world can pick. Then the result is the way that breaks the least, and among
+    those the first: the start that ``begins`` gives first, and then, going through the
+    OPTIONs in order, the way in which the OPTION leaves the OBJECT alone before the way in
+    which it keeps it.
 
-    def go(
-        position: int,
-        places: frozenset[Where],
-        broken: tuple[tuple[int, str | None], ...],
-        trail: tuple[frozenset[Where], ...],
-    ) -> Iterator[_Run]:
-        if position == len(visits):
-            yield broken, trail
-            return
-        option, persons, origin = visits[position]
-        if (option, thing) in world.needs and not _within_reach(places, persons, origin):
-            broken = (*broken, (position, None))
+    Not every way is tried. All that matters about a way so far is where it leaves the
+    OBJECT: what can follow turns on nothing else. Take two ways that leave it in the same
+    places. The same ends can follow both, and the way that comes first stays first with each
+    of them: it breaks no more, and where it breaks as much, the first difference is still
+    the first difference. So after each OPTION, only the first way is kept for each set of
+    places where the OBJECT might be. Those are few, where all the ways are as many as two
+    to the power of the OPTIONs that do whichever thing suits.
+    """
+    reached: dict[frozenset[Where], _Way] = {}
+    for pick, start in enumerate(begins):
+        reached.setdefault(frozenset({start}), ((pick,), (), (frozenset({start}),)))
+    for position, (option, persons, origin) in enumerate(visits):
+        following: dict[frozenset[Where], _Way] = {}
         action = world.does.get((option, thing), "nothing")
         taker = handed.get(option)
-        for does in ("nothing", "keeps", "hands_over") if action == "any" else (action,):
-            after = _left(does, places, persons, origin)
-            if taker is None:
-                if does != "hands_over" or action != "any":  # with "any" that is "nothing"
-                    yield from go(position + 1, after, broken, (*trail, after))
-            elif does == "hands_over" and _within_reach(after, persons, origin):
-                there = frozenset({Where(person=taker)})
-                yield from go(position + 1, there, broken, (*trail, there))
-            elif does == "hands_over" or action != "any":
-                # It is not handed over, and stays where it was.
-                found = (*broken, (position, taker))
-                yield from go(position + 1, after, found, (*trail, after))
-
-    for start in begins:
-        yield from go(0, frozenset({start}), (), (frozenset({start}),))
+        for places, (picks, broken, trail) in reached.items():
+            if (option, thing) in world.needs and not _within_reach(places, persons, origin):
+                broken = (*broken, (position, None))
+            choices = ("nothing", "keeps", "hands_over") if action == "any" else (action,)
+            for pick, does in enumerate(choices):
+                after, found = _left(does, places, persons, origin), broken
+                if taker is None:
+                    if does == "hands_over" and action == "any":
+                        continue  # with no hand-over planned, that is "nothing"
+                elif does == "hands_over" and _within_reach(after, persons, origin):
+                    after = frozenset({Where(person=taker)})
+                elif does == "hands_over" or action != "any":
+                    found = (*broken, (position, taker))  # not handed over: it stays
+                else:
+                    continue
+                known = following.get(after)
+                if known is None or (len(found), (*picks, pick)) < (len(known[1]), known[0]):
+                    following[after] = ((*picks, pick), found, (*trail, after))
+        reached = following
+    _, broken, trail = min(reached.values(), key=lambda way: (len(way[1]), way[0]))
+    return broken, trail
 
 
 def _first_hand_overs(
@@ -1779,8 +1789,8 @@ def _as_planned(
             for name, person in step.handed
             if name == thing.id
         }
-        ways = _runs(world, thing.id, visits, _begins(file, world, thing.id), handed)
-        yield thing.id, visits, min(ways, key=lambda run: len(run[0]))
+        begins = _begins(file, world, thing.id)
+        yield thing.id, visits, _least_broken(world, thing.id, visits, begins, handed)
 
 
 def _at_hand(file: File, world: World, order: list[_Placed]) -> list[Broken]:
@@ -1851,10 +1861,10 @@ def _chains(
 
     Where an OBJECT is turns on the order in which the OPTIONs happen, also among OPTIONs of
     different PERSONs that start at one instant. Each PERSON's own order is given. So every
-    order that keeps those is a candidate. Only the OPTIONs that require the OBJECT or do
-    something with it matter to it: the others change nothing, wherever they come. And the
-    OBJECTs do not affect each other. So each OBJECT that some OPTION of the plan requires
-    has an order of its own, among its own OPTIONs.
+    order that keeps those is a candidate. Only the OPTIONs that require the OBJECT or can
+    move it matter to it, as ``_can_move`` says: the others change nothing, wherever they
+    come. And the OBJECTs do not affect each other. So each OBJECT that some OPTION of the
+    plan requires and some OPTION can move has an order of its own, among its own OPTIONs.
 
     For each such order, the OBJECT is taken through it with every choice of hand-overs. The
     choice that works with the fewest hand-overs is kept, and among those the one with the
@@ -1892,6 +1902,33 @@ def _chains(
     return _orders_together(file, world, who, orders, happening, required)
 
 
+def _can_move(
+    file: File,
+    world: World,
+    who: tuple[tuple[str, ...], ...],
+    happening: Sequence[int],
+    thing: str,
+) -> set[int]:
+    """The OPTIONs of a plan that can move an OBJECT, by position in the FILE.
+
+    An OPTION can move it where it hands it over, or where it keeps it and a PERSON who takes
+    part can have it. A PERSON can have it who has it when the TRIP starts, or who takes part
+    in an OPTION of the plan that hands it over. Nobody else ever has it, and an OPTION keeps
+    nothing from them. An OPTION that only might hand it over or keep it counts as well.
+    """
+    does = {index: world.does.get((file.options[index].id, thing)) for index in happening}
+    holders = {start.person for start in _begins(file, world, thing)}
+    for index in happening:
+        if does[index] in ("hands_over", "any"):
+            holders.update(who[index])
+    return {
+        index
+        for index in happening
+        if does[index] in ("hands_over", "any")
+        or (does[index] in ("keeps", "might_keep") and not holders.isdisjoint(who[index]))
+    }
+
+
 def _orders_together(
     file: File,
     world: World,
@@ -1917,12 +1954,21 @@ def _orders_together(
         )
         for thing in required
     ]
-    # An OBJECT that no OPTION of the plan does anything with stays where it starts. So the
-    # order of the OPTIONs that require it changes nothing, and it puts none in an order.
-    moved = [
-        any((options[index].id, thing) in world.does for index in happening) for thing in required
+    # An OBJECT that no OPTION of the plan can move stays where it starts. So the order of
+    # the OPTIONs that require it changes nothing, and it puts none in an order. The others
+    # put in an order the OPTIONs that require them or can move them.
+    moving = [_can_move(file, world, who, happening, thing) for thing in required]
+    moved = [bool(theirs) for theirs in moving]
+    matters = [
+        tuple(
+            index
+            for index in happening
+            if (options[index].id, thing) in world.needs or index in can_move
+        )
+        if can_move
+        else ()
+        for thing, can_move in zip(required, moving, strict=True)
     ]
-    matters = [theirs if can_move else () for theirs, can_move in zip(touched, moved, strict=True)]
 
     def closed(later: dict[int, set[int]]) -> dict[int, set[int]]:
         """What comes after what, with everything that follows from it."""

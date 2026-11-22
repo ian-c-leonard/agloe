@@ -19,7 +19,7 @@ reference checker's own search then answers for the whole TRIP. That search trie
 so it is meant for small TRIPs.
 """
 
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence, Set
 from dataclasses import replace
 from hashlib import sha256
 from itertools import combinations
@@ -451,12 +451,6 @@ class _Search:
         # it, with the OPTIONs that matter to it: those that require it or do something with
         # it, by position in the FILE. Where an OBJECT is turns on nothing else.
         self.matters: dict[str, list[int]] = {}
-        # Each PERSON and OPTION where the PERSON can gain by taking part because of an
-        # OBJECT: they can bring it, take it or leave it there. That takes a PERSON who can
-        # have the OBJECT at some time. Where no OPTION hands it over, that is only whoever
-        # has it when the TRIP starts, and nobody where it lies at a PLACE. Whether anybody
-        # else takes part changes nothing about the OBJECT then.
-        self.touches: set[tuple[int, int]] = set()
         for thing in file.objects:
             touched = [
                 index
@@ -464,20 +458,8 @@ class _Search:
                 if (option.id, thing.id) in world.needs or (option.id, thing.id) in world.does
             ]
             required = any((option.id, thing.id) in world.needs for option in file.options)
-            if not required or thing.id in world.brought:
-                continue
-            self.matters[thing.id] = touched
-            handed = any(
-                world.does.get((option.id, thing.id)) in ("hands_over", "any")
-                for option in file.options
-            )
-            start = world.starts.get(thing.id, Where())
-            holders = [
-                number
-                for number, person in enumerate(file.persons)
-                if handed or thing.id in world.starts_anywhere or start.person == person.id
-            ]
-            self.touches.update((number, index) for number in holders for index in touched)
+            if required and thing.id not in world.brought:
+                self.matters[thing.id] = touched
 
     def _count_time(self) -> None:
         """When each OPTION starts, and its turn among OPTIONs that share an instant.
@@ -521,7 +503,8 @@ class _Search:
         self.used = [model.new_bool_var(f"used {option.id}") for option in file.options]
         self.left_out: set[tuple[int, int]] = set()  # each PERSON and OPTION that is ruled out
         meets = self._hold_to_the_wants()
-        supplies = self._could_supply(meets)
+        carries = self._could_carry()
+        supplies = self._could_supply(meets, carries)
         for index, option in enumerate(file.options):
             model.add_max_equality(self.used[index], [0, *(row[index] for row in self.takes)])
             for number, person in enumerate(file.persons):
@@ -533,25 +516,86 @@ class _Search:
                     model.add(takes == 1)
                 # A PERSON gains nothing by staying somewhere unless a LOCK asks them to, the
                 # stay could meet a must of theirs, they have a CAPABILITY that the stay
-                # requires of one PERSON, or the stay matters to an OBJECT that they can
-                # have: they can bring it, take it or leave it there. Without the stay they
-                # are in the same PLACE at the same times, and every CONSTRAINT is as easy
-                # to meet or easier. So the model leaves such stays out.
+                # requires of one PERSON, or they can have an OBJECT that the stay requires,
+                # hands over or keeps: they can bring it, take it or leave it there. Without
+                # the stay they are in the same PLACE at the same times, and every CONSTRAINT
+                # is as easy to meet or easier. So the model leaves such stays out.
                 wanted = index in meets[number] or (number, index) in supplies
-                wanted = wanted or (number, index) in self.touches
+                wanted = wanted or (number, index) in carries
                 if not self.usable[index] or (not self.moves[index] and not asked and not wanted):
                     self._rule_out(number, index)
         self._hold_to_the_requirements()
         self._hold_to_the_rights()
 
-    def _could_supply(self, meets: Sequence[set[int]]) -> set[tuple[int, int]]:
+    def _could_carry(self) -> set[tuple[int, int]]:
+        """Each PERSON and OPTION where the PERSON can gain by taking part because of an OBJECT.
+
+        The OPTION requires the OBJECT, hands it over or keeps it, and the PERSON can have the
+        OBJECT at some time: so they can bring it, take it or leave it there. A PERSON can
+        have it who has it when the TRIP starts, or who can take part in an OPTION that hands
+        it over. Nobody else ever has it, so whether they take part changes nothing about
+        where the OBJECT is.
+
+        An OPTION that only might keep the OBJECT gives nobody a reason. Where whoever has
+        the OBJECT stays out of it, the OBJECT might be in fewer places afterwards, and it is
+        at hand wherever it was at hand with more.
+
+        ``self.holders`` keeps, for each OBJECT that matters, the PERSONs who can have it.
+        """
+        file, world = self.file, self.world
+        everybody = range(len(file.persons))
+        self.holders: dict[str, set[int]] = {}
+        carries: set[tuple[int, int]] = set()
+        for thing, matter in self.matters.items():
+            start = world.starts.get(thing)
+            holders = {
+                number
+                for number, person in enumerate(file.persons)
+                if (start is None and thing in world.starts_anywhere)
+                or (start is not None and start.person == person.id)
+            }
+            gain: list[int] = []
+            for index in matter:
+                option = file.options[index].id
+                does = world.does.get((option, thing), "nothing")
+                if does in ("hands_over", "any"):
+                    holders |= {n for n in everybody if not self._shut_out(n, index)}
+                if (option, thing) in world.needs or does in ("hands_over", "keeps", "any"):
+                    gain.append(index)
+            self.holders[thing] = holders
+            carries.update((number, index) for number in holders for index in gain)
+        return carries
+
+    def _shut_out(self, number: int, index: int) -> bool:
+        """Whether this PERSON takes no part in this OPTION, whoever else does.
+
+        The OPTION cannot happen, a must-not keeps the PERSON out of it, they lack a
+        CAPABILITY that it requires of each PERSON, or it needs a right that they do not have
+        and can pay for no place of. More than this can keep a PERSON out. This only says who
+        is sure to be out, so that the model can leave out what turns on them.
+        """
+        file, world = self.file, self.world
+        option, person = file.options[index].id, file.persons[number].id
+        if not self.usable[index] or (number, index) in self.left_out:
+            return True
+        for (asking, capability), of in world.requires.items():
+            if asking == option and of == "each" and (person, capability) not in world.has:
+                return True
+        if option not in world.needs_right or (option, person) in world.rights:
+            return False
+        return not any((offer.id, person) in world.payable for offer in file.offers(option))
+
+    def _could_supply(
+        self, meets: Sequence[set[int]], carries: Set[tuple[int, int]]
+    ) -> set[tuple[int, int]]:
         """Each PERSON and stay where the PERSON may have to come to meet a requirement.
 
         The stay requires a CAPABILITY of one PERSON, and the PERSON has it. Two cases are
-        left out. Nobody comes where nobody else has a reason to be there: a LOCK, or a must
-        that the stay could meet, as ``meets`` says for each PERSON. Without them the stay
-        need not happen at all. And nobody comes for a CAPABILITY that a PERSON whom a LOCK
-        names in the stay has: that requirement is met whenever the stay happens.
+        left out. Nobody comes where nobody else has a reason to be there: a LOCK, a must
+        that the stay could meet, as ``meets`` says for each PERSON, or an OBJECT that they
+        can bring, take or leave there, as ``carries`` says. Without them the stay need not
+        happen at all. And nobody comes for a CAPABILITY that a PERSON whom a LOCK names in
+        the stay has: that requirement is met whenever the stay happens.
 
         An OPTION that moves is in the result too, and nothing reads it there: the model
         leaves nobody out of one.
@@ -561,11 +605,13 @@ class _Search:
         locked: dict[str, set[str]] = {}
         for lock in file.locks:
             locked.setdefault(lock.option, set()).update(lock.persons)
+        happens = {index for theirs in meets for index in theirs}
+        happens |= {index for _, index in carries}
         supplies: set[tuple[int, int]] = set()
         for (option, capability), of in world.requires.items():
             index = position[option]
             named = locked.get(option, set())
-            if of != "one" or not (named or any(index in theirs for theirs in meets)):
+            if of != "one" or not (named or index in happens):
                 continue
             if any((person, capability) in world.has for person in named):
                 continue
@@ -622,18 +668,21 @@ class _Search:
         model, file, world = self.model, self.file, self.world
         options = file.options
         moves = any((option.id, thing) in world.does for option in options)
-        if not moves and thing not in world.starts_anywhere:
-            # Nothing does anything with it, so it stays where it starts. An OPTION that
-            # requires it happens only there, or with the PERSON who has it.
+        picked = thing in world.starts_anywhere and thing not in world.starts
+        if not picked and not (moves and self.holders[thing]):
+            # Nothing does anything with it, or nobody can ever have it. So it stays where
+            # it starts. An OPTION that requires it happens only there, or with the PERSON
+            # who has it.
             start = world.starts.get(thing, Where())
+            holder = [
+                self.takes[number]
+                for number, person in enumerate(file.persons)
+                if person.id == start.person
+            ]
             for index in matter:
-                holder = [
-                    self.takes[number][index]
-                    for number, person in enumerate(file.persons)
-                    if person.id == start.person
-                ]
-                if start.place != options[index].origin:
-                    model.add_bool_or([self.used[index].negated(), *holder])
+                required = (options[index].id, thing) in world.needs
+                if required and start.place != options[index].origin:
+                    model.add_bool_or([self.used[index].negated(), *(row[index] for row in holder)])
             return
         origins = {options[index].origin for index in matter}
         spots = [
