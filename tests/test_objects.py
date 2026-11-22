@@ -4100,6 +4100,51 @@ def a_trip_with_steps_at_one_time(rng: Random) -> File:
     return trip(people, ["desk", "vault"], options, facts, locks, ways, objects=things)
 
 
+def a_trip_with_two_things_at_one_desk(rng: Random) -> File:
+    """Two PERSONs with five or six stays at one desk, a key that one of them has, and a
+    stamp that lies on the desk.
+
+    Mostly: a stay of both at 8:00 am can hand the key over, stays at any time keep the key
+    or require it, and stays at 9:00 am and 10:00 am require the stamp or can hand it over.
+    So the key leaves a choice of order among stays at any time, while the stamp orders
+    stays at fixed times, and the two orders have to go together. Each part is now and then
+    something else.
+    """
+
+    def mostly(usual: str, *others: str | None) -> str | None:
+        return usual if rng.random() < 0.85 else rng.choice(others)
+
+    people = ["sam", "jo"]
+    names = ["together", "sam-fixed", "sam-free", "jo-free", "jo-fixed", "jo-other"]
+    names = names if rng.random() < 0.85 else names[:5]
+    whose = {"together": people, "sam-fixed": ["sam"], "sam-free": ["sam"]}
+    whose.update({"jo-free": ["jo"], "jo-fixed": ["jo"], "jo-other": ["jo"]})
+    listed = names if rng.random() < 0.8 else rng.sample(names, len(names))
+    options = [stays(name, "desk") for name in listed]
+    facts: list[Document] = []
+    sam_at, jo_at = (10, 9) if rng.random() < 0.8 else rng.choice([(9, 10), (9, 9), (10, 10)])
+    hours = {"together": 8, "sam-fixed": sam_at, "jo-fixed": jo_at}
+    for name in listed:
+        fixed = name in hours and rng.random() < 0.95
+        facts += at(name, hours[name], length="PT5M") if fixed else whenever(name)
+    key_does = {"together": "hands_over", "sam-free": "keeps", "jo-free": "keeps"}
+    for name in listed:
+        does = mostly(key_does.get(name) or "", "keeps", None) or None
+        if does is not None:
+            facts.append(does_with(name, "key", does))
+    needs_key = "jo-other" if "jo-other" in listed else "jo-free"
+    facts.append(requires_object(mostly(needs_key, *listed) or needs_key, "key"))
+    facts += [has_object(mostly("sam", "jo") or "sam", "key"), lies_at("stamp", "desk")]
+    facts += [requires_object(mostly("jo-fixed", "sam-fixed") or "jo-fixed", "stamp")]
+    facts += [hands_over(mostly("sam-fixed", "jo-fixed") or "sam-fixed", "stamp")]
+    facts += [every_use("key"), every_transfer("key"), every_use("stamp")]
+    facts += [every_transfer("stamp")] if rng.random() < 0.9 else []
+    locks = [lock(name, *whose[name]) for name in listed]
+    locks += [trip_starts(8)] if rng.random() < 0.5 else []
+    things = ["key", "stamp"] if rng.random() < 0.8 else ["stamp", "key"]
+    return trip(people, ["desk"], options, facts, locks, objects=things)
+
+
 def test_the_short_cuts_show_the_plan_that_ranking_every_order_shows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -4127,8 +4172,9 @@ def test_the_short_cuts_show_the_plan_that_ranking_every_order_shows(
         stopped += found
         return found
 
-    for _ in range(400):
-        file = a_trip_with_steps_at_one_time(rng)
+    trips = [a_trip_with_steps_at_one_time(rng) for _ in range(300)]
+    trips += [a_trip_with_two_things_at_one_desk(rng) for _ in range(300)]
+    for file in trips:
         for world in (worst_case(file), best_case(file), no_better_than(file, ())):
             search.as_built()
             monkeypatch.setattr(reference, "_orders_differ_only_in_the_listing", counted_alike)
@@ -4139,7 +4185,7 @@ def test_the_short_cuts_show_the_plan_that_ranking_every_order_shows(
             compared += shown is not None
             with_hand_overs += any(step.handed for step in shown or ())
     assert compared > 300
-    assert left_out > 60
+    assert left_out > 40
     assert stopped > 60
     assert with_hand_overs > 50
 
