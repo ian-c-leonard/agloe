@@ -4108,28 +4108,100 @@ def test_the_short_cuts_show_the_plan_that_ranking_every_order_shows(
 
 def test_an_order_is_left_out_only_where_what_comes_before_ranks_before() -> None:
     """Alex and Sam each have a check at the desk at 9:00 am that requires the key lying
-    there. Alex also has a note to hand in at 9:00 am, which takes no time, comes before
-    Alex's check, and is listed last in the FILE. With Alex's check before Sam's, the plan
-    lists the note first. With Sam's first, it lists Sam's check first, and that comes
-    before the note. So the order that is made second gives the ITINERARY that comes first,
-    and the search may not leave it out."""
-    options = [stays("alex-check", "desk"), stays("sam-check", "desk"), stays("alex-note", "desk")]
+    there, and Jo's check at 10:00 am can hand it over. Alex also has a note to hand in at
+    9:00 am, which takes no time, comes before Alex's check, and is listed last in the FILE.
+    With Alex's check before Sam's, the plan lists the note first. With Sam's first, it
+    lists Sam's check first, and that comes before the note. Both orders leave the key on
+    the desk. So the order that is made second gives the ITINERARY that comes first, and
+    the search may not leave it out."""
+    names = ["alex-check", "sam-check", "jo-check", "alex-note"]
+    options = [stays(name, "desk") for name in names]
     facts = [
         *at("alex-check", 9),
         *at("sam-check", 9),
+        *at("jo-check", 10),
         *at("alex-note", 9, length="PT0S"),
         lies_at("key", "desk"),
         requires_object("alex-check", "key"),
         requires_object("sam-check", "key"),
-        hands_over("alex-check", "key"),
+        hands_over("jo-check", "key"),
         every_use("key"),
         every_transfer("key"),
     ]
-    locks = [lock("alex-check", "alex"), lock("sam-check", "sam"), lock("alex-note", "alex")]
-    file = trip(["alex", "sam"], ["desk"], options, facts, locks, objects=["key"])
+    locks = [lock(name, name.split("-")[0]) for name in names]
+    file = trip(["alex", "sam", "jo"], ["desk"], options, facts, locks, objects=["key"])
     found = checked(file)
     assert found.answer is Answer.FEASIBLE
-    assert [step.option for step in found.itinerary] == ["sam-check", "alex-note", "alex-check"]
+    assert [step.option for step in found.itinerary] == [
+        "sam-check",
+        "alex-note",
+        "alex-check",
+        "jo-check",
+    ]
+
+
+def test_an_order_is_left_out_only_where_one_object_orders_the_steps() -> None:
+    """Three stays at the desk at 9:00 am, listed as Sam's, Jo's and then Alex's. Alex has
+    the voucher and deposits it. Sam's stay requires the voucher, so the deposit comes
+    before it. Sam's and Jo's stays require the key that lies on the desk, and Sam's can
+    hand it over, so the key gives those two an order as well. With Jo's first, the plan
+    lists Jo's stay, the deposit and Sam's stay. With Sam's first, the deposit has to be
+    listed first of all, and it ranks last. Both orders leave the key on the desk. Two
+    OBJECTs order the steps here, so no order is left out for being like another."""
+    options = [stays("sam-stay", "desk"), stays("jo-stay", "desk"), stays("deposit", "desk")]
+    facts = [
+        *at("sam-stay", 9),
+        *at("jo-stay", 9),
+        *at("deposit", 9),
+        has_object("alex", "voucher"),
+        keeps("deposit", "voucher"),
+        requires_object("sam-stay", "voucher"),
+        every_use("voucher"),
+        every_transfer("voucher"),
+        lies_at("key", "desk"),
+        requires_object("sam-stay", "key"),
+        requires_object("jo-stay", "key"),
+        hands_over("sam-stay", "key"),
+        every_use("key"),
+        every_transfer("key"),
+    ]
+    locks = [lock("sam-stay", "sam"), lock("jo-stay", "jo"), lock("deposit", "alex")]
+    things = ["voucher", "key"]
+    file = trip(["alex", "sam", "jo"], ["desk"], options, facts, locks, objects=things)
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [step.option for step in found.itinerary] == ["jo-stay", "deposit", "sam-stay"]
+    assert not any(step.handed for step in found.itinerary)
+
+
+def test_an_unlisted_way_crosses_once_the_span_that_rules_it_out_is_over() -> None:
+    """The key lies at the hotel, where Alex takes it at 9:30 am. Alex's meeting in the park
+    at 11:00 am requires it. Only an unlisted WAY joins the two, and none leaves from
+    9:00 am to 10:00 am. The pickup is inside that span and the meeting is after it, so
+    there is time to cross once the span is over."""
+    options = [stays("pickup", "hotel"), stays("meeting", "park")]
+    span = {"from": "hotel", "to": "park", "leaving": {"earliest": moment(9), "latest": moment(10)}}
+    facts = [
+        *at("pickup", 9, 30, "PT0S"),
+        *at("meeting", 11),
+        starts_from("alex", "hotel"),
+        {"id": "ways", "complete": span},
+        lies_at("key", "hotel"),
+        hands_over("pickup", "key"),
+        requires_object("meeting", "key"),
+        every_use("key"),
+        every_transfer("key"),
+    ]
+    locks = [lock("meeting", "alex")]
+    file = trip(["alex"], ["hotel", "park"], options, facts, locks, objects=["key"])
+    world = with_these_at_best(file, [Unknown("other ways", origin="hotel", destination="park")])
+    shown = first_shown(file, world)
+    assert shown is not None
+    assert [(step.option, step.handed) for step in shown if step.handed] == [
+        ("pickup", (("key", "alex"),))
+    ]
+    assert compiler.shown(file, world) == shown
+    assert compiler.works(file, world)
 
 
 def test_the_earliest_starts_count_from_fixed_starts_and_limits() -> None:

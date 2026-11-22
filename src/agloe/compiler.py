@@ -761,10 +761,9 @@ class _Search:
         the one to the other, as ``_crossings`` gives it.
 
         An OBJECT that lies at a PLACE leaves it only by a hand-over in an OPTION that
-        starts there. Whoever takes it stays in that OPTION until it is over. So where the
-        OBJECT is at hand at another PLACE, some such OPTION hands it over, early enough to
-        be over and across by then. The same holds for an OBJECT that is nowhere the FILE
-        knows of: nothing hands it over, and it is at hand nowhere.
+        starts there. So where the OBJECT is at hand at another PLACE, some such OPTION
+        hands it over. The same holds for an OBJECT that is nowhere the FILE knows of:
+        nothing hands it over, and it is at hand nowhere.
         """
         model, world, options = self.model, self.world, self.file.options
         fixed = [each.fixed_start for each in self.terms]
@@ -808,18 +807,12 @@ class _Search:
         for index, here in at_hand:
             if options[index].origin == start.place:
                 continue
-            early_enough: list[cp_model.IntVar] = []
-            for source, given in handed.items():
-                if options[source].origin != start.place or source == index:
-                    continue
-                over, by = fixed[source], fixed[index]
-                over = None if over is None else over + self.lasts[source]
-                takes = across(options[source].destination, options[index].origin, over, by)
-                if takes is None:
-                    continue
-                if over is None or by is None or over + takes <= by:
-                    early_enough.append(given)
-            model.add_bool_or([here.negated(), *early_enough])
+            taken_there = [
+                given
+                for source, given in handed.items()
+                if options[source].origin == start.place and source != index
+            ]
+            model.add_bool_or([here.negated(), *taken_there])
 
     def _crossings(
         self, since: int | None = None, until: int | None = None
