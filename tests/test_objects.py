@@ -968,6 +968,168 @@ def test_an_object_is_handed_to_the_person_listed_first_who_does_not_have_it() -
     assert "am: coffee, jo, alex and sam\n    alex takes bags here.\n" in words
 
 
+def a_desk_with_two_hand_overs(
+    *locks: Document, facts: Sequence[Document] = (), more: Sequence[Document] = ()
+) -> File:
+    """The bags lie on a desk. Two OPTIONs there hand them over, and one at the office requires
+    them at 11:00 am. The FILE lists every way. ``more`` holds other OPTIONs."""
+    options = [stays("first", "desk"), stays("second", "desk"), stays("use", "office"), *more]
+    stated = [
+        *at("first", 9),
+        *at("second", 10),
+        *at("use", 11),
+        takes("walk", "PT15M"),
+        complete(None, None),
+        lies_at("bags", "desk"),
+        hands_over("first", "bags"),
+        hands_over("second", "bags"),
+        requires_object("use", "bags"),
+        every_use("bags"),
+        every_transfer("bags"),
+        *facts,
+    ]
+    ways = [way_between("walk", "desk", "office")]
+    return trip(
+        ["alex", "sam"], ["desk", "office"], options, stated, list(locks), ways, objects=["bags"]
+    )
+
+
+def hand_overs(found: Report) -> list[tuple[str | None, tuple[tuple[str, str], ...]]]:
+    return [(step.option, step.handed) for step in found.itinerary if step.handed]
+
+
+def test_an_object_is_handed_over_in_the_option_listed_first() -> None:
+    """Alex is in both OPTIONs at the desk, and either can hand the bags over."""
+    file = a_desk_with_two_hand_overs(
+        lock("first", "alex"), lock("second", "alex"), lock("use", "alex")
+    )
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert hand_overs(found) == [("first", (("bags", "alex"),))]
+
+
+def test_the_fewest_hand_overs_come_before_the_option_listed_first() -> None:
+    """Only Sam is at the desk at 9:00 am: Alex is at the office then. Sam could take the
+    bags there and pass them to Alex at 10:00 am. That is two hand-overs, and Alex taking
+    them at 10:00 am is one, though the first OPTION is listed first."""
+    file = a_desk_with_two_hand_overs(
+        lock("first", "sam"),
+        lock("call", "alex"),
+        lock("second", "alex", "sam"),
+        lock("use", "alex"),
+        facts=at("call", 9),
+        more=[stays("call", "office")],
+    )
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert hand_overs(found) == [("second", (("bags", "alex"),))]
+
+
+def test_the_hand_overs_listed_first_win_whichever_order_of_the_steps_is_tried_first() -> None:
+    """The bags lie on a desk. At 10:00 am Sam is at one OPTION there that hands them over,
+    and Alex at another that requires them. Sam is at a second hand-over there at 10:30 am,
+    and needs the bags at the office at 11:00 am. With Sam's OPTION first, Sam has to leave
+    the bags for Alex and take them at 10:30 am. With Alex's first, Sam takes them at
+    10:00 am, in the OPTION listed first. That plan is shown, though the search comes to the
+    other order of the steps first."""
+    options = [
+        stays("sam-first", "desk"),
+        stays("alex-check", "desk"),
+        stays("sam-use", "office"),
+        stays("sam-second", "desk"),
+    ]
+    facts = [
+        *at("sam-first", 10, length="PT5M"),
+        *at("alex-check", 10, length="PT5M"),
+        *at("sam-second", 10, 30, "PT5M"),
+        *at("sam-use", 11),
+        takes("walk", "PT15M"),
+        complete(None, None),
+        lies_at("bags", "desk"),
+        hands_over("sam-first", "bags"),
+        hands_over("sam-second", "bags"),
+        requires_object("alex-check", "bags"),
+        requires_object("sam-use", "bags"),
+        every_use("bags"),
+        every_transfer("bags"),
+    ]
+    locks = [
+        lock("sam-first", "sam"),
+        lock("alex-check", "alex"),
+        lock("sam-second", "sam"),
+        lock("sam-use", "sam"),
+    ]
+    ways = [way_between("walk", "desk", "office")]
+    file = trip(["alex", "sam"], ["desk", "office"], options, facts, locks, ways, objects=["bags"])
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [step.option for step in found.itinerary[:2]] == ["alex-check", "sam-first"]
+    assert hand_overs(found) == [("sam-first", (("bags", "sam"),))]
+
+
+def test_nothing_in_a_plan_with_a_hand_over_is_needless() -> None:
+    """Jo has the bags and is LOCKed into coffee. Alex comes along to take them, though no
+    LOCK names Alex there. Take Alex out, and nothing is handed over to Alex either: then
+    the flight has no bags."""
+    options = [stays("coffee", "cafe"), stays("flight", "cafe")]
+    facts = [
+        *at("coffee", 10),
+        *at("flight", 12),
+        has_object("jo", "bags"),
+        hands_over("coffee", "bags"),
+        requires_object("flight", "bags"),
+        every_use("bags"),
+        every_transfer("bags"),
+    ]
+    locks = [lock("coffee", "jo"), lock("flight", "alex")]
+    file = trip(["alex", "jo"], ["cafe"], options, facts, locks, objects=["bags"])
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert found.itinerary[0].persons == ("alex", "jo")
+    assert found.itinerary[0].handed == (("bags", "alex"),)
+    assert reference.needless(file, worst_case(file), found.itinerary) == []
+
+
+def test_the_upper_bound_brings_only_the_objects_that_are_asked_for() -> None:
+    """It says whether another transfer of some OBJECTs can be enough at all. With none,
+    the two desks have no plan. With the permit brought, they have one."""
+    file = two_desks()
+    assert not itineraries(file, no_better_than(file, ()))
+    assert itineraries(file, no_better_than(file, [Unknown("another transfer", about="permit")]))
+
+
+def test_a_case_that_is_not_settled_is_left_out_where_another_is_settled() -> None:
+    """Deep-dish pizza is a must for Alex. The one dinner that delivers it requires the bags,
+    and they lie at the hotel. Another OPTION for the WANT would be enough, and so might
+    another transfer of the bags. Each is one condition that asks for something new. The
+    report names the one that is sure to be enough."""
+    options = [stays("dinner", "restaurant")]
+    facts = [
+        *at("dinner", 19),
+        satisfies("dinner", "deep-dish"),
+        lies_at("bags", "hotel"),
+        requires_object("dinner", "bags"),
+    ]
+    file = trip(
+        ["alex"],
+        ["restaurant", "hotel"],
+        options,
+        facts,
+        [],
+        wants=[must("deep-dish", "alex")],
+        objects=["bags"],
+    )
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert asked(found) == [(Unknown("another option", want="deep-dish", person="alex"),)]
+    assert "The trip works if" in report.as_text(file, found)
+    for unknown in (
+        Unknown("another option", want="deep-dish", person="alex"),
+        Unknown("another transfer", about="bags"),
+    ):
+        assert itineraries(file, with_these_at_best(file, [unknown]))
+
+
 def a_lunch(*more: Document) -> File:
     """Alex is LOCKed into lunch in the park, and the FILE lists the bags."""
     return trip(
@@ -1062,6 +1224,14 @@ def test_hands_over_is_asked_only_where_does_not_keep_is_not_enough() -> None:
     assert not itineraries(
         file, with_these_at_best(file, [Unknown("keeps", "lunch", about="bags")])
     )
+    # "Does not keep" is true of two FACTs that a FILE can state, and each makes the TRIP work.
+    for does, answer in (
+        ("nothing", Answer.FEASIBLE),
+        ("hands_over", Answer.FEASIBLE),
+        ("keeps", Answer.UNDETERMINED),
+    ):
+        stated = replace(file, facts=(*file.facts, WithObject("said", "lunch", "bags", does)))
+        assert checked(stated).answer is answer
 
 
 def test_a_set_says_one_thing_about_what_an_option_does_and_where_an_object_starts() -> None:
@@ -1217,6 +1387,31 @@ def test_a_plan_relies_on_nothing_about_an_option_after_which_it_needs_the_objec
         Stay(either, "second", "might be kept"),
         Stay((*either, Where(place="office")), "third", "might be kept"),
     )
+
+
+def test_a_plan_relies_on_no_fact_about_an_object_that_it_does_not_need() -> None:
+    """The plan has the first two appointments. The FACTs about the third, which stays out,
+    are not among those it relies on. Neither is the FACT about what the second one does:
+    after it, the plan needs the passport no more."""
+    file = locked_desk(
+        has_object("alex", "passport"),
+        does_with("first", "passport", "nothing"),
+        requires_object("second", "passport"),
+        does_with("second", "passport", "nothing"),
+        requires_object("third", "passport"),
+        keeps("third", "passport"),
+        every_use("passport"),
+        every_transfer("passport"),
+        into=("first", "second"),
+    )
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert relied_on(found) == [
+        "passport-start",
+        "first-with-passport",
+        "second-requires-passport",
+        "every-use-of-passport",
+    ]
 
 
 def test_a_plan_relies_on_the_facts_about_a_keep_and_a_hand_over_it_goes_through() -> None:
@@ -1766,6 +1961,25 @@ def test_the_compiler_gives_the_reference_checkers_report_for_objects() -> None:
         assert compiler.check(file) == found
         seen.add(found.answer)
     assert seen == set(Answer)
+
+
+@pytest.mark.parametrize(
+    "name", ["the-cloakroom-is-not-in-the-plan", "nobody-collects-them", "the-visit-runs-late"]
+)
+def test_each_conflict_about_the_bags_is_enough_and_has_no_record_to_spare(name: str) -> None:
+    """The records of the conflict rule out every best case by themselves. With any one of
+    them taken out as well, something works in some best case."""
+    from agloe.file import read
+
+    file = read(EXAMPLES / "the-bags" / f"{name}.json")
+    conflict = answers.check(file).conflict
+    alone = Remaining(file)
+    for record in [*(fact.id for fact in file.facts), *(each.id for each in file.decisions)]:
+        if record not in conflict:
+            alone = alone.without(record)
+    assert cannot_work(alone)
+    for record in conflict:
+        assert not cannot_work(alone.without(record)), record
 
 
 def test_the_examples_about_the_bags_say_what_the_rules_page_says() -> None:
