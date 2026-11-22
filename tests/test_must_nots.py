@@ -1,6 +1,7 @@
 """Must-nots: a PERSON for whom a WANT is a must-not takes part in no OPTION that SATISFIES it."""
 
 from collections.abc import Sequence
+from dataclasses import replace
 from itertools import combinations
 from random import Random
 
@@ -8,7 +9,7 @@ import pytest
 
 from agloe import answers, compiler, report
 from agloe.answers import Answer, Missing, Report
-from agloe.file import File
+from agloe.file import File, Lock
 from agloe.reference import (
     Broken,
     Constraint,
@@ -221,18 +222,27 @@ def both_on_the_rooftop(*more: Document) -> File:
 
 
 def test_no_possible_world_has_an_option_both_ways_and_only_the_upper_bound_does() -> None:
-    """The upper bound lets the rooftop count for Alex and not against Jo. No world does."""
+    """The upper bound lets the rooftop count for Alex and not against Jo. No world does.
+
+    That holds where Jo is free to stay away. Where a LOCK puts Jo on the rooftop, a rooftop
+    with a view breaks Jo's must-not in every plan, so the bound does not count on it for
+    Alex either.
+    """
     file = both_on_the_rooftop()
     together: Itinerary = (visit("rooftop", "alex", "jo"),)
     another = Unknown("another option", want="view", person="alex")
-    bound = no_better_than(file, [])
-    assert broken(file, bound, together) == []
-    assert ("rooftop", "view") in bound.satisfies - bound.might_satisfy
-    with pytest.raises(ValueError, match="cannot both SATISFY"):
+    only_alex = replace(file, decisions=(Lock("lock-rooftop", "rooftop", ("alex",)),))
+    loose = no_better_than(only_alex, [])
+    assert broken(only_alex, loose, together) == []
+    assert ("rooftop", "view") in loose.satisfies - loose.might_satisfy
+    with pytest.raises(ValueError, match="no possible world has two of these"):
         with_these_at_best(file, [Unknown("satisfies", "rooftop", want="view"), is_not("rooftop")])
-    # The bound shows only that something is not enough: here it cannot rule anything out,
-    # and the report still asks for another OPTION, which the bound alone would not.
-    assert answers.any_works(file, bound)
+    # With both LOCKed in, the bound shows that the FACTs about the rooftop are not enough:
+    # another OPTION has to be found. It shows no more than that.
+    bound = no_better_than(file, [])
+    assert ("rooftop", "view") not in bound.satisfies
+    assert not answers.any_works(file, bound)
+    assert answers.any_works(file, no_better_than(file, [another]))
     assert checked(file).missing == ((Missing(is_not("rooftop"), None), Missing(another, None)),)
 
 

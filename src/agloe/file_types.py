@@ -52,6 +52,11 @@ class Capability(TypedDict):
     name: Name
 
 
+class Object(TypedDict):
+    id: Id
+    name: Name
+
+
 class Place(TypedDict):
     id: Id
     name: Name
@@ -265,6 +270,58 @@ class CompleteForACapability(TypedDict):
     complete: Requiring
 
 
+class ObjectStartsWith(TypedDict):
+    id: Id
+    object: Id
+    starts_with: Id
+
+
+class ObjectStartsAt(TypedDict):
+    id: Id
+    object: Id
+    starts_at: Id
+
+
+class ObjectRequirement(TypedDict):
+    object: Id
+    needed: bool
+
+
+class RequiresObject(TypedDict):
+    id: Id
+    option: Id
+    requires: ObjectRequirement
+
+
+class Action(TypedDict):
+    object: Id
+    does: Literal["hands_over", "keeps", "nothing"]
+
+
+class WithObject(TypedDict):
+    id: Id
+    option: Id
+    with_object: Action
+
+
+class RequiringAnObject(TypedDict):
+    requires_object: Id
+
+
+class CompleteForAnObject(TypedDict):
+    id: Id
+    complete: RequiringAnObject
+
+
+class Transferring(TypedDict):
+    transfers: Id
+
+
+class CompleteTransfers(TypedDict):
+    id: Id
+    complete: Transferring
+
+
 class TripStart(TypedDict):
     id: Id
     trip_starts_at: Time
@@ -292,6 +349,7 @@ class File(TypedDict):
     places: list[Place]
     budgets: NotRequired[list[Budget]]
     capabilities: NotRequired[list[Capability]]
+    objects: NotRequired[list[Object]]
     options: list[OptionAtAPlace | OptionBetweenPlaces]
     ways: list[WayOneWay | WayBothWays]
     wants: list[Want]
@@ -314,5 +372,11 @@ class File(TypedDict):
         | HasCapability
         | RequiresCapability
         | CompleteForACapability
+        | ObjectStartsWith
+        | ObjectStartsAt
+        | RequiresObject
+        | WithObject
+        | CompleteForAnObject
+        | CompleteTransfers
     ]
     decisions: list[Lock | TripStart | TripEnd | Cap]

@@ -1,0 +1,58 @@
+{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" }
+  ],
+  "places": [
+    { "id": "hotel", "name": "the hotel" },
+    { "id": "art-institute", "name": "the Art Institute" },
+    { "id": "ohare", "name": "O'Hare" },
+    { "id": "denver", "name": "Denver" }
+  ],
+  "objects": [
+    { "id": "bags", "name": "the bags" }
+  ],
+  "options": [
+    { "id": "museum-visit", "name": "Museum visit", "place": "art-institute" },
+    { "id": "collect-bags", "name": "Collect the bags", "place": "hotel" },
+    { "id": "flight", "name": "Flight home", "from": "ohare", "to": "denver" }
+  ],
+  "ways": [
+    { "id": "walk", "name": "the walk between the hotel and the Art Institute", "between": ["hotel", "art-institute"] },
+    { "id": "blue-line", "name": "the Blue Line to O'Hare", "from": "art-institute", "to": "ohare" }
+  ],
+  "wants": [],
+  "facts": [
+    { "id": "alex-start", "person": "alex", "starts_from": "art-institute" },
+    { "id": "sam-start", "person": "sam", "starts_from": "art-institute" },
+    { "id": "visit-time", "option": "museum-visit", "starts_at": "2027-05-15T13:00:00-05:00[America/Chicago]" },
+    { "id": "visit-length", "option": "museum-visit", "duration": "PT1H30M" },
+    { "id": "visit-arrival", "option": "museum-visit", "arrive_before_start": "PT0S" },
+    { "id": "visit-needs-a-ticket", "option": "museum-visit", "needs_right": true },
+    { "id": "museum-tickets", "booking": { "option": "museum-visit", "covers": ["alex", "sam"] } },
+    { "id": "every-museum-ticket", "complete": { "rights_to": "museum-visit" } },
+    { "id": "collect-time", "option": "collect-bags", "starts_any_time": true },
+    { "id": "collect-length", "option": "collect-bags", "duration": "PT5M" },
+    { "id": "collect-arrival", "option": "collect-bags", "arrive_before_start": "PT0S" },
+    { "id": "collect-is-walk-up", "option": "collect-bags", "needs_right": false },
+    { "id": "flight-time", "option": "flight", "starts_at": "2027-05-15T17:00:00-05:00[America/Chicago]" },
+    { "id": "flight-length", "option": "flight", "duration": "PT2H30M" },
+    { "id": "bag-drop", "option": "flight", "arrive_before_start": "PT45M" },
+    { "id": "flight-needs-a-ticket", "option": "flight", "needs_right": true },
+    { "id": "flight-tickets", "booking": { "option": "flight", "covers": ["alex", "sam"] } },
+    { "id": "every-flight-ticket", "complete": { "rights_to": "flight" } },
+    { "id": "walk-length", "way": "walk", "duration": "PT15M" },
+    { "id": "blue-line-length", "way": "blue-line", "duration": "PT1H" },
+    { "id": "every-way", "complete": { "leaving": { "earliest": "2027-05-15T00:00:00-05:00[America/Chicago]", "latest": "2027-05-15T23:59:00-05:00[America/Chicago]" } } },
+    { "id": "where-the-bags-start", "object": "bags", "starts_at": "hotel" },
+    { "id": "flight-needs-the-bags", "option": "flight", "requires": { "object": "bags", "needed": true } },
+    { "id": "collecting-needs-no-bags", "option": "collect-bags", "requires": { "object": "bags", "needed": false } },
+    { "id": "hotel-releases-the-bags", "option": "collect-bags", "with_object": { "object": "bags", "does": "hands_over" } },
+    { "id": "everything-that-moves-the-bags", "complete": { "transfers": "bags" } }
+  ],
+  "decisions": [
+    { "id": "trip-start", "trip_starts_at": "2027-05-15T13:00:00-05:00[America/Chicago]" },
+    { "id": "lock-visit", "lock": "museum-visit", "persons": ["alex", "sam"] },
+    { "id": "lock-flight", "lock": "flight", "persons": ["alex", "sam"] }
+  ]
+}

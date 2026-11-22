@@ -1,0 +1,43 @@
+FEASIBLE: this trip works.
+
+Saturday 15 May 2027 (times in America/Chicago)
+  1:00 pm to 2:30 pm: Museum visit, Alex and Sam
+  2:30 pm to 2:45 pm: the walk between the hotel and the Art Institute, Alex
+  2:30 pm to 3:30 pm: the Blue Line to O'Hare, Sam
+  2:45 pm to 2:50 pm: Collect the bags, Alex
+    Alex takes the bags here.
+  2:50 pm to 3:05 pm: the walk between the hotel and the Art Institute, Alex
+  3:05 pm to 4:05 pm: the Blue Line to O'Hare, Alex
+  5:00 pm to 7:30 pm: Flight home, Alex and Sam
+
+The plan relies on these FACTs and DECISIONs:
+  alex-start: Alex starts from the Art Institute
+  sam-start: Sam starts from the Art Institute
+  visit-time: Museum visit starts at 1:00 pm on Saturday 15 May 2027
+  visit-length: Museum visit takes 1 h 30 min
+  visit-arrival: nobody has to be at the Art Institute before Museum visit starts
+  visit-needs-a-ticket: people need a right to take part in Museum visit
+  museum-tickets: a BOOKING for Museum visit covers Alex and Sam
+  collect-time: Collect the bags can start at any time
+  collect-length: Collect the bags takes 5 min
+  collect-arrival: nobody has to be at the hotel before Collect the bags starts
+  collect-is-walk-up: nobody needs a right to take part in Collect the bags
+  flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
+  flight-length: Flight home takes 2 h 30 min
+  bag-drop: people must be at O'Hare 45 min before Flight home starts
+  flight-needs-a-ticket: people need a right to take part in Flight home
+  flight-tickets: a BOOKING for Flight home covers Alex and Sam
+  walk-length: the walk between the hotel and the Art Institute takes 15 min
+  blue-line-length: the Blue Line to O'Hare takes 1 h
+  where-the-bags-start: the TRIP starts with the bags at the hotel
+  flight-needs-the-bags: Flight home requires the bags
+  hotel-releases-the-bags: the bags can be handed over in Collect the bags
+  every-use-of-the-bags: of the OPTIONs in this FILE, only Flight home requires the bags
+  everything-that-moves-the-bags: the FILE states every OPTION that hands over or keeps the bags: Collect the bags
+  trip-start: the TRIP starts at 1:00 pm on Saturday 15 May 2027
+  lock-visit: Alex and Sam take part in Museum visit
+  lock-flight: Alex and Sam take part in Flight home
+
+Where each OBJECT is:
+  the bags: at the hotel when the TRIP starts; with Alex from 2:45 pm (handed over in Collect the bags)
+    Flight home requires the bags. Just before it starts: with Alex.

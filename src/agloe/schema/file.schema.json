@@ -10,6 +10,7 @@
     "places": { "type": "array", "items": { "$ref": "#/$defs/place" } },
     "budgets": { "type": "array", "items": { "$ref": "#/$defs/budget" } },
     "capabilities": { "type": "array", "items": { "$ref": "#/$defs/capability" } },
+    "objects": { "type": "array", "items": { "$ref": "#/$defs/object" } },
     "options": {
       "type": "array",
       "items": { "oneOf": [{ "$ref": "#/$defs/option_at_a_place" }, { "$ref": "#/$defs/option_between_places" }] }
@@ -40,7 +41,13 @@
           { "$ref": "#/$defs/complete_rights" },
           { "$ref": "#/$defs/has_capability" },
           { "$ref": "#/$defs/requires_capability" },
-          { "$ref": "#/$defs/complete_for_a_capability" }
+          { "$ref": "#/$defs/complete_for_a_capability" },
+          { "$ref": "#/$defs/object_starts_with" },
+          { "$ref": "#/$defs/object_starts_at" },
+          { "$ref": "#/$defs/requires_object" },
+          { "$ref": "#/$defs/with_object" },
+          { "$ref": "#/$defs/complete_for_an_object" },
+          { "$ref": "#/$defs/complete_transfers" }
         ]
       }
     },
@@ -148,6 +155,17 @@
     "capability": {
       "title": "Capability",
       "description": "A CAPABILITY: something a PERSON can do, such as driving a manual car or swimming.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "$ref": "#/$defs/name" }
+      }
+    },
+    "object": {
+      "title": "Object",
+      "description": "An OBJECT: a physical thing that OPTIONs may require, hand over or keep, such as a bag, a passport or a key.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "name"],
@@ -596,6 +614,112 @@
           "additionalProperties": false,
           "required": ["requires"],
           "properties": { "requires": { "$ref": "#/$defs/id" } }
+        }
+      }
+    },
+    "object_starts_with": {
+      "title": "ObjectStartsWith",
+      "description": "A FACT: where an OBJECT is when the TRIP starts. A PERSON has it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "object", "starts_with"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "object": { "$ref": "#/$defs/id" },
+        "starts_with": { "description": "The PERSON.", "$ref": "#/$defs/id" }
+      }
+    },
+    "object_starts_at": {
+      "title": "ObjectStartsAt",
+      "description": "A FACT: where an OBJECT is when the TRIP starts. It lies at a PLACE.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "object", "starts_at"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "object": { "$ref": "#/$defs/id" },
+        "starts_at": { "description": "The PLACE.", "$ref": "#/$defs/id" }
+      }
+    },
+    "requires_object": {
+      "title": "RequiresObject",
+      "description": "A FACT: whether an OPTION requires an OBJECT.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "option", "requires"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "option": { "$ref": "#/$defs/id" },
+        "requires": {
+          "title": "ObjectRequirement",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["object", "needed"],
+          "properties": {
+            "object": { "$ref": "#/$defs/id" },
+            "needed": {
+              "description": "True: the OPTION can happen only if the OBJECT is at hand just before it starts. It lies at the PLACE where the OPTION starts, or a PERSON who takes part has it. False: the OPTION does not require it.",
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "with_object": {
+      "title": "WithObject",
+      "description": "A FACT: what an OPTION does with an OBJECT.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "option", "with_object"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "option": { "$ref": "#/$defs/id" },
+        "with_object": {
+          "title": "Action",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["object", "does"],
+          "properties": {
+            "object": { "$ref": "#/$defs/id" },
+            "does": {
+              "description": "`hands_over`: where the OBJECT is at hand, a PERSON who takes part can have it from the start of the OPTION. `keeps`: where a PERSON who takes part has the OBJECT, it lies at the PLACE where the OPTION starts from then on. `nothing`: the OPTION leaves the OBJECT alone.",
+              "enum": ["hands_over", "keeps", "nothing"]
+            }
+          }
+        }
+      }
+    },
+    "complete_for_an_object": {
+      "title": "CompleteForAnObject",
+      "description": "A FACT: the FILE states every one of its OPTIONs that requires the OBJECT. Each has a FACT that it does. So an OPTION of the FILE with no FACT about that does not require it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "complete"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "complete": {
+          "title": "RequiringAnObject",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requires_object"],
+          "properties": { "requires_object": { "$ref": "#/$defs/id" } }
+        }
+      }
+    },
+    "complete_transfers": {
+      "title": "CompleteTransfers",
+      "description": "A FACT: the FILE states every OPTION that hands the OBJECT over or keeps it. Each is in the FILE, with a FACT that says so. So an OPTION of the FILE with no FACT about that leaves the OBJECT alone, and nothing outside the FILE transfers it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "complete"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "complete": {
+          "title": "Transferring",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["transfers"],
+          "properties": { "transfers": { "$ref": "#/$defs/id" } }
         }
       }
     },

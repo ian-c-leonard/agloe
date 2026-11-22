@@ -1,0 +1,12 @@
+INFEASIBLE: this trip cannot work.
+
+These FACTs and DECISIONs rule out every plan by themselves. Take any one away and they no longer do. A FACT that is taken away leaves what it said unknown. Times are in America/Chicago.
+  visit-time: Museum visit starts at 1:00 pm on Saturday 15 May 2027
+  every-way: every way from one PLACE straight to another that leaves between 12:00 am on Saturday 15 May 2027 and 11:59 pm is listed
+  where-the-bags-start: Alex has the bags when the TRIP starts
+  flight-needs-the-bags: Flight home requires the bags
+  museum-checks-the-bags: Museum visit keeps the bags
+  everything-that-moves-the-bags: the FILE states every OPTION that hands over or keeps the bags: Museum visit
+  trip-start: the TRIP starts at 1:00 pm on Saturday 15 May 2027
+  lock-visit: Alex and Sam take part in Museum visit
+  lock-flight: Alex and Sam take part in Flight home

@@ -223,6 +223,46 @@ def every_requirement(capability: str) -> Document:
     return {"id": f"every-{capability}", "complete": {"requires": capability}}
 
 
+def has_object(person: str, thing: str) -> Document:
+    """A FACT that a PERSON has an OBJECT when the TRIP starts."""
+    return {"id": f"{thing}-start", "object": thing, "starts_with": person}
+
+
+def lies_at(thing: str, place: str) -> Document:
+    """A FACT that an OBJECT lies at a PLACE when the TRIP starts."""
+    return {"id": f"{thing}-start", "object": thing, "starts_at": place}
+
+
+def requires_object(option: str, thing: str, needed: bool = True) -> Document:
+    """A FACT that an OPTION requires an OBJECT, or with ``needed`` False that it does not."""
+    asked = {"object": thing, "needed": needed}
+    return {"id": f"{option}-requires-{thing}", "option": option, "requires": asked}
+
+
+def does_with(option: str, thing: str, does: str) -> Document:
+    """A FACT about what an OPTION does with an OBJECT: "hands_over", "keeps" or "nothing"."""
+    done = {"object": thing, "does": does}
+    return {"id": f"{option}-with-{thing}", "option": option, "with_object": done}
+
+
+def hands_over(option: str, thing: str) -> Document:
+    return does_with(option, thing, "hands_over")
+
+
+def keeps(option: str, thing: str) -> Document:
+    return does_with(option, thing, "keeps")
+
+
+def every_use(thing: str) -> Document:
+    """A FACT that the FILE states every OPTION that requires this OBJECT."""
+    return {"id": f"every-use-of-{thing}", "complete": {"requires_object": thing}}
+
+
+def every_transfer(thing: str) -> Document:
+    """A FACT that the FILE states every OPTION that hands this OBJECT over or keeps it."""
+    return {"id": f"every-transfer-of-{thing}", "complete": {"transfers": thing}}
+
+
 def trip(
     persons: list[str],
     places: list[str],
@@ -234,6 +274,7 @@ def trip(
     rights: bool = False,
     budgets: Sequence[Document] | None = None,
     capabilities: Sequence[str] = (),
+    objects: Sequence[str] = (),
 ) -> File:
     """A FILE. None of its OPTIONs needs a right, unless the story is about rights.
 
@@ -242,7 +283,7 @@ def trip(
 
     Unless the story is about money, one BUDGET called money pays for everybody, in USD.
     ``budgets`` are the BUDGETs of a story that is. ``capabilities`` are the CAPABILITIES of a
-    story about what the PERSONs can do.
+    story about what the PERSONs can do, and ``objects`` the OBJECTs of a story about things.
     """
     if budgets is None:
         budgets = [budget("money", *persons)]
@@ -253,6 +294,7 @@ def trip(
             "places": named(*places),
             "budgets": list(budgets),
             "capabilities": named(*capabilities),
+            "objects": named(*objects),
             "options": options,
             "ways": list(ways),
             "wants": list(wants),

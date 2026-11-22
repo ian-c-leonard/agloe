@@ -1,0 +1,14 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "visit-time",
+    "every-way",
+    "where-the-bags-start",
+    "flight-needs-the-bags",
+    "museum-checks-the-bags",
+    "everything-that-moves-the-bags",
+    "trip-start",
+    "lock-visit",
+    "lock-flight"
+  ]
+}
