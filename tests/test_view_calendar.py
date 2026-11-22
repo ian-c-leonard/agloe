@@ -472,9 +472,7 @@ def test_the_calendar_warns_only_of_what_the_report_warns_of() -> None:
     assert seen > 3
 
 
-ASKS = (
-    " A yellow edge marks each step shown that the report says the FILE does not say enough about."
-)
+ASKS = " A yellow edge marks each step shown that the report names in what the FILE does not say."
 NOT_SHOWN = " What the report says the FILE does not say is not about a step shown here."
 NAMED_SO = "The report names this OPTION in what the FILE does not say."
 ANY_OF = "The trip works in any of these cases:"
@@ -1327,6 +1325,7 @@ def made(times: list[tuple[str, str | None]]) -> Trip:
         "rights": [],
         "budgets": [],
         "capabilities": [],
+        "objects": [],
         "steps": [
             {
                 "option": "stay",
@@ -1450,6 +1449,7 @@ def some_trip(chosen: random.Random) -> Trip:
         "rights": [],
         "budgets": [],
         "capabilities": [],
+        "objects": [],
         "starts": bound("trip-start"),
         "ends": bound("trip-end"),
         "steps": steps,

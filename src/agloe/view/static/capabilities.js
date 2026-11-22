@@ -30,9 +30,9 @@ function requiresOf(of) {
 function wholeOf(capability, others) {
   const some = capability.options.some((option) => option.of !== "none");
   if (capability.complete !== null) return some ? "The FILE states every one of its OPTIONs that requires it." : "The FILE states every one of its OPTIONs that requires it, and it names none.";
-  // Each OPTION of the FILE has a FACT of its own about the CAPABILITY. A FILE with no OPTION
-  // has nothing to say here.
-  if (!others) return capability.options.length ? "The FILE says what each of its OPTIONs requires of this CAPABILITY." : null;
+  // Each OPTION of the FILE has a FACT of its own about the CAPABILITY, or the FILE has no
+  // OPTION at all.
+  if (!others) return capability.options.length ? "The FILE says what each of its OPTIONs requires of this CAPABILITY." : "The FILE lists no OPTION.";
   if (some) return "Other OPTIONs of the FILE may require it too: the FILE does not say that these are all.";
   return capability.options.length ? "The FILE leaves open whether another of its OPTIONs requires this CAPABILITY." : "The FILE says of no OPTION whether it requires this CAPABILITY.";
 }

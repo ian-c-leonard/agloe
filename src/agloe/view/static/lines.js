@@ -13,7 +13,7 @@
 //
 // Nothing here judges a TRIP. It finds what the report already says, line by line.
 
-import { boughtIn, cappedIn, casesIn, requirementsIn, toBuyIn } from "./named.js";
+import { boughtIn, cappedIn, casesIn, objectsIn, requirementsIn, takenIn, toBuyIn } from "./named.js";
 
 /** A line that shows one step of a plan: "  2:00 pm to 3:00 pm: Museum visit, Alex and Sam". */
 const STEP = /^ {2}\d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+, .+$/;
@@ -28,6 +28,8 @@ const CASES = /^The trip (?:works|might work) in any of these cases:$/;
 const TO_BUY = /^ {4}! .+ still ha(?:s|ve) to buy a right to this(?: if it needs one)?, from (.+)\.$/;
 /** How the line starts that gives one plan for a case: who buys which place. */
 const ONE_PLAN = "One plan that works then: ";
+/** The line above where each OBJECT is in a plan. */
+const OBJECTS = "Where each OBJECT is:";
 /** How the line ends that is above the BUDGETs of the FILE, where a report states them. */
 const BUDGETS = " The BUDGETs of this FILE:";
 /** The line above who meets what the OPTIONs of a plan require. */
@@ -59,8 +61,10 @@ function listsOf(report) {
  * that the line is a warning under its step. `meets` is null, or the place in `requirements`
  * of the report as JSON of the requirement that the line says somebody meets. `about` holds
  * what else the line is about, each as the page names a thing: `offer:ID` for an OFFER that
- * the line says somebody buys a place of, `budget:ID` for a BUDGET that the line states, and
- * `cap:ID` for a cap that the line states under the plan of a case.
+ * the line says somebody buys a place of, `budget:ID` for a BUDGET that the line states,
+ * `cap:ID` for a cap that the line states under the plan of a case, and `object:ID` for an
+ * OBJECT that the line is about. A line about an OBJECT at a step of the plan holds that step
+ * too, by its number, as the page names a step.
  *
  * The lines of a plan are tied to steps only where there is one line for each step that the
  * view sent, in the same order: then the two are the same plan. Lines are tied to records only
@@ -157,6 +161,39 @@ export function lines(text, report, trip) {
     if (stated.length === pots.length && stated.every((at) => free(found[at]))) {
       stated.forEach((at, n) => (found[at].about = [`budget:${pots[n].id}`]));
     }
+  }
+  // Under a step of the plan, after what the report warns of there, a line says who takes
+  // an OBJECT at that step: one line for each OBJECT that the report as JSON has somebody take
+  // at that OPTION, in the FILE's order of OBJECTs. Each is about the step and about the
+  // OBJECT. A line under a step is set in by four spaces, whatever the name it starts with.
+  const planned = trip !== null && trip.itinerary;
+  const stepOf = (option) => (planned ? trip.steps.findIndex((each) => each.option === option) : -1);
+  const placeOf = new Map((trip === null ? [] : trip.objects).map((each, n) => [each.id, n]));
+  for (const { option, objects } of takenIn(report)) {
+    const at = found.findIndex((line) => line.step !== null && line.step === stepOf(option) && !line.warns && line.meets === null);
+    if (at < 0 || !objects.every((id) => placeOf.has(id))) continue;
+    const inOrder = [...objects].sort((one, other) => placeOf.get(one) - placeOf.get(other));
+    let next = at + 1;
+    while (next < found.length && found[next].warns) next += 1;
+    const said = [];
+    for (; next < found.length && found[next].text.startsWith("    ") && free(found[next]) && !found[next].about.length; next += 1) said.push(found[next]);
+    if (said.length === inOrder.length) said.forEach((line, n) => (line.about = [String(found[at].step), `object:${inOrder[n]}`]));
+  }
+  // Where each OBJECT is in the plan: under their heading, up to the first line that is not
+  // set in, one line for each OBJECT of the report as JSON, and after it one line for each
+  // OPTION that requires it. They are tied only where the words hold exactly as many lines as
+  // that. How far a line is set in is not compared: a name can start with a space. A line
+  // about a requirement is about the OBJECT and about the step that its OPTION is.
+  const things = objectsIn(report);
+  const above = found.flatMap((line, at) => (line.text === OBJECTS ? [at] : []));
+  if (things.length && above.length === 1) {
+    const under = [];
+    for (let at = above[0] + 1; at < found.length && found[at].text.startsWith("  "); at += 1) under.push(found[at]);
+    const ties = things.flatMap(({ object, options }) => [
+      [`object:${object}`],
+      ...options.map((option) => [...(stepOf(option) < 0 ? [] : [String(stepOf(option))]), `object:${object}`]),
+    ]);
+    if (under.length === ties.length && under.every(free)) under.forEach((line, n) => (line.about = ties[n]));
   }
   // Who meets what each OPTION of the plan requires: the lines under their heading, up to the
   // first line that is not set in. A line starts with the name of its OPTION, whatever that

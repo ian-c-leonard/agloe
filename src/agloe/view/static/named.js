@@ -4,8 +4,8 @@
 // A report on a TRIP that cannot work names the FACTs, WANTs and DECISIONs that rule out every
 // plan. A report on a TRIP that depends on what the FILE does not say names, for each case in
 // which the trip works, the things that the case needs. A report that shows a plan names who
-// meets what each OPTION of the plan requires, and which right each PERSON uses. Each part of
-// the page marks what it shows of those. Nothing here judges a TRIP: it reads what the report as JSON already holds.
+// meets what each OPTION of the plan requires, which right each PERSON uses, and where each
+// OBJECT is. Each part of the page marks what it shows of those. Nothing here judges a TRIP: it reads what the report as JSON already holds.
 
 /** Names as a sentence joins them: Alex, Sam and Jo. */
 export function listed(names) {
@@ -102,10 +102,45 @@ export function cappedIn(report) {
   return plans.map((plan) => plan.caps.map((row) => row.cap));
 }
 
-/** The OPTIONs that one of those things names: its own, and each that somebody has to buy a place for. */
+/** The OPTIONs that a list in one of those things names, each in a record of its own. */
+function namedIn(list) {
+  return Array.isArray(list) ? list.filter((each) => each !== null && typeof each === "object").map((each) => each.option).filter((id) => typeof id === "string") : [];
+}
+
+/** The OPTIONs that an OBJECT has to be at hand for, in one of those things. */
+export function atHandFor(need) {
+  return namedIn(need.at_hand_for);
+}
+
+/**
+ * The OPTIONs that one of those things names: its own, each that somebody has to buy a place
+ * for, and each that an OBJECT has to be at hand for.
+ */
 export function optionsOf(need) {
-  const bought = Array.isArray(need.buys) ? need.buys.filter((buy) => buy !== null && typeof buy === "object").map((buy) => buy.option) : [];
-  return [need.option, ...bought].filter((id) => typeof id === "string");
+  return [...(typeof need.option === "string" ? [need.option] : []), ...namedIn(need.buys), ...atHandFor(need)];
+}
+
+/**
+ * The OBJECTs that somebody takes at each OPTION of a plan, as a report states it: for each
+ * such OPTION its id and the ids of those OBJECTs, in the report's order. Only a report that
+ * shows a plan holds any.
+ */
+export function takenIn(report) {
+  const steps = report !== null && typeof report === "object" && report.answer === "FEASIBLE" && Array.isArray(report.itinerary) ? report.itinerary : [];
+  const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
+  return steps.flatMap((step) => (isRecord(step) && typeof step.option === "string" && isRecord(step.hands_over) ? [{ option: step.option, objects: Object.keys(step.hands_over) }] : []));
+}
+
+/**
+ * Where each OBJECT is in a plan, as a report states it: for each OBJECT its id, and the
+ * OPTIONs that the report says require it, in the report's order. Only a report that shows a
+ * plan holds any, and a list that is not of that shape is none.
+ */
+export function objectsIn(report) {
+  const stated = report !== null && typeof report === "object" && report.answer === "FEASIBLE" ? report.objects : null;
+  const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
+  const isOne = (each) => isRecord(each) && typeof each.object === "string" && Array.isArray(each.required_by) && each.required_by.every((by) => isRecord(by) && typeof by.option === "string");
+  return Array.isArray(stated) && stated.every(isOne) ? stated.map((each) => ({ object: each.object, options: each.required_by.map((by) => by.option) })) : [];
 }
 
 /** The cases that need something for which `about` says yes, as their places among the cases. */

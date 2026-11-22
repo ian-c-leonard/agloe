@@ -69,7 +69,7 @@ def lines_of(asked: list[dict[str, Any]]) -> list[list[Line]]:
 def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None:
     """For every example: nothing of the report is lost, and each tie is one the report makes."""
     asked = [asked_of(path) for path in FILES]
-    plans = depends = requirements = purchases = stated = 0
+    plans = depends = requirements = purchases = stated = carried = 0
     for path, each, found in zip(FILES, asked, lines_of(asked), strict=True):
         name = f"{path.parent.name}/{path.stem}"
         assert "\n".join(line["text"] for line in found) == each["text"], name
@@ -143,6 +143,16 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
                 assert line["step"] is None and line["record"] is None, name
         else:
             assert pots == [], name
+        # Each OBJECT of a plan has its line, each OPTION that requires it has one under it,
+        # and each OBJECT that somebody takes at a step has a line under that step.
+        about = [thing for line in found for thing in line["about"] if thing.startswith("object:")]
+        expected: list[str] = []
+        for step in said.get("itinerary", []):
+            expected += [f"object:{thing}" for thing in step.get("hands_over", {})]
+        for thing in said.get("objects", []):
+            expected += [f"object:{thing['object']}"] * (1 + len(thing["required_by"]))
+        assert sorted(about) == sorted(expected), name
+        carried += bool(expected)
         # Each case in which the trip works has one line, in the order of the report as JSON.
         missing = said.get("missing", [])
         states = [line for line in found if line["case"] is not None]
@@ -159,6 +169,7 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
     assert requirements > 2
     assert purchases > 2
     assert stated > 2
+    assert carried > 2
 
 
 def test_a_line_about_a_requirement_is_tied_whatever_the_name_of_its_option_starts_with(
@@ -291,6 +302,104 @@ def test_a_report_on_a_plan_states_each_cap_once_more_and_both_lines_are_tied_to
         "  trip-cap: the TRIP spends at most 200.00 USD from the trip money",
         "  trip-cap: at most 200.00 USD from the trip money: 32.00 paid; 32.00 still to buy;"
         " 136.00 left",
+    ]
+
+
+def test_the_lines_about_an_object_are_tied_to_it_and_to_the_step_they_are_about() -> None:
+    """Alex collects the bags at the hotel, and has them when the flight leaves."""
+    asked = asked_of(EXAMPLES / "the-bags" / "they-collect-them.json")
+    (found,) = lines_of([asked])
+    steps = {step["option"]: str(at) for at, step in enumerate(asked["trip"]["steps"])}
+    about = {line["text"].strip(): line["about"] for line in found if line["about"]}
+    assert about == {
+        # Under the step in which Alex collects them.
+        "Alex takes the bags here.": [steps["collect-bags"], "object:bags"],
+        # Under "Where each OBJECT is:".
+        "the bags: at the hotel when the TRIP starts; with Alex from 2:45 pm (handed over in"
+        " Collect the bags)": ["object:bags"],
+        "Flight home requires the bags. Just before it starts: with Alex.": [
+            steps["flight"],
+            "object:bags",
+        ],
+    }
+    # None of them is a line of the plan, a record or a case.
+    for line in found:
+        if line["about"]:
+            assert (line["step"], line["record"], line["case"], line["warns"]) == (
+                None,
+                None,
+                None,
+                False,
+            )
+    # A report that states other OBJECTs than the words do ties none of those lines.
+    said = asked["report"]
+    one = said["objects"][0]
+    odd: list[Any] = [
+        [one, one],
+        [{**one, "required_by": []}],
+        [{**one, "required_by": [*one["required_by"], *one["required_by"]]}],
+        "bags",
+    ]
+    for objects in odd:
+        (other,) = lines_of([{**asked, "report": {**said, "objects": objects}}])
+        assert not any(thing == "object:bags" for line in other[20:] for thing in line["about"])
+    # So does a report in which nobody takes an OBJECT at that step, or somebody takes two.
+    for hands_over in ({}, {"bags": "alex", "key": "alex"}):
+        steps_said = [
+            {**step, "hands_over": hands_over} if step.get("option") == "collect-bags" else step
+            for step in said["itinerary"]
+        ]
+        (other,) = lines_of([{**asked, "report": {**said, "itinerary": steps_said}}])
+        (takes,) = [line for line in other if line["text"].strip() == "Alex takes the bags here."]
+        assert takes["about"] == []
+
+
+def with_a_passport(content: dict[str, Any]) -> dict[str, Any]:
+    """The FILE of the bags with a passport too, which starts, moves and is required as they are.
+
+    Its id is a number. A page lists such a key before any other, whatever the order it came in.
+    """
+    content["objects"].append({"id": "17", "name": "the passport"})
+    about = [fact for fact in content["facts"] if '"bags"' in json.dumps(fact)]
+    for fact in about:
+        other = json.loads(json.dumps(fact).replace('"bags"', '"17"'))
+        content["facts"].append({**other, "id": f"{fact['id']}-too"})
+    return content
+
+
+def test_two_objects_taken_at_one_step_each_light_up_their_own_line(tmp_path: Path) -> None:
+    content = json.loads((EXAMPLES / "the-bags" / "they-collect-them.json").read_text())
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(with_a_passport(content)))
+    asked = asked_of(path)
+    assert asked["report"]["answer"] == "FEASIBLE"
+    (found,) = lines_of([asked])
+    about = {line["text"].strip(): line["about"][-1] for line in found if line["about"]}
+    assert about["Alex takes the bags here."] == "object:bags"
+    assert about["Alex takes the passport here."] == "object:17"
+    assert [thing for words, thing in about.items() if words.startswith("the ")] == [
+        "object:bags",
+        "object:17",
+    ]
+
+
+def test_a_line_about_an_object_is_tied_whatever_the_names_in_it_start_with(tmp_path: Path) -> None:
+    """A name can start with a space. The report sets its line in by one space more."""
+    content = json.loads((EXAMPLES / "the-bags" / "they-collect-them.json").read_text())
+    for kind, id in (("persons", "alex"), ("objects", "bags"), ("options", "flight")):
+        (named,) = [each for each in content[kind] if each["id"] == id]
+        named["name"] = f" {named['name']}"
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    asked = asked_of(path)
+    assert "\n     Alex takes  the bags here.\n" in asked["text"]
+    (found,) = lines_of([asked])
+    steps = {step["option"]: str(at) for at, step in enumerate(asked["trip"]["steps"])}
+    about = [line["about"] for line in found if line["about"]]
+    assert about == [
+        [steps["collect-bags"], "object:bags"],
+        ["object:bags"],
+        [steps["flight"], "object:bags"],
     ]
 
 

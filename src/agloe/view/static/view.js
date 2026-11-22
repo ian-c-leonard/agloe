@@ -482,6 +482,28 @@ function drawCapabilities(shown) {
 }
 
 /**
+ * The OBJECTs of the FILE: a card for each, with where it is when the TRIP starts, and under
+ * it the OPTIONs that the FILE says require it or do not, and those that it says hand it
+ * over, keep it or leave it alone. An OPTION that the calendar holds is tied to its step.
+ */
+function drawObjects(shown) {
+  const box = part("objects");
+  box.replaceChildren();
+  part("objects-part").hidden = !shown.objects.length;
+  part("objects-says").textContent = shown.says;
+  for (const thing of shown.objects) {
+    const card = Object.assign(made("article", `card${edges(thing)}`), { title: marks(thing).join("\n") });
+    Object.assign(card.dataset, { of: `object:${thing.id}`, records: tiesOf(thing).join(" ") });
+    card.append(made("h3", "card-name", thing.name), made("p", "card-holds", thing.starts));
+    const options = made("ul", "card-options");
+    for (const option of [...thing.requires, ...thing.transfers]) options.append(entry(option, drawingOf(option, option.option), option.does, option.takes));
+    if (options.children.length) card.append(options);
+    for (const words of thing.whole) card.append(made("p", "card-whole", words));
+    box.append(card);
+  }
+}
+
+/**
  * The parts of the page that show what the FILE holds, beside its calendar. Each is loaded by
  * itself and put on the page once for each TRIP. `words` is what puts the part in words, once
  * the page has loaded it, and `of` is the TRIP that the part on the page is of.
@@ -494,6 +516,7 @@ const held = [
   { id: "budgets-part", load: () => import("./budgets.js"), name: "budgets", draw: drawBudgets, words: null, of: undefined },
   { id: "ways-part", load: () => import("./ways.js"), name: "ways", draw: drawWays, words: null, of: undefined },
   { id: "capabilities-part", load: () => import("./capabilities.js"), name: "capabilities", draw: drawCapabilities, words: null, of: undefined },
+  { id: "objects-part", load: () => import("./objects.js"), name: "objects", draw: drawObjects, words: null, of: undefined },
 ];
 
 /** The calendar part says this, and shows no calendar. */
@@ -532,7 +555,8 @@ function write(text, tied) {
  * drawing of another thing, though a record or a case may be about both. `data-of` says what a
  * drawing is of: a step of the TRIP, an OPTION or a WAY that is no step, a PERSON, a WANT, a
  * CAPABILITY, what the FILE says of one PERSON and one CAPABILITY, the rights to an OPTION, a
- * BOOKING, an OFFER, a BUDGET, a cap, or a FACT that the FILE lists every way of some travel. A WAY that somebody takes several times is a drawing of each
+ * BOOKING, an OFFER, a BUDGET, a cap, an OBJECT, or a FACT that the FILE lists every way of
+ * some travel. A WAY that somebody takes several times is a drawing of each
  * of those steps.
  *
  * The line of a record or of a case, and a time of the TRIP, are of no thing. Pointing at one

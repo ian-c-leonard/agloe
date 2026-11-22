@@ -245,8 +245,8 @@ def test_a_capability_says_whether_its_options_are_all_that_require_it() -> None
     # Every OPTION of the FILE has a FACT about it. That is no FACT that these are all, and
     # the page says only what it is.
     assert whole([each, none]) == EACH
-    # A FILE with no OPTION has nothing to say here.
-    assert whole([cannot("alex", "swimming")], options=()) is None
+    # A FILE with no OPTION says so.
+    assert whole([cannot("alex", "swimming")], options=()) == "The FILE lists no OPTION."
 
 
 def test_an_option_says_what_it_requires_of_a_capability() -> None:
