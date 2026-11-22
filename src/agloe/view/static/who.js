@@ -1,0 +1,32 @@
+// Who is in an OPTION of a FILE, as the page says it. There is no page in here, so the tests
+// run this as it is.
+//
+// The view sends every OPTION with the PERSONs that a LOCK names for it, and the steps of the
+// plan of the report with who takes part in each. Each part of the page that shows an OPTION
+// says the same of it, in the same words.
+
+import { listed } from "./named.js";
+
+/**
+ * What the page says of who is in each OPTION of a TRIP as the view sends it: give it the id
+ * of an OPTION.
+ *
+ * `step` is the step of the TRIP that the OPTION is, where the calendar holds one. `lock` says
+ * whom a LOCK names for it. `plan` says who takes part in it in the plan of the report, and is
+ * null where the report shows no plan. `takes` is the one of the two for a part with room for
+ * one: the plan, where the report shows one.
+ */
+export function whoIsIn(trip) {
+  const person = new Map(trip.persons.map((each) => [each.id, each.name]));
+  const names = (ids) => ids.map((id) => person.get(id));
+  return (id) => {
+    const step = trip.steps.findIndex((each) => each.option === id);
+    const locked = names(trip.options.find((each) => each.id === id)?.locked ?? []);
+    const takers = step < 0 ? [] : names(trip.steps[step].persons);
+    // One LOCK can name several PERSONs, and several LOCKs one each: the words fit both.
+    const lock = locked.length ? `${listed(locked)} ${locked.length === 1 ? "is" : "are each"} named by a LOCK.` : "No LOCK names it.";
+    const taking = takers.length ? `In the plan: ${listed(takers)} ${takers.length === 1 ? "takes" : "take"} part.` : "Not in the plan.";
+    const plan = trip.itinerary ? taking : null;
+    return { step: step < 0 ? null : step, lock, plan, takes: plan ?? lock };
+  };
+}

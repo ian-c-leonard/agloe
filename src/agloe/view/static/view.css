@@ -139,22 +139,31 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 
 /* The WANTs of the FILE: each with for whom it is a must or a must-not, and under it the
    OPTIONs that the FILE says SATISFY it or do not. */
-.wants { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 10px; }
-.want { display: grid; gap: 6px; align-content: start; min-width: 0; overflow-wrap: anywhere; margin: 0; padding: 10px 14px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; }
-.want-name { margin: 0; font: 600 14px/1.3 var(--text); }
-.want-holds, .want-whole { font-size: 12.5px; color: var(--ink2); }
-.want-whole { color: var(--muted); }
-.want-options { display: grid; gap: 4px; margin: 2px 0; padding: 0; list-style: none; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 10px; }
+.card { display: grid; gap: 6px; align-content: start; min-width: 0; overflow-wrap: anywhere; margin: 0; padding: 10px 14px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; }
+.card-name { margin: 0; font: 600 14px/1.3 var(--text); }
+.card-holds, .card-whole { font-size: 12.5px; color: var(--ink2); }
+.card-whole { color: var(--muted); }
+.card-options { display: grid; gap: 4px; margin: 2px 0; padding: 0; list-style: none; }
 /* What the FILE says of an OPTION stands beside its name, and below it where the two do not fit. */
-/* An OPTION under a WANT has a ground of its own: where only the WANT is lit, it is not. */
-.delivers { display: flex; flex-wrap: wrap; gap: 0 10px; padding: 5px 8px; border: 1.2px solid var(--ink); border-radius: 5px; background: var(--surface); font-size: 12.5px; }
-.delivers-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
-.delivers-says { flex: 0 1 auto; font: 500 11.5px/1.6 var(--mono); }
-.delivers-takes { flex: 1 0 100%; font-size: 11.5px; color: var(--ink2); }
+/* An OPTION on a card has a ground of its own: where only the card is lit, it is not. */
+.entry { display: flex; flex-wrap: wrap; gap: 0 10px; padding: 5px 8px; border: 1.2px solid var(--ink); border-radius: 5px; background: var(--surface); font-size: 12.5px; }
+.entry-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.entry-says { flex: 0 1 auto; font: 500 11.5px/1.6 var(--mono); }
+.entry-takes { flex: 1 0 100%; font-size: 11.5px; color: var(--ink2); }
 /* An OPTION that the FILE says does not SATISFY the WANT has a dashed edge. */
-.delivers.not { border-style: dashed; border-color: var(--muted); color: var(--ink2); }
-.delivers.not .delivers-name { font-weight: 500; }
+.entry.not { border-style: dashed; border-color: var(--muted); color: var(--ink2); }
+.entry.not .entry-name { font-weight: 500; }
 /* Every OPTION of the FILE: a row for each, with what the FILE says of it. */
+/* Under a CAPABILITY, every PERSON with what the FILE says of them. */
+.able { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 0; padding: 0; list-style: none; }
+.has { display: flex; flex-wrap: wrap; gap: 0 6px; min-width: 0; padding: 3px 8px; border: 1.2px solid var(--ink); border-radius: 5px; background: var(--surface); font-size: 12.5px; }
+.has-name { font-weight: 600; }
+.has-says { font: 500 11.5px/1.6 var(--mono); }
+.has.no { border-style: dashed; }
+.has.unsaid { border-style: dotted; border-color: var(--muted); color: var(--ink2); }
+.has.unsaid .has-name { font-weight: 500; }
+
 .options { display: grid; gap: 6px; }
 .option { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.5fr) minmax(0, 1.4fr); gap: 4px 18px; align-items: start; min-width: 0; overflow-wrap: anywhere; margin: 0; padding: 8px 14px 9px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; font-size: 12.5px; }
 .option-name { margin: 0; font: 600 13.5px/1.35 var(--text); }
@@ -162,9 +171,9 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .option-said { display: grid; gap: 1px; color: var(--ink2); }
 @media (max-width: 700px) { .option { grid-template-columns: minmax(0, 1fr); } }
 /* What the report names has its red or its yellow edge here too, inside the thing. */
-.want.clash, .delivers.clash, .option.clash { border-color: var(--stop); box-shadow: inset 0 0 0 1.5px var(--stop); }
-.want.asked, .delivers.asked, .option.asked { border-color: var(--warn); box-shadow: inset 0 0 0 1.5px var(--warn); }
-.want.lit, .delivers.lit, .option.lit { background: var(--lit); }
+.card.clash, .entry.clash, .option.clash, .has.clash { border-style: solid; border-color: var(--stop); box-shadow: inset 0 0 0 1.5px var(--stop); }
+.card.asked, .entry.asked, .option.asked, .has.asked { border-style: solid; border-color: var(--warn); box-shadow: inset 0 0 0 1.5px var(--warn); }
+.card.lit, .entry.lit, .option.lit, .has.lit { background: var(--lit); }
 
 .key { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 12px; }
 .key span { display: inline-flex; align-items: center; gap: 6px; }
