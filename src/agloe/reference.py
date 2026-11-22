@@ -1856,28 +1856,6 @@ type _Ordered = tuple[
 ]
 
 
-class _Kept[T]:
-    """What an iterator gives, kept as it comes, so that it can be gone through more than once.
-
-    Nothing is made before it is asked for, and nothing is made twice.
-    """
-
-    def __init__(self, source: Iterable[T]) -> None:
-        self._source = iter(source)
-        self._kept: list[T] = []
-
-    def __iter__(self) -> Iterator[T]:
-        position = 0
-        while True:
-            if position == len(self._kept):
-                try:
-                    self._kept.append(next(self._source))
-                except StopIteration:
-                    return
-            yield self._kept[position]
-            position += 1
-
-
 def _chains(
     file: File, world: World, who: tuple[tuple[str, ...], ...], orders: tuple[tuple[int, ...], ...]
 ) -> Iterator[_Chain] | None:
@@ -2723,9 +2701,17 @@ def _schedules(
     the other PERSONs do. So the routes that are left come in the same order, and the first
     ITINERARY that works is the same one. Every other route is left to the timing.
     """
-    found = _chains(file, world, who, orders)
-    chains: Iterable[_Chain] = _NOTHING_TO_ORDER if found is None else _Kept(found)
-    if next(iter(chains), None) is None:
+
+    def chains() -> Iterable[_Chain]:
+        """The orders of the OPTIONs that matter to each OBJECT, made again as they are asked for.
+
+        They are not kept: there can be very many, and each choice of routes goes through
+        them once.
+        """
+        found = _chains(file, world, who, orders)
+        return _NOTHING_TO_ORDER if found is None else found
+
+    if next(iter(chains()), None) is None:
         return  # an OBJECT is not at hand where it has to be, whatever the WAYs and the times
     # Which PERSON, after which of their OPTIONs, the routes. Before their first OPTION is -1.
     needed: list[tuple[int, int, list[Route]]] = []
@@ -2768,7 +2754,7 @@ def _schedules(
             (number, position): route
             for (number, position, _), route in zip(needed, chosen, strict=True)
         }
-        yield from _timings(file, world, who, orders, hops, None, chains, any_will_do)
+        yield from _timings(file, world, who, orders, hops, None, chains(), any_will_do)
 
 
 def _over(terms: Terms) -> int | None:
