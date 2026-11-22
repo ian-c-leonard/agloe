@@ -1849,6 +1849,36 @@ def worlds_to_try(rng: Random, file: File) -> Iterator[World]:
     yield with_these_at_best(file, some)
 
 
+def never(*given: object) -> bool:
+    """Stands in for a short cut of the search that is switched off."""
+    return False
+
+
+class EveryOrder:
+    """Switches the search between its own way and one that skips nothing.
+
+    Its own way makes only some orders of the OPTIONs that matter to an OBJECT, and stops at
+    an ITINERARY that none can come before. The other way takes the orders that a stand-in
+    gives, times every one of them, and ranks every ITINERARY that works.
+    """
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.monkeypatch = monkeypatch
+        self.built = {
+            name: getattr(reference, name)
+            for name in ("_chains", "_orders_differ_only_in_the_listing", "_nothing_comes_before")
+        }
+
+    def as_built(self) -> None:
+        for name, its_own in self.built.items():
+            self.monkeypatch.setattr(reference, name, its_own)
+
+    def skipping_nothing(self, chains: object | None = None) -> None:
+        self.monkeypatch.setattr(reference, "_chains", chains or self.built["_chains"])
+        for name in ("_orders_differ_only_in_the_listing", "_nothing_comes_before"):
+            self.monkeypatch.setattr(reference, name, never)
+
+
 def test_the_search_shows_the_plan_that_a_search_that_skips_nothing_shows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1857,14 +1887,14 @@ def test_the_search_shows_the_plan_that_a_search_that_skips_nothing_shows(
     every choice of hand-overs is timed and checked, and the rule picks among all of them.
     The ITINERARIES are the same, in the same order."""
     rng = Random(2024)
-    its_own = reference._chains  # pyright: ignore[reportPrivateUsage]
+    search = EveryOrder(monkeypatch)
     compared = with_hand_overs = with_two = 0
     for _ in range(150):
         file = a_trip_with_objects(rng, leave_out=0.1, with_ways=0.6, with_complete=0.3)
         for world in worlds_to_try(rng, file):
-            monkeypatch.setattr(reference, "_chains", its_own)
+            search.as_built()
             shown = itineraries(file, world)
-            monkeypatch.setattr(reference, "_chains", those_that_matter)
+            search.skipping_nothing(those_that_matter)
             assert itineraries(file, world) == shown
             compared += bool(shown)
             with_hand_overs += any(step.handed for plan in shown for step in plan)
@@ -1880,14 +1910,14 @@ def test_ordering_only_the_options_that_matter_misses_no_plan(
     """Here every OPTION that happens is put in every order, and every OBJECT is handed about
     in every way. Something works there exactly where the search finds something."""
     rng = Random(77)
-    its_own = reference._chains  # pyright: ignore[reportPrivateUsage]
+    search = EveryOrder(monkeypatch)
     works = fails = 0
     for _ in range(120):
         file = a_trip_with_objects(rng, leave_out=0.1, with_ways=0.6, with_complete=0.3)
         for world in worlds_to_try(rng, file):
-            monkeypatch.setattr(reference, "_chains", its_own)
+            search.as_built()
             found = bool(itineraries(file, world))
-            monkeypatch.setattr(reference, "_chains", all_of_them)
+            search.skipping_nothing(all_of_them)
             assert bool(itineraries(file, world)) == found
             works += found
             fails += not found
@@ -3926,11 +3956,11 @@ def conflicts_to_answer(file: File) -> tuple[bool, int]:
     return search.read(solver, status) is not None, solver.num_conflicts
 
 
-def a_register_at_two_places(airport_at: int = 9) -> File:
+def a_register_at_two_places(airport_at: int = 9, guests: int = 11) -> File:
     """Eleven guests each have an appointment at the hotel desk at 9:00 am, and a clerk has
     one at the airport. Every appointment requires the register, which lies at the hotel.
     Each appointment at the hotel can hand it over. A shuttle takes 15 minutes."""
-    people = [f"guest-{number}" for number in range(11)]
+    people = [f"guest-{number}" for number in range(guests)]
     desks = [f"{person}-desk" for person in people]
     options = [*(stays(desk, "hotel") for desk in desks), stays("airport-desk", "airport")]
     facts = [fact for desk in desks for fact in at(desk, 9)]
@@ -3996,3 +4026,206 @@ def test_an_object_leaves_the_place_where_it_lies_only_by_a_hand_over_there() ->
     works, conflicts = conflicts_to_answer(a_pass_at_the_hotel(15, 16))
     assert not works
     assert conflicts < 1000
+
+
+# Short cuts in the search for the ITINERARY shown.
+
+
+def a_trip_with_steps_at_one_time(rng: Random) -> File:
+    """Two or three PERSONs, each LOCKed into stays of their own at a desk, and one key.
+
+    Most stays start at 9:00 am or at 10:00 am, and some at any time. Each requires the key,
+    hands it over or keeps it, at random. So several OPTIONs that matter to the key start at
+    one instant, and the key has many orders to go through them in.
+    """
+    people = ["alex", "sam", "jo"][: rng.choice([2, 3, 3])]
+    names = [f"{person}-{number}" for person in people for number in range(rng.choice([1, 2, 2]))]
+    rng.shuffle(names)
+    options = [stays(name, rng.choice(["desk"] * 4 + ["vault"])) for name in names]
+    facts: list[Document] = [takes("walk", "PT10M"), complete(None, None)]
+    for name in names:
+        hour = rng.choice([9, 9, 10, None])
+        length = rng.choice(["PT0S", "PT15M", "PT30M"])
+        facts += whenever(name, length) if hour is None else at(name, hour, 0, length)
+        if rng.random() < 0.6:
+            facts.append(requires_object(name, "key"))
+        does = rng.choice(["hands_over", "hands_over", "keeps", None, None])
+        if does is not None:
+            facts.append(does_with(name, "key", does))
+    holder = has_object(rng.choice(people), "key")
+    facts.append(rng.choice([holder, lies_at("key", "desk"), lies_at("key", "desk")]))
+    facts += [every_use("key")]
+    facts += [every_transfer("key")] if rng.random() < 0.7 else []
+    locks = [lock(name, name.split("-")[0]) for name in names]
+    locks += [trip_starts(8)] if rng.random() < 0.6 else []
+    ways = [way_between("walk", "desk", "vault")]
+    return trip(people, ["desk", "vault"], options, facts, locks, ways, objects=["key"])
+
+
+def test_the_short_cuts_show_the_plan_that_ranking_every_order_shows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The search leaves out an order that an order made before it always beats, and it
+    stops at an ITINERARY that none can come before. Here it makes every order, times each
+    one and ranks them all. The ITINERARY shown is the same. The solver chooses who takes
+    part, so that the comparison is about the orders alone."""
+    rng = Random(3131)
+    search = EveryOrder(monkeypatch)
+    left_out = stopped = with_hand_overs = compared = 0
+    alike, nothing_before = (
+        reference._orders_differ_only_in_the_listing,  # pyright: ignore[reportPrivateUsage]
+        reference._nothing_comes_before,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    def counted_alike(*given: object) -> bool:
+        nonlocal left_out
+        found = alike(*given)  # type: ignore[arg-type]
+        left_out += found
+        return found
+
+    def counted_stop(*given: object) -> bool:
+        nonlocal stopped
+        found = nothing_before(*given)  # type: ignore[arg-type]
+        stopped += found
+        return found
+
+    for _ in range(300):
+        file = a_trip_with_steps_at_one_time(rng)
+        for world in (worst_case(file), best_case(file), no_better_than(file, ())):
+            search.as_built()
+            monkeypatch.setattr(reference, "_orders_differ_only_in_the_listing", counted_alike)
+            monkeypatch.setattr(reference, "_nothing_comes_before", counted_stop)
+            shown = compiler.shown(file, world)
+            search.skipping_nothing()
+            assert compiler.shown(file, world) == shown
+            compared += shown is not None
+            with_hand_overs += any(step.handed for step in shown or ())
+    assert compared > 300
+    assert left_out > 60
+    assert stopped > 60
+    assert with_hand_overs > 50
+
+
+def test_an_order_is_left_out_only_where_what_comes_before_ranks_before() -> None:
+    """Alex and Sam each have a check at the desk at 9:00 am that requires the key lying
+    there. Alex also has a note to hand in at 9:00 am, which takes no time, comes before
+    Alex's check, and is listed last in the FILE. With Alex's check before Sam's, the plan
+    lists the note first. With Sam's first, it lists Sam's check first, and that comes
+    before the note. So the order that is made second gives the ITINERARY that comes first,
+    and the search may not leave it out."""
+    options = [stays("alex-check", "desk"), stays("sam-check", "desk"), stays("alex-note", "desk")]
+    facts = [
+        *at("alex-check", 9),
+        *at("sam-check", 9),
+        *at("alex-note", 9, length="PT0S"),
+        lies_at("key", "desk"),
+        requires_object("alex-check", "key"),
+        requires_object("sam-check", "key"),
+        hands_over("alex-check", "key"),
+        every_use("key"),
+        every_transfer("key"),
+    ]
+    locks = [lock("alex-check", "alex"), lock("sam-check", "sam"), lock("alex-note", "alex")]
+    file = trip(["alex", "sam"], ["desk"], options, facts, locks, objects=["key"])
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [step.option for step in found.itinerary] == ["sam-check", "alex-note", "alex-check"]
+
+
+def test_the_earliest_starts_count_from_fixed_starts_and_limits() -> None:
+    """Step 0 starts at a fixed time, and step 1 comes ten seconds or more after it. Step 2
+    is tied to nothing but its own limit. Step 3 has nothing to count from. Step 4 comes
+    after step 2 and after its own limit, and the later of the two counts. A fixed start
+    stays where it is, whatever comes before it and whatever its limit."""
+    gaps = [(0, 1, 10), (2, 4, 5), (1, 5, 100)]
+    soonest = reference._earliest_starts(  # pyright: ignore[reportPrivateUsage]
+        6, gaps, fixed={0: 1000, 5: 1050}, not_before={2: 300, 4: 400, 5: 2000}
+    )
+    assert soonest == {0: 1000, 1: 1010, 2: 300, 4: 400, 5: 1050}
+    later = reference._earliest_starts(  # pyright: ignore[reportPrivateUsage]
+        6, [(2, 4, 500)], fixed={}, not_before={2: 300, 4: 400}
+    )
+    assert later == {2: 300, 4: 800}
+
+
+def timings_for_the_report(monkeypatch: pytest.MonkeyPatch, file: File) -> tuple[Report, int]:
+    """The COMPILER's report on a FILE, and how often a plan was timed on the way to it."""
+    timed = 0
+    its_own = reference._times  # pyright: ignore[reportPrivateUsage]
+
+    def counted(*how: object) -> object:
+        nonlocal timed
+        timed += 1
+        return its_own(*how)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(reference, "_times", counted)
+    found = compiler.check(file)
+    monkeypatch.setattr(reference, "_times", its_own)
+    return found, timed
+
+
+def test_steps_at_one_time_do_not_have_every_order_timed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fifteen appointments, five at each of three hours, all about one voucher. They have
+    345,600 orders that work, and all of them give the same start times. The search makes
+    one order for each way the voucher can end up, and the report lists the deposit first
+    at 9:00 am, then the other appointments as the FILE lists them."""
+    found, timed = timings_for_the_report(monkeypatch, five_at_each_hour(deposit_last=True))
+    assert found.answer is Answer.FEASIBLE
+    assert timed < 50
+    people = ["person-0", "person-1", "person-2", "person-3", "person-4"]
+    assert [step.option for step in found.itinerary] == [
+        *(f"{person}-at-9" for person in people),
+        *(f"{person}-at-{hour}" for hour in (10, 11) for person in (*people[1:], people[0])),
+    ]
+
+
+def test_a_hand_over_among_steps_at_one_time_is_found_without_every_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Eleven guests each have an appointment at the hotel at 9:00 am that requires the
+    register and can hand it over. The clerk at the airport requires it at 10:00 am. So one
+    guest takes it, in the appointment that comes last of the eleven, and brings it. The
+    plan shown has the guest listed last go to the airport, so that guest's appointment is
+    the last one. The eleven have forty million orders, and the search makes one for each
+    way the register can end up. With four guests, every order can be ranked, and the plan
+    shown is the same."""
+    found, timed = timings_for_the_report(monkeypatch, a_register_at_two_places(airport_at=10))
+    assert found.answer is Answer.FEASIBLE
+    assert timed < 100
+    at_nine = [step for step in found.itinerary if step.option and step.start == seconds(9)]
+    assert [step.option for step in at_nine] == [f"guest-{number}-desk" for number in range(11)]
+    assert [step.handed for step in at_nine] == [*[()] * 10, (("register", "guest-10"),)]
+    few = a_register_at_two_places(airport_at=10, guests=4)
+    shown = compiler.shown(few, worst_case(few))
+    assert shown is not None and any(step.handed for step in shown)
+    EveryOrder(monkeypatch).skipping_nothing()
+    assert compiler.shown(few, worst_case(few)) == shown
+
+
+def four_at_a_pickup() -> File:
+    """Four travelers are all LOCKed into a pickup at 8:00 am that can hand the voucher
+    over, and then into four, three, two and two stays at any time. The voucher lies at the
+    hotel, where everything happens, and the last stay requires it. Nobody said what a stay
+    does with it."""
+    sessions = {"alex": 4, "sam": 3, "jo": 2, "kim": 2}
+    names = [f"{person}-{number}" for person, count in sessions.items() for number in range(count)]
+    options = [stays("pickup", "hotel"), *(stays(name, "hotel") for name in names)]
+    facts = [*at("pickup", 8, length="PT5M")]
+    facts += [fact for name in names for fact in whenever(name, "PT30M")]
+    facts += [lies_at("voucher", "hotel"), requires_object(names[-1], "voucher")]
+    facts += [hands_over("pickup", "voucher"), every_use("voucher")]
+    locks = [trip_starts(8), lock("pickup", *sessions)]
+    locks += [lock(name, name.split("-")[0]) for name in names]
+    return trip(list(sessions), ["hotel"], options, facts, locks, objects=["voucher"])
+
+
+def test_the_search_stops_at_a_plan_that_no_order_can_beat(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each of the four can have the voucher after the pickup, so each stay might keep it,
+    and the eleven stays have 69,300 orders. The order in which the stays fall anyway works
+    with no hand-over, and every stay starts as early as it can. No order can give a plan
+    that comes before that one, so the search stops there."""
+    found, timed = timings_for_the_report(monkeypatch, four_at_a_pickup())
+    assert found.answer is Answer.FEASIBLE
+    assert timed < 50
+    assert not any(step.handed for step in found.itinerary)
+    assert [step.start for step in found.itinerary if step.option == "kim-1"] == [seconds(8, 35)]
