@@ -9,18 +9,22 @@
 
 /** How a name ends where the page shows its id after it. */
 const WITH_AN_ID = / \([a-z0-9]+(-[a-z0-9]+)*\)$/;
+/** What a page shows nothing for: a format character, such as a soft hyphen or a mark of direction. */
+const UNSEEN = /\p{Cf}/gu;
 
 /**
  * A name as the page shows it, for a list that "or" joins: in quotation marks where it holds
- * that word, as the report puts it, so that it reads as one name. The view sends a name in
- * quotation marks already where it could be taken for something else, and with its id after
- * it where another name looks like it. The quotation marks go on before the id.
+ * that word, as the report puts it, so that it reads as one name. It holds the word where a
+ * page shows it so: a character that a page shows nothing for does not hide the word, and
+ * does not part it from its neighbour. The view sends a name in quotation marks already
+ * where it could be taken for something else, and with its id after it where another name
+ * looks like it. The quotation marks go on before the id, around the spelling of the FILE.
  */
 export function either(name) {
   if (name.startsWith('"')) return name;
   const id = name.match(WITH_AN_ID);
   const bare = id === null ? name : name.slice(0, id.index);
-  if (!bare.toLowerCase().split(/\s+/).includes("or")) return name;
+  if (!bare.replace(UNSEEN, "").toLowerCase().split(/\s+/).includes("or")) return name;
   return `"${bare.replace(/\\/g, "\\\\")}"${id === null ? "" : id[0]}`;
 }
 

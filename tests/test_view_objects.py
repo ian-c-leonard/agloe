@@ -295,6 +295,30 @@ def test_an_object_that_might_be_in_one_of_several_places_says_each(tmp_path: Pa
     (bags,) = shown["objects"]
     assert ' or at "Believe It or Not" (art-institute) from 1:00 pm (' in bags["plan"]
     assert ' or at "Believe It or Not" from 1:00 pm (' in words
+    # A name holds the word where a page shows it so. A mark of direction after the word
+    # shows as nothing, so the name reads "Tom or Jerry", and it is in quotation marks. Each
+    # name keeps the spelling of the FILE. The report tells the word by its spelling, so it
+    # sets no quotation marks here: the page differs from it in them and in the id.
+    content["persons"] = [
+        {"id": "alex", "name": "Tom or\u200e Jerry"},
+        {"id": "sam", "name": "Tom or Jerry"},
+    ]
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    assert bags["plan"].startswith('In the plan: with "Tom or\u200e Jerry" (alex) when the TRIP')
+    assert bags["requires"][0]["plan"] == (
+        'Just before it starts: with "Tom or\u200e Jerry" (alex).'
+    )
+    assert "\n  the bags: with Tom or\u200e Jerry when the TRIP starts; " in words
+    # A character that joins the word to the one before it leaves no such word to see.
+    content["persons"] = [{"id": "alex", "name": "Tom\ufeffor Jerry"}, {"id": "sam", "name": "Sam"}]
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    assert bags["requires"][0]["plan"] == "Just before it starts: with Tom\ufeffor Jerry."
 
 
 def test_an_option_of_the_plan_that_might_require_an_object_is_under_it(tmp_path: Path) -> None:
