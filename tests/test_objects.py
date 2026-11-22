@@ -4478,18 +4478,24 @@ def eleven_signatures(
     ways: Sequence[Document] = (),
     at_the_airport: Sequence[Document] | None = None,
     decisions: Sequence[Document] = (),
+    sign_at_any_time: bool = False,
 ) -> File:
     """Eleven guests each sign at the hotel desk at 9:00 am, which takes no time. Each
     signature requires the register that lies at the hotel and can hand it over. A clerk at
     the airport requires the register at 9:05 am. The shuttle takes 15 minutes. ``others``
     holds other OPTIONs, ``places`` other PLACEs, ``ways`` other WAYs, and ``more`` the FACTs
     about them. ``at_the_airport`` says when the clerk's check is, where that is not
-    9:05 am, and ``decisions`` holds other DECISIONs."""
+    9:05 am, and ``decisions`` holds other DECISIONs. With ``sign_at_any_time``, the guests
+    sign at any time."""
     people = [f"guest-{number}" for number in range(11)]
     desks = [f"{person}-desk" for person in people]
     options = [*(stays(desk, "hotel") for desk in desks), stays("airport-desk", "airport")]
     options += others
-    facts = [fact for desk in desks for fact in at(desk, 9, length="PT0S")]
+    facts = [
+        fact
+        for desk in desks
+        for fact in (whenever(desk, "PT0S") if sign_at_any_time else at(desk, 9, length="PT0S"))
+    ]
     facts += at("airport-desk", 9, 5) if at_the_airport is None else at_the_airport
     facts += [starts_from("clerk", "airport")]
     facts += [starts_from(person, "hotel") for person in people]
@@ -4621,6 +4627,26 @@ def test_a_connection_that_is_missed_does_not_count_for_the_time_to_cross() -> N
     works, conflicts = conflicts_in_the_best_case(any_time_before_the_end)
     assert not works
     assert conflicts < 1000
+
+    # And where the guests sign at any time too, in a TRIP from 9:00 am to 9:05 am. Nobody
+    # signs before the TRIP starts, so the register still misses the ferry.
+    def within_five_minutes(minute: int) -> File:
+        return eleven_signatures(
+            *at("pier-shuttle", 9, 0, "PT4M"),
+            *at("ferry", 9, minute, "PT1M"),
+            spans=[complete(None, None)],
+            others=[moves("pier-shuttle", "hotel", "pier"), moves("ferry", "pier", "airport")],
+            places=["pier"],
+            at_the_airport=whenever("airport-desk", "PT0S"),
+            decisions=[trip_starts(9), trip_ends(9, 5)],
+            sign_at_any_time=True,
+        )
+
+    works, conflicts = conflicts_in_the_best_case(within_five_minutes(2))
+    assert not works
+    assert conflicts < 1000
+    works, conflicts = conflicts_in_the_best_case(within_five_minutes(4))
+    assert works
 
 
 def test_a_way_with_no_known_length_does_not_count_for_the_time_to_cross() -> None:

@@ -772,6 +772,38 @@ class _Search:
         """
         model, world, options = self.model, self.world, self.file.options
         fixed = [each.fixed_start for each in self.terms]
+        trip_starts = self.file.trip_start()
+        opens = None if trip_starts is None else trip_starts.at
+
+        def there_by(
+            before: int, after: int, origin: str, takes_first: int, when: list[cp_model.LiteralT]
+        ) -> bool:
+            """The second OPTION starts late enough for the OBJECT to get there from the first.
+
+            ``origin`` is where the OBJECT sets out, once the first OPTION has started and
+            ``takes_first`` more seconds have gone by. ``when`` says when that holds. The
+            result is False where nothing gets there at all.
+
+            The least time on the way counts from when the first OPTION starts. Where it
+            starts at no fixed time, the TRIP's start says more: the OBJECT cannot set out
+            before then, and a ride that has left by then is no help however long the first
+            OPTION waits.
+            """
+            destination = options[after].origin
+            starts = fixed[before]
+            set_out = None if starts is None else starts + takes_first
+            takes = self._across(origin, destination, set_out)
+            if takes is None:
+                return False
+            _when(model.add(self.start[after] >= self.start[before] + takes_first + takes), *when)
+            if starts is None and opens is not None:
+                least = self._across(origin, destination, opens + takes_first)
+                if least is None:
+                    return False
+                arrives = opens + takes_first + least - self.zero
+                _when(model.add(self.start[after] >= arrives), *when)
+            return True
+
         at_hand = [
             (index, self.used[index])
             for index in matter
@@ -779,22 +811,13 @@ class _Search:
         ]
         at_hand += list(handed.items())
         for (one, here), (other, there) in combinations(at_hand, 2):
-            origin, destination = options[one].origin, options[other].origin
-            if origin == destination:
+            if options[one].origin == options[other].origin:
                 continue
-            ahead = self._across(origin, destination, fixed[one])
-            back = self._across(destination, origin, fixed[other])
             first = model.new_bool_var(f"{thing} in {options[one].id} before {options[other].id}")
-            if ahead is None:
+            if not there_by(one, other, options[one].origin, 0, [here, there, first]):
                 model.add_bool_or([here.negated(), there.negated(), first.negated()])
-            else:
-                apart = self.start[other] >= self.start[one] + ahead
-                _when(model.add(apart), here, there, first)
-            if back is None:
+            if not there_by(other, one, options[other].origin, 0, [here, there, first.negated()]):
                 model.add_bool_or([here.negated(), there.negated(), first])
-            else:
-                apart = self.start[one] >= self.start[other] + back
-                _when(model.add(apart), here, there, first.negated())
         start = world.starts.get(thing, Where())
         if (thing in world.starts_anywhere and thing not in world.starts) or start.person:
             return  # the solver picks where it starts, or a PERSON has it
@@ -807,18 +830,15 @@ class _Search:
                     continue
                 if self.endless[source]:
                     continue  # nothing follows it, so what is taken in it is at hand nowhere
-                over = fixed[source]
-                over = None if over is None else over + self.lasts[source]
-                takes = self._across(options[source].destination, options[index].origin, over)
-                if takes is None:
-                    continue
                 # The OBJECT comes from this hand-over: it is over and across by then.
                 name = f"{thing} comes to {options[index].id} from {options[source].id}"
                 from_there = model.new_bool_var(name)
                 model.add_implication(from_there, given)
-                in_time = self.start[index] >= self.start[source] + self.lasts[source] + takes
-                _when(model.add(in_time), from_there)
-                early_enough.append(from_there)
+                over = self.lasts[source]
+                if there_by(source, index, options[source].destination, over, [from_there]):
+                    early_enough.append(from_there)
+                else:
+                    model.add(from_there == 0)
             model.add_bool_or([here.negated(), *early_enough])
 
     def _across(self, origin: str, destination: str, since: int | None = None) -> int | None:
