@@ -13,7 +13,7 @@
 //
 // Nothing here judges a TRIP. It finds what the report already says, line by line.
 
-import { boughtIn, casesIn, requirementsIn, toBuyIn } from "./named.js";
+import { boughtIn, cappedIn, casesIn, requirementsIn, toBuyIn } from "./named.js";
 
 /** A line that shows one step of a plan: "  2:00 pm to 3:00 pm: Museum visit, Alex and Sam". */
 const STEP = /^ {2}\d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+, .+$/;
@@ -28,13 +28,28 @@ const CASES = /^The trip (?:works|might work) in any of these cases:$/;
 const TO_BUY = /^ {4}! .+ still ha(?:s|ve) to buy a right to this(?: if it needs one)?, from (.+)\.$/;
 /** How the line starts that gives one plan for a case: who buys which place. */
 const ONE_PLAN = "One plan that works then: ";
+/** How the line ends that is above the BUDGETs of the FILE, where a report states them. */
+const BUDGETS = " The BUDGETs of this FILE:";
 /** The line above who meets what the OPTIONs of a plan require. */
 const MEETS = "Who meets the requirements:";
 
-/** The lists of ids that a report as JSON names one after another in its words. */
+/**
+ * The lists of ids that a report as JSON names one after another in its words, each with what
+ * says that a line is the heading over that list. An id can be the id of two things, or start
+ * a line about something else: a currency, the name of an OBJECT. So a list is read only
+ * under its own heading.
+ */
 function listsOf(report) {
   const paid = Array.isArray(report?.money?.paid) ? report.money.paid.map((each) => each?.booking) : null;
-  return [report?.relies_on, report?.conflict, paid].filter((list) => Array.isArray(list) && list.length && list.every((id) => typeof id === "string"));
+  // A report on a plan states each cap once more, with what is charged to it.
+  const caps = report?.answer === "FEASIBLE" && Array.isArray(report.caps) ? report.caps.map((each) => each?.cap) : null;
+  const lists = [
+    [report?.relies_on, (text) => /^The plan relies on these .+:$/.test(text)],
+    [report?.conflict, (text) => /^These .+ rule out every plan/.test(text)],
+    [paid, (text) => text === "What the BOOKINGs state that they paid:"],
+    [caps, (text) => text === "The caps:"],
+  ];
+  return lists.filter(([list]) => Array.isArray(list) && list.length && list.every((id) => typeof id === "string"));
 }
 
 /**
@@ -42,13 +57,16 @@ function listsOf(report) {
  * the record that it names, and the case that it states, as its place in `missing` of the
  * report as JSON. `step`, `record` and `case` are null where a line has none. `warns` says
  * that the line is a warning under its step. `meets` is null, or the place in `requirements`
- * of the report as JSON of the requirement that the line says somebody meets. `offers` holds
- * the OFFERs that the line says somebody buys a place of.
+ * of the report as JSON of the requirement that the line says somebody meets. `about` holds
+ * what else the line is about, each as the page names a thing: `offer:ID` for an OFFER that
+ * the line says somebody buys a place of, `budget:ID` for a BUDGET that the line states, and
+ * `cap:ID` for a cap that the line states under the plan of a case.
  *
  * The lines of a plan are tied to steps only where there is one line for each step that the
  * view sent, in the same order: then the two are the same plan. Lines are tied to records only
- * where they name a whole list of the report as JSON, one id after another. So a line that
- * only starts like an id, such as the total in a currency, is tied to nothing. Lines are tied
+ * where they name a whole list of the report as JSON, one id after another, under the heading
+ * of that list. So a line that only starts like an id, such as the total in a currency, is
+ * tied to nothing. Lines are tied
  * to cases only where the words state as many cases as the report as JSON holds. A line that
  * says who meets a requirement is tied to the step that its OPTION is, only where the words
  * hold one line for each requirement of the report as JSON. A line that says who buys a place
@@ -61,7 +79,7 @@ export function lines(text, report, trip) {
   const tied = trip !== null && trip.itinerary && plan === trip.steps.length;
   let step = -1;
   let under = false; // whether this line can still be a warning under the step above it
-  const one = (text, at = null, warns = false) => ({ text, step: at, warns, record: null, case: null, meets: null, offers: [] });
+  const one = (text, at = null, warns = false) => ({ text, step: at, warns, record: null, case: null, meets: null, about: [] });
   const found = all.map((line) => {
     if (tied && STEP.test(line)) {
       step += 1;
@@ -79,13 +97,14 @@ export function lines(text, report, trip) {
     if (from === null) continue;
     const named = (offer) => from[1] === offer || from[1].startsWith(`${offer}, `);
     const bought = toBuyIn(report).filter((buy) => buy.option === trip.steps[line.step].option && named(buy.offer));
-    line.offers = [...new Set(bought.map((buy) => buy.offer))];
+    line.about = [...new Set(bought.map((buy) => `offer:${buy.offer}`))];
   }
-  for (const ids of listsOf(report)) {
-    // The first place where the lines name these ids one after another.
-    const names = (at) => ids.every((id, n) => at + n < found.length && found[at + n].step === null && found[at + n].record === null && found[at + n].text.startsWith(`  ${id}: `));
-    const at = found.findIndex((_, n) => names(n));
-    if (at >= 0) ids.forEach((id, n) => (found[at + n].record = id));
+  for (const [ids, isHeading] of listsOf(report)) {
+    // The lines under the one heading of this list, where they name its ids one after another.
+    const heads = found.flatMap((line, n) => (isHeading(line.text) ? [n] : []));
+    const at = heads.length === 1 ? heads[0] + 1 : found.length;
+    const names = ids.every((id, n) => at + n < found.length && found[at + n].step === null && found[at + n].record === null && found[at + n].text.startsWith(`  ${id}: `));
+    if (names) ids.forEach((id, n) => (found[at + n].record = id));
   }
   // The cases in which the trip works. One case is the only sentence that starts so. Several
   // are under their heading, each on a line with its number. What the report says of a case
@@ -108,15 +127,37 @@ export function lines(text, report, trip) {
     }
   }
   // The one plan that the report gives for a case is under the line of the case, further in.
-  // It is tied to the OFFERs that somebody buys a place of in that plan.
+  // It is tied to the OFFERs that somebody buys a place of in that plan. Under it, the report
+  // states each cap with what that plan charges to it, on a line that starts with the id of
+  // the cap. Each of those is tied to its cap.
   const bought = boughtIn(report);
+  const capped = cappedIn(report);
   found.forEach((line, at) => {
-    if (line.case === null || bought[line.case] === undefined) return;
+    if (line.case === null) return;
+    const offers = bought[line.case] ?? [];
+    const caps = capped[line.case] ?? [];
     const inset = (text) => text.length - text.trimStart().length;
     for (let next = at + 1; next < found.length && found[next].text.trim() !== "" && inset(found[next].text) > inset(line.text); next += 1) {
-      if (free(found[next]) && found[next].text.trimStart().startsWith(ONE_PLAN)) found[next].offers = bought[line.case];
+      if (!free(found[next])) continue;
+      const words = found[next].text.trimStart();
+      if (words.startsWith(ONE_PLAN)) found[next].about = offers.map((offer) => `offer:${offer}`);
+      const cap = caps.find((id) => words.startsWith(`${id}, on `));
+      if (cap !== undefined) found[next].about = [`cap:${cap}`];
     }
   });
+  // The BUDGETs of the FILE, where the report states them: one to a line under their heading,
+  // in the FILE's order. They are tied only where the words hold one line for each BUDGET that
+  // the view sent. A line starts with the name of its BUDGET as the FILE spells it, which the
+  // page can show with its id added, so the names are not compared.
+  const pots = trip === null ? [] : trip.budgets;
+  const over = found.flatMap((line, at) => (line.text.endsWith(BUDGETS) ? [at] : []));
+  if (pots.length && over.length === 1) {
+    const stated = [];
+    for (let at = over[0] + 1; at < found.length && found[at].text.startsWith("  "); at += 1) stated.push(at);
+    if (stated.length === pots.length && stated.every((at) => free(found[at]))) {
+      stated.forEach((at, n) => (found[at].about = [`budget:${pots[n].id}`]));
+    }
+  }
   // Who meets what each OPTION of the plan requires: the lines under their heading, up to the
   // first line that is not set in. A line starts with the name of its OPTION, whatever that
   // name starts with. Each is about the step that its OPTION is.

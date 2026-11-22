@@ -341,8 +341,9 @@ function item(thing, of, columns) {
 }
 
 /**
- * Every PERSON of the FILE, a row for each: where the FILE says they start from, and where a
- * WANT has them end the TRIP. The row has the colour of the PERSON's column in the calendar.
+ * Every PERSON of the FILE, a row for each: where the FILE says they start from, where a WANT
+ * has them end the TRIP, and which BUDGETs they may draw on. The row has the colour of the
+ * PERSON's column in the calendar.
  */
 function drawPersons(shown) {
   const box = part("persons");
@@ -350,7 +351,7 @@ function drawPersons(shown) {
   part("persons-part").hidden = !shown.persons.length;
   part("persons-says").textContent = shown.says;
   shown.persons.forEach((person, n) => {
-    const row = item(person, `person:${person.id}`, [person.ends]);
+    const row = item(person, `person:${person.id}`, [person.ends, person.pays]);
     row.classList.add("of-a-person", `p${n % HUES}`);
     box.append(row);
   });
@@ -388,6 +389,38 @@ function drawRights(shown) {
     for (const offer of rights.offers) entries.append(entry(offer, `offer:${offer.id}`, false, offer.uses));
     if (entries.children.length) card.append(entries);
     card.append(made("p", "card-whole", rights.whole));
+    box.append(card);
+  }
+}
+
+/**
+ * The BUDGETs of the FILE: a card for each, with the caps on it and what the BOOKINGs state
+ * that they paid from it. A cap is a thing of its own. A payment is a drawing of its BOOKING.
+ * The payments that name no BUDGET come last, on a card of their own.
+ */
+function drawBudgets(shown) {
+  const box = part("budgets");
+  box.replaceChildren();
+  part("budgets-part").hidden = !shown.budgets.length;
+  part("budgets-says").textContent = shown.says;
+  const paid = (booking) => entry(booking, `booking:${booking.id}`, true, null);
+  for (const budget of shown.budgets) {
+    const card = made("article", "card");
+    card.dataset.of = `budget:${budget.id}`;
+    card.append(made("h3", "card-name", budget.name), made("p", "card-holds", budget.holds));
+    const entries = made("ul", "card-options");
+    for (const cap of budget.caps) entries.append(entry(cap, `cap:${cap.id}`, true, null));
+    for (const booking of budget.payments) entries.append(paid(booking));
+    if (entries.children.length) card.append(entries);
+    if (budget.whole) card.append(made("p", "card-whole", budget.whole));
+    box.append(card);
+  }
+  if (shown.unnamed.length) {
+    const card = made("article", "card");
+    card.append(made("h3", "card-name", "No BUDGET named"), made("p", "card-holds", "These BOOKINGs state a payment, and not which BUDGET the money came from."));
+    const entries = made("ul", "card-options");
+    for (const booking of shown.unnamed) entries.append(paid(booking));
+    card.append(entries);
     box.append(card);
   }
 }
@@ -458,6 +491,7 @@ const held = [
   { id: "wants-part", load: () => import("./wants.js"), name: "wants", draw: drawWants, words: null, of: undefined },
   { id: "options-part", load: () => import("./options.js"), name: "options", draw: drawOptions, words: null, of: undefined },
   { id: "rights-part", load: () => import("./rights.js"), name: "rights", draw: drawRights, words: null, of: undefined },
+  { id: "budgets-part", load: () => import("./budgets.js"), name: "budgets", draw: drawBudgets, words: null, of: undefined },
   { id: "ways-part", load: () => import("./ways.js"), name: "ways", draw: drawWays, words: null, of: undefined },
   { id: "capabilities-part", load: () => import("./capabilities.js"), name: "capabilities", draw: drawCapabilities, words: null, of: undefined },
 ];
@@ -480,8 +514,8 @@ function write(text, tied) {
   tied.forEach((line, n) => {
     const words = made("span", line.warns ? "row warns" : "row", line.text);
     // A line is about the step that it shows or warns of, and about each OFFER that it says
-    // somebody buys a place of.
-    const about = [...(line.step === null ? [] : [line.step]), ...line.offers.map((id) => `offer:${id}`)];
+    // somebody buys a place of, or the BUDGET that it states.
+    const about = [...(line.step === null ? [] : [line.step]), ...line.about];
     if (about.length) words.dataset.of = about.join(" ");
     if (line.record !== null) words.dataset.record = line.record;
     if (line.case !== null) words.dataset.record = `case:${line.case}`;
@@ -498,7 +532,7 @@ function write(text, tied) {
  * drawing of another thing, though a record or a case may be about both. `data-of` says what a
  * drawing is of: a step of the TRIP, an OPTION or a WAY that is no step, a PERSON, a WANT, a
  * CAPABILITY, what the FILE says of one PERSON and one CAPABILITY, the rights to an OPTION, a
- * BOOKING, an OFFER, or a FACT that the FILE lists every way of some travel. A WAY that somebody takes several times is a drawing of each
+ * BOOKING, an OFFER, a BUDGET, a cap, or a FACT that the FILE lists every way of some travel. A WAY that somebody takes several times is a drawing of each
  * of those steps.
  *
  * The line of a record or of a case, and a time of the TRIP, are of no thing. Pointing at one

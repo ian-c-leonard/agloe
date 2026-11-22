@@ -35,8 +35,10 @@ take it in both directions, and how long it takes. It is sent each FACT that the
 every way of some travel: from which PLACE, to which, and within which span of time.
 
 The page is sent what the FILE says of the rights to each OPTION: whether a PERSON needs a
-right to take part, each BOOKING with the PERSONs it covers, each OFFER with its places and
-the price of one, and the FACT that the FILE lists every right to the OPTION. Who uses which
+right to take part, each BOOKING with the PERSONs it covers and what it paid, each OFFER with
+its places and the price of one, and the FACT that the FILE lists every right to the OPTION.
+It is sent the BUDGETs of the FILE: the PERSONs who may draw on each, the currencies it
+holds, and each cap on what the TRIP spends from it. Who uses which
 right in a plan is for the COMPILER to say, and the page reads it from the report.
 
 The page is sent the CAPABILITIES of the FILE as well: each PERSON of whom a FACT says that
@@ -49,7 +51,8 @@ CAPABILITY whose name another of its kind has comes with its id, and a name that
 taken for something else comes in quotes. So the page tells two apart where the report does,
 in the same words.
 A page shows two names alike that a report in words does not: those that differ only in how
-an accent is put on a letter, or in how many spaces they hold. Those come with their ids too.
+an accent is put on a letter, in how many spaces they hold, or in characters that a page
+shows nothing for. Those come with their ids too.
 
 A day is sent as the stretch of it in which the clocks run on without a change. So most days
 are one stretch, from midnight to midnight. A day on which the clocks change is two, and each
@@ -69,10 +72,12 @@ from typing import cast
 from agloe import report as reports
 from agloe.answers import Answer, Report
 from agloe.file import (
+    Budget,
     Capability,
     Complete,
     Duration,
     File,
+    Money,
     NeedsRight,
     Option,
     Person,
@@ -112,6 +117,7 @@ _TRIP: _Shape = {
     "ways": list,
     "complete_travel": list,
     "rights": list,
+    "budgets": list,
     "capabilities": list,
 }
 _WAY: _Shape = {
@@ -163,7 +169,10 @@ _RIGHTS: _Shape = {
     "complete": (dict, _NONE),
 }
 _NEEDS: _Shape = {"needed": bool, "record": str}
-_BOOKING: _Shape = {"id": str, "covers": list}
+_BOOKING: _Shape = {"id": str, "covers": list, "paid": (dict, _NONE)}
+_PAID: _Shape = {"amount": str, "currency": str, "budget": (str, _NONE), "by": (str, _NONE)}
+_BUDGET: _Shape = {"id": str, "name": str, "persons": list, "currencies": list, "caps": list}
+_CAP: _Shape = {"id": str, "limit": dict}
 _OFFER: _Shape = {"id": str, "places": int, "price": (dict, _NONE)}
 _MONEY: _Shape = {"amount": str, "currency": str}
 _ALL_RIGHTS: _Shape = {"record": str, "offers": list}
@@ -386,6 +395,7 @@ def shown(file: File, report: Report) -> Trip | None:
                 for fact in listed
             ],
             "rights": _rights(file, names),
+            "budgets": _budgets(file),
             "capabilities": _capabilities(file, names),
         }
     except Unwritable:
@@ -427,7 +437,7 @@ def _length(stated: Duration | None) -> Trip | None:
 
 
 def _names(
-    records: Sequence[Person | Place | Option | Way | Want | Capability],
+    records: Sequence[Person | Place | Option | Way | Want | Capability | Budget],
     joins: str | None = None,
 ) -> dict[str, str]:
     """The name to show for each record, as the report shows it, so that no two show the same.
@@ -444,7 +454,10 @@ def _names(
     """
 
     def looks(name: str) -> str:
-        return " ".join(unicodedata.normalize("NFC", name).split())
+        # A page shows nothing for a format character, such as a soft hyphen or a space of
+        # no width.
+        seen = "".join(each for each in name if unicodedata.category(each) != "Cf")
+        return " ".join(unicodedata.normalize("NFC", seen).split())
 
     def quoted(name: str) -> str:
         splits = any(mark in name for mark in ",:;") or (
@@ -530,6 +543,15 @@ def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
                         "id": booking.id,
                         # The PERSONs come in the order of the FILE, as they do in the report.
                         "covers": [each.id for each in file.persons if each.id in booking.covers],
+                        # What it paid, with the BUDGET that the money came from and the PERSON
+                        # who paid, where it names them. None: the BOOKING states no payment.
+                        "paid": None
+                        if booking.paid is None
+                        else {
+                            **_money(booking.paid.money),
+                            "budget": booking.paid.budget,
+                            "by": booking.paid.by,
+                        },
                     }
                     for booking in bookings
                 ],
@@ -537,12 +559,7 @@ def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
                     {
                         "id": offer.id,
                         "places": offer.places,
-                        "price": None
-                        if offer.price is None
-                        else {
-                            "amount": str(offer.price.amount),
-                            "currency": offer.price.currency,
-                        },
+                        "price": None if offer.price is None else _money(offer.price),
                     }
                     for offer in offers
                 ],
@@ -552,6 +569,35 @@ def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
             }
         )
     return rights
+
+
+def _money(money: Money) -> Trip:
+    """An amount of money as the FILE writes it, with its currency."""
+    return {"amount": str(money.amount), "currency": money.currency}
+
+
+def _budgets(file: File) -> list[Trip]:
+    """The BUDGETs of the FILE, in its order, each with what the FILE says of it.
+
+    ``persons`` are those who may draw on the BUDGET for what the TRIP still has to buy, in the
+    FILE's order of PERSONs. ``currencies`` are those it holds. ``caps`` holds each DECISION
+    that the TRIP spends at most an amount from the BUDGET, in the FILE's order.
+    """
+    called = _names(file.budgets)
+    return [
+        {
+            "id": budget.id,
+            "name": called[budget.id],
+            "persons": [each.id for each in file.persons if each.id in budget.persons],
+            "currencies": list(budget.currencies),
+            "caps": [
+                {"id": cap.id, "limit": _money(cap.limit)}
+                for cap in file.caps.values()
+                if cap.budget == budget.id
+            ],
+        }
+        for budget in file.budgets
+    ]
 
 
 def _capabilities(file: File, names: Mapping[str, str]) -> list[Trip]:
@@ -843,6 +889,7 @@ def holds(trip: object) -> bool:
     planned = sent["itinerary"] is True
     options = _the_options(sent["options"], persons, places)
     ways = _the_ways(sent["ways"], places)
+    budgets = _the_budgets(sent["budgets"], persons)
     steps = cast("list[object]", sent["steps"])
     return (
         options is not None
@@ -863,7 +910,8 @@ def holds(trip: object) -> bool:
             for step in cast("list[dict[str, object]]", steps)
         )
         and _are_wants(sent["wants"], persons, places, options)
-        and _are_rights(sent["rights"], persons, options)
+        and budgets is not None
+        and _are_rights(sent["rights"], persons, options, budgets)
         and _are_capabilities(sent["capabilities"], persons, options)
     )
 
@@ -976,13 +1024,69 @@ def _is_travel_listed_in_full(travel: object, places: frozenset[str]) -> bool:
     return _all_different(records) is not None
 
 
-def _are_rights(rights: object, persons: frozenset[str], options: frozenset[str]) -> bool:
+def _the_budgets(budgets: object, persons: frozenset[str]) -> frozenset[str] | None:
+    """The ids of the BUDGETs of such a TRIP, or None where these are not its BUDGETs.
+
+    Each has an id of its own and a name. It lists PERSONs of the TRIP, each once, and holds
+    one currency at least, each once. It has one cap at most in a currency, and each cap is a
+    DECISION of its own with an amount of money.
+    """
+    ids: list[object] = []
+    caps: list[object] = []
+    for budget in cast("list[object]", budgets):
+        if not _fits(budget, _BUDGET):
+            return None
+        said = cast("dict[str, object]", budget)
+        who, held = _all_different(said["persons"]), _all_different(said["currencies"])
+        if (
+            not cast("str", said["name"]).strip()
+            or who is None
+            or not who <= persons
+            or not held
+            or not all(currency.strip() for currency in held)
+        ):
+            return None
+        capped: list[object] = []
+        for cap in cast("list[object]", said["caps"]):
+            if not _fits(cap, _CAP):
+                return None
+            stated = cast("dict[str, object]", cap)
+            if not stated["id"] or stated["limit"] is None or not _is_money(stated["limit"]):
+                return None
+            caps.append(stated["id"])
+            capped.append(cast("dict[str, str]", stated["limit"])["currency"])
+        if _all_different(capped) is None:
+            return None
+        ids.append(said["id"])
+    return None if _all_different(caps) is None else _all_different(ids)
+
+
+def _is_a_payment(paid: object, persons: frozenset[str], budgets: frozenset[str]) -> bool:
+    """Whether this is what a BOOKING paid, or None where it states no payment.
+
+    An amount of money, with a BUDGET of the TRIP or none, and a PERSON of the TRIP or none.
+    """
+    if paid is None:
+        return True
+    if not _fits(paid, _PAID):
+        return False
+    said = cast("dict[str, object]", paid)
+    return (
+        _is_money({"amount": said["amount"], "currency": said["currency"]})
+        and (said["budget"] is None or said["budget"] in budgets)
+        and (said["by"] is None or said["by"] in persons)
+    )
+
+
+def _are_rights(
+    rights: object, persons: frozenset[str], options: frozenset[str], budgets: frozenset[str]
+) -> bool:
     """Whether this is what such a TRIP says of the rights to its OPTIONs.
 
     Each OPTION of the TRIP is there once at most, and each BOOKING and each OFFER once. A
-    BOOKING covers PERSONs of the TRIP, each once. An OFFER has one place at least, and a price
-    that is an amount in a currency. A FACT that the FILE lists every right to an OPTION names
-    OFFERs for that OPTION.
+    BOOKING covers PERSONs of the TRIP, each once, and what it paid names a BUDGET and a PERSON
+    of the TRIP, or none. An OFFER has one place at least, and a price that is an amount in a
+    currency. A FACT that the FILE lists every right to an OPTION names OFFERs for that OPTION.
     """
     which: list[object] = []
     ids: list[object] = []
@@ -1004,6 +1108,8 @@ def _are_rights(rights: object, persons: frozenset[str], options: frozenset[str]
             stated = cast("dict[str, object]", booking)
             covered = _all_different(stated["covers"])
             if not stated["id"] or covered is None or not covered or not covered <= persons:
+                return False
+            if not _is_a_payment(stated["paid"], persons, budgets):
                 return False
             ids.append(stated["id"])
         for offer in cast("list[object]", said["offers"]):
