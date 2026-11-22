@@ -76,6 +76,17 @@ function drawingOf(option, id) {
 }
 
 /**
+ * The name of a PERSON over their column of the calendar, or beside their row of the strip,
+ * in the colour of that PERSON. It is a drawing of the PERSON, like their row among the
+ * PERSONs, so pointing at one lights up the others.
+ */
+function nameOf(person, n, kind) {
+  const name = Object.assign(made("span", `${kind}p${n % HUES}`, person.name), { title: person.name });
+  name.dataset.of = `person:${person.id}`;
+  return name;
+}
+
+/**
  * What a row or an entry for a WAY is a drawing of: each step of the TRIP in which somebody
  * takes it, by its number, or the WAY itself, by its id, where nobody takes it.
  */
@@ -160,7 +171,7 @@ function draw(laid) {
     const column = made("div", "day");
     column.style.setProperty("--people", Math.max(people, 1));
     const heads = made("div", "people");
-    laid.persons.forEach((person, n) => heads.append(Object.assign(made("span", `person p${n % HUES}`, person.name), { title: person.name })));
+    laid.persons.forEach((person, n) => heads.append(nameOf(person, n, "person ")));
     const body = made("div", "day-body");
     body.style.height = `${tall}px`;
     for (const shut of day.shut) {
@@ -265,7 +276,7 @@ function drawStrip(laid) {
   box.style.setProperty("--people", people);
   box.style.setProperty("--row", `${strip.row}px`);
   const names = made("div", "strip-people");
-  strip.persons.forEach((person, n) => names.append(Object.assign(made("span", `p${n % HUES}`, person.name), { title: person.name })));
+  strip.persons.forEach((person, n) => names.append(nameOf(person, n, "")));
   const days = made("div", "strip-days");
   const rows = made("div", "strip-rows");
   days.style.width = rows.style.width = `${strip.wide}px`;
