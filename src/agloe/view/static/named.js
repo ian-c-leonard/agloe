@@ -9,8 +9,12 @@
 
 /** How a name ends where the page shows its id after it. */
 const WITH_AN_ID = / \([a-z0-9]+(-[a-z0-9]+)*\)$/;
-/** What a page shows nothing for: a format character, such as a soft hyphen or a mark of direction. */
-const UNSEEN = /\p{Cf}/gu;
+/**
+ * What a page shows nothing for, as the view tells it where it says which names look alike:
+ * the characters that Unicode calls default ignorable, such as a soft hyphen or a mark of
+ * direction, and the format characters.
+ */
+const UNSEEN = /[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
 
 /**
  * A name as the page shows it, for a list that "or" joins: in quotation marks where it holds
@@ -24,7 +28,7 @@ export function either(name) {
   if (name.startsWith('"')) return name;
   const id = name.match(WITH_AN_ID);
   const bare = id === null ? name : name.slice(0, id.index);
-  if (!bare.replace(UNSEEN, "").toLowerCase().split(/\s+/).includes("or")) return name;
+  if (!bare.normalize("NFKC").replace(UNSEEN, "").toLowerCase().split(/\s+/).includes("or")) return name;
   return `"${bare.replace(/\\/g, "\\\\")}"${id === null ? "" : id[0]}`;
 }
 
