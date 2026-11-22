@@ -9,6 +9,8 @@ page in it, so Node runs it here, through ``view_part.mjs``.
 Nothing in it judges a TRIP. Where an OBJECT is in a plan is for the COMPILER to say.
 """
 
+import json
+from pathlib import Path
 from typing import Any
 
 from agloe.file import read
@@ -23,6 +25,8 @@ SAYS = (
     "The OBJECTs of the FILE, each with where it is when the TRIP starts, the OPTIONs that the"
     " FILE says require it, and those that it says hand it over or keep it."
 )
+# Where a card gives a time of the plan.
+CLOCKS = " Times are on the clocks of America/Chicago."
 RED = " A red edge marks what the report names among what rules out every plan."
 YELLOW = " A yellow edge marks what the report names in what the FILE does not say."
 ALL_REQUIRE = "The FILE states every one of its OPTIONs that requires it."
@@ -53,8 +57,11 @@ def objects_of(name: str) -> Objects:
 def test_an_object_says_where_it_starts_what_requires_it_and_what_moves_it() -> None:
     """The bags are at the hotel. The flight requires them, and the hotel hands them over."""
     shown = objects_of("the-bags/they-collect-them")
-    assert shown["says"] == SAYS
+    # The card says when Alex takes the bags, so the part says whose clocks that time is on.
+    assert shown["says"] == SAYS + CLOCKS
     assert (shown["clash"], shown["asked"]) == (False, False)
+    # Alex carries the bags throughout: the card gives no time, and the part names no clocks.
+    assert objects_of("the-bags/they-carry-them")["says"] == SAYS
     (bags,) = shown["objects"]
     assert (bags["id"], bags["name"], bags["starts"]) == (
         "bags",
@@ -69,6 +76,7 @@ def test_an_object_says_where_it_starts_what_requires_it_and_what_moves_it() -> 
             "says": "requires it",
             "takes": "In the plan: Alex and Sam take part.",
             "step": 6,
+            "plan": "Just before it starts: with Alex.",
             "records": ["flight-needs-the-bags"],
             "clash": [],
             "finds": None,
@@ -83,12 +91,280 @@ def test_an_object_says_where_it_starts_what_requires_it_and_what_moves_it() -> 
         "In the plan: Alex takes part.",
         True,
     )
+    assert collect["plan"] is None
     assert bags["whole"] == [ALL_REQUIRE, ALL_MOVE]
+    # Where the report says the OBJECT is in its plan, worded as the report words it.
+    assert bags["plan"] == (
+        "In the plan: at the hotel when the TRIP starts; with Alex from 2:45 pm (handed over in"
+        " Collect the bags)."
+    )
+    assert bags["might"] == []
     # Its own records: where it starts, and the two FACTs that the FILE states every OPTION.
     assert bags["records"] == [
         "where-the-bags-start",
         "every-use-of-the-bags",
         "everything-that-moves-the-bags",
+    ]
+
+
+def test_an_object_says_where_it_is_in_a_plan_only_where_the_report_says_so() -> None:
+    sent, found, words = in_words(STORY / "they-collect-them.json")
+    assert "\nWhere each OBJECT is:\n  the bags: at the hotel when the TRIP starts; with" in words
+    # The page words it from the report as JSON, so it needs no report in words.
+    (shown,) = all_objects([sent], [found])
+    (bags,) = shown["objects"]
+    assert bags["plan"] == (
+        "In the plan: at the hotel when the TRIP starts; with Alex from 2:45 pm (handed over in"
+        " Collect the bags)."
+    )
+    assert bags["requires"][0]["plan"] == "Just before it starts: with Alex."
+    # With no report, the page has nothing to say of a plan.
+    (shown,) = all_objects([sent])
+    (bags,) = shown["objects"]
+    assert (bags["plan"], bags["might"], bags["requires"][0]["plan"]) == (None, [], None)
+    # A report that shows no plan says where no OBJECT is.
+    for name in ("nobody-collects-them", "depends-on-the-museum", "somebody-might"):
+        (bags,) = objects_of(f"the-bags/{name}")["objects"]
+        assert (bags["plan"], bags["might"]) == (None, []), name
+        assert [each["plan"] for each in bags["requires"]] == [None] * len(bags["requires"]), name
+    # A report that names something that the TRIP does not hold says nothing of that OBJECT:
+    # a PERSON, a PLACE or an OPTION that is not there, or a way of getting somewhere that
+    # the page has no words for.
+    (carried,) = found["objects"]
+    first, second = carried["path"]
+    paths: list[list[Any]] = [
+        [{**first, "where": [{"place": "the-moon"}]}, second],
+        [first, {**second, "where": [{"person": "nobody"}]}],
+        [first, {**second, "since": "no-such-option"}],
+        [first, {**second, "how": "thrown"}],
+        [first, {**second, "where": []}],
+        [],
+    ]
+    for path in paths:
+        other: dict[str, Any] = {**found, "objects": [{**carried, "path": path}]}
+        (shown,) = all_objects([sent], [other])
+        (bags,) = shown["objects"]
+        assert (bags["plan"], bags["might"], bags["requires"][0]["plan"]) == (None, [], None)
+
+
+def test_where_an_object_is_in_a_plan_has_the_names_that_the_page_shows(tmp_path: Path) -> None:
+    """Two OBJECTs, two OPTIONs or two PERSONs whose names look alike show their ids."""
+    story = json.loads((STORY / "they-carry-them.json").read_text())
+    about_the_bags = (
+        "where-the-bags-start",
+        "flight-needs-the-bags",
+        "every-use-of-the-bags",
+        "everything-that-moves-the-bags",
+    )
+    others = [fact for fact in story["facts"] if fact["id"] not in about_the_bags]
+    path = tmp_path / "trip.json"
+
+    def two(first: str, second: str) -> list[dict[str, Any]]:
+        """Alex has one thing and Sam another, and the flight requires both."""
+        return [
+            {"id": "alex-has-one", "object": first, "starts_with": "alex"},
+            {"id": "sam-has-one", "object": second, "starts_with": "sam"},
+            {"id": "needs-one", "option": "flight", "requires": {"object": first, "needed": True}},
+            {"id": "needs-two", "option": "flight", "requires": {"object": second, "needed": True}},
+            {"id": "all-that-move-one", "complete": {"transfers": first}},
+            {"id": "all-that-move-two", "complete": {"transfers": second}},
+        ]
+
+    # Alex and Sam have a bag each. The two names differ by a space, and a page shows them
+    # alike, so each card has the id. The report gives no id, and each card still says where
+    # its own bag is.
+    content = {**story, "facts": [*others, *two("alex-bag", "sam-bag")]}
+    content["objects"] = [
+        {"id": "alex-bag", "name": "the bags"},
+        {"id": "sam-bag", "name": "the  bags"},
+    ]
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    assert "\n  the bags: with Alex when the TRIP starts\n" in words
+    assert "\n  the  bags: with Sam when the TRIP starts\n" in words
+    (shown,) = all_objects([sent], [found], [words])
+    said = [
+        (each["name"], each["plan"], [option["plan"] for option in each["requires"]])
+        for each in shown["objects"]
+    ]
+    assert said == [
+        (
+            "the bags (alex-bag)",
+            "In the plan: with Alex when the TRIP starts.",
+            ["Just before it starts: with Alex."],
+        ),
+        (
+            "the  bags (sam-bag)",
+            "In the plan: with Sam when the TRIP starts.",
+            ["Just before it starts: with Sam."],
+        ),
+    ]
+    # Two PERSONs have one name, once with the accent joined to its letter and once after
+    # it. The page shows the id of each, also where it says who has an OBJECT.
+    content = {**story, "facts": [*others, *two("bags", "passport")]}
+    content["objects"] = [
+        {"id": "bags", "name": "the bags"},
+        {"id": "passport", "name": "a passport"},
+    ]
+    content["persons"] = [{"id": "alex", "name": "Jos\u00e9"}, {"id": "sam", "name": "Jose\u0301"}]
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    (shown,) = all_objects([sent], [found], [words])
+    said = [
+        (each["plan"], [option["plan"] for option in each["requires"]]) for each in shown["objects"]
+    ]
+    assert said == [
+        (
+            "In the plan: with Jos\u00e9 (alex) when the TRIP starts.",
+            ["Just before it starts: with Jos\u00e9 (alex)."],
+        ),
+        (
+            "In the plan: with Jose\u0301 (sam) when the TRIP starts.",
+            ["Just before it starts: with Jose\u0301 (sam)."],
+        ),
+    ]
+    # Two OPTIONs have names that a page shows alike, and the FILE does not say that the
+    # flight is all that requires the bags. The other OPTION is under the bags with its id.
+    content = json.loads(json.dumps(story))
+    content["facts"] = [fact for fact in story["facts"] if fact["id"] != "every-use-of-the-bags"]
+    (visit,) = [option for option in content["options"] if option["id"] == "museum-visit"]
+    visit["name"] = "Flight  home"
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    assert [(each["name"], each["plan"]) for each in (*bags["requires"], *bags["might"])] == [
+        ("Flight home (flight)", "Just before it starts: with Alex."),
+        (
+            "Flight  home (museum-visit)",
+            "Just before it starts: with Alex, so the plan holds if it does.",
+        ),
+    ]
+    # A report cannot say of one OPTION both that a FACT has it require the OBJECT and that
+    # the FILE does not say. Where one does, the OPTION is under the OBJECT once.
+    (carried,) = found["objects"]
+    uses = [{**use, "stated": False} for use in carried["required_by"]]
+    other = {**found, "objects": [{**carried, "required_by": uses}]}
+    (shown,) = all_objects([sent], [other], [words])
+    (bags,) = shown["objects"]
+    assert [each["option"] for each in bags["might"]] == ["museum-visit"]
+    assert [each["plan"] for each in bags["requires"]] == [None]
+
+
+def test_an_object_that_might_be_in_one_of_several_places_says_each(tmp_path: Path) -> None:
+    """The FILE does not say what the museum does with the bags. The cloakroom returns them."""
+    content = json.loads((STORY / "the-museum-keeps-them.json").read_text())
+    gone = ("museum-checks-the-bags", "everything-that-moves-the-bags")
+    content["facts"] = [fact for fact in content["facts"] if fact["id"] not in gone]
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    assert found["answer"] == "FEASIBLE"
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    assert bags["plan"] == (
+        "In the plan: with Alex when the TRIP starts; with Alex or at the Art Institute from"
+        " 1:00 pm (the FILE does not say what Museum visit does with the bags); with Alex from"
+        " 2:30 pm (handed over in Pick up at the cloakroom); with Alex or at O'Hare from 5:00 pm"
+        " (the FILE does not say what Flight home does with the bags)."
+    )
+    assert f"\n  the bags: {bags['plan'][len('In the plan: ') : -1]}\n" in words
+    assert shown["says"] == SAYS + CLOCKS
+    # A name that holds the word "or" is in quotation marks in such a list, as in the report:
+    # it is one name, and not two places where the OBJECT might be.
+    (museum,) = [place for place in content["places"] if place["id"] == "art-institute"]
+    museum["name"] = "Ripley's Believe It or Not!"
+    content["persons"][0]["name"] = "Tom or Jerry"
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    assert bags["plan"].startswith(
+        'In the plan: with "Tom or Jerry" when the TRIP starts; with "Tom or Jerry" or at'
+        ' "Ripley\'s Believe It or Not!" from 1:00 pm (the FILE does not say what Museum visit'
+    )
+    assert f"\n  the bags: {bags['plan'][len('In the plan: ') : -1]}\n" in words
+    assert bags["requires"][0]["plan"] == 'Just before it starts: with "Tom or Jerry".'
+    assert f"    Flight home requires the bags. {bags['requires'][0]['plan']}\n" in f"{words}\n"
+    # Where the page shows the id of such a name, the quotation marks go on before the id.
+    (hotel,) = [place for place in content["places"] if place["id"] == "hotel"]
+    museum["name"], hotel["name"] = "Believe It or Not", "Believe It  or Not"
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    assert ' or at "Believe It or Not" (art-institute) from 1:00 pm (' in bags["plan"]
+    assert ' or at "Believe It or Not" from 1:00 pm (' in words
+    # A name holds the word where a page shows it so. A mark of direction after the word
+    # shows as nothing, so the name reads "Tom or Jerry", and it is in quotation marks. Each
+    # name keeps the spelling of the FILE. The report tells the word by its spelling, so it
+    # sets no quotation marks here: the page differs from it in them and in the id.
+    content["persons"] = [
+        {"id": "alex", "name": "Tom or\u200e Jerry"},
+        {"id": "sam", "name": "Tom or Jerry"},
+    ]
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    assert bags["plan"].startswith('In the plan: with "Tom or\u200e Jerry" (alex) when the TRIP')
+    assert bags["requires"][0]["plan"] == (
+        'Just before it starts: with "Tom or\u200e Jerry" (alex).'
+    )
+    assert "\n  the bags: with Tom or\u200e Jerry when the TRIP starts; " in words
+    # A character that joins the word to the one before it leaves no such word to see.
+    content["persons"] = [{"id": "alex", "name": "Tom\ufeffor Jerry"}, {"id": "sam", "name": "Sam"}]
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    assert bags["requires"][0]["plan"] == "Just before it starts: with Tom\ufeffor Jerry."
+
+
+def test_an_option_of_the_plan_that_might_require_an_object_is_under_it(tmp_path: Path) -> None:
+    """The FILE does not say that the flight is all that requires the bags. Alex carries them."""
+    content = json.loads((STORY / "they-carry-them.json").read_text())
+    content["facts"] = [fact for fact in content["facts"] if fact["id"] != "every-use-of-the-bags"]
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    assert found["answer"] == "FEASIBLE"
+    (shown,) = all_objects([sent], [found], [words])
+    assert (shown["clash"], shown["asked"]) == (False, False)
+    (bags,) = shown["objects"]
+    assert bags["plan"] == "In the plan: with Alex when the TRIP starts."
+    assert [(each["name"], each["plan"]) for each in bags["requires"]] == [
+        ("Flight home", "Just before it starts: with Alex.")
+    ]
+    assert bags["might"] == [
+        {
+            "option": "museum-visit",
+            "name": "Museum visit",
+            "does": False,
+            "says": "the FILE does not say whether this requires it",
+            "takes": "In the plan: Alex and Sam take part.",
+            "step": 0,
+            "plan": "Just before it starts: with Alex, so the plan holds if it does.",
+            "records": [],
+            "clash": [],
+            "finds": None,
+            "cases": [],
+            "asks": [],
+        }
+    ]
+    # An OBJECT whose name holds a colon, and an OPTION whose name does, keep their words.
+    content["objects"][0]["name"] = "the bags: two"
+    (visit,) = [option for option in content["options"] if option["id"] == "museum-visit"]
+    visit["name"] = "Museum: the visit"
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    # The report puts such a name in quotation marks, and so does the page.
+    assert bags["name"] == '"the bags: two"'
+    assert bags["plan"] == "In the plan: with Alex when the TRIP starts."
+    assert [(each["name"], each["plan"]) for each in bags["might"]] == [
+        ('"Museum: the visit"', "Just before it starts: with Alex, so the plan holds if it does.")
     ]
 
 
@@ -237,13 +513,32 @@ def test_every_example_shows_its_objects_in_the_words_of_the_report() -> None:
         [found for _, found, _ in asked],
         [words for _, _, words in asked],
     )
-    starts = needs = moves = 0
+    starts = needs = moves = placed = 0
     for path, (sent, _, words), each in zip(FILES, asked, shown, strict=True):
         file = read(path)
         name = f"{path.parent.name}/{path.stem}"
         assert [thing["id"] for thing in each["objects"]] == [thing.id for thing in file.objects], (
             name
         )
+        # Where the report says where each OBJECT is in its plan, the page says each of those
+        # lines again, and nothing of a plan where the report says none.
+        under = words.split("\nWhere each OBJECT is:\n")[1:]
+        again: list[str] = []
+        for thing in each["objects"]:
+            if thing["plan"] is not None:
+                again.append(f"  {thing['name']}: {thing['plan'][len('In the plan: ') : -1]}")
+            for option in thing["requires"]:
+                if option["plan"] is not None:
+                    again.append(f"    {option['name']} requires {thing['name']}. {option['plan']}")
+            for option in thing["might"]:
+                silent = f"The FILE does not say whether {option['name']} requires {thing['name']}"
+                again.append(f"    {silent}. {option['plan']}")
+        if under:
+            placed += 1
+            lines = under[0].split("\n\n")[0].splitlines()
+            assert sorted(again) == sorted(lines), name
+        else:
+            assert again == [], name
         for thing in each["objects"]:
             called = thing["name"]
             stated = file.object_starts(thing["id"])
@@ -271,4 +566,4 @@ def test_every_example_shows_its_objects_in_the_words_of_the_report() -> None:
                     else:
                         said = f"{option['name']} {option['says'].replace(' it', f' {called}', 1)}"
                     assert f"  {record}: {said}" in words, name
-    assert min(starts, needs, moves) > 3
+    assert min(starts, needs, moves, placed) > 3

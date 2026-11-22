@@ -160,7 +160,7 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 10px; }
 .card { display: grid; gap: 6px; align-content: start; min-width: 0; overflow-wrap: anywhere; margin: 0; padding: 10px 14px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; }
 .card-name { margin: 0; font: 600 14px/1.3 var(--text); }
-.card-holds, .card-whole { font-size: 12.5px; color: var(--ink2); }
+.card-holds, .card-plan, .card-whole { font-size: 12.5px; color: var(--ink2); }
 .card-whole { color: var(--muted); }
 .card-options { display: grid; gap: 4px; margin: 2px 0; padding: 0; list-style: none; }
 /* What the FILE says of an OPTION stands beside its name, and below it where the two do not fit. */

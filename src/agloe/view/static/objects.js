@@ -10,16 +10,28 @@
 // that depends on something works.
 //
 // Nothing here judges a TRIP. Where an OBJECT is in a plan, and whether it is at hand for an
-// OPTION that requires it, is for the COMPILER to say: the report says it, and the page ties
-// those lines to the OBJECT.
+// OPTION that requires it, is for the COMPILER to say: the report says it, the page ties
+// those lines to the OBJECT, and the card of the OBJECT says the same, worded as the report
+// words it, from what the report as JSON holds.
 
-import { atHandFor, marksBy } from "./named.js";
+import { atHandFor, carriedIn, either, listed, marksBy } from "./named.js";
+import { clock, clocksOf } from "./times.js";
 import { whoIsIn } from "./who.js";
 
 /** What a case of a report can need that is about whether an OPTION requires an OBJECT. */
 const ABOUT_REQUIRING = new Set(["does not require"]);
 /** What a case of a report can need that is about what an OPTION does with an OBJECT. */
 const ABOUT_MOVING = new Set(["hands over", "keeps", "does not keep"]);
+
+/**
+ * How an OBJECT came to be where it is from the start of an OPTION, as the report words it:
+ * give it the name of the OPTION and the name of the OBJECT.
+ */
+const HOW = new Map([
+  ["handed over", (option) => `handed over in ${option}`],
+  ["kept", (option) => `kept by ${option}`],
+  ["might be kept", (option, thing) => `the FILE does not say what ${option} does with ${thing}`],
+]);
 
 /** What an OPTION does with an OBJECT, as the report words it. */
 const DOES = { hands_over: "it can be handed over here", keeps: "keeps it", nothing: "leaves it alone" };
@@ -58,6 +70,13 @@ function movedBy(thing) {
  * (`takes`), and the `step` of the TRIP that it is, where the calendar holds it. `does` says
  * that the OPTION requires the OBJECT, or hands it over or keeps it.
  *
+ * Where the report shows a plan and says where each OBJECT is in it, the page says the same,
+ * worded as the report words it, with each name as the page shows it. `plan` on an OBJECT
+ * says where it is throughout the plan. `plan` on an OPTION that requires it says where it is
+ * just before that OPTION starts. `might` holds each OPTION of the plan of which the report
+ * says that the FILE does not say whether it requires the OBJECT, with the same. Where the
+ * report names something that the TRIP does not hold, nothing is said of that OBJECT.
+ *
  * `report` is the report as JSON, where the page has one. `clash` on an OBJECT or on one of
  * its OPTIONs holds its `records` that the report names as ruling out every plan, and `finds`
  * says so. `cases` holds the cases that name it among what the FILE does not say, as their
@@ -71,7 +90,44 @@ export function objects(trip, report = null, stated = null) {
   const places = new Map(trip.places.map((each) => [each.id, each.name]));
   const who = whoIsIn(trip);
   const marked = marksBy(report, stated);
+  const named = new Map(trip.options.map((each) => [each.id, each.name]));
+  // When each OPTION of the plan starts, and the first step of the plan: a time has its date
+  // where it is not on the day that the plan starts.
+  const startOf = new Map(trip.itinerary ? trip.steps.flatMap((step) => (step.option === null ? [] : [[step.option, step.start]])) : []);
+  const first = trip.itinerary && trip.steps.length ? trip.steps[0].start : null;
+  // Where an OBJECT is, or each place it might be: with Alex or at the Art Institute. Each
+  // name is as "or" joins it, as in the report. Null where the TRIP has no such PERSON or
+  // PLACE.
+  const whereIs = (where) => {
+    const each = where.map((one) => (typeof one.person === "string" ? (people.has(one.person) ? `with ${either(people.get(one.person))}` : null) : places.has(one.place) ? `at ${either(places.get(one.place))}` : null));
+    return each.includes(null) ? null : listed(each, "or");
+  };
+  const carried = new Map(carriedIn(report).map((each) => [each.object, each]));
+  // Whether a card gives a time of the plan. The part then says whose clocks it is on.
+  let timed = false;
   const shown = trip.objects.map((thing) => {
+    // What the report says of this OBJECT in its plan: where it is from the start of the
+    // TRIP on, and where it is just before each OPTION that requires it or might. All of it
+    // is said, or nothing: a stay or a use that names something the TRIP does not hold
+    // leaves the OBJECT with no word on the plan.
+    const said = carried.get(thing.id) ?? null;
+    const stays = (said === null ? [] : said.stays).map((stay) => {
+      const where = whereIs(stay.where);
+      if (where === null || stay.since === null) return where === null ? null : `${where} when the TRIP starts`;
+      const how = HOW.get(stay.how);
+      if (how === undefined || !startOf.has(stay.since) || !named.has(stay.since)) return null;
+      return `${where} from ${clock(startOf.get(stay.since), first)} (${how(named.get(stay.since), thing.name)})`;
+    });
+    const all = (said === null ? [] : said.uses).map((use) => ({ option: use.option, stated: use.stated, where: startOf.has(use.option) ? whereIs(use.where) : null }));
+    const known = stays.length > 0 && !stays.includes(null) && all.every((use) => use.where !== null);
+    const uses = known ? all : [];
+    timed ||= known && said.stays.some((stay) => stay.since !== null);
+    // Where the OBJECT is just before an OPTION starts, where the report says that a FACT
+    // has the OPTION require it.
+    const before = (option) => {
+      const use = uses.find((each) => each.option === option && each.stated);
+      return use === undefined ? null : `Just before it starts: ${use.where}.`;
+    };
     // An OPTION under the OBJECT shows one thing of the two: whether it requires the OBJECT,
     // or what it does with it. A case marks it where the case is about that. An OPTION that
     // requires the OBJECT is also marked where a case has the OBJECT at hand for it.
@@ -85,10 +141,21 @@ export function objects(trip, report = null, stated = null) {
         says,
         takes,
         step,
+        plan: atHand && does ? before(each.option) : null,
         ...marked([each.record], about, "The report names this OPTION and this OBJECT in what the FILE does not say."),
       };
     };
     const asked = new Set(thing.requires.map((each) => each.option));
+    // An OPTION of the plan of which the report says that the FILE does not say whether it
+    // requires the OBJECT. No FACT is about the two, and no case names them: the plan holds
+    // either way.
+    const might = uses
+      .filter((use) => !use.stated && !asked.has(use.option))
+      .map((use) => {
+        const { step, takes } = who(use.option);
+        const plan = `Just before it starts: ${use.where}, so the plan holds if it does.`;
+        return { option: use.option, name: named.get(use.option), does: false, says: "the FILE does not say whether this requires it", takes, step, plan, ...marked([], () => false, "") };
+      });
     const { starts } = thing;
     // The report says it so: Alex has the bags when the TRIP starts, the TRIP starts with the
     // bags at the hotel.
@@ -97,7 +164,9 @@ export function objects(trip, report = null, stated = null) {
       id: thing.id,
       name: thing.name,
       starts: where,
+      plan: known ? `In the plan: ${stays.join("; ")}.` : null,
       requires: thing.requires.map((each) => under(each, each.needed, each.needed ? "requires it" : "does not require it", ABOUT_REQUIRING, true)),
+      might,
       transfers: thing.transfers.map((each) => under(each, each.does !== "nothing", DOES[each.does], ABOUT_MOVING, false)),
       whole: [requiredBy(thing, trip.options.some((option) => !asked.has(option.id))), movedBy(thing)],
       // An OBJECT's own records: the FACT about where it is when the TRIP starts, and the FACTs
@@ -114,6 +183,7 @@ export function objects(trip, report = null, stated = null) {
   const asked = all.some((each) => each.cases.length > 0);
   const says =
     "The OBJECTs of the FILE, each with where it is when the TRIP starts, the OPTIONs that the FILE says require it, and those that it says hand it over or keep it." +
+    (timed ? clocksOf(trip.zone) : "") +
     (clash ? " A red edge marks what the report names among what rules out every plan." : "") +
     (asked ? " A yellow edge marks what the report names in what the FILE does not say." : "");
   return { says, clash, asked, objects: shown };
