@@ -18,16 +18,19 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 /* What the page draws of the FILE: the calendar, and a part for each kind of thing in it. */
 .drawings { display: grid; gap: 18px; min-width: 0; }
 .drawings:not(:has(> :not([hidden]))) { display: none; }
-/* On a wide window the report stays beside what the page draws, and scrolls by itself. So
-   pointing at a drawing shows its lines in the report, and the other way round. */
+/* On a wide window the page fills the window and does not scroll. Under the answer are two
+   panes, side by side: what the page draws, and the report. Each scrolls by itself. So the
+   answer stays in view, and pointing at a drawing shows its lines in the report, and the other
+   way round. Where the answer alone is taller than the window, the whole of it scrolls. */
 @media (min-width: 1400px) {
-  /* The report stays in the window to the end of the page: the page ends where it does. */
-  main { max-width: 1800px; padding-bottom: 12px; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); column-gap: 28px; align-items: start; }
+  body { height: 100vh; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+  main { width: 100%; max-width: 1800px; min-height: 0; padding-bottom: 12px; overflow-y: auto; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-rows: auto minmax(0, 1fr); column-gap: 28px; }
   .answer { grid-column: 1 / -1; }
-  .report-part { position: sticky; top: 12px; max-height: calc(100vh - 24px); grid-template-rows: auto minmax(0, 1fr); }
+  .drawings { min-height: 0; overflow-y: auto; align-content: start; padding-right: 6px; }
+  .report-part { min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
   .report-part pre { min-height: 0; overflow-y: auto; }
   /* With nothing drawn, the report has the page to itself. */
-  .drawings:not(:has(> :not([hidden]))) + .report-part { grid-column: 1 / -1; position: static; max-height: none; }
+  .drawings:not(:has(> :not([hidden]))) + .report-part { grid-column: 1 / -1; }
 }
 
 .answer { background: var(--surface); border: 1px solid var(--line); border-left: 6px solid var(--ink); border-radius: 9px; padding: 12px 16px; display: grid; gap: 4px; }

@@ -18,7 +18,7 @@
     <ul class="problems" id="problems" hidden></ul>
     <p class="note" id="note"></p>
   </section>
-  <div class="drawings" id="drawings">
+  <div class="drawings" id="drawings" tabindex="0" aria-label="What the page draws of the FILE">
   <section class="calendar-part" id="calendar-part" hidden>
     <h2>Calendar</h2>
     <p class="says" id="calendar-says"></p>
@@ -79,8 +79,8 @@
   </section>
   </div>
   <section class="report-part" id="report-part" hidden>
-    <h2>The COMPILER's report</h2>
-    <pre id="report"></pre>
+    <h2 id="report-heading">The COMPILER's report</h2>
+    <pre id="report" tabindex="0" aria-labelledby="report-heading"></pre>
   </section>
 </main>
 </body>
