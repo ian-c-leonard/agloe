@@ -668,7 +668,7 @@ def test_with_the_transfers_left_open_the_compiler_says_what_it_has_not_worked_o
     assert (
         "The trip might work if another transfer puts permit at hand for desk-a and desk-b."
     ) in words
-    assert "That is not settled. Nothing that the FILE lists puts permit at hand there" in words
+    assert "That is not settled. What the FILE lists does not do that for permit" in words
     assert "The trip works" not in words
 
 
@@ -1705,6 +1705,8 @@ def test_the_best_and_worst_cases_settle_the_answer_with_objects() -> None:
 
 
 type Chain = tuple[list[tuple[int, int, int]], dict[int, tuple[tuple[str, str], ...]], object]
+# One order of some OPTIONs as gaps, with hand-overs: an OPTION, an OBJECT and a PERSON.
+type Ordered = tuple[list[tuple[int, int, int]], list[tuple[int, str, str]]]
 
 
 def every_chain(
@@ -1719,9 +1721,9 @@ def every_chain(
     It stands in for the search's own way of choosing them. Every order is given, also one
     that a PERSON's own order rules out. In each OPTION that hands an OBJECT over in this
     world, the OBJECT goes to anybody who takes part or to nobody, also where it is not at
-    hand. With ``everything``, all the OPTIONs that happen are ordered and every OBJECT is
-    handed about. Without it, they are the OPTIONs and OBJECTs that the rules say matter, so
-    that the times come out as the rules say.
+    hand. With ``everything``, all the OPTIONs that happen are put in one order and every
+    OBJECT is handed about. Without it, each OBJECT that the rules say matters has an order
+    of its own among its own OPTIONs, so that the times come out as the rules say.
     """
     options = file.options
     people = [person.id for person in file.persons]
@@ -1732,38 +1734,53 @@ def every_chain(
         for thing in things
         if any((options[index].id, thing) in world.needs for index in happening)
     ]
-    matter = [
-        index
-        for index in happening
-        if any(
-            (options[index].id, thing) in world.needs or (options[index].id, thing) in world.does
-            for thing in followed
-        )
-    ]
     if not followed:
         return None
-    if everything:
-        followed, matter = things, happening
-    chains: list[Chain] = []
-    for order in permutations(matter):
-        gaps = [(before, after, 0) for before, after in pairwise(order)]
-        slots = [
-            (index, thing)
-            for index in order
-            for thing in followed
-            if world.does.get((options[index].id, thing)) in ("hands_over", "any")
-        ]
-        for chosen in product(*([None, *who[index]] for index, _ in slots)):
-            handed: dict[int, tuple[tuple[str, str], ...]] = {}
-            ranked: dict[str, list[tuple[int, int]]] = {thing: [] for thing in followed}
-            for (index, thing), person in zip(slots, chosen, strict=True):
-                if person is not None:
-                    handed[index] = (*handed.get(index, ()), (thing, person))
-                    ranked[thing].append((index, people.index(person)))
-            count = sum(len(each) for each in ranked.values())
-            chains.append(
-                (gaps, handed, (count, tuple(tuple(ranked[thing]) for thing in followed)))
+    # Each group: the OPTIONs that are put in one order, and the OBJECTs handed about in them.
+    groups: list[tuple[list[int], list[str]]] = [(happening, things)]
+    if not everything:
+        groups = [
+            (
+                [
+                    index
+                    for index in happening
+                    if (options[index].id, thing) in world.needs
+                    or (options[index].id, thing) in world.does
+                ],
+                [thing],
             )
+            for thing in followed
+        ]
+    for_each: list[list[Ordered]] = []
+    for matter, mine in groups:
+        ways: list[Ordered] = []
+        for order in permutations(matter):
+            gaps = [(before, after, 0) for before, after in pairwise(order)]
+            slots = [
+                (index, thing)
+                for index in order
+                for thing in mine
+                if world.does.get((options[index].id, thing)) in ("hands_over", "any")
+            ]
+            for chosen in product(*([None, *who[index]] for index, _ in slots)):
+                given = [
+                    (index, thing, person)
+                    for (index, thing), person in zip(slots, chosen, strict=True)
+                    if person is not None
+                ]
+                ways.append((gaps, given))
+        for_each.append(ways)
+    chains: list[Chain] = []
+    for combined in product(*for_each):
+        gaps = [gap for some, _ in combined for gap in some]
+        handed: dict[int, tuple[tuple[str, str], ...]] = {}
+        ranked: dict[str, list[tuple[int, int]]] = {thing: [] for thing in things}
+        for _, given in combined:
+            for index, thing, person in given:
+                handed[index] = (*handed.get(index, ()), (thing, person))
+                ranked[thing].append((index, people.index(person)))
+        count = sum(len(each) for each in ranked.values())
+        chains.append((gaps, handed, (count, tuple(tuple(ranked[thing]) for thing in followed))))
     return chains
 
 
@@ -1886,35 +1903,37 @@ NEW = ("another option", "another transfer")
 def smallest_sets(file: File) -> list[tuple[Unknown, ...]]:
     """The sets of unknown FACTs that a report names, found by trying each set.
 
-    They ask for the fewest things that the FILE does not list, and among those they have
-    the fewest FACTs. "Hands over" is left out where "does not keep" is enough in its place,
-    and then a set that is not settled is left out where another is settled.
+    They ask for the fewest things that the FILE does not list. Among those, the settled
+    sets come first, whatever their size: the ones with no other transfer. Then they have
+    the fewest FACTs. "Hands over" is left out where "does not keep" is enough in its place.
     """
     every_one = unknowns(file)
     facts = [unknown for unknown in every_one if unknown.what not in NEW]
     found = [unknown for unknown in every_one if unknown.what in NEW]
+
+    def weaker(some: tuple[Unknown, ...], asked: Unknown) -> tuple[Unknown, ...]:
+        return tuple(replace(u, what="does not keep") if u == asked else u for u in some)
+
     for count in range(len(found) + 1):
-        for size in range(len(facts) + 1):
-            enough = [
-                (*some, *others)
-                for some in combinations(facts, size)
-                for others in combinations(found, count)
-                if one_way_each(some)
-                and itineraries(file, with_these_at_best(file, (*some, *others)))
-            ]
-            if not enough or not count + size:
-                continue
-
-            def weaker(some: tuple[Unknown, ...], asked: Unknown) -> tuple[Unknown, ...]:
-                return tuple(replace(u, what="does not keep") if u == asked else u for u in some)
-
-            kept = [
-                some
-                for some in enough
-                if not any(u.what == "hands over" and weaker(some, u) in enough for u in some)
-            ]
-            sure = [some for some in kept if all(u.what != "another transfer" for u in some)]
-            return sure or kept
+        new = list(combinations(found, count))
+        settled = [some for some in new if all(u.what != "another transfer" for u in some)]
+        for those in (settled, [some for some in new if some not in settled]):
+            for size in range(len(facts) + 1):
+                enough = [
+                    (*some, *others)
+                    for some in combinations(facts, size)
+                    for others in those
+                    if one_way_each(some)
+                    and itineraries(file, with_these_at_best(file, (*some, *others)))
+                ]
+                if enough and count + size:
+                    return [
+                        some
+                        for some in enough
+                        if not any(
+                            u.what == "hands over" and weaker(some, u) in enough for u in some
+                        )
+                    ]
     return []
 
 
@@ -1923,7 +1942,7 @@ def test_the_sets_named_for_objects_are_all_the_smallest_that_are_enough() -> No
     rng = Random(3141)
     kinds: set[str] = set()
     compared = several = unsettled = 0
-    for _ in range(170):
+    for _ in range(260):
         file = a_trip_with_objects(rng, most=1, leave_out=0.08)
         found = answers.check(file)
         named_sets = asked(found)
@@ -1933,7 +1952,8 @@ def test_the_sets_named_for_objects_are_all_the_smallest_that_are_enough() -> No
             for left_out in named:
                 fewer = [unknown for unknown in named if unknown != left_out]
                 assert not itineraries(file, with_these_at_best(file, fewer))
-        if named_sets and len(named_sets[0]) <= 2 and len(unknowns(file)) <= 22:
+        plain = [unknown for unknown in unknowns(file) if unknown.what not in NEW]
+        if named_sets and len(named_sets[0]) <= 2 and len(plain) <= 11:
             assert named_sets == smallest_sets(file)
             compared += 1
             several += len(named_sets) > 1
@@ -2256,3 +2276,209 @@ def test_an_object_that_no_option_requires_puts_no_option_in_an_order() -> None:
         ("sam-appointment", seconds(8)),
         ("alex-appointment", seconds(10)),
     ]
+
+
+# What the second review's FILEs showed.
+
+
+def test_what_another_transfer_has_to_do_is_read_off_the_plan_that_the_rules_put_first() -> None:
+    """Alex has the bag at the hotel and is LOCKed into a bag drop there, which keeps it, and
+    into a check in the park at 10:00 am. Sam has a check at the hotel at 10:00 am. Both
+    checks require the bag. Only an unlisted WAY leads to the park, and none leaves from
+    9:00 am to 9:30 am. Nothing that the FILE lists brings the bag to the park.
+
+    With the drop just before 9:00 am, the bag is at the hotel for Sam's check. With the
+    drop at 10:00 am, after Sam's check, it is not. The first plan has the earlier first
+    step, so the rules put it first, and the report says that Sam's check is covered."""
+    options = [stays("sam-check", "hotel"), stays("bag-drop", "hotel"), stays("alex-check", "park")]
+    span = {
+        "from": "hotel",
+        "to": "park",
+        "leaving": {"earliest": moment(9), "latest": moment(9, 30)},
+    }
+    facts = [
+        *at("sam-check", 10),
+        *whenever("bag-drop", "PT0S"),
+        *at("alex-check", 10),
+        starts_from("alex", "hotel"),
+        starts_from("sam", "hotel"),
+        {"id": "ways", "complete": span},
+        has_object("alex", "bag"),
+        requires_object("sam-check", "bag"),
+        requires_object("alex-check", "bag"),
+        keeps("bag-drop", "bag"),
+        every_use("bag"),
+    ]
+    locks = [lock("sam-check", "sam"), lock("bag-drop", "alex"), lock("alex-check", "alex")]
+    file = trip(["alex", "sam"], ["hotel", "park"], options, facts, locks, objects=["bag"])
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert asked(found) == [
+        (
+            Unknown("other ways", origin="hotel", destination="park"),
+            Unknown("another transfer", about="bag"),
+        )
+    ]
+    assert found.missing[0][1].at_hand_for == (
+        ("sam-check", True, True),
+        ("alex-check", True, False),
+    )
+
+
+def test_two_objects_that_have_nothing_to_do_with_each_other_have_two_orders() -> None:
+    """The TRIP starts at 8:00 am. Alex's appointment at 10:00 am requires Alex's key. Sam's
+    appointment can start at any time and requires Sam's bag. Neither OBJECT has anything to
+    do with the other OPTION, so nothing ties Sam's appointment to Alex's: it starts when the
+    TRIP starts."""
+    options = [stays("alex-appointment", "desk"), stays("sam-appointment", "desk")]
+    facts = [
+        *at("alex-appointment", 10),
+        *whenever("sam-appointment"),
+        has_object("alex", "key"),
+        has_object("sam", "bag"),
+        requires_object("alex-appointment", "key"),
+        requires_object("sam-appointment", "bag"),
+        *(every_use(thing) for thing in ("key", "bag")),
+        *(every_transfer(thing) for thing in ("key", "bag")),
+    ]
+    locks = [trip_starts(8), lock("alex-appointment", "alex"), lock("sam-appointment", "sam")]
+    file = trip(["alex", "sam"], ["desk"], options, facts, locks, objects=["key", "bag"])
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [(step.option, step.start) for step in found.itinerary] == [
+        ("sam-appointment", seconds(8)),
+        ("alex-appointment", seconds(10)),
+    ]
+
+
+def test_a_plan_with_its_steps_the_wrong_way_round_in_time_is_not_put_right() -> None:
+    """In a FILE that lists an OBJECT, a plan is checked just as it lists its steps. Alex
+    walks to the gate at 9:00 am and back at 10:00 am. Listed the other way round, the first
+    walk does not start where Alex is."""
+    ways = [way_between("walk", "hotel", "gate")]
+    facts = [takes("walk", "PT30M"), starts_from("alex", "hotel"), every_use("key")]
+    file = trip(["alex"], ["hotel", "gate"], [], facts, [], ways, objects=["key"])
+    world = worst_case(file)
+    out = Step(None, "hotel", "gate", ("alex",), seconds(9), seconds(9, 30), "walk")
+    back = Step(None, "gate", "hotel", ("alex",), seconds(10), seconds(10, 30), "walk")
+    assert broken(file, world, (out, back)) == []
+    assert works_as_listed(file, world, (out, back))
+    assert broken(file, world, (back, out)) == broken_as_listed(file, world, (back, out)) != []
+    assert not works_as_listed(file, world, (back, out))
+
+
+def an_evening() -> File:
+    """Music and shellfish are musts for Alex, and shellfish is a must-not for Sam. A cruise
+    at 7:00 pm delivers both and requires a bag that lies at the hotel. Sam is LOCKed into
+    an outing at 6:00 pm with no music, and nobody said whether it has shellfish."""
+    options = [moves("cruise", "pier", "quay"), moves("outing", "quay", "cove")]
+    facts = [
+        *at("cruise", 19),
+        *at("outing", 18),
+        satisfies("cruise", "music"),
+        satisfies("cruise", "shellfish"),
+        satisfies("outing", "music", 0),
+        lies_at("bag", "hotel"),
+        requires_object("cruise", "bag"),
+    ]
+    wants = [must("music", "alex"), must("shellfish", "alex", never=["sam"])]
+    places = ["pier", "quay", "cove", "hotel"]
+    return trip(
+        ["alex", "sam"],
+        places,
+        options,
+        facts,
+        [lock("outing", "sam")],
+        wants=wants,
+        objects=["bag"],
+    )
+
+
+def test_the_upper_bound_does_not_count_on_an_option_that_a_lock_makes_break_a_must_not() -> None:
+    """If the outing has shellfish, Sam breaks a must-not in every plan. So no plan that
+    works anywhere counts on the outing for Alex's shellfish, and neither does the bound."""
+    file = an_evening()
+    with_music = [Unknown("another option", want="music", person="alex")]
+    assert not itineraries(file, no_better_than(file, with_music))
+    # With Sam free to stay away, the outing could be Alex's shellfish.
+    free = replace(file, decisions=())
+    assert itineraries(free, no_better_than(free, with_music))
+
+
+def test_looking_for_a_settled_case_takes_few_questions_where_none_can_be() -> None:
+    """The report asks that the outing has no shellfish, and for another transfer of the bag.
+    No settled set asks for as few new things, and the upper bound says so at once: the
+    search does not go through every set of FACTs to find that out."""
+    file = an_evening()
+    asked_of_the_search = 0
+
+    def counted(left: File, world: World) -> bool:
+        nonlocal asked_of_the_search
+        asked_of_the_search += 1
+        return reference.any_works(left, world)
+
+    found = answers.check(file, works=counted)
+    assert asked(found) == [
+        (
+            Unknown("does not satisfy", "outing", want="shellfish"),
+            Unknown("another transfer", about="bag"),
+        )
+    ]
+    assert asked_of_the_search < 400
+
+
+def test_whether_anything_works_is_settled_by_the_first_plan_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Six travelers are LOCKed into lunch in the park, and one of them carries the key that
+    lunch requires. Only an unlisted WAY leads there, and four spans rule it out. Each
+    traveler can leave in any of six ways around those spans. To say that something works,
+    the first way is enough. To show a plan, every one is compared."""
+    people = ["alex", "sam", "jo", "kit", "lee", "max"]
+    closed = [
+        {
+            "id": f"closed-{number}",
+            "complete": {
+                "from": "hotel",
+                "to": "park",
+                "leaving": {
+                    "earliest": moment(9, 15 * number),
+                    "latest": moment(9, 15 * number + 5),
+                },
+            },
+        }
+        for number in range(4)
+    ]
+    facts = [
+        *at("lunch", 12),
+        *(starts_from(person, "hotel") for person in people),
+        *closed,
+        has_object("alex", "key"),
+        requires_object("lunch", "key"),
+        every_use("key"),
+        every_transfer("key"),
+    ]
+    file = trip(
+        people, ["hotel", "park"], [stays("lunch", "park")], facts, [lock("lunch", *people)],
+        objects=["key"],
+    )  # fmt: skip
+    world = with_these_at_best(file, [Unknown("other ways", origin="hotel", destination="park")])
+    timed = 0
+    its_own = reference._times  # pyright: ignore[reportPrivateUsage]
+
+    def counted(
+        count: int,
+        gaps: list[tuple[int, int, int]],
+        fixed: dict[int, int],
+        not_before: dict[int, int],
+        no_later: dict[int, int],
+    ) -> list[int] | None:
+        nonlocal timed
+        timed += 1
+        return its_own(count, gaps, fixed, not_before, no_later)
+
+    monkeypatch.setattr(reference, "_times", counted)
+    assert reference.any_works(file, world)
+    assert timed < 20
+    found = answers.check(file)
+    assert asked(found) == [(Unknown("other ways", origin="hotel", destination="park"),)]

@@ -126,7 +126,7 @@ def works(file: File, world: World, asked: _Asked | None = None) -> bool:
         return False
     choice = _plan(_Search(file, world, plain=True), asked)
     if choice is not None:
-        _checked(file, world, choice)
+        _checked(file, world, choice, any_will_do=True)
     return choice is not None
 
 
@@ -160,7 +160,7 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
     chosen = replace(
         world, satisfies=world.satisfies | does, might_satisfy=world.might_satisfy | does
     )
-    _checked(file, chosen, choice)
+    _checked(file, chosen, choice, any_will_do=True)
     return True
 
 
@@ -300,7 +300,11 @@ def _plan(search: _Search, asked: _Asked | None) -> _Choice | None:
 
 
 def _checked(
-    file: File, world: World, choice: _Choice, known: reference.Routes | None = None
+    file: File,
+    world: World,
+    choice: _Choice,
+    known: reference.Routes | None = None,
+    any_will_do: bool = False,
 ) -> Itinerary:
     """The solver's choice, timed and checked by the reference checker.
 
@@ -308,10 +312,11 @@ def _checked(
     rules page, from the routes already worked out. Otherwise it checks the WAYs the solver
     picked. Where a COMPLETE FACT rules an unlisted WAY out for a span, it takes that WAY
     before or after the span as the solver did, and tries no other side. The times are its
-    own, by the usual rule.
+    own, by the usual rule. With ``any_will_do`` the question is only whether the choice
+    works, and the first ITINERARY that the reference checker finds for it answers that.
     """
     who, orders, by, falls = choice
-    itinerary = reference.scheduled(file, world, who, orders, by, known, falls)
+    itinerary = reference.scheduled(file, world, who, orders, by, known, falls, any_will_do)
     if itinerary is None:
         raise AssertionError("the solver chose PERSONs and orders that the rules refuse")
     return itinerary

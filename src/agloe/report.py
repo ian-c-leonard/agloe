@@ -592,9 +592,9 @@ def as_text(file: File, report: Report) -> str:
             this = "That is" if len(cases) == 1 else "These cases are"
             lines += [
                 "",
-                f"{this} not settled. Nothing that the FILE lists puts {_listed(names)} at"
-                " hand there, and the COMPILER has not worked out whether another transfer"
-                " can.",
+                f"{this} not settled. What the FILE lists does not do that for"
+                f" {_listed(names)}, and the COMPILER has not worked out whether another"
+                " transfer can.",
             ]
         # A BOOKING can stand in for that answer, for an OPTION whose rights are not COMPLETE.
         might_be_booked = {

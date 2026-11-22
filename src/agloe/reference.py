@@ -551,7 +551,10 @@ def no_better_than(file: File, found: Iterable[Unknown]) -> World:
 
     Everything is as in the best case, with two differences. Another OPTION is found only for
     the WANTs and PERSONs in ``found``. And an OPTION with no FACT about a WANT counts for a
-    must while it breaks no must-not, which no possible world allows.
+    must while it breaks no must-not, which no possible world allows. One such OPTION is left
+    out: one that a LOCK puts a PERSON into for whom the WANT is a must-not. Where it
+    SATISFIES the WANT, that PERSON breaks the must-not in every ITINERARY, so nothing that
+    works anywhere counts on it.
 
     Another transfer is the same: it brings only the OBJECTs in ``found``. An OPTION with no
     FACT about what it does with any other OBJECT does whichever of the three things suits
@@ -563,11 +566,13 @@ def no_better_than(file: File, found: Iterable[Unknown]) -> World:
     """
     best = best_case(file)
     found = tuple(found)
+    locked = {(lock.option, person) for lock in file.locks for person in lock.persons}
     unknown = {
         (option.id, want.id)
         for option in file.options
         for want in file.wants
         if file.says(option.id, want.id) is None
+        and not any((option.id, person) in locked for person in want.must_nots)
     }
     conditions = frozenset(
         (each.want, each.person)
@@ -873,15 +878,14 @@ def broken(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
 
     A FILE that lists an OBJECT is different. Where an OBJECT is turns on the order of all
     the steps that start at one instant, whatever time they take, and that order is part of
-    the plan. So the steps are checked in the order the ITINERARY lists them, earlier starts
-    first, and in no other order.
+    the plan. So the steps are checked in the order the ITINERARY lists them, and in no
+    other: the result is that of ``broken_as_listed``.
     """
-    _well_formed(file, itinerary)
-    orders: Iterable[list[_Placed]] = _in_each_order(itinerary)
     if file.objects:
-        orders = [sorted(enumerate(itinerary), key=lambda placed: placed[1].start)]
+        return broken_as_listed(file, world, itinerary)
+    _well_formed(file, itinerary)
     fewest: list[Broken] | None = None
-    for order in orders:
+    for order in _in_each_order(itinerary):
         found = _in_this_order(file, world, itinerary, order)
         if fewest is None or len(found) < len(fewest):
             fewest = found
@@ -1767,29 +1771,31 @@ _NOTHING_TO_ORDER: list[_Chain] = [([], {}, (0, ()))]  # no OBJECT turns on the 
 def _chains(
     file: File, world: World, who: tuple[tuple[str, ...], ...], orders: tuple[tuple[int, ...], ...]
 ) -> list[_Chain] | None:
-    """Each order of the OPTIONs that matter to an OBJECT, with the hand-overs that work in it.
+    """Each order of the OPTIONs that matter to each OBJECT, with the hand-overs that work in it.
 
     Where an OBJECT is turns on the order in which the OPTIONs happen, also among OPTIONs of
     different PERSONs that start at one instant. Each PERSON's own order is given. So every
-    order of all the OPTIONs that keeps those is a candidate. Only the OPTIONs that require an
-    OBJECT or do something with one matter: the others change nothing, wherever they come.
+    order that keeps those is a candidate. Only the OPTIONs that require the OBJECT or do
+    something with it matter to it: the others change nothing, wherever they come. And the
+    OBJECTs do not affect each other. So each OBJECT that some OPTION of the plan requires
+    has an order of its own, among its own OPTIONs.
 
-    For each such order, each OBJECT that some OPTION of the plan requires is taken through
-    it with every choice of hand-overs. The choice that works with the fewest hand-overs is
-    kept, and among those the one with the OPTION listed first, then the PERSON listed first,
-    going through the hand-overs in the order they happen. The OBJECTs do not affect each
-    other, so the choice is made for each by itself. An order in which some OBJECT has no
-    choice that works is left out.
+    For each such order, the OBJECT is taken through it with every choice of hand-overs. The
+    choice that works with the fewest hand-overs is kept, and among those the one with the
+    OPTION listed first, then the PERSON listed first, going through the hand-overs in the
+    order they happen. An order in which the OBJECT has no choice that works is left out.
 
-    A result holds the gaps that keep the order, each from one OPTION to the next with no time
-    between their starts; the hand-overs in each OPTION, by its position in the FILE; and how
-    the hand-overs rank: how many they are, and then, for each OBJECT in the FILE's order, its
-    hand-overs by the positions of the OPTION and the PERSON in the FILE.
+    A result takes one order for each OBJECT. It holds the gaps that keep those orders, each
+    from one OPTION to the next with no time between their starts; the hand-overs in each
+    OPTION, by its position in the FILE; and how the hand-overs rank: how many they are, and
+    then, for each OBJECT in the FILE's order, its hand-overs by the positions of the OPTION
+    and the PERSON in the FILE. The orders of two OBJECTs can go round in a circle together.
+    The timing finds that.
 
-    Every ITINERARY that works lists its OPTIONs in one order, and that order is tried. The
-    start times it has keep these gaps, so the rule for start times finds times too. Where no
-    OPTION of the plan requires an OBJECT that the fourteenth CONSTRAINT asks about, there is
-    nothing to order, and the result is None.
+    Every ITINERARY that works lists its OPTIONs in one order, and that order gives each
+    OBJECT its own, so it is tried. The start times it has keep these gaps, so the rule for
+    start times finds times too. Where no OPTION of the plan requires an OBJECT that the
+    fourteenth CONSTRAINT asks about, there is nothing to order, and the result is None.
     """
     options = file.options
     happening = [index for index, persons in enumerate(who) if persons]
@@ -1801,14 +1807,6 @@ def _chains(
     ]
     if not followed:
         return None
-    matter = tuple(
-        index
-        for index in happening
-        if any(
-            (options[index].id, thing) in world.needs or (options[index].id, thing) in world.does
-            for thing in followed
-        )
-    )
     # The OPTIONs that come after each one: a PERSON does them later, or a chain of PERSONs does.
     later: dict[int, set[int]] = {index: set() for index in happening}
     for order in orders:
@@ -1832,25 +1830,35 @@ def _chains(
 
     people = {person.id: number for number, person in enumerate(file.persons)}
     place_of = {option.id: number for number, option in enumerate(options)}
-    found: list[_Chain] = []
-    for order in in_each_order((), matter):
-        visits = [(options[index].id, who[index], options[index].origin) for index in order]
-        handed: dict[int, _Taken] = {}
-        ranked: list[_Ranked] = []
-        for thing in followed:
+    # For each OBJECT, each order of its OPTIONs that works, with its hand-overs.
+    for_each: list[list[tuple[tuple[int, ...], _Ranked]]] = []
+    for thing in followed:
+        matter = tuple(
+            index
+            for index in happening
+            if (options[index].id, thing) in world.needs or (options[index].id, thing) in world.does
+        )
+        working: list[tuple[tuple[int, ...], _Ranked]] = []
+        for order in in_each_order((), matter):
+            visits = [(options[index].id, who[index], options[index].origin) for index in order]
             ways = [
                 tuple((place_of[option], people[person]) for option, person in run[1])
                 for run in _runs(world, thing, visits, _begins(file, world, thing), None)
             ]
-            if not ways:
-                break
-            best = min(ways, key=lambda way: (len(way), way))
-            ranked.append(best)
+            if ways:
+                working.append((order, min(ways, key=lambda way: (len(way), way))))
+        if not working:
+            return []
+        for_each.append(working)
+    found: list[_Chain] = []
+    for chosen in product(*for_each):
+        gaps = [(before, after, 0) for order, _ in chosen for before, after in pairwise(order)]
+        handed: dict[int, _Taken] = {}
+        for thing, (_, best) in zip(followed, chosen, strict=True):
             for index, person in best:
                 handed[index] = (*handed.get(index, ()), (thing, file.persons[person].id))
-        else:
-            gaps = [(before, after, 0) for before, after in pairwise(order)]
-            found.append((gaps, handed, (sum(map(len, ranked)), tuple(ranked))))
+        ranked = tuple(best for _, best in chosen)
+        found.append((gaps, handed, (sum(map(len, ranked)), ranked)))
     return found
 
 
@@ -1930,7 +1938,7 @@ def _that_work(
             [i for i, persons in enumerate(who) if person.id in persons] for person in file.persons
         ]
         for orders in product(*(list(_orders(file, world, indexes, known)) for indexes in mine)):
-            found = scheduled(file, world, who, orders, known=known)
+            found = scheduled(file, world, who, orders, known=known, any_will_do=one_is_enough)
             if found is None:
                 continue
             if one_is_enough:
@@ -1955,6 +1963,7 @@ def scheduled(
     by: Mapping[tuple[int, int], Route] | None = None,
     known: Routes | None = None,
     falls: Mapping[tuple[int, int, int], int] | None = None,
+    any_will_do: bool = False,
 ) -> Itinerary | None:
     """The ITINERARY for one choice of PERSONs and orders, or None when it breaks a CONSTRAINT.
 
@@ -1979,10 +1988,14 @@ def scheduled(
     and the place of the WAY in the route. Then that WAY is tried only in the opening between
     spans that holds its time, and no other. Within that opening the start times follow the
     usual rule, so they need not be the times given.
+
+    With ``any_will_do``, the ITINERARY is the first one found that works. It answers whether
+    anything works for this choice, and it need not be the one that rules 9 to 11 put first.
     """
     if by is not None:
-        return next(_timings(file, world, who, orders, by, falls), None)
-    return next(_schedules(file, world, who, orders, known or Routes(file, world)), None)
+        return next(_timings(file, world, who, orders, by, falls, None, any_will_do), None)
+    known = known or Routes(file, world)
+    return next(_schedules(file, world, who, orders, known, any_will_do), None)
 
 
 def _who_takes_part(file: File, world: World) -> Iterator[tuple[tuple[str, ...], ...]]:
@@ -2382,6 +2395,7 @@ def _schedules(
     who: tuple[tuple[str, ...], ...],
     orders: tuple[tuple[int, ...], ...],
     known: Routes,
+    any_will_do: bool = False,
 ) -> Iterator[Itinerary]:
     """The ITINERARIES for one choice of PERSONs and orders.
 
@@ -2441,7 +2455,9 @@ def _schedules(
             (number, position): route
             for (number, position, _), route in zip(needed, chosen, strict=True)
         }
-        yield from _timings(file, world, who, orders, hops, chains=chains or _NOTHING_TO_ORDER)
+        yield from _timings(
+            file, world, who, orders, hops, None, chains or _NOTHING_TO_ORDER, any_will_do
+        )
 
 
 def _over(terms: Terms) -> int | None:
@@ -2535,6 +2551,7 @@ def _timings(
     hops: Mapping[tuple[int, int], Route],
     falls: Mapping[tuple[int, int, int], int] | None = None,
     chains: Sequence[_Chain] | None = None,
+    any_will_do: bool = False,
 ) -> Iterator[Itinerary]:
     """The ITINERARIES for one choice of PERSONs, orders and routes, one for each timing.
 
@@ -2548,17 +2565,26 @@ def _timings(
     an answer within that opening.
 
     ``chains`` holds what ``_chains`` gives for these PERSONs and orders, where it is already
-    worked out. Each is one order of the OPTIONs that matter to an OBJECT, with its
-    hand-overs. Each is timed and checked, in each way the timing can fall, and the
-    ITINERARIES come in the order of "Which ITINERARY is shown": the fewest hand-overs, then
-    the hand-overs listed first, then the steps that come first with their times. So they are
-    all found before the first is given. Where nothing is to be ordered, each is given as
-    soon as it is found.
+    worked out. Each takes one order of the OPTIONs that matter to each OBJECT, with its
+    hand-overs. Each is timed and checked, in each way the timing can fall.
+
+    Where an OPTION of the plan requires an OBJECT, the ITINERARIES come in the order of
+    "Which ITINERARY is shown": the fewest hand-overs, then the hand-overs listed first, then
+    the steps that come first with their times. So they are all found before the first is
+    given. That holds too where another transfer brings the OBJECT: which OPTIONs it has to
+    be brought to is read off the ITINERARY that comes first. Where no OPTION requires an
+    OBJECT, or with ``any_will_do``, each ITINERARY is given as soon as it is found.
     """
     if chains is None:
         found = _chains(file, world, who, orders)
         chains = _NOTHING_TO_ORDER if found is None else found
-    in_turn = chains is _NOTHING_TO_ORDER
+    required = any(
+        (option.id, thing.id) in world.needs
+        for option, persons in zip(file.options, who, strict=True)
+        if persons
+        for thing in file.objects
+    )
+    in_turn = any_will_do or not required
     listed = len(file.options)
     legs: list[tuple[str, Leg]] = []  # each WAY taken: who takes it, and which one
     lines: list[list[int]] = []  # what each PERSON does in order, the WAYs they take included
