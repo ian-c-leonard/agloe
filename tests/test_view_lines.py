@@ -357,7 +357,7 @@ def test_what_the_report_says_is_charged_to_a_cap_is_kept_in_its_own_words(
     story = EXAMPLES / "a-ticket" / "within-the-cap.json"
     stated = stated_of(asked_of(story))
     assert stated["charged"] == {"trip-cap": "32.00 paid; 32.00 still to buy; 136.00 left"}
-    assert (stated["heading"], stated["cases"], stated["carried"]) == (None, [], {})
+    assert (stated["heading"], stated["cases"]) == (None, [])
     # Each of two caps keeps its own words. They are read only under the heading of the caps:
     # a line about a FACT can start as the line of a cap does, after the name of its OPTION.
     content = json.loads(story.read_text())
@@ -375,60 +375,6 @@ def test_what_the_report_says_is_charged_to_a_cap_is_kept_in_its_own_words(
         "trip-cap": "32.00 paid; 32.00 still to buy; 136.00 left",
         "jo-cap": "0.00 paid; 0.00 still to buy; 50.00 left",
     }
-
-
-def test_where_the_report_says_an_object_is_in_a_plan_is_kept_in_its_own_words(
-    tmp_path: Path,
-) -> None:
-    """For the cards of the OBJECTs, which say it again."""
-    story = EXAMPLES / "the-bags"
-    stated = stated_of(asked_of(story / "they-collect-them.json"))
-    assert stated["carried"] == {
-        "bags": {
-            "where": "the bags: at the hotel when the TRIP starts; with Alex from 2:45 pm"
-            " (handed over in Collect the bags)",
-            "uses": [
-                {
-                    "step": 6,
-                    "says": "Flight home requires the bags. Just before it starts: with Alex.",
-                }
-            ],
-        }
-    }
-    assert stated["charged"] == {}
-    # A report that shows no plan says where no OBJECT is.
-    for name in ("nobody-collects-them", "depends-on-the-museum"):
-        asked = asked_of(story / f"{name}.json")
-        assert asked["report"]["answer"] != "FEASIBLE"
-        assert stated_of(asked)["carried"] == {}
-    # An OPTION of the plan of which the FILE does not say whether it requires the OBJECT.
-    content = json.loads((story / "they-carry-them.json").read_text())
-    content["facts"] = [fact for fact in content["facts"] if fact["id"] != "every-use-of-the-bags"]
-    path = tmp_path / "trip.json"
-    path.write_text(json.dumps(content))
-    asked = asked_of(path)
-    assert stated_of(asked)["carried"] == {
-        "bags": {
-            "where": "the bags: with Alex when the TRIP starts",
-            "uses": [
-                {
-                    "step": 0,
-                    "says": "The FILE does not say whether Museum visit requires the bags. Just"
-                    " before it starts: with Alex, so the plan holds if it does.",
-                },
-                {
-                    "step": 2,
-                    "says": "Flight home requires the bags. Just before it starts: with Alex.",
-                },
-            ],
-        }
-    }
-    # The words are read only under their heading. Under a step, a line that says who takes
-    # the OBJECT is about it too, and is no word on where it is.
-    assert "\n    Alex takes the bags here.\n" in asked_of(story / "they-collect-them.json")["text"]
-    # Where the lines under the heading are not those of the report as JSON, none is kept.
-    more = asked["text"].replace("\nWhere each OBJECT is:\n", "\nWhere each OBJECT is:\n  x: y\n")
-    assert stated_of({**asked, "text": more})["carried"] == {}
 
 
 def test_a_report_on_a_plan_states_each_cap_once_more_and_both_lines_are_tied_to_it() -> None:

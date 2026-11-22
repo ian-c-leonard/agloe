@@ -728,8 +728,8 @@ def test_pointing_ties_an_object_to_the_calendar_and_the_report(
             "The FILE states every one of its OPTIONs that requires it.",
             "The FILE states every OPTION that hands it over or keeps it.",
         ]
-        # The card says where the report says the bags are in its plan, in the report's words:
-        # throughout, and just before the OPTION that requires them starts.
+        # The card says where the report says the bags are in its plan, worded as the report
+        # words it: throughout, and just before the OPTION that requires them starts.
         assert card.locator(".card-plan").text_content() == (
             "In the plan: at the hotel when the TRIP starts; with Alex from 2:45 pm (handed over"
             " in Collect the bags)."
