@@ -189,14 +189,63 @@ def test_leaving_those_ways_out_changes_no_report() -> None:
     assert thinned > 100
 
 
+type Route = tuple[tuple[str | None, str, str], ...]
+
+
+def never_slower(world: World, one: str, stretch: Route) -> bool:
+    """Whether one listed WAY takes no longer than these WAYs together, shortest and longest."""
+    shortest, longest = world.takes[one]
+    least = most = 0
+    for each, _, _ in stretch:
+        low, high = (world.unlisted_takes,) * 2 if each is None else world.takes[each]
+        if high is None:
+            return False
+        least, most = least + low, most + high
+    return longest is not None and shortest <= least and longest <= most
+
+
+def one_before_it_that_is_never_worse(
+    file: File, world: World, route: Route, every: list[Route]
+) -> Route | None:
+    """A route that is tried before this one and is never worse, of those in ``every``.
+
+    It has the same legs, but for one WAY that is listed earlier, joins the same two PLACEs
+    and is never slower. Or one listed WAY stands in for a stretch of two or more of its
+    WAYs, and is never slower than the stretch.
+    """
+    order = [each.id for each in file.ways]
+    for other in every[: every.index(route)]:
+        if len(other) == len(route):
+            differ = [at for at in range(len(route)) if route[at] != other[at]]
+            if len(differ) != 1 or route[differ[0]][1:] != other[differ[0]][1:]:
+                continue
+            mine, theirs = route[differ[0]][0], other[differ[0]][0]
+            earlier = mine is not None and theirs is not None
+            earlier = earlier and order.index(theirs or "") < order.index(mine or "")
+            if earlier and never_slower(world, theirs or "", (route[differ[0]],)):
+                return other
+            continue
+        for first in range(len(route)):
+            for last in range(first + 1, len(route)):
+                rest = (*route[:first], *route[last + 1 :])
+                if len(other) != len(rest) + 1 or (*other[:first], *other[first + 1 :]) != rest:
+                    continue
+                one, origin, destination = other[first]
+                straight = (origin, destination) == (route[first][1], route[last][2])
+                if one and straight and never_slower(world, one, route[first : last + 1]):
+                    return other
+    return None
+
+
 def test_each_route_left_out_has_one_that_is_never_worse() -> None:
-    """Through the same PLACEs, with the same WAY or an earlier one that is never slower."""
+    """A route that is left out has one that is tried before it and is never worse: with an
+    earlier WAY that is never slower, or with one listed WAY in place of a stretch of
+    several. Going from one such route to the next ends at a route that is kept."""
     rng = Random(5757)
-    left_out = 0
+    left_out = shorter = 0
     for _ in range(300):
         file = with_parallel_ways(rng)
         worst = worst_case(file)
-        order = [each.id for each in file.ways]
         for here in "abc":
             for there in "abc":
                 if here == there:
@@ -208,25 +257,66 @@ def test_each_route_left_out_has_one_that_is_never_worse() -> None:
                     if route in kept:
                         continue
                     left_out += 1
-                    assert any(
-                        len(other) == len(route)
-                        and all(
-                            (mine, origin, to) == (theirs, start, end)
-                            or (
-                                (origin, to) == (start, end)
-                                and mine is not None
-                                and theirs is not None
-                                and order.index(theirs) < order.index(mine)
-                                and worst.takes[theirs][0] <= worst.takes[mine][0]
-                                and (worst.takes[theirs][1] or 0) <= (worst.takes[mine][1] or 0)
-                            )
-                            for (mine, origin, to), (theirs, start, end) in zip(
-                                route, other, strict=True
-                            )
-                        )
-                        for other in kept
-                    )
+                    better: Route | None = route
+                    while better is not None and better not in kept:
+                        better = one_before_it_that_is_never_worse(file, worst, better, every)
+                    assert better is not None
+                    shorter += len(better) < len(route)
     assert left_out > 200
+    assert shorter > 50
+
+
+def a_city_to_walk(places: int) -> File:
+    """So many PLACEs with a walk of five minutes between every two of them. Sam starts at
+    the first and is LOCKed into an appointment at the last."""
+    names_of = [f"place-{number}" for number in range(places)]
+    walks = [
+        way_between(f"walk-{a}-{b}", names_of[a], names_of[b])
+        for a in range(places)
+        for b in range(a + 1, places)
+    ]
+    facts = [takes(each["id"], "PT5M") for each in walks]
+    facts += [starts_at("appointment", 10), lasts("appointment", "PT30M")]
+    facts += [cutoff("appointment", "PT0S"), starts_from("sam", names_of[0])]
+    options = [stays("appointment", names_of[-1])]
+    return trip(["sam"], names_of, options, facts, [lock("appointment", "sam")], ways=walks)
+
+
+def test_a_walk_between_every_two_places_leaves_one_route() -> None:
+    """Ten PLACEs with a walk between every two. From one to another, 109,601 chains of
+    walks pass through the others. The walk straight there is as quick as any stretch of
+    them, so it is the one route that is tried. With thirty PLACEs it still is."""
+    file = a_city_to_walk(10)
+    assert names(routes(file, worst_case(file), "place-0", "place-9")) == [["walk-0-9"]]
+    found = compiler.check(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [step.way for step in found.itinerary if step.option is None] == ["walk-0-9"]
+    wide = a_city_to_walk(30)
+    assert names(routes(wide, worst_case(wide), "place-0", "place-29")) == [["walk-0-29"]]
+
+
+def test_a_longer_chain_is_kept_where_it_is_quicker_than_the_way_straight_there() -> None:
+    """The walk straight from the hotel to the hall takes an hour. The metro to the square
+    and the tram on take twenty minutes together, so that chain is kept and tried second.
+    With the walk at twenty minutes it is as quick, and the chain is left out. A walk that
+    can take up to an hour is as quick only at its shortest, so the chain is kept."""
+
+    def city(*walk: Document) -> File:
+        ways = [way("walk", "hotel", "hall"), way("metro", "hotel", "square")]
+        ways.append(way("tram", "square", "hall"))
+        facts = [*walk, takes("metro", "PT10M"), takes("tram", "PT10M")]
+        facts += [starts_at("show", 10), lasts("show", "PT1H"), cutoff("show", "PT0S")]
+        facts.append(starts_from("sam", "hotel"))
+        places = ["hotel", "square", "hall"]
+        options = [stays("show", "hall")]
+        return trip(["sam"], places, options, facts, [lock("show", "sam")], ways=ways)
+
+    def found(file: File) -> list[list[str | None]]:
+        return names(routes(file, worst_case(file), "hotel", "hall"))
+
+    assert found(city(takes("walk", "PT1H"))) == [["walk"], ["metro", "tram"]]
+    assert found(city(takes("walk", "PT20M"))) == [["walk"]]
+    assert found(city(takes_between("walk", "PT20M", "PT1H"))) == [["walk"], ["metro", "tram"]]
 
 
 # ------------------------------- What the search does not walk through -------------------------

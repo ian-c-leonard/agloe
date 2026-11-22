@@ -2139,7 +2139,7 @@ def routes(
 ) -> list[Route]:
     """Every route from one PLACE to another by WAYs alone that is worth trying, shortest first.
 
-    ``last`` says that the PERSON does nothing after the route. Four kinds of route are left
+    ``last`` says that the PERSON does nothing after the route. Five kinds of route are left
     out, because another route is never worse.
 
     - A route that passes through a PLACE twice. A PERSON who came back to a PLACE could have
@@ -2158,6 +2158,14 @@ def routes(
       other WAY has as many WAYs, arrives no later in either case, and comes first by the
       rule for the WAYs listed first. This is right only where each WAY takes as long as this
       world says.
+    - With ``thin``, a route in which one listed WAY could stand in for a stretch of two or
+      more WAYs. That WAY goes straight between the two ends of the stretch, and takes no
+      longer than the whole stretch when all run shortest, and no longer when all run
+      longest. The PERSON takes it when they would have set out on the stretch, arrives no
+      later in either case, and waits. A listed WAY leaves at any time. The route with that
+      WAY has fewer WAYs, so it is tried first, and it works wherever the other does. Where a
+      walk joins every two of ten PLACEs, this leaves one route between two of them, and
+      not the hundred thousand that pass through the others.
 
     A WAY SATISFIES no WANT. So which WAYs a PERSON takes never changes which musts are met.
 
@@ -2188,14 +2196,32 @@ def routes(
 
     # Each PLACE with the WAYs a route can leave it by, in the FILE's order, and where each
     # one leads. A WAY with no limit to how long it takes can only be the last leg of a
-    # PERSON's last route.
+    # PERSON's last route. And for each two PLACEs, how long each listed WAY straight from
+    # the one to the other takes, shortest and longest, where it has a limit.
     leaving: dict[str, list[tuple[str, str]]] = {}
+    straight: dict[tuple[str, str], list[tuple[int, int]]] = {}
     for way in file.ways:
         ends = [(way.origin, way.destination)]
         ends += [(way.destination, way.origin)] if way.both_ways else []
+        shortest, longest = world.takes[way.id]
         for origin, destination in ends:
-            if world.takes[way.id][1] is not None or (last and destination == there):
+            if longest is not None or (last and destination == there):
                 leaving.setdefault(origin, []).append((way.id, destination))
+            if longest is not None:
+                straight.setdefault((origin, destination), []).append((shortest, longest))
+
+    def as_quick(origin: str, destination: str, stretch: Route) -> bool:
+        """Whether one listed WAY between these PLACEs is never slower than this stretch."""
+        least = most = 0
+        for way, _, _ in stretch:
+            shortest, longest = (world.unlisted_takes,) * 2 if way is None else world.takes[way]
+            if longest is None:
+                return False
+            least, most = least + shortest, most + longest
+        return any(
+            shortest <= least and longest <= most
+            for shortest, longest in straight.get((origin, destination), ())
+        )
 
     # The PLACEs from which some WAYs of this world lead to the destination. Where an unlisted
     # WAY joins any two PLACEs, that is every PLACE.
@@ -2249,6 +2275,10 @@ def routes(
             continue
         longer = (*legs, (way, passed[-1], place))
         if any(stands_in(passed[first], place, longer[first:]) for first in range(len(legs))):
+            continue
+        if thin and any(
+            as_quick(passed[first], place, longer[first:]) for first in range(len(legs))
+        ):
             continue
         if place == there:
             found.append(longer)
