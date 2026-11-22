@@ -3,7 +3,8 @@
 // The answer and the report need nothing but state.js. The calendar is loaded beside them, so
 // that a calendar that fails to load or to draw leaves the answer and the report on the page.
 // So is what ties each line of the report to the step or the record that it is about, and so
-// are the strip above the calendar and the WANTs of the FILE.
+// are the strip above the calendar, and each part of the page that shows what the FILE holds:
+// its WANTs and its OPTIONs.
 import { after, says, start } from "./state.js";
 
 const PER_MINUTE = 0.8; // pixels down the calendar for each minute
@@ -19,8 +20,6 @@ let state = start();
 let lay = null; // what lays a calendar out, once the page has loaded it: false where it cannot
 let tie = null; // what ties the lines of a report to steps and records, once the page has loaded it
 let turn = null; // what turns a calendar into the strip above it, once the page has loaded it
-let list = null; // what puts the WANTs of a FILE in words, once the page has loaded it
-let wanted; // the TRIP whose WANTs are on the page
 let onStrip = null; // the calendar that the strip on the page is of
 let stripRoom = 0; // pixels: how wide the page was when the strip was laid out
 let drawn; // the TRIP that the calendar on the page is of
@@ -42,6 +41,16 @@ function wordsOf(mark) {
   return [mark.name, when, mark.where, mark.who, mark.lock ?? "A WAY in the plan of the report.", ...(mark.finds ? [mark.finds] : []), ...mark.warns, ...mark.asks].join("\n");
 }
 
+/** The edges of a thing that the report names: red, or yellow. */
+function edges(each) {
+  return `${each.clash.length ? " clash" : ""}${each.cases.length ? " asked" : ""}`;
+}
+
+/** What the report says of a thing that it names, for the pointer that rests on it. */
+function marks(each) {
+  return [...(each.finds ? [each.finds] : []), ...each.asks];
+}
+
 /** How a mark looks, on the calendar and on the strip: by what the view and the report say of its step. */
 function looksOf(mark) {
   return `${mark.state}${mark.begins ? "" : " goes-on"}${mark.ends ? "" : " no-end"}${mark.brief ? " brief" : ""}${mark.clash.length ? " clash" : ""}${mark.warns.length ? " warned" : ""}${mark.asks.length ? " asked" : ""}`;
@@ -57,13 +66,22 @@ function tiesOf(step) {
 }
 
 /**
+ * What a row for an OPTION is a drawing of: the step of the TRIP that the OPTION is, by its
+ * number, or the OPTION itself where the calendar holds no step for it. A name with a colon is
+ * the name of no step.
+ */
+function drawingOf(option, id) {
+  return option.step !== null ? String(option.step) : `option:${id}`;
+}
+
+/**
  * One mark of the calendar, put on its day: a block for an OPTION, or a line down each PERSON's
  * column for a WAY. The name of a WAY stands beside the line of the first PERSON who takes it,
  * as far as its day has room.
  */
 function put(body, mark, index, people, open, ticks) {
   const box = made("div", `mark ${looksOf(mark)}`);
-  Object.assign(box.dataset, { step: mark.step, records: tiesOf(mark).join(" "), mark: index });
+  Object.assign(box.dataset, { of: mark.step, records: tiesOf(mark).join(" "), mark: index });
   const columns = mark.last - mark.first + 1;
   const when = mark.late ? `${mark.when}, ${mark.late}` : mark.when;
   // A mark is never smaller than the eye can find, and never outside the hours of its column.
@@ -174,7 +192,7 @@ function draw(laid) {
   const untimed = laid.untimed.flatMap((step, n) => {
     const name = Object.assign(made("span", `${step.clash.length ? "clash" : ""}${step.asks.length ? " asked" : ""}`, `${step.name} (${step.who})`), { title: [...(step.finds ? [step.finds] : []), ...step.asks].join("\n") });
     // It is a step of the TRIP: pointing at it lights up that step, and no other.
-    Object.assign(name.dataset, { step: step.step, records: tiesOf(step).join(" ") });
+    Object.assign(name.dataset, { of: step.step, records: tiesOf(step).join(" ") });
     return n ? [", ", name] : [name];
   });
   part("calendar-untimed").replaceChildren("The FILE gives no time for these LOCKed OPTIONs: ", ...untimed, ".");
@@ -198,7 +216,7 @@ function bar(mark, people) {
   box.title = several ? [`${mark.of.length} steps too close together to show apart at this width:`, ...mark.of.flatMap(said)].join("\n") : wordsOf(one);
   // A click goes to the first of the marks that it stands for.
   Object.assign(box.dataset, {
-    step: [...new Set(mark.of.map((each) => each.step))].join(" "),
+    of: [...new Set(mark.of.map((each) => each.step))].join(" "),
     records: [...new Set(mark.of.flatMap(tiesOf))].join(" "),
     day: one.day,
     mark: one.index,
@@ -275,19 +293,16 @@ function drawWants(shown) {
   box.replaceChildren();
   part("wants-part").hidden = !shown.wants.length;
   part("wants-says").textContent = shown.says;
-  const edges = (each) => `${each.clash.length ? " clash" : ""}${each.cases.length ? " asked" : ""}`;
-  const marks = (each) => [...(each.finds ? [each.finds] : []), ...each.asks];
   for (const want of shown.wants) {
     const card = Object.assign(made("article", `want${edges(want)}`), { title: marks(want).join("\n") });
-    card.dataset.records = tiesOf(want).join(" ");
+    Object.assign(card.dataset, { of: `want:${want.id}`, records: tiesOf(want).join(" ") });
     card.append(made("h3", "want-name", want.name));
     for (const words of [want.holds, want.ends]) if (words) card.append(made("p", "want-holds", words));
     const options = made("ul", "want-options");
     for (const option of want.options) {
       const item = made("li", `delivers${option.degree > 0 ? "" : " not"}${edges(option)}`);
       item.title = [option.name, option.says, option.takes, ...marks(option)].join("\n");
-      item.dataset.records = tiesOf(option).join(" ");
-      if (option.step !== null) item.dataset.step = option.step;
+      Object.assign(item.dataset, { of: drawingOf(option, option.option), records: tiesOf(option).join(" ") });
       item.append(made("b", "delivers-name", option.name), made("span", "delivers-says", option.says), made("span", "delivers-takes", option.takes));
       options.append(item);
     }
@@ -296,6 +311,40 @@ function drawWants(shown) {
     box.append(card);
   }
 }
+
+/**
+ * Every OPTION of the FILE, a row for each: where it is, what the FILE says of its start and
+ * its length, and who is in it. An OPTION that the calendar holds is tied to its step, so
+ * pointing at it lights up that step.
+ */
+function drawOptions(shown) {
+  const box = part("options");
+  box.replaceChildren();
+  part("options-part").hidden = !shown.options.length;
+  part("options-says").textContent = shown.says;
+  for (const option of shown.options) {
+    const row = Object.assign(made("article", `option${edges(option)}`), { title: marks(option).join("\n") });
+    Object.assign(row.dataset, { of: drawingOf(option, option.id), records: tiesOf(option).join(" ") });
+    const head = made("div", "option-head");
+    head.append(made("h3", "option-name", option.name), made("p", "option-where", option.where));
+    const said = made("div", "option-said");
+    for (const words of [option.when, option.takes, option.arrive]) if (words) said.append(made("p", "", words));
+    const who = made("div", "option-said");
+    for (const words of [option.lock, option.plan]) if (words) who.append(made("p", "", words));
+    row.append(head, said, who);
+    box.append(row);
+  }
+}
+
+/**
+ * The parts of the page that show what the FILE holds, beside its calendar. Each is loaded by
+ * itself and put on the page once for each TRIP. `words` is what puts the part in words, once
+ * the page has loaded it, and `of` is the TRIP that the part on the page is of.
+ */
+const held = [
+  { id: "wants-part", load: () => import("./wants.js"), name: "wants", draw: drawWants, words: null, of: undefined },
+  { id: "options-part", load: () => import("./options.js"), name: "options", draw: drawOptions, words: null, of: undefined },
+];
 
 /** The calendar part says this, and shows no calendar. */
 function noCalendar(words) {
@@ -314,7 +363,7 @@ function write(text, tied) {
   report.replaceChildren();
   tied.forEach((line, n) => {
     const words = made("span", line.warns ? "row warns" : "row", line.text);
-    if (line.step !== null) words.dataset.step = line.step;
+    if (line.step !== null) words.dataset.of = line.step;
     if (line.record !== null) words.dataset.record = line.record;
     if (line.case !== null) words.dataset.record = `case:${line.case}`;
     report.append(words, n + 1 < tied.length ? "\n" : "");
@@ -322,23 +371,39 @@ function write(text, tied) {
 }
 
 /**
- * Pointing at a step lights up that step and what the report says of it: its marks, its line
- * in the plan, what the report warns of there, and the lines of the records that are about it.
- * It lights up no other step, though a record may be about both. Pointing at the line of a
- * record, or at a time of the TRIP, lights up everything that the record is about.
+ * Pointing at a drawing lights up every drawing of the same thing, and the lines of the report
+ * that the drawing pointed at is tied to: the line of its step in the plan, what the report
+ * warns of there, and the lines of its own records and cases. A drawing has the records of
+ * what it shows. A mark and a row have every record about their OPTION. An OPTION under a WANT
+ * has the one FACT about the two, so pointing at it picks out that FACT. Pointing lights up no
+ * drawing of another thing, though a record or a case may be about both. `data-of` says what a
+ * drawing is of: a step of the TRIP, an OPTION that is no step, or a WANT.
+ *
+ * The line of a record or of a case, and a time of the TRIP, are of no thing. Pointing at one
+ * lights up everything that is tied to it. A drawing that is tied to it is a drawing of what
+ * the line is about, so every other drawing of that thing lights up too.
  */
 function light(target) {
-  const from = target instanceof Element ? target.closest("[data-step], [data-record], [data-records]") : null;
+  const tied = "[data-of], [data-record], [data-records]";
+  const from = target instanceof Element ? target.closest(tied) : null;
+  const all = [...document.querySelectorAll(tied)];
   const ids = (each) => [each.dataset.record, ...(each.dataset.records ?? "").split(" ")].filter(Boolean);
   // A mark of the strip can stand for several steps.
-  const stepsOf = (each) => (each.dataset.step ?? "").split(" ").filter(Boolean);
+  const thingsOf = (each) => (each.dataset.of ?? "").split(" ").filter(Boolean);
+  const isLine = (each) => each.classList.contains("row");
   const records = new Set(from ? ids(from) : []);
-  const steps = new Set(from ? stepsOf(from) : []);
-  for (const each of document.querySelectorAll("[data-step], [data-record], [data-records]")) {
-    const theirs = stepsOf(each);
-    const shares = ids(each).some((id) => records.has(id));
-    const same = from !== null && (steps.size && theirs.length ? theirs.some((step) => steps.has(step)) : shares);
-    each.classList.toggle("lit", same);
+  const shares = (each) => ids(each).some((id) => records.has(id));
+  const things = new Set(from ? thingsOf(from) : []);
+  const ofAThing = things.size > 0;
+  // What a line is about: each thing with a drawing of its own that is tied to the line.
+  if (from !== null && !ofAThing) {
+    for (const each of all) if (!isLine(each) && thingsOf(each).length === 1 && shares(each)) things.add(thingsOf(each)[0]);
+  }
+  for (const each of all) {
+    const theirs = thingsOf(each);
+    const ofThese = theirs.some((thing) => things.has(thing));
+    const same = ofAThing ? (theirs.length ? ofThese : shares(each)) : shares(each) || (ofThese && !isLine(each));
+    each.classList.toggle("lit", from !== null && same);
   }
 }
 
@@ -367,20 +432,22 @@ function show() {
   }
   part("report-part").hidden = said.report === null;
   part("report-part").classList.toggle("old", said.old);
-  // The WANTs of the FILE are put on the page once for each TRIP, like the calendar. They
-  // need no calendar, and a fault in them leaves the rest of the page as it is.
-  part("wants-part").classList.toggle("old", said.old);
-  if (said.calendar === null || list === null) part("wants-part").hidden = true;
-  else if (said.calendar.trip !== wanted) {
-    wanted = said.calendar.trip;
-    try {
-      drawWants(list(wanted, said.calendar.report, tied ? tie.casesOf(tied) : null));
-      lightAgain();
-    } catch (problem) {
-      part("wants-part").hidden = true;
-      queueMicrotask(() => {
-        throw problem;
-      });
+  // Each part that shows what the FILE holds is put on the page once for each TRIP, like the
+  // calendar. It needs no calendar, and a fault in it leaves the rest of the page as it is.
+  for (const each of held) {
+    part(each.id).classList.toggle("old", said.old);
+    if (said.calendar === null || each.words === null) part(each.id).hidden = true;
+    else if (said.calendar.trip !== each.of) {
+      each.of = said.calendar.trip;
+      try {
+        each.draw(each.words(each.of, said.calendar.report, tied ? tie.casesOf(tied) : null));
+        lightAgain();
+      } catch (problem) {
+        part(each.id).hidden = true;
+        queueMicrotask(() => {
+          throw problem;
+        });
+      }
     }
   }
   // The answer and the report are on the page before the calendar is drawn. The calendar is
@@ -443,21 +510,24 @@ import("./calendar.js").then(
 );
 import("./lines.js").then(
   (loaded) => {
-    // The report is written again with its lines tied, and the calendar and the WANTs are
-    // drawn with what the report says of them.
+    // The report is written again with its lines tied, and the calendar and the parts of the
+    // FILE are drawn with what the report says of them.
     tie = loaded;
-    drawn = wanted = undefined;
+    drawn = undefined;
+    for (const each of held) each.of = undefined;
     show();
   },
   () => {}, // The report stays on the page as it is, and nothing lights up.
 );
-import("./wants.js").then(
-  (loaded) => {
-    list = loaded.wants;
-    show();
-  },
-  () => {}, // The page goes on without the WANTs of the FILE.
-);
+for (const each of held) {
+  each.load().then(
+    (loaded) => {
+      each.words = loaded[each.name];
+      show();
+    },
+    () => {}, // The page goes on without this part.
+  );
+}
 // The strip is laid out again when the page has more room for it, or less.
 if (typeof ResizeObserver === "function") {
   new ResizeObserver(() => {

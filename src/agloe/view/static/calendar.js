@@ -21,53 +21,15 @@
 // starts, how tall it is, whose columns it spans, and what its words are.
 
 import { casesAbout, casesIn, findsOf, listed, optionsOf, ruledOut, saidOf } from "./named.js";
+import { clock, clocksOf, dateName } from "./times.js";
 
 const DAY = 24 * 60 * 60; // seconds
-const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const ROOM = 20 * 60; // seconds of room above the first step of a day and below the last
 const NO_END = 30 * 60; // seconds drawn for a step whose end nobody knows
 const NAMED = 20 * 60; // seconds that a WAY takes before its name has room beside it
 const SMALLEST = 4 * 60; // seconds that the smallest mark covers on the page
 
-/** The number of a day, counted from 1 January 1970, in the calendar that a FILE writes dates in. */
-function dayNumber(year, month, day) {
-  const y = month <= 2 ? year - 1 : year;
-  const era = Math.floor(y / 400);
-  const inEra = y - era * 400;
-  const inYear = Math.floor((153 * (month + (month > 2 ? -3 : 9)) + 2) / 5) + day - 1;
-  return era * 146097 + inEra * 365 + Math.floor(inEra / 4) - Math.floor(inEra / 100) + inYear - 719468;
-}
-
-/** A time such as 2027-05-15T14:00:00, or a date: its year, month and day, and its seconds into the day. */
-function read(written) {
-  const [year, month, day, hour = 0, minute = 0, second = 0] = written.match(/\d+/g).map(Number);
-  return { year, month, day, seconds: hour * 3600 + minute * 60 + second };
-}
-
-/** A date as the report names it: Saturday 15 May 2027. */
-export function dateName(written) {
-  const { year, month, day } = read(written);
-  return `${DAYS[(((dayNumber(year, month, day) + 3) % 7) + 7) % 7]} ${day} ${MONTHS[month - 1]} ${year}`;
-}
-
-/**
- * A time of day as the report writes it: 2:00 pm. Its offset from UTC follows where the view
- * sends one. The date is added when it is not on the day of `from`.
- */
-export function clock(time, from = null) {
-  const at = read(time.at);
-  const hour = Math.floor(at.seconds / 3600);
-  const minute = Math.floor(at.seconds / 60) % 60;
-  const second = at.seconds % 60;
-  const shown = `${hour % 12 || 12}:${String(minute).padStart(2, "0")}${second ? `:${String(second).padStart(2, "0")}` : ""} ${hour < 12 ? "am" : "pm"}${time.offset === null ? "" : ` (${time.offset})`}`;
-  if (from === null) return shown;
-  const day = read(from.at);
-  if (at.year === day.year && at.month === day.month && at.day === day.day) return shown;
-  return `${shown} on ${at.day} ${MONTHS[at.month - 1]}${at.year === day.year ? "" : ` ${at.year}`}`;
-}
-
-export { listed };
+export { clock, dateName, listed };
 
 /**
  * Where each of these marks goes in one PERSON's column: its lane, and how many lanes there are
@@ -124,7 +86,7 @@ function rulesOut(named, marked) {
 
 /** What the calendar holds, in words. */
 function saysOf(trip, timed) {
-  const clocks = ` Times are on the clocks of ${trip.zone}.`;
+  const clocks = clocksOf(trip.zone);
   const changes = trip.days.some((day) => day.offset !== null) ? " A column that names its offset from UTC starts or ends with a change of those clocks." : "";
   const cut = trip.until === null ? "" : ` The calendar shows the first ${trip.days.length} columns. It leaves out what comes after them, up to ${dateName(trip.until)}.`;
   const more = clocks + changes + cut;

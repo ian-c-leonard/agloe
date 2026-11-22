@@ -1225,6 +1225,22 @@ def parts_of(start: datetime, end: datetime | None, days: list[date]) -> list[di
     return parts
 
 
+def an_option(id: str, name: str, place: str) -> dict[str, Any]:
+    """An OPTION as the view sends it, of which the FILE says nothing but where it is."""
+    return {
+        "id": id,
+        "name": name,
+        "from": place,
+        "to": place,
+        "start": None,
+        "any_time": False,
+        "length": None,
+        "margin": None,
+        "locked": [],
+        "records": [],
+    }
+
+
 def written(moment: datetime | None) -> dict[str, Any] | None:
     """A time as the view sends it, with no offset."""
     return None if moment is None else {"at": moment.isoformat(timespec="seconds"), "offset": None}
@@ -1257,6 +1273,7 @@ def made(times: list[tuple[str, str | None]]) -> Trip:
         "starts": None,
         "ends": None,
         "wants": [],
+        "options": [an_option("stay", "Stay", "pier")],
         "steps": [
             {
                 "option": "stay",
@@ -1373,6 +1390,7 @@ def some_trip(chosen: random.Random) -> Trip:
         "days": [whole(day) for day in days],
         "until": chosen.choice([None, None, "2030-01-01"]),
         "wants": [],
+        "options": [an_option("o", "A name", places[0])],
         "starts": bound("trip-start"),
         "ends": bound("trip-end"),
         "steps": steps,

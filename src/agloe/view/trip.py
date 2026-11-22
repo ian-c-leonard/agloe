@@ -22,6 +22,10 @@ time is written as those clocks show it, such as 2027-05-15T14:00:00. Each time 
 offset from UTC where the report gives its times with theirs, and where the times sent are not
 all at one offset. The offset is written as the report writes it.
 
+The page is sent every OPTION of the FILE too, whether or not a LOCK names it or a plan uses
+it: where it is, when the FILE says it starts, how long it takes, how early people must be
+there, and whom a LOCK names for it. What the FILE does not say is sent as nothing.
+
 Each name is sent as the report shows it. A PERSON, a PLACE, an OPTION, a WAY or a WANT whose
 name another of its kind has comes with its id, and a name that could be taken for something
 else comes in quotes. So the page tells two apart where the report does, in the same words.
@@ -38,14 +42,14 @@ show as one time of day are never drawn as one.
 import re
 import unicodedata
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import cast
 
 from agloe import report as reports
 from agloe.answers import Answer, Report
-from agloe.file import File, Option, Person, Place, Unwritable, Want, Way, local
+from agloe.file import File, Option, Person, Place, Start, Unwritable, Want, Way, local
 
 type Trip = dict[str, object]
 type _Shape = Mapping[str, type | tuple[type, ...]]
@@ -70,7 +74,21 @@ _TRIP: _Shape = {
     "ends": (dict, _NONE),
     "steps": list,
     "wants": list,
+    "options": list,
 }
+_OPTION: _Shape = {
+    "id": str,
+    "name": str,
+    "from": str,
+    "to": str,
+    "start": (dict, _NONE),
+    "any_time": bool,
+    "length": (dict, _NONE),
+    "margin": (int, _NONE),
+    "locked": list,
+    "records": list,
+}
+_LENGTH: _Shape = {"shortest": int, "longest": int, "contingent": bool}
 _WANT: _Shape = {
     "id": str,
     "name": str,
@@ -165,6 +183,9 @@ def shown(file: File, report: Report) -> Trip | None:
         if moment is not None
     ]
     times += [bound.at for bound in (starts, ends) if bound is not None]
+    # The time that the FILE states for an OPTION is sent too, whether or not it is a step.
+    stated = {option.id: file.start(option.id) for option in file.options}
+    times += [start.at for start in stated.values() if start is not None and start.at is not None]
     held = [
         moment
         for step in steps
@@ -181,10 +202,12 @@ def shown(file: File, report: Report) -> Trip | None:
     held += [] if ends is None else [ends.at - 1 if closes else ends.at]
     try:
         days, until = _days(file, held)
-        # Each time gives its offset where the report's do, and where these are not at one.
+        # Each time gives its offset where the report's do, where these are not at one, and
+        # where the clocks show one of them twice: only its offset says which of the two it is.
         offsets = (
             reports.clock_for(file, report).offsets
             or len({local(moment, file.zone).utcoffset() for moment in times}) > 1
+            or any(_comes_twice(file, moment) for moment in times)
         )
 
         def time(moment: int | None) -> Trip | None:
@@ -235,9 +258,49 @@ def shown(file: File, report: Report) -> Trip | None:
                 for step in steps
             ],
             "wants": _wants(file, names),
+            "options": [
+                {
+                    "id": option.id,
+                    "name": names[option.id],
+                    "from": option.origin,
+                    "to": option.destination,
+                    **_said_of(file, option.id, stated[option.id], time),
+                    "locked": [
+                        each.id for each in file.persons if each.id in locked.get(option.id, ())
+                    ],
+                    "records": about.get(option.id, []),
+                }
+                for option in file.options
+            ],
         }
     except Unwritable:
         return None
+
+
+def _said_of(
+    file: File, option: str, stated: Start | None, time: Callable[[int | None], Trip | None]
+) -> Trip:
+    """What the FILE says of when an OPTION starts, how long it takes, and how early to be there.
+
+    ``start`` is the time that the FILE states. ``any_time`` says that the FILE lets it start
+    at any time, which is not a time. With neither, the FILE does not say when it starts.
+    ``length`` is in seconds, from the shortest to the longest it can take. It is ``contingent``
+    where the FILE states it as a range, in which the world decides. ``margin`` is how many
+    seconds before its start people must be there. Each is None where the FILE is silent.
+    """
+    length, margin = file.duration(option), file.cutoff(option)
+    return {
+        "start": time(None if stated is None else stated.at),
+        "any_time": stated is not None and stated.at is None,
+        "length": None
+        if length is None
+        else {
+            "shortest": length.shortest,
+            "longest": length.longest,
+            "contingent": length.contingent,
+        },
+        "margin": None if margin is None else margin.margin,
+    }
 
 
 def _names(
@@ -388,6 +451,12 @@ def _seconds_into_the_day(file: File, moment: int) -> int:
     """How far into its day a moment is, by the clock."""
     there = local(moment, file.zone)
     return there.hour * 3600 + there.minute * 60 + there.second
+
+
+def _comes_twice(file: File, moment: int) -> bool:
+    """Whether the clocks of the FILE's time zone show this time twice, as when they go back."""
+    there = local(moment, file.zone)
+    return there.replace(fold=1 - there.fold).utcoffset() != there.utcoffset()
 
 
 def _time(file: File, moment: int, with_its_offset: bool) -> Trip:
@@ -556,14 +625,60 @@ def holds(trip: object) -> bool:
     ):
         return False
     planned = sent["itinerary"] is True
+    options = _the_options(sent["options"], persons, places)
+    steps = cast("list[object]", sent["steps"])
     return (
-        all(_is_a_bound(sent[which], days) for which in ("starts", "ends"))
+        options is not None
+        and all(_is_a_bound(sent[which], days) for which in ("starts", "ends"))
         and all(
-            _is_a_step(step, persons, places, days, planned, until is not None)
-            for step in cast("list[object]", sent["steps"])
+            _is_a_step(step, persons, places, days, planned, until is not None) for step in steps
+        )
+        # Each step that is an OPTION is one of the OPTIONs of the FILE.
+        and all(
+            step["option"] is None or step["option"] in options
+            for step in cast("list[dict[str, object]]", steps)
         )
         and _are_wants(sent["wants"], persons, places)
     )
+
+
+def _the_options(
+    options: object, persons: frozenset[str], places: frozenset[str]
+) -> frozenset[str] | None:
+    """The ids of the OPTIONs of such a TRIP, or None where these are not its OPTIONs.
+
+    Each has an id of its own. It has a time or can start at any time, and never both. It
+    takes no less than no time, and no longer at its shortest than at its longest. Only a
+    length that the world decides in a range has two ends that differ.
+    """
+    ids: list[object] = []
+    for option in cast("list[object]", options):
+        if not _fits(option, _OPTION):
+            return None
+        said = cast("dict[str, object]", option)
+        locked, records = _all_different(said["locked"]), _all_different(said["records"])
+        start, length, margin = said["start"], said["length"], said["margin"]
+        if (
+            not cast("str", said["name"]).strip()
+            or said["from"] not in places
+            or said["to"] not in places
+            or locked is None
+            or not locked <= persons
+            or records is None
+            or not (start is None or (_is_a_time(start) and said["any_time"] is False))
+            or not (margin is None or cast("int", margin) >= 0)
+        ):
+            return None
+        if length is not None:
+            if not _fits(length, _LENGTH):
+                return None
+            span = cast("dict[str, int]", length)
+            if not 0 <= span["shortest"] <= span["longest"]:
+                return None
+            if span["shortest"] != span["longest"] and not span["contingent"]:
+                return None
+        ids.append(said["id"])
+    return _all_different(ids)
 
 
 def _are_wants(wants: object, persons: frozenset[str], places: frozenset[str]) -> bool:
