@@ -704,7 +704,9 @@ def test_pointing_ties_a_budget_its_caps_and_its_payments_to_the_report(chromium
         assert page.locator("#persons .item-said p").count() == 0
 
 
-def test_pointing_ties_an_object_to_the_calendar_and_the_report(chromium: Browser) -> None:
+def test_pointing_ties_an_object_to_the_calendar_and_the_report(
+    chromium: Browser, tmp_path: Path
+) -> None:
     """The bags are at the hotel. Alex collects them, and has them when the flight leaves."""
     with opened(chromium, EXAMPLES / "the-bags" / "they-collect-them.json") as page:
         card = page.locator("#objects .card")
@@ -725,6 +727,17 @@ def test_pointing_ties_an_object_to_the_calendar_and_the_report(chromium: Browse
         assert card.locator(".card-whole").all_text_contents() == [
             "The FILE states every one of its OPTIONs that requires it.",
             "The FILE states every OPTION that hands it over or keeps it.",
+        ]
+        # The card says where the report says the bags are in its plan, in the report's words:
+        # throughout, and just before the OPTION that requires them starts.
+        assert card.locator(".card-plan").text_content() == (
+            "In the plan: at the hotel when the TRIP starts; with Alex from 2:45 pm (handed over"
+            " in Collect the bags)."
+        )
+        assert entries.locator(".entry-takes").all_text_contents() == [
+            "In the plan: Alex and Sam take part.",
+            "Just before it starts: with Alex.",
+            "In the plan: Alex takes part.",
         ]
         # Pointing at the OBJECT lights up the lines of its own FACTs, and the lines that say
         # where it is in the plan. It lights up no step.
@@ -773,10 +786,45 @@ def test_pointing_ties_an_object_to_the_calendar_and_the_report(chromium: Browse
         asked.wait_for()
         assert asked.locator(".item-name").all_text_contents() == ["Flight home"]
         assert page.locator("#calendar .mark.asked").count() == 1
-    # Nobody collects the bags, and the flight requires them.
+    # Nobody collects the bags, and the flight requires them. The report shows no plan, so
+    # the card says nothing of one.
     with opened(chromium, EXAMPLES / "the-bags" / "nobody-collects-them.json") as page:
         page.locator("#objects .card.clash").wait_for()
         assert page.locator("#objects .entry.clash").count() >= 1
+        assert page.locator("#objects .card-plan").count() == 0
+        assert page.locator("#objects .entry-takes", has_text="Just before").count() == 0
+    # The FILE does not say that the flight is all that requires the bags, and Alex carries
+    # them. The report says of the museum visit that the FILE does not say whether it requires
+    # them, and so does the card: that OPTION is under the OBJECT, and it is its step.
+    content = json.loads((EXAMPLES / "the-bags" / "they-carry-them.json").read_text())
+    content["facts"] = [fact for fact in content["facts"] if fact["id"] != "every-use-of-the-bags"]
+    with opened(chromium, written(tmp_path, content)) as page:
+        card = page.locator("#objects .card")
+        card.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        assert card.locator(".card-plan").text_content() == (
+            "In the plan: with Alex when the TRIP starts."
+        )
+        might = card.locator(".entry.not")
+        assert might.locator(".entry-name").all_text_contents() == ["Museum visit"]
+        assert might.locator(".entry-says").all_text_contents() == [
+            "the FILE does not say whether this requires it"
+        ]
+        assert might.locator(".entry-takes").all_text_contents() == [
+            "In the plan: Alex and Sam take part.",
+            "Just before it starts: with Alex, so the plan holds if it does.",
+        ]
+        assert "asked" not in (might.get_attribute("class") or "")
+        line = (
+            "    The FILE does not say whether Museum visit requires the bags. Just before it"
+            " starts: with Alex, so the plan holds if it does."
+        )
+        might.hover()
+        found = lit(page, objects=["Museum visit"], marks=["Museum visit"])
+        assert line in found["rows"]
+        # That line of the report is about the step and about the OBJECT.
+        page.locator("#report .row", has_text="The FILE does not say whether Museum").hover()
+        lit(page, objects=["the bags", "Museum visit"], marks=["Museum visit"])
     # A FILE with no OBJECT has no such part on its page.
     with opened(chromium, EXAMPLES / "flight-home" / "works.json") as page:
         page.locator("#report .row").first.wait_for()

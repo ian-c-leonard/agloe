@@ -289,14 +289,16 @@ function drawStrip(laid) {
  * OFFER on the card of the rights to an OPTION. It has its name, what the FILE says of it, and
  * who is in it or uses it, where the page says so. `of` says what the entry is a drawing of,
  * and it is tied to its one FACT. `plain` says that the entry is drawn full: the OPTION
- * SATISFIES the WANT or requires the CAPABILITY, or the BOOKING secures a right.
+ * SATISFIES the WANT or requires the CAPABILITY, or the BOOKING secures a right. `more` holds
+ * what the page says under that: who takes part, and what the report says of a plan.
  */
-function entry(thing, of, plain, who) {
+function entry(thing, of, plain, ...more) {
+  const under = more.filter(Boolean);
   const item = made("li", `entry${plain ? "" : " not"}${edges(thing)}`);
-  item.title = [thing.name, thing.says, ...(who ? [who] : []), ...marks(thing)].join("\n");
+  item.title = [thing.name, thing.says, ...under, ...marks(thing)].join("\n");
   Object.assign(item.dataset, { of, records: tiesOf(thing).join(" ") });
   item.append(made("b", "entry-name", thing.name), made("span", "entry-says", thing.says));
-  if (who) item.append(made("span", "entry-takes", who));
+  for (const words of under) item.append(made("span", "entry-takes", words));
   return item;
 }
 
@@ -496,8 +498,9 @@ function drawObjects(shown) {
     const card = Object.assign(made("article", `card${edges(thing)}`), { title: marks(thing).join("\n") });
     Object.assign(card.dataset, { of: `object:${thing.id}`, records: tiesOf(thing).join(" ") });
     card.append(made("h3", "card-name", thing.name), made("p", "card-holds", thing.starts));
+    if (thing.plan) card.append(made("p", "card-plan", thing.plan));
     const options = made("ul", "card-options");
-    for (const option of [...thing.requires, ...thing.transfers]) options.append(entry(option, drawingOf(option, option.option), option.does, option.takes));
+    for (const option of [...thing.requires, ...thing.might, ...thing.transfers]) options.append(entry(option, drawingOf(option, option.option), option.does, option.takes, option.plan));
     if (options.children.length) card.append(options);
     for (const words of thing.whole) card.append(made("p", "card-whole", words));
     box.append(card);

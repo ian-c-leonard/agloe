@@ -241,22 +241,38 @@ export function lines(text, report, trip) {
  * its lines. For the cases in which the trip works: the line of each case, at the place of the
  * case, and the heading over them where the report lists several. For the caps of a plan, in
  * `charged`: what the report says is charged to each cap and what it has left, by the id of
- * the cap.
+ * the cap. For the OBJECTs of a plan, in `carried`, by the id of the OBJECT: the line that
+ * says where it is throughout (`where`), and in `uses` the line of each OPTION that requires
+ * it or might, with the `step` of the TRIP that the OPTION is.
  */
 export function statedIn(tied) {
   const cases = [];
   const charged = {};
+  // An id can be any word, so this holds nothing but what is put in it.
+  const carried = Object.create(null);
   let capped = false;
+  let placed = false;
   for (const line of tied) {
     if (line.case !== null) cases[line.case] = line.text.trim();
     // Under "The caps:", and nowhere else, a line states the cap with its limit and its
     // BUDGET, and after the last colon what is charged to it. A line that is not set in ends
     // what is under a heading.
-    if (!line.text.startsWith("  ")) capped = line.text === CAPS;
+    if (!line.text.startsWith("  ")) [capped, placed] = [line.text === CAPS, line.text === OBJECTS];
     else if (capped && line.record !== null && line.text.startsWith(`  ${line.record}: at most `)) charged[line.record] = line.text.slice(line.text.lastIndexOf(": ") + 2);
+    else if (placed) {
+      // Under "Where each OBJECT is:" the lines that `lines` ties to an OBJECT: its own line,
+      // set in by two spaces, and then the line of each OPTION, set in by four, which is
+      // about the step of that OPTION too.
+      const about = line.about.filter((thing) => thing.startsWith("object:"));
+      if (about.length !== 1) continue;
+      const id = about[0].slice("object:".length);
+      const steps = line.about.filter((thing) => thing !== about[0]);
+      if (carried[id] === undefined) carried[id] = { where: line.text.slice(2), uses: [] };
+      else carried[id].uses.push({ step: steps.length === 1 ? Number(steps[0]) : null, says: line.text.slice(4) });
+    }
   }
   const heading = tied.find((line) => CASES.test(line.text));
-  return { heading: cases.length > 1 && heading !== undefined ? heading.text : null, cases, charged };
+  return { heading: cases.length > 1 && heading !== undefined ? heading.text : null, cases, charged, carried };
 }
 
 /**
