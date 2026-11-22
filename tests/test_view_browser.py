@@ -639,6 +639,13 @@ def test_pointing_ties_a_budget_its_caps_and_its_payments_to_the_report(chromium
             "the TRIP spends at most 200.00 USD from it",
             "32.00 USD, paid by Alex",
         ]
+        # The cap says what the report says its plan charges to it, in the report's words.
+        assert entries.first.locator(".entry-takes").text_content() == (
+            "In the plan: 32.00 paid; 32.00 still to buy; 136.00 left."
+        )
+        # The sum in USD of what the plan pays is about the OFFER that it still buys from.
+        page.locator("#report .row", has_text="USD: 32.00 paid; 32.00 still to buy").hover()
+        lit(page, rights=["skydeck-tickets"], marks=[], budgets=[])
         # The row of a PERSON names the BUDGETs that list them.
         assert page.locator("#persons .item-said p").all_text_contents() == [
             "May draw on the trip money.",

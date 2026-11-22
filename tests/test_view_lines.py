@@ -30,6 +30,14 @@ FILES = sorted(
 
 type Line = dict[str, Any]
 
+# Prints what the page keeps of the report's own words, for one report given on standard input.
+STATED = """
+import { readFileSync } from "node:fs";
+import { lines, statedIn } from "../src/agloe/view/static/lines.js";
+const { text, report, trip } = JSON.parse(readFileSync(0, "utf8"));
+process.stdout.write(JSON.stringify(statedIn(lines(text, report, trip))));
+"""
+
 
 def offers_of(line: Line) -> list[str]:
     """The OFFERs that a line is tied to: those that it says somebody buys a place of."""
@@ -194,9 +202,12 @@ def test_a_line_that_says_who_buys_a_place_is_tied_to_the_offer() -> None:
     (found,) = lines_of([asked])
     buys = [line for line in found if offers_of(line)]
     assert [(line["about"], line["step"], line["warns"]) for line in buys] == [
-        (["offer:skydeck-tickets"], 0, True)
+        (["offer:skydeck-tickets"], 0, True),
+        # The sum in USD of what the plan pays: it still buys a place of the OFFER.
+        (["offer:skydeck-tickets"], None, False),
     ]
     assert buys[0]["text"].startswith("    ! Sam still has to buy a right to this, from ")
+    assert buys[1]["text"] == "  USD: 32.00 paid; 32.00 still to buy (skydeck-tickets)"
     # A report that names another OFFER for that step, or none, leaves the line tied to none.
     odd: list[Any] = [
         [{**asked["report"]["to_buy"][0], "offer": "skydeck"}],
@@ -206,7 +217,11 @@ def test_a_line_that_says_who_buys_a_place_is_tied_to_the_offer() -> None:
     ]
     for to_buy in odd:
         (other,) = lines_of([{**asked, "report": {**asked["report"], "to_buy": to_buy}}])
-        assert all(line["about"] == [] for line in other)
+        assert all(line["about"] == [] for line in other if line["warns"])
+        # The sum is tied to an OFFER only where the line and the report as JSON both name it.
+        both = isinstance(to_buy, list) and '"skydeck-tickets"' in json.dumps(to_buy)
+        expected = ["offer:skydeck-tickets"] if both else []
+        assert [line["about"] for line in other if line["text"].startswith("  USD: ")] == [expected]
     # A warning about something else names no OFFER.
     (late,) = lines_of([asked_of(EXAMPLES / "flight-home" / "works-but-risky.json")])
     assert any(line["warns"] for line in late)
@@ -291,6 +306,45 @@ def test_the_line_of_a_budget_is_tied_though_the_page_shows_its_name_with_its_id
     trip["budgets"].append({**money, "id": "kitty", "name": "the kitty"})
     (found,) = lines_of([{**asked, "trip": trip}])
     assert all(line["about"] == [] for line in found if line["text"].startswith("  the trip"))
+
+
+def test_the_line_about_bookings_that_state_no_payment_is_tied_to_each_of_them(
+    tmp_path: Path,
+) -> None:
+    """Alex's BOOKING states what it paid, and Sam's does not."""
+    content = json.loads((EXAMPLES / "a-ticket" / "works.json").read_text())
+    (booking,) = [fact for fact in content["facts"] if fact["id"] == "sam-skydeck-ticket"]
+    del booking["booking"]["paid"]
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    asked = asked_of(path)
+    assert asked["report"]["money"]["not_stated"] == ["sam-skydeck-ticket"]
+    (found,) = lines_of([asked])
+    (unstated,) = [line for line in found if line["about"]]
+    assert unstated["text"] == "  No payment is stated for sam-skydeck-ticket."
+    assert unstated["about"] == ["booking:sam-skydeck-ticket"]
+    # A report that names other BOOKINGs than the line does ties it to none.
+    for not_stated in (["alex-skydeck-ticket"], [], "sam-skydeck-ticket"):
+        money = {**asked["report"]["money"], "not_stated": not_stated}
+        (other,) = lines_of([{**asked, "report": {**asked["report"], "money": money}}])
+        assert all(line["about"] == [] for line in other)
+
+
+def test_what_the_report_says_is_charged_to_a_cap_is_kept_in_its_own_words() -> None:
+    """For the cards of the BUDGETs, which say it again."""
+    asked = asked_of(EXAMPLES / "a-ticket" / "within-the-cap.json")
+    done = subprocess.run(
+        [shutil.which("node") or "node", "--input-type=module", "--eval", STATED],
+        input=json.dumps(asked),
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=Path(__file__).parent,
+    )
+    assert done.returncode == 0, done.stderr
+    stated = json.loads(done.stdout)
+    assert stated["charged"] == {"trip-cap": "32.00 paid; 32.00 still to buy; 136.00 left"}
+    assert (stated["heading"], stated["cases"]) == (None, [])
 
 
 def test_a_report_on_a_plan_states_each_cap_once_more_and_both_lines_are_tied_to_it() -> None:

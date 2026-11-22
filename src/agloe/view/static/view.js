@@ -410,7 +410,7 @@ function drawBudgets(shown) {
     card.dataset.of = `budget:${budget.id}`;
     card.append(made("h3", "card-name", budget.name), made("p", "card-holds", budget.holds));
     const entries = made("ul", "card-options");
-    for (const cap of budget.caps) entries.append(entry(cap, `cap:${cap.id}`, true, null));
+    for (const cap of budget.caps) entries.append(entry(cap, `cap:${cap.id}`, true, cap.plan));
     for (const booking of budget.payments) entries.append(paid(booking));
     if (entries.children.length) card.append(entries);
     if (budget.whole) card.append(made("p", "card-whole", budget.whole));
@@ -644,7 +644,7 @@ function show() {
     else if (said.calendar.trip !== each.of) {
       each.of = said.calendar.trip;
       try {
-        each.draw(each.words(each.of, said.calendar.report, tied ? tie.casesOf(tied) : null));
+        each.draw(each.words(each.of, said.calendar.report, tied ? tie.statedIn(tied) : null));
         lightAgain();
       } catch (problem) {
         part(each.id).hidden = true;
@@ -664,7 +664,7 @@ function show() {
   drawn = said.calendar.trip;
   let laid;
   try {
-    laid = lay(drawn, said.calendar.report, tied ? tie.warningsOf(tied) : [], tied ? tie.casesOf(tied) : []);
+    laid = lay(drawn, said.calendar.report, tied ? tie.warningsOf(tied) : [], tied ? tie.statedIn(tied) : []);
     draw(laid);
     lightAgain();
   } catch (problem) {

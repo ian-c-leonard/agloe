@@ -13,7 +13,7 @@
 //
 // Nothing here judges a TRIP. It finds what the report already says, line by line.
 
-import { boughtIn, cappedIn, casesIn, objectsIn, requirementsIn, takenIn, toBuyIn } from "./named.js";
+import { boughtIn, cappedIn, casesIn, listed, objectsIn, requirementsIn, takenIn, toBuyIn } from "./named.js";
 
 /** A line that shows one step of a plan: "  2:00 pm to 3:00 pm: Museum visit, Alex and Sam". */
 const STEP = /^ {2}\d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+, .+$/;
@@ -28,6 +28,8 @@ const CASES = /^The trip (?:works|might work) in any of these cases:$/;
 const TO_BUY = /^ {4}! .+ still ha(?:s|ve) to buy a right to this(?: if it needs one)?, from (.+)\.$/;
 /** How the line starts that gives one plan for a case: who buys which place. */
 const ONE_PLAN = "One plan that works then: ";
+/** The line above the sums of a plan in each currency. */
+const SUMS = "The money of this plan, by currency:";
 /** The line above where each OBJECT is in a plan. */
 const OBJECTS = "Where each OBJECT is:";
 /** How the line ends that is above the BUDGETs of the FILE, where a report states them. */
@@ -62,8 +64,9 @@ function listsOf(report) {
  * of the report as JSON of the requirement that the line says somebody meets. `about` holds
  * what else the line is about, each as the page names a thing: `offer:ID` for an OFFER that
  * the line says somebody buys a place of, `budget:ID` for a BUDGET that the line states,
- * `cap:ID` for a cap that the line states under the plan of a case, and `object:ID` for an
- * OBJECT that the line is about. A line about an OBJECT at a step of the plan holds that step
+ * `cap:ID` for a cap that the line states under the plan of a case, `booking:ID` for a
+ * BOOKING that the line says states no payment, and `object:ID` for an OBJECT that the line is
+ * about. A line about an OBJECT at a step of the plan holds that step
  * too, by its number, as the page names a step.
  *
  * The lines of a plan are tied to steps only where there is one line for each step that the
@@ -149,6 +152,26 @@ export function lines(text, report, trip) {
       if (cap !== undefined) found[next].about = [`cap:${cap}`];
     }
   });
+  // The money of a plan. One line names the BOOKINGs that state no payment: it is about each
+  // of them. Under their heading, one line for each currency sums what the plan pays in it:
+  // it is about each OFFER that the plan still buys a place of at a price in that currency.
+  const money = report !== null && typeof report === "object" && report.answer === "FEASIBLE" && report.money !== null && typeof report.money === "object" ? report.money : null;
+  const unstated = money !== null && Array.isArray(money.not_stated) && money.not_stated.every((id) => typeof id === "string") ? money.not_stated : [];
+  if (unstated.length) {
+    const says = found.filter((line) => free(line) && line.text === `  No payment is stated for ${listed(unstated)}.`);
+    if (says.length === 1) says[0].about = unstated.map((id) => `booking:${id}`);
+  }
+  const totals = money !== null && Array.isArray(money.totals) && money.totals.every((each) => each !== null && typeof each === "object" && typeof each.currency === "string") ? money.totals : [];
+  const sums = found.flatMap((line, at) => (line.text === SUMS ? [at] : []));
+  if (totals.length && sums.length === 1 && totals.every((each, n) => found[sums[0] + 1 + n] !== undefined && free(found[sums[0] + 1 + n]) && found[sums[0] + 1 + n].text.startsWith(`  ${each.currency}: `))) {
+    totals.forEach((each, n) => {
+      const line = found[sums[0] + 1 + n];
+      // The line names those OFFERs in brackets. One is tied where the line names it too.
+      const named = new Set([...line.text.matchAll(/\(([^)]*)\)/g)].flatMap((group) => group[1].split(/, | and /)));
+      const offers = toBuyIn(report).filter((buy) => buy.price !== null && typeof buy.price === "object" && buy.price.currency === each.currency && named.has(buy.offer)).map((buy) => buy.offer);
+      line.about = [...new Set(offers)].map((id) => `offer:${id}`);
+    });
+  }
   // The BUDGETs of the FILE, where the report states them: one to a line under their heading,
   // in the FILE's order. They are tied only where the words hold one line for each BUDGET that
   // the view sent. A line starts with the name of its BUDGET as the FILE spells it, which the
@@ -212,17 +235,23 @@ export function lines(text, report, trip) {
 }
 
 /**
- * The words of the report for the cases in which the trip works, from its lines: the line of
- * each case, at the place of the case, and the heading over them where the report lists
- * several.
+ * What the report states, in its own words, for the parts of the page that say it again, from
+ * its lines. For the cases in which the trip works: the line of each case, at the place of the
+ * case, and the heading over them where the report lists several. For the caps of a plan, in
+ * `charged`: what the report says is charged to each cap and what it has left, by the id of
+ * the cap.
  */
-export function casesOf(tied) {
+export function statedIn(tied) {
   const cases = [];
+  const charged = {};
   for (const line of tied) {
     if (line.case !== null) cases[line.case] = line.text.trim();
+    // Under "The caps:" a line states the cap with its limit and its BUDGET, and after the
+    // last colon what is charged to it.
+    if (line.record !== null && line.text.startsWith(`  ${line.record}: at most `)) charged[line.record] = line.text.slice(line.text.lastIndexOf(": ") + 2);
   }
   const heading = tied.find((line) => CASES.test(line.text));
-  return { heading: cases.length > 1 && heading !== undefined ? heading.text : null, cases };
+  return { heading: cases.length > 1 && heading !== undefined ? heading.text : null, cases, charged };
 }
 
 /**
