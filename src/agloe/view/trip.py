@@ -470,10 +470,16 @@ def seen_as(name: str) -> str:
 
     It is without the characters that a page shows nothing for, with each accent joined to
     its letter, and with each run of spaces as one space. A format character is left out too:
-    a page shows nothing for most of them.
+    a page shows nothing for most of them. A character that is another one set in another way
+    counts as that one, as Unicode has it: two letters drawn as one sign, a wide letter, a
+    space or a hyphen that does not break.
+
+    This stops there. A letter of another alphabet that is drawn like one of this alphabet is
+    another letter, and a dash is no hyphen.
     """
-    seen = "".join(each for each in _UNSEEN.sub("", name) if unicodedata.category(each) != "Cf")
-    return " ".join(unicodedata.normalize("NFC", seen).split())
+    plain = unicodedata.normalize("NFKC", name).replace("\u2010", "-")
+    seen = "".join(each for each in _UNSEEN.sub("", plain) if unicodedata.category(each) != "Cf")
+    return " ".join(seen.split())
 
 
 def _names(

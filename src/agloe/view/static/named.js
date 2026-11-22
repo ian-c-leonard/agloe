@@ -28,7 +28,7 @@ export function either(name) {
   if (name.startsWith('"')) return name;
   const id = name.match(WITH_AN_ID);
   const bare = id === null ? name : name.slice(0, id.index);
-  if (!bare.replace(UNSEEN, "").toLowerCase().split(/\s+/).includes("or")) return name;
+  if (!bare.normalize("NFKC").replace(UNSEEN, "").toLowerCase().split(/\s+/).includes("or")) return name;
   return `"${bare.replace(/\\/g, "\\\\")}"${id === null ? "" : id[0]}`;
 }
 
