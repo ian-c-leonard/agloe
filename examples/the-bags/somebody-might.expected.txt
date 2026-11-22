@@ -1,5 +1,5 @@
 UNDETERMINED: the FILE does not say enough to tell.
 
-The trip might work if the bags can be at hand some other way for Flight home.
+The trip might work if another transfer puts the bags at hand for Flight home.
 
-That is not settled. Nothing that the FILE lists brings the bags there, and the COMPILER has not worked out whether another transfer can.
+That is not settled. Nothing that the FILE lists puts the bags at hand there, and the COMPILER has not worked out whether another transfer can.

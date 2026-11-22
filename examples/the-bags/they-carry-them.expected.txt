@@ -22,11 +22,11 @@ The plan relies on these FACTs and DECISIONs:
   where-the-bags-start: Alex has the bags when the TRIP starts
   flight-needs-the-bags: Flight home requires the bags
   every-use-of-the-bags: of the OPTIONs in this FILE, only Flight home requires the bags
-  everything-that-moves-the-bags: nothing hands over or keeps the bags, in this FILE or outside it
+  everything-that-moves-the-bags: the FILE states every OPTION that hands over or keeps the bags: there is none
   trip-start: the TRIP starts at 1:00 pm on Saturday 15 May 2027
   lock-visit: Alex and Sam take part in Museum visit
   lock-flight: Alex and Sam take part in Flight home
 
 Where each OBJECT is:
   the bags: with Alex when the TRIP starts
-    Flight home requires the bags. At its start: with Alex.
+    Flight home requires the bags. Just before it starts: with Alex.

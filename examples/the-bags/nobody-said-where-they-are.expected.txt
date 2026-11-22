@@ -3,5 +3,5 @@ UNDETERMINED: the FILE does not say enough to tell.
 The trip works in any of these cases:
   1. Alex has the bags when the TRIP starts.
   2. Sam has the bags when the TRIP starts.
-  3. the hotel has the bags when the TRIP starts.
-  4. O'Hare has the bags when the TRIP starts.
+  3. The TRIP starts with the bags at the hotel.
+  4. The TRIP starts with the bags at O'Hare.

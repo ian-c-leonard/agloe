@@ -763,15 +763,13 @@ class File:
 
         "hands_over", "keeps" or "nothing", and None where the FILE does not say. A FACT about
         the two settles it. Without one, a FACT that the set of the OBJECT's transfers is
-        COMPLETE settles it too: the OPTION leaves the OBJECT alone. That FACT is about the
-        OPTIONs of the FILE, so the answer is None for anything else.
+        COMPLETE settles it too: the OPTION leaves the OBJECT alone. That FACT says that
+        nothing else transfers the OBJECT, in the FILE or outside it.
         """
         stated = self._actions.get((option, object))
         if stated is not None:
             return stated.does
-        listed = option in self._options_listed
-        whole = listed and self.transfers_complete(object) is not None
-        return "nothing" if whole else None
+        return "nothing" if self.transfers_complete(object) is not None else None
 
     def transfers_complete(self, object: str) -> CompleteTransfers | None:
         """The FACT that the FILE states every transfer of this OBJECT, if any."""
@@ -1500,7 +1498,9 @@ def _describe(error: ValidationError, shapes: dict[str, dict[str, object]]) -> s
             misses = [miss for miss in misses if name(miss) == meant[0]] or misses
         asked = record.get("requires")
         if isinstance(asked, dict) and list(error.absolute_path)[:1] == ["facts"]:
-            inside = "requires_object" if "object" in asked else "requires_capability"
+            # About an OBJECT where it names one, or says whether the OBJECT is needed.
+            about_an_object = "object" in asked or "needed" in asked
+            inside = "requires_object" if about_an_object else "requires_capability"
             misses = [miss for miss in misses if name(miss) == inside] or misses
     closest = max(misses, key=lambda miss: len(miss.absolute_path))
     return f"{where}: fits no known shape; the closest miss: {closest.message}"

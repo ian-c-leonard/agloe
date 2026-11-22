@@ -8,7 +8,8 @@
         "at_hand_for": [
           {
             "option": "flight",
-            "stated": true
+            "stated": true,
+            "covered": false
           }
         ],
         "settled": false

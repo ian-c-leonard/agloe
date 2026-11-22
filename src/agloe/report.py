@@ -430,10 +430,12 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
         if unknown.place is not None:
             out["place"] = unknown.place
         if unknown.what == "another transfer":
-            # The OPTIONs for which the OBJECT has to be at hand in one plan. Nobody has
-            # worked out whether another transfer can bring it there.
+            # The OPTIONs for which the OBJECT has to be at hand in one plan, and whether
+            # what the FILE lists already puts it there. Nobody has worked out whether
+            # another transfer can put it at hand for all of them.
             out["at_hand_for"] = [
-                {"option": option, "stated": stated} for option, stated in needed.at_hand_for
+                {"option": option, "stated": stated, "covered": covered}
+                for option, stated, covered in needed.at_hand_for
             ]
             out["settled"] = False
         return out
@@ -590,8 +592,9 @@ def as_text(file: File, report: Report) -> str:
             this = "That is" if len(cases) == 1 else "These cases are"
             lines += [
                 "",
-                f"{this} not settled. Nothing that the FILE lists brings {_listed(names)}"
-                " there, and the COMPILER has not worked out whether another transfer can.",
+                f"{this} not settled. Nothing that the FILE lists puts {_listed(names)} at"
+                " hand there, and the COMPILER has not worked out whether another transfer"
+                " can.",
             ]
         # A BOOKING can stand in for that answer, for an OPTION whose rights are not COMPLETE.
         might_be_booked = {
@@ -813,10 +816,11 @@ def _carried_in_words(
     for use in carried.uses:
         name, where = _name(file, use.option), _where(file, use.where)
         if use.stated:
-            lines.append(f"    {name} requires {thing}. At its start: {where}.")
+            lines.append(f"    {name} requires {thing}. Just before it starts: {where}.")
         else:
             silent = f"The FILE does not say whether {name} requires {thing}"
-            lines.append(f"    {silent}. At its start: {where}, so the plan holds if it does.")
+            holds = f"Just before it starts: {where}, so the plan holds if it does"
+            lines.append(f"    {silent}. {holds}.")
     return lines
 
 
@@ -941,6 +945,7 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
     """
     parts: list[str] = []
     for_whom: dict[str | None, list[str]] = {}
+    transfers: list[str] = []  # they come last, as in the fixed order
     for _, run in groupby(enough, key=_named_with):
         group = list(run)
         unknown = group[0].unknown
@@ -950,14 +955,7 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
             names = [_name(file, needed.unknown.option, "or") for needed in group]
             parts.append(_OwnWords(f"nobody needs a right to take part in {_listed(names, 'or')}"))
         elif unknown.what == "another transfer":
-            thing = _names(file.objects)[unknown.about or ""]
-            stated = [_name(file, option, "and") for option, said in group[0].at_hand_for if said]
-            might = [_name(file, each, "and") for each, said in group[0].at_hand_for if not said]
-            for_these = [f"for {_listed(stated)}"] if stated else []
-            if might:
-                they = "it requires" if len(might) == 1 else "they require"
-                for_these.append(f"for {_listed(might)} if {they} {thing}")
-            parts.append(f"{thing} can be at hand some other way {', and '.join(for_these)}")
+            transfers.append(_another_transfer(file, group[0]))
         elif unknown.what == "another right":
             # A right that is found is one more than the places on OFFER, and the words say so.
             places = file.places_on_offer(unknown.option or "")
@@ -974,8 +972,33 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
         each = "each of " if len(persons) > 1 else ""
         other = f"another OPTION that SATISFIES {_want(file, want)} is found for {each}{who}"
         parts.append(_OwnWords(other))
+    parts += transfers
     whole = " and ".join(parts)
     return _OwnWords(whole) if isinstance(parts[0], _OwnWords) else whole
+
+
+def _another_transfer(file: File, needed: Missing) -> str:
+    """Another transfer of an OBJECT, in words.
+
+    It names the OPTIONs for which another transfer has to put the OBJECT at hand in one
+    plan, and then those for which what the FILE lists already does: another transfer has
+    to leave it at hand there. An OPTION that only might require the OBJECT is named so.
+    """
+    thing = _names(file.objects)[needed.unknown.about or ""]
+
+    def for_those(covered: bool) -> str:
+        mine = [each for each in needed.at_hand_for if each[2] is covered]
+        stated = [_name(file, option, "and") for option, said, _ in mine if said]
+        might = [_name(file, option, "and") for option, said, _ in mine if not said]
+        named = [f"for {_listed(stated)}"] if stated else []
+        if might:
+            they = "it requires" if len(might) == 1 else "they require"
+            named.append(f"for {_listed(might)} if {they} {thing}")
+        return ", and ".join(named)
+
+    words = f"another transfer puts {thing} at hand {for_those(False)}"
+    already = for_those(True)
+    return _OwnWords(f"{words}, and leaves {thing} at hand {already}" if already else words)
 
 
 def _places(count: int) -> str:
@@ -1018,13 +1041,14 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
         if unknown.what == "starts with":
             return f"{_people(file, (unknown.person or '',))} has {thing} when the TRIP starts"
         if unknown.what == "starts at":
-            return f"{_names(file.places)[unknown.place or '']} has {thing} when the TRIP starts"
+            place = _names(file.places)[unknown.place or ""]
+            return _OwnWords(f"the TRIP starts with {thing} at {place}")
         name = _name(file, unknown.option)
         return {
             "does not require": f"{name} does not require {thing}",
             "keeps": f"{name} keeps {thing}",
             "does not keep": f"{name} does not keep {thing}",
-            "hands over": f"{name} hands over {thing}",
+            "hands over": f"{thing} can be handed over in {name}",
         }[unknown.what]
     if unknown.what == "price":
         buyers = tuple(cover.person for cover in needed.buys)
@@ -1144,14 +1168,14 @@ def _record(file: File, clock: Clock, record: str) -> str:
         thing = _names(file.objects)[found.object]
         if found.person is not None:
             return f"{_people(file, (found.person,))} has {thing} when the TRIP starts"
-        return f"{_names(file.places)[found.place or '']} has {thing} when the TRIP starts"
+        return f"the TRIP starts with {thing} at {_names(file.places)[found.place or '']}"
     if isinstance(found, RequiresObject):
         does = "requires" if found.needed else "does not require"
         return f"{_name(file, found.option)} {does} {_names(file.objects)[found.object]}"
     if isinstance(found, WithObject):
         thing = _names(file.objects)[found.object]
         return {
-            "hands_over": f"{_name(file, found.option)} hands over {thing}",
+            "hands_over": f"{thing} can be handed over in {_name(file, found.option)}",
             "keeps": f"{_name(file, found.option)} keeps {thing}",
             "nothing": f"{_name(file, found.option)} leaves {thing} alone",
         }[found.does]
@@ -1174,10 +1198,8 @@ def _record(file: File, clock: Clock, record: str) -> str:
             if fact.does != "nothing"
         ]
         thing = _names(file.objects)[found.object]
-        if not which:
-            return f"nothing hands over or keeps {thing}, in this FILE or outside it"
-        verb = "hands over or keeps" if len(which) == 1 else "hand over or keep"
-        return f"only {_listed(which)} {verb} {thing}, and nothing outside this FILE does"
+        said = _listed(which) if which else "there is none"
+        return f"the FILE states every OPTION that hands over or keeps {thing}: {said}"
     name = _name(file, found.option)
     if isinstance(found, Lock):
         verb = "takes" if len(found.persons) == 1 else "take"

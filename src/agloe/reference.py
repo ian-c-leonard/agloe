@@ -20,7 +20,7 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence, Sized
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from heapq import heapify, heappop, heappush
-from itertools import chain, combinations, groupby, pairwise, permutations, product
+from itertools import combinations, groupby, pairwise, permutations, product
 
 from agloe.file import Booking, Complete, File, Offer, Satisfies, StartsFrom, Want, WithObject
 
@@ -363,7 +363,14 @@ def has_to_end_at(file: File, person: str) -> list[Want]:
 
 
 def best_case(file: File) -> World:
-    """The possible world in which every unknown FACT turns out as well as it can."""
+    """Every unknown FACT turned out as well as it can.
+
+    Without OBJECTs that is one possible world. An OBJECT makes it more. Where no FACT says
+    where it starts, the world leaves the start to pick, and each pick is a possible world.
+    Where the set of its transfers is not COMPLETE, the fourteenth CONSTRAINT asks nothing
+    of it here. That is an upper bound and no possible world: whatever works in a possible
+    world works here, and no more is claimed.
+    """
     return _world(file, None)
 
 
@@ -555,6 +562,7 @@ def no_better_than(file: File, found: Iterable[Unknown]) -> World:
     It can show nothing else, and no answer and no evidence is ever read from it.
     """
     best = best_case(file)
+    found = tuple(found)
     unknown = {
         (option.id, want.id)
         for option in file.options
@@ -863,15 +871,15 @@ def broken(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
     ITINERARY lists them is tried first, then every other order. The result is that of the order
     that breaks the least.
 
-    Where an OBJECT is turns on the order of all the steps that start at one instant, whatever
-    time they take. So in a FILE that lists an OBJECT, the steps are first tried just as the
-    ITINERARY lists them.
+    A FILE that lists an OBJECT is different. Where an OBJECT is turns on the order of all
+    the steps that start at one instant, whatever time they take, and that order is part of
+    the plan. So the steps are checked in the order the ITINERARY lists them, earlier starts
+    first, and in no other order.
     """
     _well_formed(file, itinerary)
     orders: Iterable[list[_Placed]] = _in_each_order(itinerary)
     if file.objects:
-        as_listed = sorted(enumerate(itinerary), key=lambda placed: placed[1].start)
-        orders = chain([as_listed], orders)
+        orders = [sorted(enumerate(itinerary), key=lambda placed: placed[1].start)]
     fewest: list[Broken] | None = None
     for order in orders:
         found = _in_this_order(file, world, itinerary, order)
@@ -1753,11 +1761,12 @@ def whereabouts(
 
 type _Chain = tuple[list[tuple[int, int, int]], dict[int, _Taken], tuple[int, tuple[_Ranked, ...]]]
 type _Ranked = tuple[tuple[int, int], ...]  # the hand-overs of one OBJECT, by position in the FILE
+_NOTHING_TO_ORDER: list[_Chain] = [([], {}, (0, ()))]  # no OBJECT turns on the order of the steps
 
 
 def _chains(
     file: File, world: World, who: tuple[tuple[str, ...], ...], orders: tuple[tuple[int, ...], ...]
-) -> list[_Chain]:
+) -> list[_Chain] | None:
     """Each order of the OPTIONs that matter to an OBJECT, with the hand-overs that work in it.
 
     Where an OBJECT is turns on the order in which the OPTIONs happen, also among OPTIONs of
@@ -1780,7 +1789,7 @@ def _chains(
     Every ITINERARY that works lists its OPTIONs in one order, and that order is tried. The
     start times it has keep these gaps, so the rule for start times finds times too. Where no
     OPTION of the plan requires an OBJECT that the fourteenth CONSTRAINT asks about, there is
-    nothing to order: the one result has no gap and no hand-over.
+    nothing to order, and the result is None.
     """
     options = file.options
     happening = [index for index, persons in enumerate(who) if persons]
@@ -1791,7 +1800,7 @@ def _chains(
         and any((options[index].id, thing.id) in world.needs for index in happening)
     ]
     if not followed:
-        return [([], {}, (0, ()))]
+        return None
     matter = tuple(
         index
         for index in happening
@@ -2389,7 +2398,7 @@ def _schedules(
     ITINERARY that works is the same one. Every other route is left to the timing.
     """
     chains = _chains(file, world, who, orders)
-    if not chains:
+    if chains is not None and not chains:
         return  # an OBJECT is not at hand where it has to be, whatever the WAYs and the times
     # Which PERSON, after which of their OPTIONs, the routes. Before their first OPTION is -1.
     needed: list[tuple[int, int, list[Route]]] = []
@@ -2432,7 +2441,7 @@ def _schedules(
             (number, position): route
             for (number, position, _), route in zip(needed, chosen, strict=True)
         }
-        yield from _timings(file, world, who, orders, hops, chains=chains)
+        yield from _timings(file, world, who, orders, hops, chains=chains or _NOTHING_TO_ORDER)
 
 
 def _over(terms: Terms) -> int | None:
@@ -2540,12 +2549,16 @@ def _timings(
 
     ``chains`` holds what ``_chains`` gives for these PERSONs and orders, where it is already
     worked out. Each is one order of the OPTIONs that matter to an OBJECT, with its
-    hand-overs. For one timing of the unlisted WAYs, each is timed and checked, and the
+    hand-overs. Each is timed and checked, in each way the timing can fall, and the
     ITINERARIES come in the order of "Which ITINERARY is shown": the fewest hand-overs, then
-    the hand-overs listed first, then the steps that come first with their times.
+    the hand-overs listed first, then the steps that come first with their times. So they are
+    all found before the first is given. Where nothing is to be ordered, each is given as
+    soon as it is found.
     """
     if chains is None:
-        chains = _chains(file, world, who, orders)
+        found = _chains(file, world, who, orders)
+        chains = _NOTHING_TO_ORDER if found is None else found
+    in_turn = chains is _NOTHING_TO_ORDER
     listed = len(file.options)
     legs: list[tuple[str, Leg]] = []  # each WAY taken: who takes it, and which one
     lines: list[list[int]] = []  # what each PERSON does in order, the WAYs they take included
@@ -2651,6 +2664,7 @@ def _timings(
             [sum(latest < falls[taken[node - listed]] for _, latest in spans)]
             for node, spans in ruled_out
         ]
+    working: list[tuple[tuple[int, tuple[_Ranked, ...]], Itinerary]] = []
     for choice in product(*openings):
         earliest, latest = dict(not_before), dict(no_later)
         for (node, spans), opening in zip(ruled_out, choice, strict=True):
@@ -2662,7 +2676,6 @@ def _timings(
             if opening < len(spans):
                 before = spans[opening][0] - 1
                 latest[node] = min(before, latest.get(node, before))
-        working: list[tuple[tuple[int, tuple[_Ranked, ...]], Itinerary]] = []
         for all_gaps, handed, rank in ordered:
             starts = _times(count, all_gaps, fixed, earliest, latest)
             if starts is None:
@@ -2690,14 +2703,18 @@ def _timings(
                     None, start_place, end_place, (person_id,), start, end, way
                 )
             itinerary = _in_the_order_they_happen(file, steps, all_gaps)
-            if works_as_listed(file, world, itinerary):
+            if not works_as_listed(file, world, itinerary):
+                continue
+            if in_turn:
+                yield itinerary
+            else:
                 working.append((rank, itinerary))
-        if len(working) > 1:
-            working.sort(
-                key=lambda each: (each[0], [_step_in_file_order(file, step) for step in each[1]])
-            )
-        for _, itinerary in working:
-            yield itinerary
+    if len(working) > 1:
+        working.sort(
+            key=lambda each: (each[0], [_step_in_file_order(file, step) for step in each[1]])
+        )
+    for _, itinerary in working:
+        yield itinerary
 
 
 def _closed(file: File, origin: str, destination: str) -> list[tuple[int, int]]:

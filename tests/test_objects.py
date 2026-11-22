@@ -51,6 +51,8 @@ from tests.stories import (
     Document,
     any_time,
     booking,
+    budget,
+    cap,
     complete,
     cutoff,
     does_with,
@@ -65,17 +67,23 @@ from tests.stories import (
     lasts_between,
     lies_at,
     lock,
+    moves,
     must,
+    needs_no_right,
     needs_right,
+    offer,
     requires_object,
     satisfies,
     seconds,
     starts_at,
+    starts_from,
     stays,
     takes,
     trip,
+    trip_starts,
     way_between,
 )
+from tests.stories import at as moment
 from tests.test_cross_check import possible_world, random_trip
 
 
@@ -184,8 +192,9 @@ def test_a_complete_set_settles_what_an_option_with_no_fact_requires_and_does() 
     file = load(a_document(every_transfer("passport")))
     assert file.requires_object("check-in", "passport") is None
     assert file.does_with("check-in", "passport") == "nothing"
-    # Each set is about the OPTIONs of the FILE only.
-    assert file.does_with("another", "passport") is None
+    # Nothing outside the FILE transfers the passport either. The set of requirements is
+    # about the OPTIONs of the FILE only.
+    assert file.does_with("another", "passport") == "nothing"
     assert load(a_document(every_use("passport"))).requires_object("another", "passport") is None
 
 
@@ -641,25 +650,25 @@ def test_with_the_transfers_left_open_the_compiler_says_what_it_has_not_worked_o
     found = checked(file)
     assert found.answer is Answer.UNDETERMINED
     assert asked(found) == [(Unknown("another transfer", about="permit"),)]
-    assert found.missing[0][0].at_hand_for == (("desk-a", True), ("desk-b", True))
+    assert found.missing[0][0].at_hand_for == (("desk-a", True, False), ("desk-b", True, False))
     assert report.as_json(file, found)["missing"] == [
         [
             {
                 "what": "another transfer",
                 "object": "permit",
                 "at_hand_for": [
-                    {"option": "desk-a", "stated": True},
-                    {"option": "desk-b", "stated": True},
+                    {"option": "desk-a", "stated": True, "covered": False},
+                    {"option": "desk-b", "stated": True, "covered": False},
                 ],
                 "settled": False,
             }
         ]
     ]
     words = report.as_text(file, found)
-    assert "The trip might work if permit can be at hand some other way for desk-a and desk-b." in (
-        words
-    )
-    assert "That is not settled. Nothing that the FILE lists brings permit there" in words
+    assert (
+        "The trip might work if another transfer puts permit at hand for desk-a and desk-b."
+    ) in words
+    assert "That is not settled. Nothing that the FILE lists puts permit at hand there" in words
     assert "The trip works" not in words
 
 
@@ -671,9 +680,14 @@ def test_a_requirement_that_the_file_leaves_open_is_named_as_one_that_might_hold
     found = checked(replace(file, facts=(*file.facts, lies_at_fact("permit", "south"))))
     assert found.answer is Answer.UNDETERMINED
     assert asked(found) == [(Unknown("another transfer", about="permit"),)]
-    assert found.missing[0][0].at_hand_for == (("desk-a", True), ("desk-b", False))
+    # The permit lies where desk-b is. So what the FILE lists already puts it at hand there,
+    # and another transfer has to leave it at hand there.
+    assert found.missing[0][0].at_hand_for == (("desk-a", True, False), ("desk-b", False, True))
     words = report.as_text(file, found)
-    assert "for desk-a, and for desk-b if it requires permit." in words
+    assert (
+        "The trip might work if another transfer puts permit at hand for desk-a, and leaves"
+        " permit at hand for desk-b if it requires permit."
+    ) in words
 
 
 def lies_at_fact(thing: str, place: str) -> ObjectStarts:
@@ -786,7 +800,7 @@ def test_a_plan_that_holds_wherever_the_object_is_can_be_robust() -> None:
         "  passport: with alex when the TRIP starts; with alex or at desk from 9:00 am"
         " (the FILE does not say what short does with passport)"
     ) in words
-    assert "    check requires passport. At its start: with alex or at desk." in words
+    assert "    check requires passport. Just before it starts: with alex or at desk." in words
     # At the shortest durations the rule would show the first appointment.
     assert [each.option for each in first_shown(file, worst_case(file)) or ()] == ["long", "check"]
 
@@ -1151,7 +1165,7 @@ def test_a_writer_who_lists_an_object_has_more_to_state() -> None:
     words = report.as_text(a_lunch(), found)
     assert "  1. lunch does not require bags." in words
     assert "  2. alex has bags when the TRIP starts." in words
-    assert "  3. park has bags when the TRIP starts." in words
+    assert "  3. The TRIP starts with bags at park." in words
 
 
 def test_two_facts_settle_an_object_for_every_option() -> None:
@@ -1193,11 +1207,10 @@ def test_an_object_that_starts_in_the_wrong_place_makes_the_trip_infeasible() ->
         "lock-lunch",
     )
     words = report.as_text(file, found)
-    assert "  bags-start: hotel has bags when the TRIP starts" in words
+    assert "  bags-start: the TRIP starts with bags at hotel" in words
     assert "  lunch-requires-bags: lunch requires bags" in words
-    assert (
-        "  every-transfer-of-bags: nothing hands over or keeps bags, in this FILE or outside it"
-    ) in words
+    whole = "the FILE states every OPTION that hands over or keeps bags: there is none"
+    assert f"  every-transfer-of-bags: {whole}" in words
 
 
 def test_hands_over_is_asked_only_where_does_not_keep_is_not_enough() -> None:
@@ -1354,18 +1367,21 @@ def test_a_plan_relies_on_the_fact_about_what_an_option_does_where_the_file_stat
         every_transfer("passport"),
     )
     found = checked(file)
+    # Alex has the passport in all three. A FACT says what the first one does, and only the
+    # COMPLETE set says that the other two leave it alone.
     assert relied_on(found) == [
         "passport-start",
         "first-with-passport",
         "second-requires-passport",
         "every-use-of-passport",
+        "every-transfer-of-passport",
     ]
 
 
-def test_a_plan_relies_on_nothing_about_an_option_after_which_it_needs_the_object_no_more() -> None:
-    """The second appointment is the last one that requires the passport. What it does with
-    the passport, and what the third one does, changes nothing. So the plan holds with the
-    transfers left open, and it says so by relying on nothing there."""
+def test_where_the_file_says_nothing_about_an_option_the_report_names_each_place() -> None:
+    """Nothing says what the second and the third appointment do with the passport. The plan
+    holds either way: the second requires it while Alex has it, and nothing requires it
+    afterwards. The report says each place where it might be from then on."""
     file = locked_desk(
         has_object("alex", "passport"),
         does_with("first", "passport", "nothing"),
@@ -1380,7 +1396,6 @@ def test_a_plan_relies_on_nothing_about_an_option_after_which_it_needs_the_objec
         "second-requires-passport",
         "every-use-of-passport",
     ]
-    # The report still says where the passport might be after each of them.
     either = (Where(person="alex"), Where(place="desk"))
     assert found.objects[0].stays == (
         Stay((Where(person="alex"),)),
@@ -1391,8 +1406,8 @@ def test_a_plan_relies_on_nothing_about_an_option_after_which_it_needs_the_objec
 
 def test_a_plan_relies_on_no_fact_about_an_object_that_it_does_not_need() -> None:
     """The plan has the first two appointments. The FACTs about the third, which stays out,
-    are not among those it relies on. Neither is the FACT about what the second one does:
-    after it, the plan needs the passport no more."""
+    are not among those it relies on. A FACT says what each of the first two does with the
+    passport, so the plan does not rely on the COMPLETE set of transfers either."""
     file = locked_desk(
         has_object("alex", "passport"),
         does_with("first", "passport", "nothing"),
@@ -1410,6 +1425,7 @@ def test_a_plan_relies_on_no_fact_about_an_object_that_it_does_not_need() -> Non
         "passport-start",
         "first-with-passport",
         "second-requires-passport",
+        "second-with-passport",
         "every-use-of-passport",
     ]
 
@@ -1431,6 +1447,7 @@ def test_a_plan_relies_on_the_facts_about_a_keep_and_a_hand_over_it_goes_through
         "second-with-passport",
         "third-requires-passport",
         "every-use-of-passport",
+        "every-transfer-of-passport",
     ]
     assert report.as_json(file, found)["objects"] == [
         {
@@ -1449,7 +1466,7 @@ def test_a_plan_relies_on_the_facts_about_a_keep_and_a_hand_over_it_goes_through
         " with alex from 10:00 am (handed over in second)"
     ) in words
     assert "  first-with-passport: first keeps passport" in words
-    assert "  second-with-passport: second hands over passport" in words
+    assert "  second-with-passport: passport can be handed over in second" in words
     assert "  third-requires-passport: third requires passport" in words
     assert "of the OPTIONs in this FILE, only third requires passport" in words
 
@@ -1464,7 +1481,7 @@ def test_a_plan_says_where_the_file_leaves_a_requirement_open() -> None:
     assert relied_on(found) == ["passport-start"]
     words = report.as_text(file, found)
     silent = "The FILE does not say whether first requires passport"
-    assert f"    {silent}. At its start: with alex, so the plan holds if it does." in words
+    assert f"    {silent}. Just before it starts: with alex, so the plan holds if it does." in words
 
 
 def test_the_report_puts_each_fact_about_an_object_in_words() -> None:
@@ -1478,7 +1495,7 @@ def test_the_report_puts_each_fact_about_an_object_in_words() -> None:
     )
     words = report.as_text(file, checked(file))
     for line in (
-        "  passport-start: desk has passport when the TRIP starts",
+        "  passport-start: the TRIP starts with passport at desk",
         "  first-requires-passport: first requires passport",
         "  second-requires-passport: second does not require passport",
     ):
@@ -1503,7 +1520,7 @@ def test_the_report_puts_each_fact_about_an_object_in_words() -> None:
     kept = replace(whole, facts=tuple(f for f in whole.facts if f.id != "second-with-passport"))
     words = report.as_text(kept, checked(kept))
     assert "INFEASIBLE" in words
-    said = "only first hands over or keeps passport, and nothing outside this FILE does"
+    said = "the FILE states every OPTION that hands over or keeps passport: first"
     assert f"  every-transfer-of-passport: {said}" in words
 
 
@@ -1696,7 +1713,7 @@ def every_chain(
     who: tuple[tuple[str, ...], ...],
     orders: tuple[tuple[int, ...], ...],
     everything: bool,
-) -> list[Chain]:
+) -> list[Chain] | None:
     """Every order of the OPTIONs of a plan with every choice of hand-overs. Nothing is skipped.
 
     It stands in for the search's own way of choosing them. Every order is given, also one
@@ -1723,10 +1740,10 @@ def every_chain(
             for thing in followed
         )
     ]
+    if not followed:
+        return None
     if everything:
         followed, matter = things, happening
-    if not followed:
-        return [([], {}, (0, ()))]
     chains: list[Chain] = []
     for order in permutations(matter):
         gaps = [(before, after, 0) for before, after in pairwise(order)]
@@ -1752,13 +1769,13 @@ def every_chain(
 
 def those_that_matter(
     file: File, world: World, who: tuple[tuple[str, ...], ...], orders: tuple[tuple[int, ...], ...]
-) -> list[Chain]:
+) -> list[Chain] | None:
     return every_chain(file, world, who, orders, everything=False)
 
 
 def all_of_them(
     file: File, world: World, who: tuple[tuple[str, ...], ...], orders: tuple[tuple[int, ...], ...]
-) -> list[Chain]:
+) -> list[Chain] | None:
     return every_chain(file, world, who, orders, everything=True)
 
 
@@ -2018,7 +2035,7 @@ def test_the_examples_about_the_bags_say_what_the_rules_page_says() -> None:
     )
     might = result("somebody-might")
     assert named("somebody-might") == [(("another transfer", None, "bags"),)]
-    assert might.missing[0][0].at_hand_for == (("flight", True),)
+    assert might.missing[0][0].at_hand_for == (("flight", True, False),)
     late = result("the-visit-runs-late").conflict
     assert len(late) == 13
     assert "everything-that-moves-the-bags" in late and "hotel-releases-the-bags" not in late
@@ -2031,3 +2048,211 @@ def test_the_examples_about_the_bags_say_what_the_rules_page_says() -> None:
     assert named("depends-on-the-museum") == [(("does not require", "museum-visit", "bags"),)]
     words = json.dumps(report.as_json(read(EXAMPLES / "the-bags" / "somebody-might.json"), might))
     assert '"settled": false' in words
+
+
+# What the reviewer's FILEs showed.
+
+
+def test_all_the_ways_the_timing_can_fall_are_compared_before_a_plan_is_shown() -> None:
+    """Alex has a check at the hotel at any time, and an appointment in the park at noon that
+    requires the key Alex carries. Sam has a check in the park at 10:00 am. Only an unlisted
+    WAY joins the hotel to the park, and none leaves from 9:00 am to 10:00 am. Each check
+    does something with a key, so the two have an order.
+
+    With Sam's check first, Alex travels at noon or just after 10:00 am. With Alex's first,
+    Alex can also travel just before 9:00 am. That plan has the earliest first step, so it
+    is the one shown, though another one is found first."""
+    options = [stays("sam-check", "park"), stays("alex-check", "hotel"), stays("meeting", "park")]
+    span = {"from": "hotel", "to": "park", "leaving": {"earliest": moment(9), "latest": moment(10)}}
+    facts = [
+        *at("sam-check", 10, length="PT0S"),
+        *whenever("alex-check", "PT0S"),
+        *at("meeting", 12, length="PT0S"),
+        starts_from("alex", "hotel"),
+        starts_from("sam", "park"),
+        {"id": "ways", "complete": span},
+        has_object("alex", "key"),
+        requires_object("meeting", "key"),
+        keeps("sam-check", "key"),
+        hands_over("alex-check", "key"),
+        every_use("key"),
+        every_transfer("key"),
+    ]
+    locks = [lock("sam-check", "sam"), lock("alex-check", "alex"), lock("meeting", "alex")]
+    file = trip(["alex", "sam"], ["hotel", "park"], options, facts, locks, objects=["key"])
+    world = with_these_at_best(file, [Unknown("other ways", origin="hotel", destination="park")])
+    shown = first_shown(file, world)
+    assert shown is not None
+    just_before = seconds(9) - 1
+    assert [(step.option, step.start) for step in shown] == [
+        ("alex-check", just_before),
+        (None, just_before),
+        ("sam-check", seconds(10)),
+        ("meeting", seconds(12)),
+    ]
+
+
+def test_a_plan_is_checked_in_the_order_it_lists_its_steps() -> None:
+    """Two appointments at one desk at 10:00 am. Alex has the bag. Sam's appointment requires
+    it, and Alex's keeps it. Listed with Sam's first, the bag is not there yet. The check
+    says so: it does not look for another order that would work."""
+    options = [stays("sam-uses", "desk"), stays("alex-leaves", "desk")]
+    facts = [
+        *at("sam-uses", 10),
+        *at("alex-leaves", 10, length="PT0S"),
+        has_object("alex", "bag"),
+        requires_object("sam-uses", "bag"),
+        keeps("alex-leaves", "bag"),
+        every_use("bag"),
+        every_transfer("bag"),
+    ]
+    locks = [lock("sam-uses", "sam"), lock("alex-leaves", "alex")]
+    file = trip(["alex", "sam"], ["desk"], options, facts, locks, objects=["bag"])
+    world = worst_case(file)
+    uses = Step("sam-uses", "desk", "desk", ("sam",), seconds(10), seconds(10, 30))
+    leaves = Step("alex-leaves", "desk", "desk", ("alex",), seconds(10), seconds(10))
+    too_soon = [Broken(Constraint.AT_HAND, "sam-uses", ("sam",), object="bag")]
+    assert broken(file, world, (uses, leaves)) == too_soon
+    assert broken_as_listed(file, world, (uses, leaves)) == too_soon
+    assert broken(file, world, (leaves, uses)) == []
+    assert checked(file).itinerary == (leaves, uses)
+
+
+def test_a_case_that_is_not_settled_says_what_the_file_already_covers() -> None:
+    """Alex takes a train from the desk to the gate, and then a flight. Both require the bag.
+    It lies at the desk, and the train leaves it there. So it is at hand for the train, and
+    nothing brings it to the flight. The report says which is which. The plan under it buys
+    the place on the train, and the report says that this plan works in that case."""
+    options = [moves("train", "desk", "gate"), moves("flight", "gate", "away")]
+    facts = [
+        *at("train", 9),
+        *at("flight", 11),
+        needs_right("train"),
+        offer("train", 1, price="1.00 USD"),
+        every_right("train", "train-offer"),
+        needs_no_right("flight"),
+        lies_at("bag", "desk"),
+        requires_object("train", "bag"),
+        does_with("train", "bag", "nothing"),
+        requires_object("flight", "bag"),
+    ]
+    locks = [lock("train", "alex"), lock("flight", "alex"), cap("money", "10.00 USD")]
+    file = trip(
+        ["alex"],
+        ["desk", "gate", "away"],
+        options,
+        facts,
+        locks,
+        rights=True,
+        budgets=[budget("money", "alex")],
+        objects=["bag"],
+    )
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert asked(found) == [(Unknown("another transfer", about="bag"),)]
+    assert found.missing[0][0].at_hand_for == (("train", True, True), ("flight", True, False))
+    words = report.as_text(file, found)
+    assert (
+        "The trip might work if another transfer puts bag at hand for flight, and leaves bag"
+        " at hand for train."
+    ) in words
+    assert "  One plan that works then: alex buys a place from train-offer for 1.00 USD" in words
+    assert "That is not settled." in words
+
+
+def test_a_settled_case_comes_before_one_that_is_not_however_many_facts_it_holds() -> None:
+    """Music and food are musts for Alex. The gala delivers both and requires the bag, which
+    lies at the hotel. Supper delivers the food, and nobody said when it starts. Another
+    transfer of the bag is one new thing, and might be enough. Another OPTION for the music
+    is one new thing too, and with supper free to start it is sure to be enough. The report
+    names that one: it asks one FACT more, and its answer gives a plan that works."""
+    options = [stays("gala", "venue"), stays("supper", "venue")]
+    facts = [
+        *at("gala", 19),
+        lasts("supper", "PT1H"),
+        cutoff("supper", "PT0S"),
+        satisfies("gala", "music"),
+        satisfies("gala", "food"),
+        satisfies("supper", "food"),
+        satisfies("supper", "music", 0),
+        lies_at("bag", "hotel"),
+        requires_object("gala", "bag"),
+        every_use("bag"),
+    ]
+    wants = [must("music", "alex"), must("food", "alex")]
+    file = trip(["alex"], ["venue", "hotel"], options, facts, [], wants=wants, objects=["bag"])
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    settled_set = (
+        Unknown("start", "supper"),
+        Unknown("another option", want="music", person="alex"),
+    )
+    assert asked(found) == [settled_set]
+    assert itineraries(file, with_these_at_best(file, [Unknown("another transfer", about="bag")]))
+    assert "The trip works if" in report.as_text(file, found)
+
+
+def test_another_option_is_named_before_another_transfer_in_words_and_in_json() -> None:
+    """Lunch requires the bags, which lie at the hotel, and it does not deliver the music
+    that is a must for Alex. The TRIP needs both new things."""
+    file = trip(
+        ["alex"],
+        ["park", "hotel"],
+        [stays("lunch", "park")],
+        [
+            *at("lunch", 12),
+            lies_at("bags", "hotel"),
+            requires_object("lunch", "bags"),
+            satisfies("lunch", "music", 0),
+        ],
+        [lock("lunch", "alex")],
+        wants=[must("music", "alex")],
+        objects=["bags"],
+    )
+    found = checked(file)
+    assert asked(found) == [
+        (
+            Unknown("another option", want="music", person="alex"),
+            Unknown("another transfer", about="bags"),
+        )
+    ]
+    assert (
+        "The trip might work if another OPTION that SATISFIES music is found for alex and"
+        " another transfer puts bags at hand for lunch."
+    ) in report.as_text(file, found)
+
+
+def test_the_upper_bound_takes_its_conditions_from_anything_that_gives_them_once() -> None:
+    file = two_desks()
+    brought = iter([Unknown("another transfer", about="permit")])
+    assert itineraries(file, no_better_than(file, brought))
+
+
+def test_a_requirement_of_an_object_with_no_object_named_says_what_is_missing() -> None:
+    wrong: Document = {"id": "f", "option": "check-in", "requires": {"needed": True}}
+    assert "'object' is a required property" in problems(a_document(wrong))
+
+
+def test_an_object_that_no_option_requires_puts_no_option_in_an_order() -> None:
+    """The TRIP starts at 8:00 am. Alex's appointment at 10:00 am requires Alex's key. Sam's
+    appointment can start at any time and keeps Sam's spare bag, which nothing requires. So
+    Sam's appointment is tied to no other, and starts when the TRIP starts."""
+    options = [stays("alex-appointment", "desk"), stays("sam-appointment", "desk")]
+    facts = [
+        *at("alex-appointment", 10),
+        *whenever("sam-appointment"),
+        has_object("alex", "key"),
+        has_object("sam", "bag"),
+        requires_object("alex-appointment", "key"),
+        keeps("sam-appointment", "bag"),
+        *(every_use(thing) for thing in ("key", "bag")),
+        *(every_transfer(thing) for thing in ("key", "bag")),
+    ]
+    locks = [trip_starts(8), lock("alex-appointment", "alex"), lock("sam-appointment", "sam")]
+    file = trip(["alex", "sam"], ["desk"], options, facts, locks, objects=["key", "bag"])
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [(step.option, step.start) for step in found.itinerary] == [
+        ("sam-appointment", seconds(8)),
+        ("alex-appointment", seconds(10)),
+    ]

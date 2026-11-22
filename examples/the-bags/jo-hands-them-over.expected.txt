@@ -28,8 +28,9 @@ The plan relies on these FACTs and DECISIONs:
   blue-line-length: the Blue Line to O'Hare takes 1 h
   where-the-bags-start: Jo has the bags when the TRIP starts
   flight-needs-the-bags: Flight home requires the bags
-  jo-can-pass-the-bags: Coffee with Jo hands over the bags
+  jo-can-pass-the-bags: the bags can be handed over in Coffee with Jo
   every-use-of-the-bags: of the OPTIONs in this FILE, only Flight home requires the bags
+  everything-that-moves-the-bags: the FILE states every OPTION that hands over or keeps the bags: Coffee with Jo
   trip-start: the TRIP starts at 1:00 pm on Saturday 15 May 2027
   lock-visit: Alex and Sam take part in Museum visit
   lock-coffee: Alex, Sam and Jo take part in Coffee with Jo
@@ -37,4 +38,4 @@ The plan relies on these FACTs and DECISIONs:
 
 Where each OBJECT is:
   the bags: with Jo when the TRIP starts; with Alex from 2:30 pm (handed over in Coffee with Jo)
-    Flight home requires the bags. At its start: with Alex.
+    Flight home requires the bags. Just before it starts: with Alex.
