@@ -2872,3 +2872,78 @@ def test_a_span_that_is_over_does_not_move_the_start_that_is_shown() -> None:
     shown = first_shown(file, world)
     assert shown is not None
     assert [(step.option, step.start) for step in shown] == [(None, 0), ("check", 0)]
+
+
+# What the sixth review's FILE showed. It has no OBJECT: it is about the rule for start times.
+
+
+def test_a_way_that_cannot_leave_before_a_span_does_not_time_what_comes_before_it() -> None:
+    """Sam has a class at the desk from 10:00 am to 10:30 am. Alex has five minutes of prep
+    at home, joins Sam for a meeting at the desk, and has to end at home. No WAY is listed,
+    and none leaves either way from 10:10 am to 10:30 am.
+
+    The meeting is after the class, so Alex cannot be back before the span, and a return
+    before it times nothing. Alex goes out just before the span, at 10:09:59 am, and the
+    prep is five minutes before that. The class and the prep cost 1 USD each, and the cash
+    has 1 USD. The class comes first in the plan, so Sam's place takes the cash."""
+    options = [stays("class", "desk"), stays("prep", "home"), stays("meeting", "desk")]
+    closed = [
+        {
+            "id": f"closed-{origin}",
+            "complete": {
+                "from": origin,
+                "to": destination,
+                "leaving": {"earliest": moment(10, 10), "latest": moment(10, 30)},
+            },
+        }
+        for origin, destination in (("home", "desk"), ("desk", "home"))
+    ]
+    facts = [
+        *at("class", 10),
+        *whenever("meeting", "PT15M"),
+        *whenever("prep"),
+        starts_from("alex", "home"),
+        starts_from("sam", "desk"),
+        *closed,
+        needs_right("class"),
+        offer("class", 1, price="1.00 USD"),
+        needs_right("prep"),
+        offer("prep", 1, price="1.00 USD"),
+        needs_no_right("meeting"),
+    ]
+    decisions = [
+        lock("class", "sam"),
+        lock("meeting", "alex", "sam"),
+        lock("prep", "alex"),
+        cap("cash", "1.00 USD"),
+    ]
+    file = trip(
+        ["alex", "sam"],
+        ["home", "desk"],
+        options,
+        facts,
+        decisions,
+        wants=[ends_at("home", "alex")],
+        rights=True,
+        budgets=[budget("cash", "alex", "sam"), budget("card", "alex", "sam")],
+    )
+    both_ways = [
+        Unknown("other ways", origin="home", destination="desk"),
+        Unknown("other ways", origin="desk", destination="home"),
+    ]
+    shown = first_shown(file, with_these_at_best(file, both_ways))
+    assert shown is not None
+    just_before = seconds(10, 10) - 1
+    assert [(step.option, step.start) for step in shown] == [
+        ("class", seconds(10)),
+        ("prep", just_before - 300),
+        (None, just_before),
+        ("meeting", seconds(10, 30)),
+        (None, seconds(10, 45)),
+    ]
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert [(cover.person, cover.option, cover.budget) for cover in found.plans[0].buys] == [
+        ("sam", "class", "cash"),
+        ("alex", "prep", "card"),
+    ]

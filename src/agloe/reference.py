@@ -2940,7 +2940,9 @@ def _times(
     This finds a timing whenever one exists. The gaps and limits say only that one start is at
     least so long after another, or after or before a known time. With starts of that kind, any
     start chosen inside its own limits leaves room for all the others. So where a start comes
-    out outside its limits, there is no timing, and the result is None.
+    out outside its limits, there is no timing, and the result is None. That is about the
+    starts that are not fixed. A fixed start outside the TRIP comes back as it is, and the
+    check of the ITINERARY finds it.
     """
     floor = {node: moment for node, moment in not_before.items() if node not in fixed}
     cap = {node: moment for node, moment in no_later.items() if node not in fixed}
