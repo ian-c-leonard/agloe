@@ -97,13 +97,11 @@ def test_a_want_about_where_the_trip_ends_says_so() -> None:
     assert ending["holds"] == "Alex and Sam must end the TRIP at Denver."
     assert ending["ends"] == "It is about the whole ITINERARY: no OPTION delivers it."
     assert (ending["whole"], ending["options"]) == (None, [])
-    # A must-not about where the TRIP ends.
+    # Only a PERSON who holds the WANT must end the TRIP there.
     sent = drawn(EXAMPLES / "ending-in-denver" / "works.json")
-    sent["wants"][0].update(musts=["alex"], must_nots=["sam"])
+    sent["wants"][0].update(musts=["alex"])
     (shown,) = all_wants([sent])
-    assert shown["wants"][0]["holds"] == (
-        "Alex must end the TRIP at Denver. Sam must not end the TRIP at Denver."
-    )
+    assert shown["wants"][0]["holds"] == "Alex must end the TRIP at Denver."
 
 
 def test_a_want_says_whether_its_options_are_all_that_satisfy_it() -> None:

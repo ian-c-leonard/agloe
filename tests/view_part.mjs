@@ -7,10 +7,10 @@
 //     words is given, the part gets the words of each case in which it says the trip works.
 //     In the place of wants: options, or capabilities.
 import { readFileSync } from "node:fs";
-import { casesOf, lines } from "../src/agloe/view/static/lines.js";
+import { statedIn, lines } from "../src/agloe/view/static/lines.js";
 
 const name = process.argv[2];
 const part = (await import(`../src/agloe/view/static/${name}.js`))[name];
 const asked = JSON.parse(readFileSync(0, "utf8"));
-const shown = asked.map(({ trip, report, text }) => part(trip, report, text === null ? null : casesOf(lines(text, report, trip))));
+const shown = asked.map(({ trip, report, text }) => part(trip, report, text === null ? null : statedIn(lines(text, report, trip))));
 process.stdout.write(JSON.stringify(shown));

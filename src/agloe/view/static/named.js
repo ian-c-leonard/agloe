@@ -4,12 +4,46 @@
 // A report on a TRIP that cannot work names the FACTs, WANTs and DECISIONs that rule out every
 // plan. A report on a TRIP that depends on what the FILE does not say names, for each case in
 // which the trip works, the things that the case needs. A report that shows a plan names who
-// meets what each OPTION of the plan requires, and which right each PERSON uses. Each part of
-// the page marks what it shows of those. Nothing here judges a TRIP: it reads what the report as JSON already holds.
+// meets what each OPTION of the plan requires, which right each PERSON uses, and where each
+// OBJECT is. Each part of the page marks what it shows of those. Nothing here judges a TRIP: it reads what the report as JSON already holds.
 
-/** Names as a sentence joins them: Alex, Sam and Jo. */
-export function listed(names) {
-  return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+/** How a name ends where the page shows its id after it. */
+const WITH_AN_ID = / \([a-z0-9]+(-[a-z0-9]+)*\)$/;
+/**
+ * What a page shows nothing for, as the view tells it where it says which names look alike:
+ * the characters that Unicode calls default ignorable, such as a soft hyphen or a mark of
+ * direction, and the format characters.
+ */
+const UNSEEN = /[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
+
+/**
+ * A name as the page shows it, for a list that "or" joins: in quotation marks where it holds
+ * that word, as the report puts it, so that it reads as one name. It holds the word where a
+ * page shows it so: a character that a page shows nothing for does not hide the word, and
+ * does not part it from its neighbour. The view sends a name in quotation marks already
+ * where it could be taken for something else, and with its id after it where another name
+ * looks like it. The quotation marks go on before the id, around the spelling of the FILE.
+ */
+export function either(name) {
+  return apart(name, (seen) => seen.split(/\s+/).includes("or"));
+}
+
+/**
+ * A name as the page shows it, in quotation marks where it could be taken for a word of the
+ * sentence around it: where `misleads` says so of the name as a page shows it, in small
+ * letters. A name that is in quotation marks already stays as it is.
+ */
+export function apart(name, misleads) {
+  if (name.startsWith('"')) return name;
+  const id = name.match(WITH_AN_ID);
+  const bare = id === null ? name : name.slice(0, id.index);
+  if (!misleads(bare.normalize("NFKC").replace(UNSEEN, "").toLowerCase())) return name;
+  return `"${bare.replace(/\\/g, "\\\\")}"${id === null ? "" : id[0]}`;
+}
+
+/** Names as a sentence joins them: Alex, Sam and Jo. `last` is the word before the last one. */
+export function listed(names, last = "and") {
+  return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} ${last} ${names[names.length - 1]}`;
 }
 
 /**
@@ -89,10 +123,78 @@ export function boughtIn(report) {
   return plans.map((plan) => [...new Set(plan.buys.map((buy) => buy.offer))]);
 }
 
-/** The OPTIONs that one of those things names: its own, and each that somebody has to buy a place for. */
+/**
+ * The caps that a report states under the one plan that it gives for each case in which the
+ * trip works: a list of their ids for each case, at the place of the case. Only a report with
+ * one plan for each of its cases holds any.
+ */
+export function cappedIn(report) {
+  const cases = casesIn(report);
+  const plans = cases.length && Array.isArray(report.plans) && report.plans.length === cases.length ? report.plans : [];
+  const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
+  if (!plans.every((plan) => isRecord(plan) && Array.isArray(plan.caps) && plan.caps.every((row) => isRecord(row) && typeof row.cap === "string"))) return [];
+  return plans.map((plan) => plan.caps.map((row) => row.cap));
+}
+
+/** The OPTIONs that a list in one of those things names, each in a record of its own. */
+function namedIn(list) {
+  return Array.isArray(list) ? list.filter((each) => each !== null && typeof each === "object").map((each) => each.option).filter((id) => typeof id === "string") : [];
+}
+
+/** The OPTIONs that an OBJECT has to be at hand for, in one of those things. */
+export function atHandFor(need) {
+  return namedIn(need.at_hand_for);
+}
+
+/**
+ * The OPTIONs that one of those things names: its own, each that somebody has to buy a place
+ * for, and each that an OBJECT has to be at hand for.
+ */
 export function optionsOf(need) {
-  const bought = Array.isArray(need.buys) ? need.buys.filter((buy) => buy !== null && typeof buy === "object").map((buy) => buy.option) : [];
-  return [need.option, ...bought].filter((id) => typeof id === "string");
+  return [...(typeof need.option === "string" ? [need.option] : []), ...namedIn(need.buys), ...atHandFor(need)];
+}
+
+/**
+ * The OBJECTs that somebody takes at each OPTION of a plan, as a report states it: for each
+ * such OPTION its id and the ids of those OBJECTs, in the report's order. Only a report that
+ * shows a plan holds any.
+ */
+export function takenIn(report) {
+  const steps = report !== null && typeof report === "object" && report.answer === "FEASIBLE" && Array.isArray(report.itinerary) ? report.itinerary : [];
+  const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
+  return steps.flatMap((step) => (isRecord(step) && typeof step.option === "string" && isRecord(step.hands_over) ? [{ option: step.option, objects: Object.keys(step.hands_over) }] : []));
+}
+
+/**
+ * Where each OBJECT is in a plan, as a report states it: for each OBJECT its id, and the
+ * OPTIONs that the report says require it, in the report's order. Only a report that shows a
+ * plan holds any, and a list that is not of that shape is none.
+ */
+export function objectsIn(report) {
+  const stated = report !== null && typeof report === "object" && report.answer === "FEASIBLE" ? report.objects : null;
+  const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
+  const isOne = (each) => isRecord(each) && typeof each.object === "string" && Array.isArray(each.required_by) && each.required_by.every((by) => isRecord(by) && typeof by.option === "string");
+  return Array.isArray(stated) && stated.every(isOne) ? stated.map((each) => ({ object: each.object, options: each.required_by.map((by) => by.option) })) : [];
+}
+
+/**
+ * Where a report on a plan has each OBJECT, as the report as JSON holds it: for each `object`,
+ * its `stays` from the start of the TRIP on, and its `uses`, the OPTIONs of the plan that
+ * require it or might. A stay has `where` the OBJECT is, or each place it might be: each with
+ * a `person` or at a `place`. `since` is the OPTION from whose start it is there, and `how`
+ * says what that OPTION did, and both are null from the start of the TRIP. A use has its
+ * `option`, whether a FACT says that the OPTION requires the OBJECT (`stated`), and `where`
+ * the OBJECT is just before the OPTION starts. Only a report that shows a plan holds any, and
+ * a list that is not of that shape is none.
+ */
+export function carriedIn(report) {
+  const stated = report !== null && typeof report === "object" && report.answer === "FEASIBLE" ? report.objects : null;
+  const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
+  const isWhere = (list) => Array.isArray(list) && list.length > 0 && list.every((each) => isRecord(each) && (typeof each.person === "string") !== (typeof each.place === "string"));
+  const isStay = (each) => isRecord(each) && isWhere(each.where) && (typeof each.since === "string" ? typeof each.how === "string" : each.since === null && each.how === null);
+  const isUse = (each) => isRecord(each) && typeof each.option === "string" && typeof each.stated === "boolean" && isWhere(each.where);
+  const isOne = (each) => isRecord(each) && typeof each.object === "string" && Array.isArray(each.path) && each.path.every(isStay) && Array.isArray(each.required_by) && each.required_by.every(isUse);
+  return Array.isArray(stated) && stated.every(isOne) ? stated.map((each) => ({ object: each.object, stays: each.path, uses: each.required_by })) : [];
 }
 
 /** The cases that need something for which `about` says yes, as their places among the cases. */

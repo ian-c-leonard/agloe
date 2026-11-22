@@ -19,7 +19,11 @@ night and in any time zone.
 import copy
 import functools
 import json
+import os
 import re
+import shutil
+import subprocess
+import unicodedata
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
@@ -32,7 +36,7 @@ from agloe import report as reports
 from agloe.answers import Answer, Report
 from agloe.file import Complete, File, instant, parse, read
 from agloe.reference import Step
-from agloe.view.trip import MOST_DAYS, holds, shown
+from agloe.view.trip import MOST_DAYS, holds, seen_as, shown
 from tests.stories import (
     EXAMPLES,
     any_time,
@@ -205,10 +209,29 @@ def test_every_example_is_sent_as_a_trip_that_a_page_can_draw(path: Path) -> Non
         rights = said_of[each.id]
         assert (None if rights["needs"] is None else rights["needs"]["needed"]) is needed
         assert [booking["id"] for booking in rights["bookings"]] == [fact.id for fact in bookings]
+        for booking, fact in zip(rights["bookings"], bookings, strict=True):
+            assert booking["paid"] == (
+                None
+                if fact.paid is None
+                else {
+                    "amount": str(fact.paid.money.amount),
+                    "currency": fact.paid.money.currency,
+                    "budget": fact.paid.budget,
+                    "by": fact.paid.by,
+                }
+            )
         assert [(offer["id"], offer["places"]) for offer in rights["offers"]] == [
             (fact.id, fact.places) for fact in offers
         ]
         assert (rights["complete"] is None) is (complete is None)
+    # Every BUDGET of the FILE is sent, in the FILE's order, with each cap on it.
+    assert [budget["id"] for budget in sent["budgets"]] == [each.id for each in file.budgets]
+    for budget, pot in zip(sent["budgets"], file.budgets, strict=True):
+        assert budget["persons"] == [each.id for each in file.persons if each.id in pot.persons]
+        assert budget["currencies"] == list(pot.currencies)
+        assert [(cap["id"], cap["limit"]["currency"]) for cap in budget["caps"]] == [
+            (cap.id, currency) for (id, currency), cap in file.caps.items() if id == pot.id
+        ]
     # Every CAPABILITY of the FILE is sent, in the FILE's order, with each FACT about it.
     assert [each["id"] for each in sent["capabilities"]] == [each.id for each in file.capabilities]
     for capability in sent["capabilities"]:
@@ -224,6 +247,27 @@ def test_every_example_is_sent_as_a_trip_that_a_page_can_draw(path: Path) -> Non
         ]
         complete = file.requires_complete(capability["id"])
         assert capability["complete"] == (None if complete is None else complete.id)
+    # Every OBJECT of the FILE is sent, in the FILE's order, with each FACT about it.
+    assert [thing["id"] for thing in sent["objects"]] == [each.id for each in file.objects]
+    for thing in sent["objects"]:
+        starts = file.object_starts(thing["id"])
+        assert thing["starts"] == (
+            None
+            if starts is None
+            else {"person": starts.person, "place": starts.place, "record": starts.id}
+        )
+        needs = [(each.id, file.object_requirement(each.id, thing["id"])) for each in file.options]
+        assert [(each["option"], each["needed"], each["record"]) for each in thing["requires"]] == [
+            (option, fact.needed, fact.id) for option, fact in needs if fact is not None
+        ]
+        does = [(each.id, file.action(each.id, thing["id"])) for each in file.options]
+        assert [(each["option"], each["does"], each["record"]) for each in thing["transfers"]] == [
+            (option, fact.does, fact.id) for option, fact in does if fact is not None
+        ]
+        required = file.object_requirements_complete(thing["id"])
+        moved = file.transfers_complete(thing["id"])
+        assert thing["requires_complete"] == (None if required is None else required.id)
+        assert thing["transfers_complete"] == (None if moved is None else moved.id)
     # Each step that is an OPTION is one of them.
     ids = {option["id"] for option in sent["options"]}
     assert {step["option"] for step in sent["steps"]} - {None} <= ids
@@ -604,7 +648,19 @@ def test_the_rights_to_each_option_are_sent_as_far_as_the_file_says() -> None:
         "option": "skydeck",
         "name": "Skydeck visit",
         "needs": {"needed": True, "record": "skydeck-needs-a-ticket"},
-        "bookings": [{"id": "alex-skydeck-ticket", "covers": ["alex"]}],
+        "bookings": [
+            {
+                "id": "alex-skydeck-ticket",
+                "covers": ["alex"],
+                # What the BOOKING paid, from which BUDGET, and who paid.
+                "paid": {
+                    "amount": "32.00",
+                    "currency": "USD",
+                    "budget": "trip-money",
+                    "by": "alex",
+                },
+            }
+        ],
         "offers": [
             {"id": "skydeck-tickets", "places": 2, "price": {"amount": "32.00", "currency": "USD"}}
         ],
@@ -624,6 +680,76 @@ def test_the_rights_to_each_option_are_sent_as_far_as_the_file_says() -> None:
     # An OPTION of which the FILE says nothing about rights is not among them.
     file = trip(["alex"], ["pier"], [stays("swim", "pier")], [], [], rights=True)
     assert sent_for(file, Report(Answer.UNDETERMINED))["rights"] == []
+
+
+def test_the_budgets_of_the_file_are_sent_with_their_caps() -> None:
+    """The trip money is for Alex and Sam, and the TRIP spends at most 200.00 USD from it."""
+    sent = drawn(EXAMPLES / "a-ticket" / "within-the-cap.json")
+    assert sent["budgets"] == [
+        {
+            "id": "trip-money",
+            "name": "the trip money",
+            "persons": ["alex", "sam"],
+            "currencies": ["USD"],
+            "caps": [{"id": "trip-cap", "limit": {"amount": "200.00", "currency": "USD"}}],
+        }
+    ]
+    # A BUDGET with no cap has none, and a FILE with no BUDGET is sent none.
+    (money,) = drawn(EXAMPLES / "a-ticket" / "not-bought-yet.json")["budgets"]
+    assert money["caps"] == []
+    assert drawn(EXAMPLES / "flight-home" / "works.json")["budgets"] == []
+    # A BOOKING that states no payment has none, and one can leave out the BUDGET and who paid.
+    (skydeck, *_) = drawn(EXAMPLES / "a-ticket" / "depends-on-the-receipt.json")["rights"]
+    assert [booking["paid"] for booking in skydeck["bookings"]] == [None]
+    (skydeck, *_) = drawn(EXAMPLES / "a-ticket" / "works.json")["rights"]
+    assert skydeck["bookings"][0]["paid"] == {
+        "amount": "32.00",
+        "currency": "USD",
+        "budget": None,
+        "by": "alex",
+    }
+
+
+def test_the_objects_of_the_file_are_sent_with_what_the_file_says_of_each() -> None:
+    """The bags are at the hotel. The flight requires them, and the hotel hands them over."""
+    sent = drawn(EXAMPLES / "the-bags" / "they-collect-them.json")
+    assert sent["objects"] == [
+        {
+            "id": "bags",
+            "name": "the bags",
+            # Where the OBJECT is when the TRIP starts: at a PLACE, and with no PERSON.
+            "starts": {"person": None, "place": "hotel", "record": "where-the-bags-start"},
+            "requires": [
+                {
+                    "option": "flight",
+                    "name": "Flight home",
+                    "needed": True,
+                    "record": "flight-needs-the-bags",
+                }
+            ],
+            "requires_complete": "every-use-of-the-bags",
+            "transfers": [
+                {
+                    "option": "collect-bags",
+                    "name": "Collect the bags",
+                    "does": "hands_over",
+                    "record": "hotel-releases-the-bags",
+                }
+            ],
+            "transfers_complete": "everything-that-moves-the-bags",
+        }
+    ]
+    # Alex has the bags when the TRIP starts, and the museum keeps them.
+    (bags,) = drawn(EXAMPLES / "the-bags" / "the-museum-keeps-them.json")["objects"]
+    assert bags["starts"] == {"person": "alex", "place": None, "record": "where-the-bags-start"}
+    assert ("museum-visit", "keeps") in [
+        (each["option"], each["does"]) for each in bags["transfers"]
+    ]
+    # The FILE does not say where the bags are when the TRIP starts.
+    (bags,) = drawn(EXAMPLES / "the-bags" / "nobody-said-where-they-are.json")["objects"]
+    assert bags["starts"] is None
+    # A FILE with no OBJECT is sent none.
+    assert drawn(EXAMPLES / "flight-home" / "works.json")["objects"] == []
 
 
 def test_the_capabilities_of_the_file_are_sent_with_who_has_each_and_what_requires_it() -> None:
@@ -783,11 +909,98 @@ def test_names_that_look_the_same_on_a_page_come_with_their_ids() -> None:
         "Anne  Marie (lunch)",
     ]
     assert holds(sent)
+    # So do two names that differ only in a character that a page shows nothing for: a soft
+    # hyphen, or a space of no width.
+    by_id["alex"]["name"], by_id["jo"]["name"] = "Member\u00adship", "Membership"
+    by_id["skydeck"]["name"], by_id["lunch"]["name"] = "Anne\u200bMarie", "AnneMarie"
+    file = parse(json.dumps(content))
+    sent = sent_for(file, compiler.check(file))
+    assert [each["name"] for each in sent["persons"]] == [
+        "Member\u00adship (alex)",
+        "Sam",
+        "Membership (jo)",
+    ]
+    assert [step["name"] for step in sent["steps"] if step["option"]] == [
+        "Anne\u200bMarie (skydeck)",
+        "AnneMarie (lunch)",
+    ]
+    # Or in a character that only says how the sign before it is drawn, or that joins two
+    # others: a page shows nothing for it.
+    by_id["alex"]["name"], by_id["jo"]["name"] = (
+        "Central Caf\u00e9 \u2615",
+        "Central Caf\u00e9 \u2615\ufe0f",
+    )
+    by_id["skydeck"]["name"], by_id["lunch"]["name"] = "Anne\u034fMarie", "AnneMarie"
+    file = parse(json.dumps(content))
+    sent = sent_for(file, compiler.check(file))
+    assert [each["name"] for each in sent["persons"]] == [
+        "Central Caf\u00e9 \u2615 (alex)",
+        "Sam",
+        "Central Caf\u00e9 \u2615\ufe0f (jo)",
+    ]
+    assert [step["name"] for step in sent["steps"] if step["option"]] == [
+        "Anne\u034fMarie (skydeck)",
+        "AnneMarie (lunch)",
+    ]
+    # Or in how a character is set: a hyphen that does not break, two letters drawn as one
+    # sign, a space that does not break.
+    by_id["alex"]["name"], by_id["jo"]["name"] = "Saint-Malo", "Saint\u2011Malo"
+    by_id["skydeck"]["name"], by_id["lunch"]["name"] = "Sheffield tour", "Shef\ufb01eld\u00a0tour"
+    file = parse(json.dumps(content))
+    sent = sent_for(file, compiler.check(file))
+    assert [each["name"] for each in sent["persons"]] == [
+        "Saint-Malo (alex)",
+        "Sam",
+        "Saint\u2011Malo (jo)",
+    ]
+    assert [step["name"] for step in sent["steps"] if step["option"]] == [
+        "Sheffield tour (skydeck)",
+        "Shef\ufb01eld\u00a0tour (lunch)",
+    ]
     # A name that only differs in its capitals looks different, and comes as it is.
+    by_id["skydeck"]["name"], by_id["lunch"]["name"] = "Skydeck visit", "Lunch in the park"
     by_id["alex"]["name"], by_id["jo"]["name"] = "Alex", "alex"
     file = parse(json.dumps(content))
     sent = sent_for(file, compiler.check(file))
     assert [each["name"] for each in sent["persons"]] == ["Alex", "Sam", "alex"]
+
+
+def test_what_a_page_shows_nothing_for_is_what_unicode_calls_default_ignorable() -> None:
+    """The view and the page tell the same characters, and a browser knows which they are."""
+    node = shutil.which("node")
+    if node is None:
+        if os.environ.get("CI"):
+            pytest.fail("the tests of the view need Node")
+        pytest.skip("needs Node")
+    listing = """
+    const found = [];
+    for (let point = 0; point <= 0x10ffff; point += 1) {
+      if (point >= 0xd800 && point <= 0xdfff) continue;
+      if (/\\p{Default_Ignorable_Code_Point}/u.test(String.fromCodePoint(point))) found.push(point);
+    }
+    process.stdout.write(JSON.stringify(found));
+    """
+    done = subprocess.run([node, "--eval", listing], capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
+    ignorable = set(json.loads(done.stdout))
+    assert len(ignorable) > 4000
+    # Between two letters, exactly these characters and the format characters leave no trace.
+    unseen = {point for point in range(0x110000) if seen_as(f"a{chr(point)}b") == "ab"}
+    formats = {point for point in range(0x110000) if unicodedata.category(chr(point)) == "Cf"}
+    assert unseen == ignorable | formats
+    # A sign that a page shows stays: a letter, an accent, a hyphen, a coffee cup.
+    for sign in ("a", "\u00e9", "-", "\u2615", "\u0301", "'"):
+        assert seen_as(f"a{sign}b") == unicodedata.normalize("NFC", f"a{sign}b"), sign
+    # Each accent is joined to its letter, and each run of spaces is one space.
+    assert seen_as("  Jose\u0301   Luis ") == "Jos\u00e9 Luis"
+    # A character that is another one set in another way is that one: two letters drawn as
+    # one sign, a wide letter, a hyphen that does not break.
+    assert seen_as("Shef\ufb01eld") == "Sheffield"
+    assert seen_as("\uff21irport") == "Airport"
+    assert seen_as("Saint\u2011Malo") == seen_as("Saint\u2010Malo") == "Saint-Malo"
+    # A dash is no hyphen, and a letter of another alphabet is another letter.
+    assert seen_as("Saint\u2013Malo") != "Saint-Malo"
+    assert seen_as("P\u0430ris") != "Paris"
 
 
 def test_every_option_of_the_file_is_sent_with_what_the_file_says_of_it() -> None:
@@ -1744,7 +1957,7 @@ RIGHTS: dict[str, Any] = {
     "option": "night",
     "name": "night",
     "needs": {"needed": True, "record": "night-needs-a-room"},
-    "bookings": [{"id": "room", "covers": ["alex"]}],
+    "bookings": [{"id": "room", "covers": ["alex"], "paid": None}],
     "offers": [{"id": "rooms", "places": 2, "price": {"amount": "120.00", "currency": "USD"}}],
     "complete": {"record": "every-room", "offers": ["rooms"]},
 }
@@ -1752,6 +1965,63 @@ RIGHTS: dict[str, Any] = {
 
 # The same OPTION once more, with no BOOKING and no OFFER.
 NO_MORE_RIGHTS: dict[str, Any] = {**RIGHTS, "bookings": [], "offers": [], "complete": None}
+
+
+BUDGET: dict[str, Any] = {
+    "id": "pot",
+    "name": "the pot",
+    "persons": ["alex", "sam"],
+    "currencies": ["USD", "EUR"],
+    "caps": [{"id": "pot-cap", "limit": {"amount": "500.00", "currency": "USD"}}],
+}
+BUDGET_WITH_NO_CAP: dict[str, Any] = {**BUDGET, "caps": []}
+PAID: dict[str, Any] = {"amount": "120.00", "currency": "USD", "budget": "pot", "by": "alex"}
+
+
+def _budget(**other: object) -> Callable[[Trip], None]:
+    """The TRIP gets one BUDGET, which is good but for these parts."""
+    return _set("budgets", to=[{**BUDGET, **other}])
+
+
+def _paid(**other: object) -> Callable[[Trip], None]:
+    """The TRIP gets one BUDGET, and a BOOKING whose payment is good but for these parts."""
+
+    def change(sent: Trip) -> None:
+        _budget()(sent)
+        _booking(paid={**PAID, **other})(sent)
+
+    return change
+
+
+def _paid_is(other: object) -> Callable[[Trip], None]:
+    """The TRIP gets one BUDGET, and a BOOKING with this in the place of what it paid."""
+
+    def change(sent: Trip) -> None:
+        _budget()(sent)
+        _booking(paid=other)(sent)
+
+    return change
+
+
+def test_a_trip_with_a_budget_and_a_payment_is_a_trip() -> None:
+    sent = good()
+    # The FILE has one BUDGET, for Alex and Sam, with no cap.
+    (money,) = sent["budgets"]
+    assert (money["id"], money["persons"], money["caps"]) == ("money", ["alex", "sam"], [])
+    _budget()(sent)
+    assert holds(sent)
+    # A BUDGET that lists nobody, and has no cap.
+    _budget(persons=[], caps=[])(sent)
+    assert holds(sent)
+    # A cap in each currency that the BUDGET holds.
+    euros = {"id": "pot-cap-eur", "limit": {"amount": "300", "currency": "EUR"}}
+    _budget(caps=[BUDGET["caps"][0], euros])(sent)
+    assert holds(sent)
+    # A payment from the BUDGET, and one that names no BUDGET and nobody who paid.
+    _paid()(sent)
+    assert holds(sent)
+    _paid(budget=None, by=None)(sent)
+    assert holds(sent)
 
 
 def _rights(**other: object) -> Callable[[Trip], None]:
@@ -1787,6 +2057,57 @@ def test_a_trip_that_says_something_of_the_rights_to_an_option_is_a_trip() -> No
     for amount in ("0", "0.50"):
         _offer(price={"amount": amount, "currency": "USD"})(sent)
         assert holds(sent)
+
+
+OBJECT: dict[str, Any] = {
+    "id": "key",
+    "name": "the key",
+    "starts": {"person": "alex", "place": None, "record": "alex-has-the-key"},
+    "requires": [{"option": "night", "name": "night", "needed": True, "record": "night-needs-it"}],
+    "requires_complete": "every-use-of-the-key",
+    "transfers": [
+        {"option": "night", "name": "night", "does": "keeps", "record": "night-keeps-it"}
+    ],
+    "transfers_complete": "everything-that-moves-the-key",
+}
+
+
+def _object(**other: object) -> Callable[[Trip], None]:
+    """The TRIP gets one OBJECT, which is good but for these parts."""
+    return _set("objects", to=[{**OBJECT, **other}])
+
+
+def _object_starts(**other: object) -> Callable[[Trip], None]:
+    return _object(starts={**OBJECT["starts"], **other})
+
+
+def _object_need(**other: object) -> Callable[[Trip], None]:
+    return _object(requires=[{**OBJECT["requires"][0], **other}])
+
+
+def _transfer(**other: object) -> Callable[[Trip], None]:
+    return _object(transfers=[{**OBJECT["transfers"][0], **other}])
+
+
+def test_a_trip_with_an_object_is_a_trip() -> None:
+    sent = good()
+    assert sent["objects"] == []
+    _object()(sent)
+    assert holds(sent)
+    # An OBJECT of which the FILE says nothing.
+    _object(
+        starts=None, requires=[], requires_complete=None, transfers=[], transfers_complete=None
+    )(sent)
+    assert holds(sent)
+    # One that lies at a PLACE when the TRIP starts.
+    _object_starts(person=None, place="hotel")(sent)
+    assert holds(sent)
+    # An OPTION hands it over, keeps it, or leaves it alone, and requires it or does not.
+    for does in ("hands_over", "keeps", "nothing"):
+        _transfer(does=does)(sent)
+        assert holds(sent)
+    _object_need(needed=False)(sent)
+    assert holds(sent)
 
 
 CAPABILITY: dict[str, Any] = {
@@ -1886,8 +2207,9 @@ def test_a_trip_with_a_want_is_a_trip() -> None:
     # A WANT with nobody for whom it is a must-not, and no OPTION.
     _want(must_nots=[], complete=None, options=[])(sent)
     assert holds(sent)
-    # A WANT about where the TRIP ends names a PLACE. No OPTION delivers such a WANT.
-    _want(ends_at="hotel", complete=None, options=[])(sent)
+    # A WANT about where the TRIP ends names a PLACE. No OPTION delivers such a WANT, and
+    # it is a must for each PERSON who holds it.
+    _want(ends_at="hotel", must_nots=[], complete=None, options=[])(sent)
     assert holds(sent)
     # A DEGREE OF SATISFACTION is from 0 to 10, both ends included.
     for degree in (0, 10):
@@ -1939,6 +2261,9 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "a want with an id that is no text": _want(id=7),
     "two wants with one id": _set("wants", to=[WANT, WANT]),
     "a want that is a must for a person the trip does not have": _want(musts=["jo"]),
+    "a want about where the trip ends that is a must-not for somebody": _want(
+        ends_at="hotel", complete=None, options=[]
+    ),
     "a want that names a person twice": _want(musts=["alex", "alex"]),
     "a want that is a must and a must-not for one person": _want(must_nots=["alex"]),
     "a want that is a must or a must-not for nobody": _want(musts=[], must_nots=[]),
@@ -2033,6 +2358,61 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "a fact that the rights are all listed that names an offer twice": _rights(
         complete={"record": "every-room", "offers": ["rooms", "rooms"]}
     ),
+    "no budgets": _drop("budgets"),
+    "budgets that are no list": _set("budgets", to={}),
+    "a budget that is no record": _set("budgets", to=["pot"]),
+    "a budget with one thing more": _budget(more=1),
+    "a budget with a blank name": _budget(name=" "),
+    "two budgets with one id": _set("budgets", to=[BUDGET, BUDGET_WITH_NO_CAP]),
+    "a budget for a person the trip does not have": _budget(persons=["jo"]),
+    "a budget that lists a person twice": _budget(persons=["alex", "alex"]),
+    "a budget that holds no currency": _budget(currencies=[]),
+    "a budget that holds a currency twice": _budget(currencies=["USD", "USD"]),
+    "a budget that holds a blank currency": _budget(currencies=[" "]),
+    "caps that are no list": _budget(caps={}),
+    "a cap that is no record": _budget(caps=["pot-cap"]),
+    "a cap with no id": _budget(caps=[{**BUDGET["caps"][0], "id": ""}]),
+    "a cap with no limit": _budget(caps=[{"id": "pot-cap", "limit": None}]),
+    "a cap with a limit that is no amount": _budget(
+        caps=[{"id": "pot-cap", "limit": {"amount": "lots", "currency": "USD"}}]
+    ),
+    "two caps in one currency": _budget(
+        caps=[BUDGET["caps"][0], {**BUDGET["caps"][0], "id": "pot-cap-2"}]
+    ),
+    "a payment that is a number": _paid_is(120),
+    "a payment with one thing more": _paid(more=1),
+    "a payment that is no amount": _paid(amount="-1"),
+    "a payment from a budget the trip does not have": _paid(budget="purse"),
+    "a payment by a person the trip does not have": _paid(by="jo"),
+    "no objects": _drop("objects"),
+    "objects that are no list": _set("objects", to={}),
+    "an object that is no record": _set("objects", to=["key"]),
+    "an object with one thing more": _object(more=1),
+    "an object with a blank name": _object(name=" "),
+    "two objects with one id": _set("objects", to=[OBJECT, OBJECT]),
+    "an object that starts with a person and at a place": _object_starts(place="hotel"),
+    "an object that starts nowhere": _object_starts(person=None),
+    "an object that starts with a person the trip does not have": _object_starts(person="jo"),
+    "an object that starts at a place the trip does not have": _object_starts(
+        person=None, place="denver"
+    ),
+    "an object whose start has no fact": _object_starts(record=""),
+    "an object whose start is a place name": _object(starts="hotel"),
+    "an object whose requirements are no list": _object(requires={}),
+    "an option that requires an object and is no record": _object(requires=["night"]),
+    "an option of an object that the trip does not have": _object_need(option="dinner"),
+    "an option of an object with a blank name": _object_need(name=""),
+    "an option that requires an object as a number": _object_need(needed=1),
+    "an option of an object with no fact": _object_need(record=""),
+    "an object that names an option twice among what requires it": _object(
+        requires=[OBJECT["requires"][0]] * 2
+    ),
+    "an option that does something else with an object": _transfer(does="loses"),
+    "an option that moves an object and that the trip does not have": _transfer(option="dinner"),
+    "an object that names an option twice among what moves it": _object(
+        transfers=[OBJECT["transfers"][0]] * 2
+    ),
+    "an object whose complete set is no id": _object(requires_complete=7),
     "no capabilities": _drop("capabilities"),
     "capabilities that are no list": _set("capabilities", to={}),
     "a capability that is no record": _set("capabilities", to=["driving"]),

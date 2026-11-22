@@ -60,9 +60,12 @@ FITTED = """() => {
   return Math.abs(rows.getBoundingClientRect().width - room) < 1;
 }"""
 # What is lit on the page: the steps of the calendar, the steps with no time beside it, the
-# marks of the strip, the lines of the report, the PERSONs, the WANTs with the OPTIONs under
-# them, the OPTIONs of the FILE, the rights to them with their BOOKINGs and OFFERs, its WAYs,
-# the travel that it lists in full, and the CAPABILITIES with the PERSONs and the OPTIONs
+# marks of the strip, the names of the PERSONs over their columns of the calendar and beside
+# their rows of the strip, the lines of the report, the PERSONs, the PLACEs with the OPTIONs and
+# the WAYs under them, the WANTs with the OPTIONs under
+# them, the OPTIONs of the FILE, the rights to them with their BOOKINGs and OFFERs, the
+# BUDGETs with their caps and payments, its WAYs, the travel that it lists in full, the
+# CAPABILITIES with the PERSONs and the OPTIONs under them, and the OBJECTs with the OPTIONs
 # under them.
 LIT = """() => {
   const first = (each) => each.title.split("\\n")[0];
@@ -71,11 +74,16 @@ LIT = """() => {
     marks: [...new Set(all("#calendar .mark.lit").map(first))],
     untimed: all("#calendar-untimed .lit").map((each) => each.textContent),
     bars: [...new Set(all("#strip .bar.lit").map(first))],
+    heads: [...new Set(all("#calendar .person.lit").map((each) => each.textContent))],
+    beside: all("#strip .strip-people .lit").map((each) => each.textContent),
     rows: all("#report .row.lit").map((row) => row.textContent),
     wants: all("#wants .lit").map((each) => each.querySelector("h3, b").textContent),
     options: all("#options .item.lit").map((each) => each.querySelector("h3").textContent),
     persons: all("#persons .item.lit").map((each) => each.querySelector("h3").textContent),
+    places: all("#places .lit").map((each) => each.querySelector("h3, b").textContent),
     rights: all("#rights .lit").map((each) => each.querySelector("h3, b").textContent),
+    budgets: all("#budgets .lit").map((each) => each.querySelector("h3, b").textContent),
+    objects: all("#objects .lit").map((each) => each.querySelector("h3, b").textContent),
     ways: all("#ways .item.lit").map((each) => each.querySelector("h3").textContent),
     travel: all("#travel .in-full.lit").map((each) => each.textContent),
     capabilities: all("#capabilities .lit").map((each) => each.querySelector("h3, b").textContent),
@@ -126,6 +134,30 @@ INSIDE = """(name) => {
   return {
     across: mark.left >= grid.left - 1 && mark.right <= grid.right + 1,
     down: mark.top >= -1 && mark.bottom <= innerHeight + 1,
+  };
+}"""
+# Where the report and the drawings are in the window, and which lines of the report that are
+# lit are wholly inside the box of the report.
+PLACED = """() => {
+  const box = (id) => document.getElementById(id).getBoundingClientRect();
+  const sides = ({ left, right, top, bottom }) => ({ left, right, top, bottom });
+  const report = box("report");
+  const lit = [...document.querySelectorAll("#report .row.lit")];
+  // A line is shown where it is inside the box of the report and inside the window.
+  const inside = (row) => {
+    const at = row.getBoundingClientRect();
+    return at.top >= Math.max(report.top, 0) && at.bottom <= Math.min(report.bottom, innerHeight);
+  };
+  const text = document.getElementById("report");
+  return {
+    report: sides(box("report-part")),
+    drawings: sides(box("drawings")),
+    lit: lit.length,
+    shown: lit.filter(inside).length,
+    tall: innerHeight,
+    scrolls: text.scrollHeight > text.clientHeight,
+    page: scrollY,
+    at: text.scrollTop,
   };
 }"""
 # Whether what is lit on the page is what a test expects of it.
@@ -486,6 +518,35 @@ def test_pointing_ties_a_person_to_the_report(chromium: Browser) -> None:
         assert ids_of(found["rows"]) == ["alex-start"]
         page.locator("#report .row[data-record='sam-start']").hover()
         lit(page, persons=["Sam"], marks=[])
+        # The name over a PERSON's column of the calendar is a drawing of the PERSON: it
+        # lights up with the row, and the row with it.
+        rows.first.hover()
+        lit(page, persons=["Alex"], heads=["Alex"])
+        page.locator("#calendar .person", has_text="Sam").first.hover()
+        lit(page, persons=["Sam"], heads=["Sam"], marks=[])
+        page.locator("#report .row[data-record='sam-start']").hover()
+        lit(page, persons=["Sam"], heads=["Sam"])
+        # Pointing at a step lights up the name of no PERSON.
+        page.locator("#calendar .mark", has_text="Museum visit").first.hover()
+        lit(page, marks=["Museum visit"], persons=[], heads=[])
+    # On a TRIP of two days the strip has a row for each PERSON. The name beside it is a
+    # drawing of the PERSON too, and so is the name over their column on each day.
+    with opened(chromium, EXAMPLES / "several-days" / "works-but-risky.json") as page:
+        page.locator("#persons .item").first.wait_for()
+        beside = page.locator("#strip .strip-people span")
+        beside.first.wait_for()
+        names = page.locator("#persons .item-name").all_text_contents()
+        assert beside.all_text_contents() == names == ["Alex"]
+        beside.first.hover()
+        lit(page, persons=names, heads=names, beside=names, marks=[], bars=[])
+        days = page.locator("#calendar .day").count()
+        assert days > 1
+        assert page.locator("#calendar .person.lit").count() == days
+        # Away from the names, none is lit. From the row of the PERSON, each is again.
+        page.locator("#strip .bar").first.hover()
+        lit(page, persons=[], heads=[], beside=[])
+        page.locator("#persons .item").first.hover()
+        lit(page, persons=names, heads=names, beside=names)
     # The trip works if Alex can drive a manual car, or if Sam can.
     with opened(chromium, EXAMPLES / "a-driver" / "depends-on-who-can-drive.json") as page:
         asked = page.locator("#persons .item.asked")
@@ -515,7 +576,7 @@ def test_pointing_ties_a_booking_and_an_offer_to_the_report(chromium: Browser) -
             "skydeck-tickets",
         ]
         assert entries.first.locator("span").all_text_contents() == [
-            "a BOOKING that covers Alex",
+            "a BOOKING that covers Alex; its payment: 32.00 USD, paid by Alex, from the trip money",
             "In the plan: Alex uses it.",
         ]
         assert entries.nth(1).locator("span").all_text_contents() == [
@@ -592,6 +653,467 @@ def test_the_rights_have_the_edges_of_what_the_report_names(chromium: Browser) -
         page.locator("#report .row").first.wait_for()
         page.locator("#options .item").first.wait_for()
         assert page.locator("#rights-part").is_hidden()
+
+
+def test_pointing_ties_a_budget_its_caps_and_its_payments_to_the_report(chromium: Browser) -> None:
+    """The trip money is for Alex and Sam, and the TRIP spends at most 200.00 USD from it."""
+    with opened(chromium, EXAMPLES / "a-ticket" / "within-the-cap.json") as page:
+        card = page.locator("#budgets .card")
+        card.wait_for()
+        page.locator("#report .row").first.wait_for()
+        page.locator("#rights .entry").first.wait_for()
+        assert card.locator(".card-name").text_content() == "the trip money"
+        assert card.locator(".card-holds").text_content() == "For Alex and Sam. It holds USD."
+        entries = card.locator(".entry")
+        assert entries.locator(".entry-name").all_text_contents() == [
+            "trip-cap",
+            "alex-skydeck-ticket",
+        ]
+        assert entries.locator(".entry-says").all_text_contents() == [
+            "the TRIP spends at most 200.00 USD from it",
+            "32.00 USD, paid by Alex",
+        ]
+        # The cap says what the report says its plan charges to it, in the report's words.
+        assert entries.first.locator(".entry-takes").text_content() == (
+            "In the plan: 32.00 paid; 32.00 still to buy; 136.00 left."
+        )
+        # The sum in USD of what the plan pays is about the OFFER that it still buys from.
+        page.locator("#report .row", has_text="USD: 32.00 paid; 32.00 still to buy").hover()
+        lit(page, rights=["skydeck-tickets"], marks=[], budgets=[])
+        # The row of a PERSON names the BUDGETs that list them.
+        assert page.locator("#persons .item-said p").all_text_contents() == [
+            "May draw on the trip money.",
+            "May draw on the trip money.",
+            "No BUDGET of the FILE lists this PERSON.",
+        ]
+        # A cap is a thing of its own. The report states it twice on a plan: among what the
+        # plan relies on, and with what is charged to it. Both lines are its lines.
+        entries.first.hover()
+        found = lit(page, budgets=["trip-cap"], marks=[], rights=[])
+        assert [row.strip()[:25] for row in found["rows"]] == [
+            "trip-cap: the TRIP spends",
+            "trip-cap: at most 200.00 ",
+        ]
+        page.locator("#report .row[data-record='trip-cap']").nth(1).hover()
+        lit(page, budgets=["trip-cap"], marks=[])
+        # A payment is a drawing of its BOOKING: pointing at it lights up the BOOKING among
+        # the rights, and its lines in the report.
+        entries.nth(1).hover()
+        found = lit(page, budgets=["alex-skydeck-ticket"], rights=["alex-skydeck-ticket"], marks=[])
+        assert set(ids_of(found["rows"])) == {"alex-skydeck-ticket"}
+    # Two BOOKINGs paid more from the trip money than its cap allows.
+    with opened(chromium, EXAMPLES / "a-ticket" / "already-overspent.json") as page:
+        page.locator("#budgets .entry.clash").first.wait_for()
+        clash = page.locator("#budgets .entry.clash")
+        assert clash.locator(".entry-name").all_text_contents() == [
+            "trip-cap",
+            "alex-skydeck-ticket",
+            "jo-talk-ticket",
+        ]
+        # The report states the BUDGETs of the FILE. The line of each lights up its card.
+        line = page.locator("#report .row", has_text="the trip money: for Alex and Sam")
+        line.wait_for()
+        line.hover()
+        lit(page, budgets=["the trip money"], marks=[])
+        page.locator("#budgets .card-name").hover()
+        found = lit(page, budgets=["the trip money"], marks=[])
+        assert found["rows"] == ["  the trip money: for Alex and Sam; it holds USD"]
+    # Under the one plan for a case, the report states the cap with what that plan charges
+    # to it. That line is about the cap.
+    with opened(chromium, EXAMPLES / "a-ticket" / "depends-on-the-receipt.json") as page:
+        page.locator("#budgets .entry").first.wait_for()
+        line = page.locator("#report .row", has_text="trip-cap, on the trip money:")
+        line.wait_for()
+        said = line.text_content()
+        line.hover()
+        lit(page, budgets=["trip-cap"], marks=[])
+        page.locator("#budgets .entry").first.hover()
+        found = lit(page, budgets=["trip-cap"], marks=[])
+        assert said in found["rows"]
+    # A FILE with no BUDGET has no such part on its page.
+    with opened(chromium, EXAMPLES / "flight-home" / "works.json") as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#options .item").first.wait_for()
+        assert page.locator("#budgets-part").is_hidden()
+        assert page.locator("#persons .item-said p").count() == 0
+
+
+def test_pointing_ties_an_object_to_the_calendar_and_the_report(
+    chromium: Browser, tmp_path: Path
+) -> None:
+    """The bags are at the hotel. Alex collects them, and has them when the flight leaves."""
+    with opened(chromium, EXAMPLES / "the-bags" / "they-collect-them.json") as page:
+        card = page.locator("#objects .card")
+        card.wait_for()
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        assert card.locator(".card-name").text_content() == "the bags"
+        assert card.locator(".card-holds").text_content() == "The TRIP starts with it at the hotel."
+        entries = card.locator(".entry")
+        assert entries.locator(".entry-name").all_text_contents() == [
+            "Flight home",
+            "Collect the bags",
+        ]
+        assert entries.locator(".entry-says").all_text_contents() == [
+            "requires it",
+            "it can be handed over here",
+        ]
+        assert card.locator(".card-whole").all_text_contents() == [
+            "The FILE states every one of its OPTIONs that requires it.",
+            "The FILE states every OPTION that hands it over or keeps it.",
+        ]
+        # The card says where the report says the bags are in its plan, worded as the report
+        # words it: throughout, and just before the OPTION that requires them starts.
+        assert card.locator(".card-plan").text_content() == (
+            "In the plan: at the hotel when the TRIP starts; with Alex from 2:45 pm (handed over"
+            " in Collect the bags)."
+        )
+        assert entries.locator(".entry-takes").all_text_contents() == [
+            "In the plan: Alex and Sam take part.",
+            "Just before it starts: with Alex.",
+            "In the plan: Alex takes part.",
+        ]
+        # The card gives a time, so the part says whose clocks show it.
+        assert " Times are on the clocks of America/Chicago." in (
+            page.text_content("#objects-says") or ""
+        )
+        # Pointing at the OBJECT lights up the lines of its own FACTs, and the lines that say
+        # where it is in the plan. It lights up no step.
+        card.locator(".card-name").hover()
+        found = lit(page, objects=["the bags"], marks=[])
+        said = [row.strip() for row in found["rows"]]
+        # They come in the order of the report: under the step, among what the plan relies
+        # on, and under "Where each OBJECT is:".
+        assert said[0] == "Alex takes the bags here."
+        assert ids_of(said[1:4]) == [
+            "where-the-bags-start",
+            "every-use-of-the-bags",
+            "everything-that-moves-the-bags",
+        ]
+        assert said[4:] == [
+            "the bags: at the hotel when the TRIP starts; with Alex from 2:45 pm (handed over in"
+            " Collect the bags)",
+            "Flight home requires the bags. Just before it starts: with Alex.",
+        ]
+        # The line that says who takes the bags is about the step and about the OBJECT.
+        page.locator("#report .row", has_text="Alex takes the bags here.").hover()
+        lit(page, objects=["the bags", "Collect the bags"], marks=["Collect the bags"])
+        # An OPTION under the OBJECT is its step: pointing at it lights up that step, its line
+        # in the plan, the line of the FACT, and the line that says where the bags are then.
+        entries.first.hover()
+        found = lit(page, objects=["Flight home"], marks=["Flight home"])
+        assert (
+            "    Flight home requires the bags. Just before it starts: with Alex." in found["rows"]
+        )
+        assert "flight-needs-the-bags" in ids_of(found["rows"])
+    # Nobody said where the bags are when the TRIP starts.
+    with opened(chromium, EXAMPLES / "the-bags" / "nobody-said-where-they-are.json") as page:
+        page.locator("#objects .card.asked").wait_for()
+        assert page.text_content("#objects .card-holds") == (
+            "The FILE does not say where it is when the TRIP starts."
+        )
+        case = page.locator("#report .row[data-record='case:0']")
+        case.wait_for()
+        case.hover()
+        lit(page, objects=["the bags"], persons=["Alex"])
+    # The trip might work if another transfer puts the bags at hand for the flight: the report
+    # names the flight, and its step and its row have the yellow edge.
+    with opened(chromium, EXAMPLES / "the-bags" / "somebody-might.json") as page:
+        page.locator("#objects .card.asked").wait_for()
+        asked = page.locator("#options .item.asked")
+        asked.wait_for()
+        assert asked.locator(".item-name").all_text_contents() == ["Flight home"]
+        assert page.locator("#calendar .mark.asked").count() == 1
+    # Nobody collects the bags, and the flight requires them. The report shows no plan, so
+    # the card says nothing of one.
+    with opened(chromium, EXAMPLES / "the-bags" / "nobody-collects-them.json") as page:
+        page.locator("#objects .card.clash").wait_for()
+        assert page.locator("#objects .entry.clash").count() >= 1
+        assert page.locator("#objects .card-plan").count() == 0
+        assert page.locator("#objects .entry-takes", has_text="Just before").count() == 0
+    # The FILE does not say that the flight is all that requires the bags, and Alex carries
+    # them. The report says of the museum visit that the FILE does not say whether it requires
+    # them, and so does the card: that OPTION is under the OBJECT, and it is its step.
+    content = json.loads((EXAMPLES / "the-bags" / "they-carry-them.json").read_text())
+    content["facts"] = [fact for fact in content["facts"] if fact["id"] != "every-use-of-the-bags"]
+    with opened(chromium, written(tmp_path, content)) as page:
+        card = page.locator("#objects .card")
+        card.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        assert card.locator(".card-plan").text_content() == (
+            "In the plan: with Alex when the TRIP starts."
+        )
+        # No card gives a time, and the part names no clocks.
+        assert "clocks" not in (page.text_content("#objects-says") or "")
+        might = card.locator(".entry.not")
+        assert might.locator(".entry-name").all_text_contents() == ["Museum visit"]
+        assert might.locator(".entry-says").all_text_contents() == [
+            "the FILE does not say whether this requires it"
+        ]
+        assert might.locator(".entry-takes").all_text_contents() == [
+            "In the plan: Alex and Sam take part.",
+            "Just before it starts: with Alex, so the plan holds if it does.",
+        ]
+        assert "asked" not in (might.get_attribute("class") or "")
+        line = (
+            "    The FILE does not say whether Museum visit requires the bags. Just before it"
+            " starts: with Alex, so the plan holds if it does."
+        )
+        might.hover()
+        found = lit(page, objects=["Museum visit"], marks=["Museum visit"])
+        assert line in found["rows"]
+        # That line of the report is about the step and about the OBJECT.
+        page.locator("#report .row", has_text="The FILE does not say whether Museum").hover()
+        lit(page, objects=["the bags", "Museum visit"], marks=["Museum visit"])
+    # A FILE with no OBJECT has no such part on its page.
+    with opened(chromium, EXAMPLES / "flight-home" / "works.json") as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#options .item").first.wait_for()
+        assert page.locator("#objects-part").is_hidden()
+
+
+def test_pointing_ties_a_place_to_the_calendar_and_the_report(chromium: Browser) -> None:
+    """Alex and Sam start from the hotel, walk to the museum, and fly from O'Hare to Denver."""
+    walk = "the walk between the hotel and the Art Institute"
+    with opened(chromium, EXAMPLES / "ending-in-denver" / "works.json") as page:
+        cards = page.locator("#places .card")
+        cards.first.wait_for()
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        assert cards.locator(".card-name").all_text_contents() == [
+            "the hotel",
+            "the Art Institute",
+            "O'Hare",
+            "Denver",
+        ]
+        hotel, museum, ohare, denver = (cards.nth(n) for n in range(4))
+        assert hotel.locator(".card-holds").all_text_contents() == ["Alex and Sam start from here."]
+        assert hotel.locator(".entry-name").all_text_contents() == [walk]
+        assert hotel.locator(".entry-says").all_text_contents() == [
+            "between here and the Art Institute, in both directions"
+        ]
+        assert hotel.locator(".entry-takes").all_text_contents() == ["Takes 15 min."]
+        assert museum.locator(".entry-name").all_text_contents() == [
+            "Museum visit",
+            "Blue Line to O'Hare",
+            walk,
+        ]
+        assert museum.locator(".entry-says").all_text_contents() == [
+            "happens here",
+            "goes from here to O'Hare",
+            "between here and the hotel, in both directions",
+        ]
+        assert ohare.locator(".entry-says").all_text_contents() == [
+            "comes here from the Art Institute",
+            "goes from here to Denver",
+        ]
+        assert denver.locator(".card-holds").all_text_contents() == [
+            "Alex and Sam must end the TRIP here."
+        ]
+        # Pointing at a PLACE lights up the lines of its own records: here the FACTs about
+        # who starts from it. It lights up no step and no PERSON.
+        hotel.locator(".card-name").hover()
+        found = lit(page, places=["the hotel"], marks=[], persons=[])
+        assert ids_of(found["rows"]) == ["alex-start", "sam-start"]
+        # The line of such a FACT is about the PERSON and about the PLACE.
+        page.locator("#report .row[data-record='alex-start']").hover()
+        lit(page, places=["the hotel"], persons=["Alex"])
+        # A WANT about where the TRIP ends is about its PLACE too.
+        denver.locator(".card-name").hover()
+        found = lit(page, places=["Denver"], wants=[])
+        assert ids_of(found["rows"]) == ["ending-in-denver"]
+        page.locator("#report .row[data-record='ending-in-denver']").hover()
+        lit(page, places=["Denver"], wants=["ending the trip in Denver"])
+        # An OPTION under a PLACE is its step: pointing at it lights up that step, and the
+        # OPTION under each PLACE that it is at.
+        museum.locator(".entry").nth(1).hover()
+        lit(page, places=["Blue Line to O'Hare"] * 2, marks=["Blue Line to O'Hare"])
+        # A WAY under a PLACE is each step in which somebody takes it.
+        hotel.locator(".entry").hover()
+        lit(page, places=[walk, walk], marks=[walk], ways=[walk])
+        # Pointing at a step lights up what is under the PLACEs, and no PLACE.
+        page.locator("#calendar .mark", has_text="Museum visit").first.hover()
+        lit(page, places=["Museum visit"], marks=["Museum visit"])
+    # A WAY that nobody takes is a drawing of the WAY: here the report shows no plan. So
+    # pointing at it under a PLACE lights up its row among the WAYs, and it under each of its
+    # two PLACEs, and no other WAY. The other way round too.
+    line = "the Blue Line to O'Hare"
+    with opened(chromium, EXAMPLES / "the-bags" / "nobody-collects-them.json") as page:
+        cards = page.locator("#places .card")
+        cards.first.wait_for()
+        page.locator("#ways .item").first.wait_for()
+        cards.first.locator(".entry", has_text=walk).hover()
+        lit(page, places=[walk, walk], ways=[walk], marks=[])
+        page.locator("#ways .item", has_text=line).hover()
+        lit(page, places=[line, line], ways=[line], marks=[])
+    # The trip works if there are other WAYs from the Art Institute to O'Hare: the report
+    # names the two PLACEs, and each has the yellow edge.
+    with opened(chromium, EXAMPLES / "flight-home" / "depends-on-another-way.json") as page:
+        asked = page.locator("#places .card.asked")
+        asked.first.wait_for()
+        assert asked.locator(".card-name").all_text_contents() == ["the Art Institute", "O'Hare"]
+        assert "A yellow edge marks" in (page.text_content("#places-says") or "")
+        case = page.locator("#report .row[data-record='case:0']")
+        case.wait_for()
+        case.hover()
+        lit(page, places=["the Art Institute", "O'Hare"])
+        asked.first.locator(".card-name").hover()
+        found = lit(page, places=["the Art Institute"])
+        assert [row.strip()[:40] for row in found["rows"]] == [
+            "The trip works if there are other WAYs f"
+        ]
+    # Alex and Sam cannot end the TRIP in Denver: the report names the WANT, and its PLACE
+    # has the red edge.
+    with opened(chromium, EXAMPLES / "ending-in-denver" / "cannot-work.json") as page:
+        clash = page.locator("#places .card.clash")
+        clash.first.wait_for()
+        assert clash.locator(".card-name").all_text_contents() == ["Denver"]
+        assert page.locator("#places .entry.clash").count() == 0
+
+
+def test_on_a_wide_window_the_report_stays_beside_the_drawings(chromium: Browser) -> None:
+    """The page fills the window, and the drawings and the report each scroll by themselves."""
+    path = EXAMPLES / "the-bags" / "they-collect-them.json"
+    to_its_end = (
+        "() => { const r = document.getElementById('report'); r.scrollTop = r.scrollHeight; }"
+    )
+    with opened(chromium, path, wide=1728, tall=700) as page:
+        page.locator("#objects .card").wait_for()
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        placed = page.evaluate(PLACED)
+        # The report is to the right of the drawings, and both are in the window from top to
+        # bottom. The page itself does not scroll.
+        assert placed["report"]["left"] >= placed["drawings"]["right"]
+        assert abs(placed["report"]["top"] - placed["drawings"]["top"]) < 2
+        for pane in (placed["report"], placed["drawings"]):
+            assert pane["top"] >= 0 and pane["bottom"] <= placed["tall"]
+        assert page.evaluate("() => document.documentElement.scrollHeight <= innerHeight")
+        # The drawings scroll by themselves: the last of them comes into view, and the report
+        # and the answer stay where they are.
+        page.locator("#objects .card-name").scroll_into_view_if_needed()
+        assert page.locator("#objects .card-name").is_visible()
+        assert page.evaluate("() => document.getElementById('drawings').scrollTop") > 0
+        assert page.evaluate(PLACED)["report"] == placed["report"]
+        assert page.locator("#line").bounding_box() is not None
+        # The report is scrolled to its end, where no line about where Alex starts from is.
+        # Pointing at Alex brings that line into view there.
+        page.evaluate(to_its_end)
+        page.locator("#persons .item").first.hover()
+        found = lit(page, persons=["Alex"])
+        assert ids_of(found["rows"]) == ["alex-start"]
+        page.wait_for_function(f"() => ({PLACED})().shown === 1")
+        # Pointing at the OBJECT lights up six lines. One is in view already, so nothing moves.
+        before = page.evaluate(PLACED)["at"]
+        page.locator("#objects .card-name").hover()
+        lit(page, objects=["the bags"])
+        placed = page.evaluate(PLACED)
+        assert (placed["lit"], placed["shown"] > 0, placed["at"]) == (6, True, before)
+        # A line of the report that is pointed at stays where it is.
+        row = page.locator("#report .row[data-record='flight-needs-the-bags']")
+        row.scroll_into_view_if_needed()
+        before = row.bounding_box()
+        row.hover()
+        lit(page, objects=["Flight home"], marks=["Flight home"])
+        assert row.bounding_box() == before
+    # On a shorter and narrower window that is still wide, pointing at where the TRIP starts
+    # brings its line into view. Only the report moves, so what is under the pointer is still
+    # what was pointed at.
+    with opened(chromium, path, wide=1400, tall=700) as page:
+        page.locator("#report .row").first.wait_for()
+        starts = page.locator("#calendar .bound-says").first
+        starts.wait_for()
+        starts.hover()
+        page.wait_for_function(f"() => ({PLACED})().shown === 1")
+        placed = page.evaluate(PLACED)
+        assert (placed["lit"], placed["page"]) == (1, 0)
+        assert page.evaluate("() => [...document.querySelectorAll(':hover')].pop().className") == (
+            "bound-says lit"
+        )
+        # The reader scrolls the report to its end. Moving on within the same drawing leaves
+        # the report where the reader put it.
+        alex = page.locator("#persons .item").first
+        alex.locator(".item-name").hover()
+        lit(page, persons=["Alex"])
+        page.wait_for_function(f"() => ({PLACED})().shown === 1")
+        page.evaluate(to_its_end)
+        end = page.evaluate(PLACED)["at"]
+        assert end > 0
+        alex.locator(".item-where").hover()
+        lit(page, persons=["Alex"])
+        assert page.evaluate(PLACED)["at"] == end
+        # The keyboard reaches both panes, and End takes the report to its last line.
+        for pane in ("#drawings", "#report", "#calendar"):
+            assert page.locator(pane).get_attribute("tabindex") == "0"
+        page.evaluate("() => { document.getElementById('report').scrollTop = 0; }")
+        page.locator("#drawings").focus()
+        for _ in range(4):
+            page.keyboard.press("Tab")
+            if page.evaluate("() => document.activeElement.id") == "report":
+                break
+        assert page.evaluate("() => document.activeElement.id") == "report"
+        page.keyboard.press("End")
+        page.wait_for_function(
+            "() => { const r = document.getElementById('report');"
+            " return r.scrollTop + r.clientHeight >= r.scrollHeight - 1; }"
+        )
+    # The line of a WAY and its name beside it are one drawing. On a short window no line
+    # about the WAY is in view at the end of the report. The reader's scrolling stands while
+    # the pointer moves from the name to the line.
+    with opened(chromium, path, wide=1400, tall=500) as page:
+        page.locator("#report .row").first.wait_for()
+        name = page.locator("#calendar .way-name").first
+        name.hover()
+        page.wait_for_function("() => document.querySelector('#calendar .way-name.lit') !== null")
+        page.evaluate(to_its_end)
+        placed = page.evaluate(PLACED)
+        assert (placed["shown"], placed["at"] > 0) == (0, True)
+        line = page.locator(f"#calendar .mark.way[data-of='{name.get_attribute('data-of')}']")
+        line.locator(".stripe").first.hover()
+        page.wait_for_function("() => document.querySelector('#calendar .stripe:hover') !== null")
+        assert page.locator("#calendar .way-name.lit").count() == 1
+        assert page.evaluate(PLACED)["at"] == placed["at"]
+    # A shallow window keeps panes that a reader can use: the whole of it scrolls instead.
+    with opened(chromium, path, wide=1400, tall=260) as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        placed = page.evaluate(PLACED)
+        assert placed["drawings"]["bottom"] - placed["drawings"]["top"] >= 300
+        page.locator("#calendar .mark").first.hover()
+        lit(page, marks=["Museum visit"])
+    # A short report, at the top of the page: the one line about where the TRIP starts is
+    # shown in the window once it is pointed at.
+    with opened(chromium, EXAMPLES / "the-times-of-the-trip" / "works.json", 1400, 700) as page:
+        page.locator("#report .row").first.wait_for()
+        starts = page.locator("#calendar .bound-says").first
+        starts.wait_for()
+        starts.hover()
+        page.wait_for_function(f"() => ({PLACED})().shown === 1")
+        assert page.evaluate(PLACED)["page"] == 0
+    # On a narrower window the page scrolls as a whole: the report is below the drawings, and
+    # has no scrolling of its own.
+    with opened(chromium, path, wide=1280, tall=700) as page:
+        page.locator("#objects .card").wait_for()
+        page.locator("#report .row").first.wait_for()
+        placed = page.evaluate(PLACED)
+        assert placed["report"]["top"] >= placed["drawings"]["bottom"]
+        assert placed["scrolls"] is False
+        assert page.evaluate("() => document.documentElement.scrollHeight > innerHeight")
+
+
+def test_the_keyboard_moves_a_calendar_that_is_wider_than_its_room(
+    chromium: Browser, tmp_path: Path
+) -> None:
+    """A train just after midnight, and brunch two weeks later: more days than fit side by side."""
+    with opened(chromium, written(tmp_path, crowded()), wide=1400, tall=700) as page:
+        calendar = page.locator("#calendar")
+        page.locator("#calendar .mark").first.wait_for()
+        assert calendar.get_attribute("aria-label") == "The calendar"
+        box = "document.getElementById('calendar')"
+        assert page.evaluate(f"() => {box}.scrollWidth > {box}.clientWidth")
+        calendar.focus()
+        page.keyboard.press("ArrowRight")
+        page.wait_for_function(f"() => {box}.scrollLeft > 0")
 
 
 def test_pointing_ties_a_way_to_the_calendar_and_the_report(chromium: Browser) -> None:

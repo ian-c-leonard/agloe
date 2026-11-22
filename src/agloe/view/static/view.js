@@ -24,6 +24,7 @@ let onStrip = null; // the calendar that the strip on the page is of
 let stripRoom = 0; // pixels: how wide the page was when the strip was laid out
 let drawn; // the TRIP that the calendar on the page is of
 let written = []; // what the report on the page was written from: its words, and what its lines are tied to
+let revealedFor = null; // the drawing that the pointer is on, by what it is of and tied to: the report has moved for it
 
 function made(tag, className, text = "") {
   return Object.assign(document.createElement(tag), { className, textContent: text });
@@ -72,6 +73,25 @@ function tiesOf(step) {
  */
 function drawingOf(option, id) {
   return option.step !== null ? String(option.step) : `option:${id}`;
+}
+
+/**
+ * The name of a PERSON over their column of the calendar, or beside their row of the strip,
+ * in the colour of that PERSON. It is a drawing of the PERSON, like their row among the
+ * PERSONs, so pointing at one lights up the others.
+ */
+function nameOf(person, n, kind) {
+  const name = Object.assign(made("span", `${kind}p${n % HUES}`, person.name), { title: person.name });
+  name.dataset.of = `person:${person.id}`;
+  return name;
+}
+
+/**
+ * What a row or an entry for a WAY is a drawing of: each step of the TRIP in which somebody
+ * takes it, by its number, or the WAY itself, by its id, where nobody takes it.
+ */
+function drawingOfAWay(steps, id) {
+  return steps.length ? steps.join(" ") : `way:${id}`;
 }
 
 /**
@@ -151,7 +171,7 @@ function draw(laid) {
     const column = made("div", "day");
     column.style.setProperty("--people", Math.max(people, 1));
     const heads = made("div", "people");
-    laid.persons.forEach((person, n) => heads.append(Object.assign(made("span", `person p${n % HUES}`, person.name), { title: person.name })));
+    laid.persons.forEach((person, n) => heads.append(nameOf(person, n, "person ")));
     const body = made("div", "day-body");
     body.style.height = `${tall}px`;
     for (const shut of day.shut) {
@@ -256,7 +276,7 @@ function drawStrip(laid) {
   box.style.setProperty("--people", people);
   box.style.setProperty("--row", `${strip.row}px`);
   const names = made("div", "strip-people");
-  strip.persons.forEach((person, n) => names.append(Object.assign(made("span", `p${n % HUES}`, person.name), { title: person.name })));
+  strip.persons.forEach((person, n) => names.append(nameOf(person, n, "")));
   const days = made("div", "strip-days");
   const rows = made("div", "strip-rows");
   days.style.width = rows.style.width = `${strip.wide}px`;
@@ -288,14 +308,16 @@ function drawStrip(laid) {
  * OFFER on the card of the rights to an OPTION. It has its name, what the FILE says of it, and
  * who is in it or uses it, where the page says so. `of` says what the entry is a drawing of,
  * and it is tied to its one FACT. `plain` says that the entry is drawn full: the OPTION
- * SATISFIES the WANT or requires the CAPABILITY, or the BOOKING secures a right.
+ * SATISFIES the WANT or requires the CAPABILITY, or the BOOKING secures a right. `more` holds
+ * what the page says under that: who takes part, and what the report says of a plan.
  */
-function entry(thing, of, plain, who) {
+function entry(thing, of, plain, ...more) {
+  const under = more.filter(Boolean);
   const item = made("li", `entry${plain ? "" : " not"}${edges(thing)}`);
-  item.title = [thing.name, thing.says, ...(who ? [who] : []), ...marks(thing)].join("\n");
+  item.title = [thing.name, thing.says, ...under, ...marks(thing)].join("\n");
   Object.assign(item.dataset, { of, records: tiesOf(thing).join(" ") });
   item.append(made("b", "entry-name", thing.name), made("span", "entry-says", thing.says));
-  if (who) item.append(made("span", "entry-takes", who));
+  for (const words of under) item.append(made("span", "entry-takes", words));
   return item;
 }
 
@@ -341,8 +363,9 @@ function item(thing, of, columns) {
 }
 
 /**
- * Every PERSON of the FILE, a row for each: where the FILE says they start from, and where a
- * WANT has them end the TRIP. The row has the colour of the PERSON's column in the calendar.
+ * Every PERSON of the FILE, a row for each: where the FILE says they start from, where a WANT
+ * has them end the TRIP, and which BUDGETs they may draw on. The row has the colour of the
+ * PERSON's column in the calendar.
  */
 function drawPersons(shown) {
   const box = part("persons");
@@ -350,10 +373,35 @@ function drawPersons(shown) {
   part("persons-part").hidden = !shown.persons.length;
   part("persons-says").textContent = shown.says;
   shown.persons.forEach((person, n) => {
-    const row = item(person, `person:${person.id}`, [person.ends]);
+    const row = item(person, `person:${person.id}`, [person.ends, person.pays]);
     row.classList.add("of-a-person", `p${n % HUES}`);
     box.append(row);
   });
+}
+
+/**
+ * Every PLACE of the FILE, a card for each: who starts from it, which OBJECTs are there when
+ * the TRIP starts, and who must end the TRIP there, and under that the OPTIONs and the WAYs
+ * that are at it or go from it or to it. An OPTION that the calendar holds is tied to its
+ * step, and a WAY to each step in which somebody takes it, so pointing at one lights up those
+ * steps.
+ */
+function drawPlaces(shown) {
+  const box = part("places");
+  box.replaceChildren();
+  part("places-part").hidden = !shown.places.length;
+  part("places-says").textContent = shown.says;
+  for (const place of shown.places) {
+    const card = Object.assign(made("article", `card${edges(place)}`), { title: marks(place).join("\n") });
+    Object.assign(card.dataset, { of: `place:${place.id}`, records: tiesOf(place).join(" ") });
+    card.append(made("h3", "card-name", place.name));
+    for (const words of place.holds) card.append(made("p", "card-holds", words));
+    const entries = made("ul", "card-options");
+    for (const option of place.options) entries.append(entry(option, drawingOf(option, option.option), true, option.takes));
+    for (const way of place.ways) entries.append(entry(way, drawingOfAWay(way.steps, way.way), true, way.takes));
+    if (entries.children.length) card.append(entries);
+    box.append(card);
+  }
 }
 
 /**
@@ -393,6 +441,38 @@ function drawRights(shown) {
 }
 
 /**
+ * The BUDGETs of the FILE: a card for each, with the caps on it and what the BOOKINGs state
+ * that they paid from it. A cap is a thing of its own. A payment is a drawing of its BOOKING.
+ * The payments that name no BUDGET come last, on a card of their own.
+ */
+function drawBudgets(shown) {
+  const box = part("budgets");
+  box.replaceChildren();
+  part("budgets-part").hidden = !shown.budgets.length;
+  part("budgets-says").textContent = shown.says;
+  const paid = (booking) => entry(booking, `booking:${booking.id}`, true, null);
+  for (const budget of shown.budgets) {
+    const card = made("article", "card");
+    card.dataset.of = `budget:${budget.id}`;
+    card.append(made("h3", "card-name", budget.name), made("p", "card-holds", budget.holds));
+    const entries = made("ul", "card-options");
+    for (const cap of budget.caps) entries.append(entry(cap, `cap:${cap.id}`, true, cap.plan));
+    for (const booking of budget.payments) entries.append(paid(booking));
+    if (entries.children.length) card.append(entries);
+    if (budget.whole) card.append(made("p", "card-whole", budget.whole));
+    box.append(card);
+  }
+  if (shown.unnamed.length) {
+    const card = made("article", "card");
+    card.append(made("h3", "card-name", "No BUDGET named"), made("p", "card-holds", "These BOOKINGs state a payment, and not which BUDGET the money came from."));
+    const entries = made("ul", "card-options");
+    for (const booking of shown.unnamed) entries.append(paid(booking));
+    card.append(entries);
+    box.append(card);
+  }
+}
+
+/**
  * Every WAY of the FILE, a row for each: where it goes, how long it takes, and who takes it in
  * the plan. A WAY is tied to each step in which somebody takes it, so pointing at it lights up
  * those steps. Under the WAYs comes each FACT that the FILE lists every way of some travel: a
@@ -407,7 +487,7 @@ function drawWays(shown) {
   part("ways-says").textContent = shown.says;
   box.hidden = !shown.ways.length;
   travel.hidden = !shown.travel.length;
-  for (const way of shown.ways) box.append(item(way, way.steps.length ? way.steps.join(" ") : `way:${way.id}`, [[way.takes], way.plan]));
+  for (const way of shown.ways) box.append(item(way, drawingOfAWay(way.steps, way.id), [[way.takes], way.plan]));
   for (const fact of shown.travel) {
     const line = Object.assign(made("li", `in-full${fact.clash.length ? " clash" : ""}`, fact.says), { title: fact.finds ?? "" });
     Object.assign(line.dataset, { of: `travel:${fact.record}`, records: fact.records.join(" ") });
@@ -449,17 +529,43 @@ function drawCapabilities(shown) {
 }
 
 /**
+ * The OBJECTs of the FILE: a card for each, with where it is when the TRIP starts, and under
+ * it the OPTIONs that the FILE says require it or do not, and those that it says hand it
+ * over, keep it or leave it alone. An OPTION that the calendar holds is tied to its step.
+ */
+function drawObjects(shown) {
+  const box = part("objects");
+  box.replaceChildren();
+  part("objects-part").hidden = !shown.objects.length;
+  part("objects-says").textContent = shown.says;
+  for (const thing of shown.objects) {
+    const card = Object.assign(made("article", `card${edges(thing)}`), { title: marks(thing).join("\n") });
+    Object.assign(card.dataset, { of: `object:${thing.id}`, records: tiesOf(thing).join(" ") });
+    card.append(made("h3", "card-name", thing.name), made("p", "card-holds", thing.starts));
+    if (thing.plan) card.append(made("p", "card-plan", thing.plan));
+    const options = made("ul", "card-options");
+    for (const option of [...thing.requires, ...thing.might, ...thing.transfers]) options.append(entry(option, drawingOf(option, option.option), option.does, option.takes, option.plan));
+    if (options.children.length) card.append(options);
+    for (const words of thing.whole) card.append(made("p", "card-whole", words));
+    box.append(card);
+  }
+}
+
+/**
  * The parts of the page that show what the FILE holds, beside its calendar. Each is loaded by
  * itself and put on the page once for each TRIP. `words` is what puts the part in words, once
  * the page has loaded it, and `of` is the TRIP that the part on the page is of.
  */
 const held = [
   { id: "persons-part", load: () => import("./persons.js"), name: "persons", draw: drawPersons, words: null, of: undefined },
+  { id: "places-part", load: () => import("./places.js"), name: "places", draw: drawPlaces, words: null, of: undefined },
   { id: "wants-part", load: () => import("./wants.js"), name: "wants", draw: drawWants, words: null, of: undefined },
   { id: "options-part", load: () => import("./options.js"), name: "options", draw: drawOptions, words: null, of: undefined },
   { id: "rights-part", load: () => import("./rights.js"), name: "rights", draw: drawRights, words: null, of: undefined },
+  { id: "budgets-part", load: () => import("./budgets.js"), name: "budgets", draw: drawBudgets, words: null, of: undefined },
   { id: "ways-part", load: () => import("./ways.js"), name: "ways", draw: drawWays, words: null, of: undefined },
   { id: "capabilities-part", load: () => import("./capabilities.js"), name: "capabilities", draw: drawCapabilities, words: null, of: undefined },
+  { id: "objects-part", load: () => import("./objects.js"), name: "objects", draw: drawObjects, words: null, of: undefined },
 ];
 
 /** The calendar part says this, and shows no calendar. */
@@ -480,8 +586,8 @@ function write(text, tied) {
   tied.forEach((line, n) => {
     const words = made("span", line.warns ? "row warns" : "row", line.text);
     // A line is about the step that it shows or warns of, and about each OFFER that it says
-    // somebody buys a place of.
-    const about = [...(line.step === null ? [] : [line.step]), ...line.offers.map((id) => `offer:${id}`)];
+    // somebody buys a place of, or the BUDGET that it states.
+    const about = [...(line.step === null ? [] : [line.step]), ...line.about];
     if (about.length) words.dataset.of = about.join(" ");
     if (line.record !== null) words.dataset.record = line.record;
     if (line.case !== null) words.dataset.record = `case:${line.case}`;
@@ -496,9 +602,10 @@ function write(text, tied) {
  * what it shows. A mark and a row have every record about their OPTION. An OPTION under a WANT
  * has the one FACT about the two, so pointing at it picks out that FACT. Pointing lights up no
  * drawing of another thing, though a record or a case may be about both. `data-of` says what a
- * drawing is of: a step of the TRIP, an OPTION or a WAY that is no step, a PERSON, a WANT, a
+ * drawing is of: a step of the TRIP, an OPTION or a WAY that is no step, a PERSON, a PLACE, a WANT, a
  * CAPABILITY, what the FILE says of one PERSON and one CAPABILITY, the rights to an OPTION, a
- * BOOKING, an OFFER, or a FACT that the FILE lists every way of some travel. A WAY that somebody takes several times is a drawing of each
+ * BOOKING, an OFFER, a BUDGET, a cap, an OBJECT, or a FACT that the FILE lists every way of
+ * some travel. A WAY that somebody takes several times is a drawing of each
  * of those steps.
  *
  * The line of a record or of a case, and a time of the TRIP, are of no thing. Pointing at one
@@ -527,6 +634,29 @@ function light(target) {
     const same = ofAThing ? (theirs.length ? ofThese : shares(each)) : shares(each) || (ofThese && !isLine(each));
     each.classList.toggle("lit", from !== null && same);
   }
+  reveal(from);
+}
+
+/**
+ * Where the report scrolls by itself beside the drawings, pointing at a drawing brings the
+ * first of its lines into view there, unless one of them is in view already.
+ *
+ * Only the report scrolls, so the drawing stays under the pointer. And the report moves once
+ * for a drawing: while the pointer stays on that drawing, the reader's own scrolling stands.
+ * A drawing is known by what it is of and what it is tied to, so the line of a WAY and its
+ * name beside it are one drawing.
+ */
+function reveal(from) {
+  const drawing = from === null ? null : [from.dataset.of, from.dataset.record, from.dataset.records].join("|");
+  const entered = drawing !== revealedFor;
+  revealedFor = drawing;
+  const report = part("report");
+  if (!entered || from === null || report.contains(from) || report.scrollHeight <= report.clientHeight) return;
+  const box = report.getBoundingClientRect();
+  const lines = [...report.querySelectorAll(".row.lit")].map((line) => line.getBoundingClientRect());
+  if (!lines.length || lines.some((at) => at.top >= box.top && at.bottom <= box.bottom)) return;
+  // The middle of the first line goes to the middle of the report.
+  report.scrollTop += (lines[0].top + lines[0].bottom) / 2 - (box.top + box.bottom) / 2;
 }
 
 /** What is under the pointer is lit again, after the page has written or drawn anew. */
@@ -562,7 +692,7 @@ function show() {
     else if (said.calendar.trip !== each.of) {
       each.of = said.calendar.trip;
       try {
-        each.draw(each.words(each.of, said.calendar.report, tied ? tie.casesOf(tied) : null));
+        each.draw(each.words(each.of, said.calendar.report, tied ? tie.statedIn(tied) : null));
         lightAgain();
       } catch (problem) {
         part(each.id).hidden = true;
@@ -582,7 +712,7 @@ function show() {
   drawn = said.calendar.trip;
   let laid;
   try {
-    laid = lay(drawn, said.calendar.report, tied ? tie.warningsOf(tied) : [], tied ? tie.casesOf(tied) : []);
+    laid = lay(drawn, said.calendar.report, tied ? tie.warningsOf(tied) : [], tied ? tie.statedIn(tied) : []);
     draw(laid);
     lightAgain();
   } catch (problem) {

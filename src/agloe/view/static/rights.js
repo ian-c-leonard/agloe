@@ -2,8 +2,9 @@
 // the tests run this as it is.
 //
 // The view sends what the FILE says of the rights to each OPTION: whether a PERSON needs a
-// right to take part, each BOOKING with the PERSONs it covers, each OFFER with its places and
-// the price of one, and the FACT that the FILE lists every right to the OPTION. This puts
+// right to take part, each BOOKING with the PERSONs it covers and what it paid, each OFFER
+// with its places and the price of one, and the FACT that the FILE lists every right to the
+// OPTION. This puts
 // them in words, as the report words them. Where the report shows a plan, it says who uses
 // each BOOKING and who takes a place of each OFFER in that plan, as the report states it. It
 // marks what the report names: the records that rule out every plan, and the cases in which a
@@ -13,6 +14,7 @@
 // COMPILER to say: the page names who uses a right only where the report does.
 
 import { listed, marksBy, optionsOf, toBuyIn, usesIn } from "./named.js";
+import { paidOf } from "./money.js";
 import { needsARight } from "./who.js";
 
 /** What a case of a report can need that is about the rights to an OPTION. */
@@ -57,6 +59,18 @@ export function rights(trip, report = null, stated = null) {
   const needs = needsARight(trip);
   const marked = marksBy(report, stated);
   const uses = usesIn(report);
+  const pots = new Map(trip.budgets.map((each) => [each.id, each.name]));
+  const capped = trip.budgets.some((budget) => budget.caps.length > 0);
+  // What a BOOKING paid, as the report words it. Where the FILE has a cap, a BOOKING that
+  // states no payment says so: then no cap can be shown to hold.
+  const paymentOf = (booking) => {
+    if (booking.paid === null) return capped ? "; it states no payment" : "";
+    return `; its payment: ${paidOf(
+      booking.paid,
+      (id) => person.get(id),
+      (id) => pots.get(id),
+    )}`;
+  };
   // A place that the plan buys only if its OPTION turns out to need a right.
   const ifNeeded = (option, offer) => toBuyIn(report).some((buy) => buy.option === option && buy.offer === offer && buy.only_if_needed === true);
   // Those who use one right for one OPTION in the plan, in the FILE's order of PERSONs.
@@ -72,7 +86,7 @@ export function rights(trip, report = null, stated = null) {
         return {
           id: booking.id,
           name: booking.id,
-          says: `a BOOKING that covers ${listed(booking.covers.map((id) => person.get(id)))}`,
+          says: `a BOOKING that covers ${listed(booking.covers.map((id) => person.get(id)))}${paymentOf(booking)}`,
           uses: !trip.itinerary ? null : users.length ? `In the plan: ${listed(users)} ${users.length === 1 ? "uses" : "use"} it.` : "In the plan: nobody uses it.",
           ...marked([booking.id], (need) => need.booking === booking.id, "The report names this BOOKING in what the FILE does not say."),
         };

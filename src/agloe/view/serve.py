@@ -50,6 +50,10 @@ PAGE = (
     "ways.js",
     "persons.js",
     "rights.js",
+    "money.js",
+    "budgets.js",
+    "objects.js",
+    "places.js",
 )  # the page and its files
 NEEDED = PAGE[:4]  # those that the answer and the report need: the page shows them without the rest
 KINDS = {".html": "text/html", ".css": "text/css", ".js": "text/javascript"}

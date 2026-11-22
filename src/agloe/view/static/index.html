@@ -18,12 +18,13 @@
     <ul class="problems" id="problems" hidden></ul>
     <p class="note" id="note"></p>
   </section>
+  <div class="drawings" id="drawings" tabindex="0" aria-label="What the page draws of the FILE">
   <section class="calendar-part" id="calendar-part" hidden>
     <h2>Calendar</h2>
     <p class="says" id="calendar-says"></p>
     <div class="strip" id="strip" hidden></div>
     <p class="says" id="strip-says" hidden></p>
-    <div class="calendar" id="calendar" hidden></div>
+    <div class="calendar" id="calendar" tabindex="0" aria-label="The calendar" hidden></div>
     <p class="says" id="calendar-untimed" hidden></p>
     <p class="key" id="calendar-key" hidden>
       <span><i class="key-box locked"></i>a LOCK names the PERSON</span>
@@ -32,13 +33,18 @@
       <span><i class="key-box cut"></i>a dashed edge: the step does not start there, or may not end there</span>
       <span class="in-a-clash"><i class="key-box clash"></i>a red edge: the report names it in what rules out every plan</span>
       <span class="in-a-warning"><i class="key-box warned"></i>a yellow edge: the report warns of something at this step</span>
-      <span class="in-an-ask"><i class="key-box asked"></i>a yellow edge: the report says the FILE does not say enough about this step</span>
+      <span class="in-an-ask"><i class="key-box asked"></i>a yellow edge: the report names this step in what the FILE does not say</span>
     </p>
   </section>
   <section class="part" id="persons-part" hidden>
     <h2>PERSONs</h2>
     <p class="says" id="persons-says"></p>
     <div class="items" id="persons"></div>
+  </section>
+  <section class="part" id="places-part" hidden>
+    <h2>PLACEs</h2>
+    <p class="says" id="places-says"></p>
+    <div class="cards" id="places"></div>
   </section>
   <section class="part" id="wants-part" hidden>
     <h2>WANTs</h2>
@@ -55,6 +61,11 @@
     <p class="says" id="rights-says"></p>
     <div class="cards" id="rights"></div>
   </section>
+  <section class="part" id="budgets-part" hidden>
+    <h2>BUDGETs</h2>
+    <p class="says" id="budgets-says"></p>
+    <div class="cards" id="budgets"></div>
+  </section>
   <section class="part" id="ways-part" hidden>
     <h2>WAYs</h2>
     <p class="says" id="ways-says"></p>
@@ -66,9 +77,15 @@
     <p class="says" id="capabilities-says"></p>
     <div class="cards" id="capabilities"></div>
   </section>
+  <section class="part" id="objects-part" hidden>
+    <h2>OBJECTs</h2>
+    <p class="says" id="objects-says"></p>
+    <div class="cards" id="objects"></div>
+  </section>
+  </div>
   <section class="report-part" id="report-part" hidden>
-    <h2>The COMPILER's report</h2>
-    <pre id="report"></pre>
+    <h2 id="report-heading">The COMPILER's report</h2>
+    <pre id="report" tabindex="0" aria-labelledby="report-heading"></pre>
   </section>
 </main>
 </body>
