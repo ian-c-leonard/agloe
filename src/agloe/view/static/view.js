@@ -24,7 +24,7 @@ let onStrip = null; // the calendar that the strip on the page is of
 let stripRoom = 0; // pixels: how wide the page was when the strip was laid out
 let drawn; // the TRIP that the calendar on the page is of
 let written = []; // what the report on the page was written from: its words, and what its lines are tied to
-let revealedFor = null; // the drawing whose lines the report was last scrolled to, while the pointer is on it
+let revealedFor = null; // the drawing that the pointer is on, by what it is of and tied to: the report has moved for it
 
 function made(tag, className, text = "") {
   return Object.assign(document.createElement(tag), { className, textContent: text });
@@ -595,10 +595,13 @@ function light(target) {
  *
  * Only the report scrolls, so the drawing stays under the pointer. And the report moves once
  * for a drawing: while the pointer stays on that drawing, the reader's own scrolling stands.
+ * A drawing is known by what it is of and what it is tied to, so the line of a WAY and its
+ * name beside it are one drawing.
  */
 function reveal(from) {
-  const entered = from !== revealedFor;
-  revealedFor = from;
+  const drawing = from === null ? null : [from.dataset.of, from.dataset.record, from.dataset.records].join("|");
+  const entered = drawing !== revealedFor;
+  revealedFor = drawing;
   const report = part("report");
   if (!entered || from === null || report.contains(from) || report.scrollHeight <= report.clientHeight) return;
   const box = report.getBoundingClientRect();

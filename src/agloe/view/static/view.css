@@ -13,7 +13,7 @@ body { margin: 0; background: var(--ground); color: var(--ink); font: 15px/1.5 v
 p, h2, ul { margin: 0; }
 header { display: flex; align-items: baseline; gap: 16px; padding: 12px 28px; background: var(--surface); border-bottom: 1px solid var(--line); }
 .word { font: italic 400 24px/1 Georgia, serif; }
-.name { font: 500 13px var(--mono); color: var(--ink2); }
+.name { min-width: 0; overflow-wrap: anywhere; font: 500 13px var(--mono); color: var(--ink2); }
 main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: grid; gap: 18px; }
 /* What the page draws of the FILE: the calendar, and a part for each kind of thing in it. */
 .drawings { display: grid; gap: 18px; min-width: 0; }
@@ -21,10 +21,11 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 /* On a wide window the page fills the window and does not scroll. Under the answer are two
    panes, side by side: what the page draws, and the report. Each scrolls by itself. So the
    answer stays in view, and pointing at a drawing shows its lines in the report, and the other
-   way round. Where the answer alone is taller than the window, the whole of it scrolls. */
+   way round. The panes keep a height that a reader can use. Where the window is too short
+   for that, or the answer alone is taller than the window, the whole of it scrolls. */
 @media (min-width: 1400px) {
-  body { height: 100vh; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
-  main { width: 100%; max-width: 1800px; min-height: 0; padding-bottom: 12px; overflow-y: auto; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-rows: auto minmax(0, 1fr); column-gap: 28px; }
+  body { height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+  main { width: 100%; max-width: 1800px; min-height: 0; padding-bottom: 12px; overflow-y: auto; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-rows: auto minmax(320px, 1fr); column-gap: 28px; }
   .answer { grid-column: 1 / -1; }
   .drawings { min-height: 0; overflow-y: auto; align-content: start; padding-right: 6px; }
   .report-part { min-height: 0; grid-template-rows: auto minmax(0, 1fr); }

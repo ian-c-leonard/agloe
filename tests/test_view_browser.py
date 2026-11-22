@@ -848,14 +848,45 @@ def test_on_a_wide_window_the_report_stays_beside_the_drawings(chromium: Browser
         alex.locator(".item-where").hover()
         lit(page, persons=["Alex"])
         assert page.evaluate(PLACED)["at"] == end
-        # The keyboard reaches both panes, and End takes the report to its end.
-        report = page.locator("#report")
-        assert report.get_attribute("tabindex") == "0"
-        assert page.locator("#drawings").get_attribute("tabindex") == "0"
+        # The keyboard reaches both panes, and End takes the report to its last line.
+        for pane in ("#drawings", "#report", "#calendar"):
+            assert page.locator(pane).get_attribute("tabindex") == "0"
         page.evaluate("() => { document.getElementById('report').scrollTop = 0; }")
-        report.focus()
+        page.locator("#drawings").focus()
+        for _ in range(4):
+            page.keyboard.press("Tab")
+            if page.evaluate("() => document.activeElement.id") == "report":
+                break
+        assert page.evaluate("() => document.activeElement.id") == "report"
         page.keyboard.press("End")
-        page.wait_for_function(f"() => ({PLACED})().at > 0")
+        page.wait_for_function(
+            "() => { const r = document.getElementById('report');"
+            " return r.scrollTop + r.clientHeight >= r.scrollHeight - 1; }"
+        )
+    # The line of a WAY and its name beside it are one drawing. On a short window no line
+    # about the WAY is in view at the end of the report. The reader's scrolling stands while
+    # the pointer moves from the name to the line.
+    with opened(chromium, path, wide=1400, tall=500) as page:
+        page.locator("#report .row").first.wait_for()
+        name = page.locator("#calendar .way-name").first
+        name.hover()
+        page.wait_for_function("() => document.querySelector('#calendar .way-name.lit') !== null")
+        page.evaluate(to_its_end)
+        placed = page.evaluate(PLACED)
+        assert (placed["shown"], placed["at"] > 0) == (0, True)
+        line = page.locator(f"#calendar .mark.way[data-of='{name.get_attribute('data-of')}']")
+        line.locator(".stripe").first.hover()
+        page.wait_for_function("() => document.querySelector('#calendar .stripe:hover') !== null")
+        assert page.locator("#calendar .way-name.lit").count() == 1
+        assert page.evaluate(PLACED)["at"] == placed["at"]
+    # A shallow window keeps panes that a reader can use: the whole of it scrolls instead.
+    with opened(chromium, path, wide=1400, tall=260) as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        placed = page.evaluate(PLACED)
+        assert placed["drawings"]["bottom"] - placed["drawings"]["top"] >= 300
+        page.locator("#calendar .mark").first.hover()
+        lit(page, marks=["Museum visit"])
     # A short report, at the top of the page: the one line about where the TRIP starts is
     # shown in the window once it is pointed at.
     with opened(chromium, EXAMPLES / "the-times-of-the-trip" / "works.json", 1400, 700) as page:
@@ -874,6 +905,21 @@ def test_on_a_wide_window_the_report_stays_beside_the_drawings(chromium: Browser
         assert placed["report"]["top"] >= placed["drawings"]["bottom"]
         assert placed["scrolls"] is False
         assert page.evaluate("() => document.documentElement.scrollHeight > innerHeight")
+
+
+def test_the_keyboard_moves_a_calendar_that_is_wider_than_its_room(
+    chromium: Browser, tmp_path: Path
+) -> None:
+    """A train just after midnight, and brunch two weeks later: more days than fit side by side."""
+    with opened(chromium, written(tmp_path, crowded()), wide=1400, tall=700) as page:
+        calendar = page.locator("#calendar")
+        page.locator("#calendar .mark").first.wait_for()
+        assert calendar.get_attribute("aria-label") == "The calendar"
+        box = "document.getElementById('calendar')"
+        assert page.evaluate(f"() => {box}.scrollWidth > {box}.clientWidth")
+        calendar.focus()
+        page.keyboard.press("ArrowRight")
+        page.wait_for_function(f"() => {box}.scrollLeft > 0")
 
 
 def test_pointing_ties_a_way_to_the_calendar_and_the_report(chromium: Browser) -> None:
