@@ -200,7 +200,7 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 
 .card.clash, .entry.clash, .item.clash, .has.clash, .in-full.clash { border-style: solid; border-color: var(--stop); box-shadow: inset 0 0 0 1.5px var(--stop); }
 .card.asked, .entry.asked, .item.asked, .has.asked { border-style: solid; border-color: var(--warn); box-shadow: inset 0 0 0 1.5px var(--warn); }
-.card.lit, .entry.lit, .item.lit, .has.lit, .in-full.lit { background: var(--lit); }
+.card.lit, .entry.lit, .item.lit, .has.lit, .in-full.lit, .person.lit, .strip-people .lit { background: var(--lit); }
 
 .key { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 12px; }
 .key span { display: inline-flex; align-items: center; gap: 6px; }

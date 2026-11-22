@@ -60,7 +60,8 @@ FITTED = """() => {
   return Math.abs(rows.getBoundingClientRect().width - room) < 1;
 }"""
 # What is lit on the page: the steps of the calendar, the steps with no time beside it, the
-# marks of the strip, the lines of the report, the PERSONs, the PLACEs with the OPTIONs and
+# marks of the strip, the names of the PERSONs over their columns of the calendar and beside
+# their rows of the strip, the lines of the report, the PERSONs, the PLACEs with the OPTIONs and
 # the WAYs under them, the WANTs with the OPTIONs under
 # them, the OPTIONs of the FILE, the rights to them with their BOOKINGs and OFFERs, the
 # BUDGETs with their caps and payments, its WAYs, the travel that it lists in full, the
@@ -73,6 +74,8 @@ LIT = """() => {
     marks: [...new Set(all("#calendar .mark.lit").map(first))],
     untimed: all("#calendar-untimed .lit").map((each) => each.textContent),
     bars: [...new Set(all("#strip .bar.lit").map(first))],
+    heads: [...new Set(all("#calendar .person.lit").map((each) => each.textContent))],
+    beside: all("#strip .strip-people .lit").map((each) => each.textContent),
     rows: all("#report .row.lit").map((row) => row.textContent),
     wants: all("#wants .lit").map((each) => each.querySelector("h3, b").textContent),
     options: all("#options .item.lit").map((each) => each.querySelector("h3").textContent),
@@ -515,6 +518,35 @@ def test_pointing_ties_a_person_to_the_report(chromium: Browser) -> None:
         assert ids_of(found["rows"]) == ["alex-start"]
         page.locator("#report .row[data-record='sam-start']").hover()
         lit(page, persons=["Sam"], marks=[])
+        # The name over a PERSON's column of the calendar is a drawing of the PERSON: it
+        # lights up with the row, and the row with it.
+        rows.first.hover()
+        lit(page, persons=["Alex"], heads=["Alex"])
+        page.locator("#calendar .person", has_text="Sam").first.hover()
+        lit(page, persons=["Sam"], heads=["Sam"], marks=[])
+        page.locator("#report .row[data-record='sam-start']").hover()
+        lit(page, persons=["Sam"], heads=["Sam"])
+        # Pointing at a step lights up the name of no PERSON.
+        page.locator("#calendar .mark", has_text="Museum visit").first.hover()
+        lit(page, marks=["Museum visit"], persons=[], heads=[])
+    # On a TRIP of two days the strip has a row for each PERSON. The name beside it is a
+    # drawing of the PERSON too, and so is the name over their column on each day.
+    with opened(chromium, EXAMPLES / "several-days" / "works-but-risky.json") as page:
+        page.locator("#persons .item").first.wait_for()
+        beside = page.locator("#strip .strip-people span")
+        beside.first.wait_for()
+        names = page.locator("#persons .item-name").all_text_contents()
+        assert beside.all_text_contents() == names == ["Alex"]
+        beside.first.hover()
+        lit(page, persons=names, heads=names, beside=names, marks=[], bars=[])
+        days = page.locator("#calendar .day").count()
+        assert days > 1
+        assert page.locator("#calendar .person.lit").count() == days
+        # Away from the names, none is lit. From the row of the PERSON, each is again.
+        page.locator("#strip .bar").first.hover()
+        lit(page, persons=[], heads=[], beside=[])
+        page.locator("#persons .item").first.hover()
+        lit(page, persons=names, heads=names, beside=names)
     # The trip works if Alex can drive a manual car, or if Sam can.
     with opened(chromium, EXAMPLES / "a-driver" / "depends-on-who-can-drive.json") as page:
         asked = page.locator("#persons .item.asked")
