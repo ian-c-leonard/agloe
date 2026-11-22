@@ -19,7 +19,11 @@ night and in any time zone.
 import copy
 import functools
 import json
+import os
 import re
+import shutil
+import subprocess
+import unicodedata
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
@@ -32,7 +36,7 @@ from agloe import report as reports
 from agloe.answers import Answer, Report
 from agloe.file import Complete, File, instant, parse, read
 from agloe.reference import Step
-from agloe.view.trip import MOST_DAYS, holds, shown
+from agloe.view.trip import MOST_DAYS, holds, seen_as, shown
 from tests.stories import (
     EXAMPLES,
     any_time,
@@ -920,12 +924,58 @@ def test_names_that_look_the_same_on_a_page_come_with_their_ids() -> None:
         "Anne\u200bMarie (skydeck)",
         "AnneMarie (lunch)",
     ]
+    # Or in a character that only says how the sign before it is drawn, or that joins two
+    # others: a page shows nothing for it.
+    by_id["alex"]["name"], by_id["jo"]["name"] = (
+        "Central Caf\u00e9 \u2615",
+        "Central Caf\u00e9 \u2615\ufe0f",
+    )
+    by_id["skydeck"]["name"], by_id["lunch"]["name"] = "Anne\u034fMarie", "AnneMarie"
+    file = parse(json.dumps(content))
+    sent = sent_for(file, compiler.check(file))
+    assert [each["name"] for each in sent["persons"]] == [
+        "Central Caf\u00e9 \u2615 (alex)",
+        "Sam",
+        "Central Caf\u00e9 \u2615\ufe0f (jo)",
+    ]
+    assert [step["name"] for step in sent["steps"] if step["option"]] == [
+        "Anne\u034fMarie (skydeck)",
+        "AnneMarie (lunch)",
+    ]
     # A name that only differs in its capitals looks different, and comes as it is.
     by_id["skydeck"]["name"], by_id["lunch"]["name"] = "Skydeck visit", "Lunch in the park"
     by_id["alex"]["name"], by_id["jo"]["name"] = "Alex", "alex"
     file = parse(json.dumps(content))
     sent = sent_for(file, compiler.check(file))
     assert [each["name"] for each in sent["persons"]] == ["Alex", "Sam", "alex"]
+
+
+def test_what_a_page_shows_nothing_for_is_what_unicode_calls_default_ignorable() -> None:
+    """The view and the page tell the same characters, and a browser knows which they are."""
+    node = shutil.which("node")
+    if node is None:
+        if os.environ.get("CI"):
+            pytest.fail("the tests of the view need Node")
+        pytest.skip("needs Node")
+    listing = """
+    const found = [];
+    for (let point = 0; point <= 0x10ffff; point += 1) {
+      if (point >= 0xd800 && point <= 0xdfff) continue;
+      if (/\\p{Default_Ignorable_Code_Point}/u.test(String.fromCodePoint(point))) found.push(point);
+    }
+    process.stdout.write(JSON.stringify(found));
+    """
+    done = subprocess.run([node, "--eval", listing], capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
+    ignorable = set(json.loads(done.stdout))
+    assert len(ignorable) > 4000
+    for point in ignorable:
+        assert seen_as(f"a{chr(point)}b") == "ab", hex(point)
+    # A sign that a page shows stays: a letter, an accent, a hyphen, a coffee cup.
+    for sign in ("a", "\u00e9", "-", "\u2615", "\u0301", "'"):
+        assert seen_as(f"a{sign}b") == unicodedata.normalize("NFC", f"a{sign}b"), sign
+    # Each accent is joined to its letter, and each run of spaces is one space.
+    assert seen_as("  Jose\u0301   Luis ") == "Jos\u00e9 Luis"
 
 
 def test_every_option_of_the_file_is_sent_with_what_the_file_says_of_it() -> None:

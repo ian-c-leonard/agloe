@@ -312,6 +312,16 @@ def test_an_object_that_might_be_in_one_of_several_places_says_each(tmp_path: Pa
         'Just before it starts: with "Tom or\u200e Jerry" (alex).'
     )
     assert "\n  the bags: with Tom or\u200e Jerry when the TRIP starts; " in words
+    # So is a name with a character after the word that joins two others and shows as nothing.
+    content["persons"] = [
+        {"id": "alex", "name": "Tom or\u034f Jerry"},
+        {"id": "sam", "name": "Sam"},
+    ]
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    assert bags["requires"][0]["plan"] == 'Just before it starts: with "Tom or\u034f Jerry".'
     # A character that joins the word to the one before it leaves no such word to see.
     content["persons"] = [{"id": "alex", "name": "Tom\ufeffor Jerry"}, {"id": "sam", "name": "Sam"}]
     path.write_text(json.dumps(content))

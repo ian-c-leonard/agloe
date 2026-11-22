@@ -105,6 +105,14 @@ _AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}")
 _DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _OFFSET = re.compile(r"UTC[+-][0-9]{1,2}(:[0-9]{2}(:[0-9]{2})?)?")
 _WITH_AN_ID = re.compile(r" \([a-z0-9]+(-[a-z0-9]+)*\)$")  # how a name ends when its id is shown
+# What a page shows nothing for: the characters that Unicode calls default ignorable. A soft
+# hyphen, a space of no width, a mark of direction, a character that joins two others, and one
+# that only says how the sign before it is drawn.
+_UNSEEN = re.compile(
+    "[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e"
+    "\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufff8"
+    "\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0000-\U000e0fff]"
+)
 _NONE = type(None)
 _NAMED: _Shape = {"id": str, "name": str}
 _TRIP: _Shape = {
@@ -457,6 +465,17 @@ def _length(stated: Duration | None) -> Trip | None:
     }
 
 
+def seen_as(name: str) -> str:
+    """A name as a page shows it, so that two names that a page shows alike are the same.
+
+    It is without the characters that a page shows nothing for, with each accent joined to
+    its letter, and with each run of spaces as one space. A format character is left out too:
+    a page shows nothing for most of them.
+    """
+    seen = "".join(each for each in _UNSEEN.sub("", name) if unicodedata.category(each) != "Cf")
+    return " ".join(unicodedata.normalize("NFC", seen).split())
+
+
 def _names(
     records: Sequence[Person | Place | Option | Way | Want | Capability | Budget | Object],
     joins: str | None = None,
@@ -469,16 +488,10 @@ def _names(
     id, and one that holds the word ``joins``, which joins the list the names are for.
 
     This is the rule of the report in words. A test holds the two together. One thing is
-    added for a page: two names count as the same where a page shows them alike. That is where
-    they have the same characters once each accent is joined to its letter, and each run of
-    spaces is one space. Each name is still printed in the spelling of the FILE.
+    added for a page: two names count as the same where a page shows them alike, as
+    ``seen_as`` tells it. Each name is still printed in the spelling of the FILE.
     """
-
-    def looks(name: str) -> str:
-        # A page shows nothing for a format character, such as a soft hyphen or a space of
-        # no width.
-        seen = "".join(each for each in name if unicodedata.category(each) != "Cf")
-        return " ".join(unicodedata.normalize("NFC", seen).split())
+    looks = seen_as
 
     def quoted(name: str) -> str:
         splits = any(mark in name for mark in ",:;") or (

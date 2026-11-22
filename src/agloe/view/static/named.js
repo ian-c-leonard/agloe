@@ -9,8 +9,12 @@
 
 /** How a name ends where the page shows its id after it. */
 const WITH_AN_ID = / \([a-z0-9]+(-[a-z0-9]+)*\)$/;
-/** What a page shows nothing for: a format character, such as a soft hyphen or a mark of direction. */
-const UNSEEN = /\p{Cf}/gu;
+/**
+ * What a page shows nothing for, as the view tells it where it says which names look alike:
+ * the characters that Unicode calls default ignorable, such as a soft hyphen or a mark of
+ * direction, and the format characters.
+ */
+const UNSEEN = /[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
 
 /**
  * A name as the page shows it, for a list that "or" joins: in quotation marks where it holds
