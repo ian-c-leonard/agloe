@@ -102,13 +102,22 @@ export function cappedIn(report) {
   return plans.map((plan) => plan.caps.map((row) => row.cap));
 }
 
+/** The OPTIONs that a list in one of those things names, each in a record of its own. */
+function namedIn(list) {
+  return Array.isArray(list) ? list.filter((each) => each !== null && typeof each === "object").map((each) => each.option).filter((id) => typeof id === "string") : [];
+}
+
+/** The OPTIONs that an OBJECT has to be at hand for, in one of those things. */
+export function atHandFor(need) {
+  return namedIn(need.at_hand_for);
+}
+
 /**
  * The OPTIONs that one of those things names: its own, each that somebody has to buy a place
  * for, and each that an OBJECT has to be at hand for.
  */
 export function optionsOf(need) {
-  const named = (list) => (Array.isArray(list) ? list.filter((each) => each !== null && typeof each === "object").map((each) => each.option) : []);
-  return [need.option, ...named(need.buys), ...named(need.at_hand_for)].filter((id) => typeof id === "string");
+  return [...(typeof need.option === "string" ? [need.option] : []), ...namedIn(need.buys), ...atHandFor(need)];
 }
 
 /**

@@ -27,6 +27,7 @@ RED = " A red edge marks what the report names among what rules out every plan."
 YELLOW = " A yellow edge marks what the report names in what the FILE does not say."
 ALL_REQUIRE = "The FILE states every one of its OPTIONs that requires it."
 ALL_MOVE = "The FILE states every OPTION that hands it over or keeps it."
+NONE = ", and it names none."
 MAY_MOVE = "Another OPTION may hand it over or keep it: the FILE does not say that these are all."
 UNSAID = "The FILE does not say where it is when the TRIP starts."
 
@@ -118,6 +119,39 @@ def test_the_objects_mark_what_the_report_says_the_file_does_not_say() -> None:
     ]
 
 
+def test_a_case_marks_the_option_under_an_object_that_shows_what_the_case_is_about() -> None:
+    """The trip might work if another transfer puts the bags at hand for the flight."""
+    (bags,) = objects_of("the-bags/somebody-might")["objects"]
+    # The flight requires the bags, and the case has them at hand for it.
+    assert [(each["name"], each["cases"]) for each in bags["requires"]] == [("Flight home", [0])]
+    assert all(each["cases"] == [] for each in bags["transfers"])
+    # A case about whether the museum requires the bags is not about what the museum does
+    # with them. So it marks the OBJECT, and not the OPTION that leaves them alone.
+    sent, found, words = in_words(STORY / "depends-on-the-museum.json")
+    assert found["missing"] == [
+        [{"what": "does not require", "option": "museum-visit", "object": "bags"}]
+    ]
+    (thing,) = sent["objects"]
+    thing["transfers"].append(
+        {
+            "option": "museum-visit",
+            "name": "Museum visit",
+            "does": "nothing",
+            "record": "museum-leaves-them",
+        }
+    )
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    assert bags["cases"] == [0]
+    assert [each["cases"] for each in bags["transfers"] if each["name"] == "Museum visit"] == [[]]
+    # A case about what an OPTION does with the OBJECT marks that OPTION there.
+    keeps = {"what": "does not keep", "option": "museum-visit", "object": "bags"}
+    (shown,) = all_objects([sent], [{**found, "missing": [[keeps]]}])
+    (bags,) = shown["objects"]
+    assert [each["cases"] for each in bags["transfers"] if each["name"] == "Museum visit"] == [[0]]
+    assert all(each["cases"] == [] for each in bags["requires"])
+
+
 def test_the_objects_mark_what_the_report_names_as_ruling_out_every_plan() -> None:
     sent, found = with_its_report(STORY / "nobody-collects-them.json")
     (shown,) = all_objects([sent], [found])
@@ -168,6 +202,11 @@ def test_an_object_says_whether_its_options_are_all_there_are() -> None:
     assert whole(requires=every, requires_complete=None)[0] == (
         "The FILE says of each of its OPTIONs whether it requires this OBJECT."
     )
+    # A FILE with no OPTION says so: nothing in it can require the OBJECT.
+    walk: Trip = {**sent, "options": [], "steps": [], "rights": [], "wants": [], "capabilities": []}
+    lone: Trip = {**bags, "requires": [], "requires_complete": None, "transfers": []}
+    (shown,) = all_objects([{**walk, "objects": [lone]}])
+    assert shown["objects"][0]["whole"] == ["The FILE lists no OPTION.", ALL_MOVE[:-1] + NONE]
 
 
 def test_an_option_that_leaves_an_object_alone_or_does_not_require_it_says_so() -> None:

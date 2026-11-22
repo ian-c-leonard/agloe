@@ -354,6 +354,55 @@ def test_the_lines_about_an_object_are_tied_to_it_and_to_the_step_they_are_about
         assert takes["about"] == []
 
 
+def with_a_passport(content: dict[str, Any]) -> dict[str, Any]:
+    """The FILE of the bags with a passport too, which starts, moves and is required as they are.
+
+    Its id is a number. A page lists such a key before any other, whatever the order it came in.
+    """
+    content["objects"].append({"id": "17", "name": "the passport"})
+    about = [fact for fact in content["facts"] if '"bags"' in json.dumps(fact)]
+    for fact in about:
+        other = json.loads(json.dumps(fact).replace('"bags"', '"17"'))
+        content["facts"].append({**other, "id": f"{fact['id']}-too"})
+    return content
+
+
+def test_two_objects_taken_at_one_step_each_light_up_their_own_line(tmp_path: Path) -> None:
+    content = json.loads((EXAMPLES / "the-bags" / "they-collect-them.json").read_text())
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(with_a_passport(content)))
+    asked = asked_of(path)
+    assert asked["report"]["answer"] == "FEASIBLE"
+    (found,) = lines_of([asked])
+    about = {line["text"].strip(): line["about"][-1] for line in found if line["about"]}
+    assert about["Alex takes the bags here."] == "object:bags"
+    assert about["Alex takes the passport here."] == "object:17"
+    assert [thing for words, thing in about.items() if words.startswith("the ")] == [
+        "object:bags",
+        "object:17",
+    ]
+
+
+def test_a_line_about_an_object_is_tied_whatever_the_names_in_it_start_with(tmp_path: Path) -> None:
+    """A name can start with a space. The report sets its line in by one space more."""
+    content = json.loads((EXAMPLES / "the-bags" / "they-collect-them.json").read_text())
+    for kind, id in (("persons", "alex"), ("objects", "bags"), ("options", "flight")):
+        (named,) = [each for each in content[kind] if each["id"] == id]
+        named["name"] = f" {named['name']}"
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    asked = asked_of(path)
+    assert "\n     Alex takes  the bags here.\n" in asked["text"]
+    (found,) = lines_of([asked])
+    steps = {step["option"]: str(at) for at, step in enumerate(asked["trip"]["steps"])}
+    about = [line["about"] for line in found if line["about"]]
+    assert about == [
+        [steps["collect-bags"], "object:bags"],
+        ["object:bags"],
+        [steps["flight"], "object:bags"],
+    ]
+
+
 def test_a_warning_is_tied_to_the_step_above_it() -> None:
     """Alex and Sam would be too late for the flight if the train took its longest."""
     asked = asked_of(EXAMPLES / "flight-home" / "works-but-risky.json")

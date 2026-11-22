@@ -164,41 +164,36 @@ export function lines(text, report, trip) {
   }
   // Under a step of the plan, after what the report warns of there, a line says who takes
   // an OBJECT at that step: one line for each OBJECT that the report as JSON has somebody take
-  // at that OPTION. Each is about the step and about the OBJECT.
+  // at that OPTION, in the FILE's order of OBJECTs. Each is about the step and about the
+  // OBJECT. A line under a step is set in by four spaces, whatever the name it starts with.
   const planned = trip !== null && trip.itinerary;
   const stepOf = (option) => (planned ? trip.steps.findIndex((each) => each.option === option) : -1);
+  const placeOf = new Map((trip === null ? [] : trip.objects).map((each, n) => [each.id, n]));
   for (const { option, objects } of takenIn(report)) {
     const at = found.findIndex((line) => line.step !== null && line.step === stepOf(option) && !line.warns && line.meets === null);
-    if (at < 0) continue;
+    if (at < 0 || !objects.every((id) => placeOf.has(id))) continue;
+    const inOrder = [...objects].sort((one, other) => placeOf.get(one) - placeOf.get(other));
     let next = at + 1;
     while (next < found.length && found[next].warns) next += 1;
     const said = [];
-    for (; next < found.length && /^ {4}\S/.test(found[next].text) && free(found[next]) && !found[next].about.length; next += 1) said.push(found[next]);
-    if (said.length === objects.length) said.forEach((line, n) => (line.about = [String(found[at].step), `object:${objects[n]}`]));
+    for (; next < found.length && found[next].text.startsWith("    ") && free(found[next]) && !found[next].about.length; next += 1) said.push(found[next]);
+    if (said.length === inOrder.length) said.forEach((line, n) => (line.about = [String(found[at].step), `object:${inOrder[n]}`]));
   }
-  // Where each OBJECT is in the plan: under their heading, one line for each OBJECT of the
-  // report as JSON, and under it, further in, one line for each OPTION that requires it. They
-  // are tied only where the words hold exactly those lines. A line about a requirement is
-  // about the OBJECT and about the step that its OPTION is.
+  // Where each OBJECT is in the plan: under their heading, up to the first line that is not
+  // set in, one line for each OBJECT of the report as JSON, and after it one line for each
+  // OPTION that requires it. They are tied only where the words hold exactly as many lines as
+  // that. How far a line is set in is not compared: a name can start with a space. A line
+  // about a requirement is about the OBJECT and about the step that its OPTION is.
   const things = objectsIn(report);
   const above = found.flatMap((line, at) => (line.text === OBJECTS ? [at] : []));
   if (things.length && above.length === 1) {
-    const ties = [];
-    let at = above[0] + 1;
-    const whole = things.every(({ object, options }) => {
-      if (at >= found.length || !/^ {2}\S/.test(found[at].text) || !free(found[at])) return false;
-      ties.push([found[at], [`object:${object}`]]);
-      at += 1;
-      return options.every((option) => {
-        if (at >= found.length || !/^ {4}\S/.test(found[at].text) || !free(found[at])) return false;
-        const step = stepOf(option);
-        ties.push([found[at], [...(step < 0 ? [] : [String(step)]), `object:${object}`]]);
-        at += 1;
-        return true;
-      });
-    });
-    const ends = at >= found.length || !found[at].text.startsWith("  ");
-    if (whole && ends) for (const [line, about] of ties) line.about = about;
+    const under = [];
+    for (let at = above[0] + 1; at < found.length && found[at].text.startsWith("  "); at += 1) under.push(found[at]);
+    const ties = things.flatMap(({ object, options }) => [
+      [`object:${object}`],
+      ...options.map((option) => [...(stepOf(option) < 0 ? [] : [String(stepOf(option))]), `object:${object}`]),
+    ]);
+    if (under.length === ties.length && under.every(free)) under.forEach((line, n) => (line.about = ties[n]));
   }
   // Who meets what each OPTION of the plan requires: the lines under their heading, up to the
   // first line that is not set in. A line starts with the name of its OPTION, whatever that

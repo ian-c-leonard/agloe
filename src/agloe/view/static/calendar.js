@@ -178,7 +178,7 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
   // A step that the report names in what the FILE does not say is marked where the calendar
   // shows it: on its days, or among the steps with no time.
   const asked = steps.some((step) => step.cases.length && (step.parts.length || step.when === null));
-  const asks = !needed.length ? "" : asked ? " A yellow edge marks each step shown that the report says the FILE does not say enough about." : " What the report says the FILE does not say is not about a step shown here.";
+  const asks = !needed.length ? "" : asked ? " A yellow edge marks each step shown that the report names in what the FILE does not say." : " What the report says the FILE does not say is not about a step shown here.";
   const says = saysOf(trip, steps.length - untimed.length) + rulesOut(ruled.size, marked.size) + warns + asks;
   if (!trip.days.length) return { ...none, says, zone: trip.zone, itinerary: trip.itinerary, asked, persons: trip.persons, untimed };
 

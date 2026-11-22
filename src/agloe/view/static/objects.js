@@ -13,8 +13,13 @@
 // OPTION that requires it, is for the COMPILER to say: the report says it, and the page ties
 // those lines to the OBJECT.
 
-import { marksBy } from "./named.js";
+import { atHandFor, marksBy } from "./named.js";
 import { whoIsIn } from "./who.js";
+
+/** What a case of a report can need that is about whether an OPTION requires an OBJECT. */
+const ABOUT_REQUIRING = new Set(["does not require"]);
+/** What a case of a report can need that is about what an OPTION does with an OBJECT. */
+const ABOUT_MOVING = new Set(["hands over", "keeps", "does not keep"]);
 
 /** What an OPTION does with an OBJECT, as the report words it. */
 const DOES = { hands_over: "it can be handed over here", keeps: "keeps it", nothing: "leaves it alone" };
@@ -27,7 +32,7 @@ const DOES = { hands_over: "it can be handed over here", keeps: "keeps it", noth
 function requiredBy(thing, others) {
   const some = thing.requires.some((each) => each.needed);
   if (thing.requires_complete !== null) return some ? "The FILE states every one of its OPTIONs that requires it." : "The FILE states every one of its OPTIONs that requires it, and it names none.";
-  if (!others) return thing.requires.length ? "The FILE says of each of its OPTIONs whether it requires this OBJECT." : null;
+  if (!others) return thing.requires.length ? "The FILE says of each of its OPTIONs whether it requires this OBJECT." : "The FILE lists no OPTION.";
   if (some) return "Other OPTIONs of the FILE may require it too: the FILE does not say that these are all.";
   return thing.requires.length ? "The FILE leaves open whether another of its OPTIONs requires this OBJECT." : "The FILE says of no OPTION whether it requires this OBJECT.";
 }
@@ -67,8 +72,12 @@ export function objects(trip, report = null, stated = null) {
   const who = whoIsIn(trip);
   const marked = marksBy(report, stated);
   const shown = trip.objects.map((thing) => {
-    const under = (each, does, says) => {
+    // An OPTION under the OBJECT shows one thing of the two: whether it requires the OBJECT,
+    // or what it does with it. A case marks it where the case is about that. An OPTION that
+    // requires the OBJECT is also marked where a case has the OBJECT at hand for it.
+    const under = (each, does, says, kinds, atHand) => {
       const { step, takes } = who(each.option);
+      const about = (need) => need.object === thing.id && ((need.option === each.option && kinds.has(need.what)) || (atHand && atHandFor(need).includes(each.option)));
       return {
         option: each.option,
         name: each.name,
@@ -76,7 +85,7 @@ export function objects(trip, report = null, stated = null) {
         says,
         takes,
         step,
-        ...marked([each.record], (need) => need.object === thing.id && need.option === each.option, "The report names this OPTION and this OBJECT in what the FILE does not say."),
+        ...marked([each.record], about, "The report names this OPTION and this OBJECT in what the FILE does not say."),
       };
     };
     const asked = new Set(thing.requires.map((each) => each.option));
@@ -88,9 +97,9 @@ export function objects(trip, report = null, stated = null) {
       id: thing.id,
       name: thing.name,
       starts: where,
-      requires: thing.requires.map((each) => under(each, each.needed, each.needed ? "requires it" : "does not require it")),
-      transfers: thing.transfers.map((each) => under(each, each.does !== "nothing", DOES[each.does])),
-      whole: [requiredBy(thing, trip.options.some((option) => !asked.has(option.id))), movedBy(thing)].filter((words) => words !== null),
+      requires: thing.requires.map((each) => under(each, each.needed, each.needed ? "requires it" : "does not require it", ABOUT_REQUIRING, true)),
+      transfers: thing.transfers.map((each) => under(each, each.does !== "nothing", DOES[each.does], ABOUT_MOVING, false)),
+      whole: [requiredBy(thing, trip.options.some((option) => !asked.has(option.id))), movedBy(thing)],
       // An OBJECT's own records: the FACT about where it is when the TRIP starts, and the FACTs
       // that the FILE states every OPTION that requires it, and every one that moves it.
       ...marked(
