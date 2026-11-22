@@ -12,7 +12,7 @@
 // Nothing here judges a TRIP. Whether everybody who takes part has a right is for the
 // COMPILER to say: the page names who uses a right only where the report does.
 
-import { listed, marksBy, optionsOf, usesIn } from "./named.js";
+import { listed, marksBy, optionsOf, toBuyIn, usesIn } from "./named.js";
 import { needsARight } from "./who.js";
 
 /** What a case of a report can need that is about the rights to an OPTION. */
@@ -40,7 +40,8 @@ function wholeOf(complete) {
  * need a right (`needs`), its `bookings` and its `offers`, and whether those are all the
  * rights to it (`whole`). A BOOKING and an OFFER are named by their ids. Each has what the
  * FILE says of it (`says`), and who uses it in the plan of the report (`uses`, null where the
- * report shows no plan).
+ * report shows no plan). Where the plan buys a place only if the OPTION turns out to need a
+ * right, the OFFER says so, as the report does.
  *
  * `report` is the report as JSON, where the page has one. `clash` on the rights to an OPTION,
  * on a BOOKING or on an OFFER holds its `records` that the report names as ruling out every
@@ -56,6 +57,8 @@ export function rights(trip, report = null, stated = null) {
   const needs = needsARight(trip);
   const marked = marksBy(report, stated);
   const uses = usesIn(report);
+  // A place that the plan buys only if its OPTION turns out to need a right.
+  const ifNeeded = (option, offer) => toBuyIn(report).some((buy) => buy.option === option && buy.offer === offer && buy.only_if_needed === true);
   // Those who use one right for one OPTION in the plan, in the FILE's order of PERSONs.
   const usersOf = (option, by) => trip.persons.filter(({ id }) => uses.some((use) => use.option === option && use.by === by && use.person === id)).map(({ name }) => name);
   const shown = trip.rights
@@ -76,12 +79,13 @@ export function rights(trip, report = null, stated = null) {
       }),
       offers: each.offers.map((offer) => {
         const users = usersOf(each.option, offer.id);
+        const takes = `In the plan: ${listed(users)} ${users.length === 1 ? "takes" : "each take"} a place of it${ifNeeded(each.option, offer.id) ? ", if the OPTION needs a right" : ""}.`;
         const buys = (need) => Array.isArray(need.buys) && need.buys.some((buy) => buy !== null && typeof buy === "object" && buy.offer === offer.id);
         return {
           id: offer.id,
           name: offer.id,
           says: offerOf(offer),
-          uses: !trip.itinerary ? null : users.length ? `In the plan: ${listed(users)} ${users.length === 1 ? "takes" : "each take"} a place of it.` : "In the plan: nobody takes a place of it.",
+          uses: !trip.itinerary ? null : users.length ? takes : "In the plan: nobody takes a place of it.",
           ...marked([offer.id], (need) => need.offer === offer.id || buys(need), "The report names this OFFER in what the FILE does not say."),
         };
       }),

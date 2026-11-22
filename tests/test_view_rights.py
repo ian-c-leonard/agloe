@@ -10,6 +10,8 @@ Nothing in it judges a TRIP. Whether everybody who takes part has a right is for
 to say: the page names who uses a right only where the report does.
 """
 
+import json
+from pathlib import Path
 from typing import Any
 
 from agloe.file import read
@@ -131,6 +133,8 @@ def test_the_rights_mark_what_the_report_says_the_file_does_not_say() -> None:
     assert booking["asks"] == [
         "The trip works if the FILE states what alex-skydeck-ticket paid and from which BUDGET."
     ]
+    # The report gives one plan for that case, in which Sam buys a place of the OFFER. The
+    # FILE says all there is to say of the OFFER, so it has no yellow edge.
     assert all(offer["cases"] == [] for offer in skydeck["offers"])
 
 
@@ -188,6 +192,24 @@ def test_who_uses_a_right_is_said_only_where_the_report_names_them() -> None:
         assert [booking["uses"] for booking in skydeck["bookings"]] == [
             "In the plan: nobody uses it."
         ] * 2
+
+
+def test_a_place_bought_only_if_the_option_needs_a_right_says_so(tmp_path: Path) -> None:
+    """The FILE does not say whether the Skydeck needs a right. Sam has none."""
+    content = json.loads((STORY / "not-bought-yet.json").read_text())
+    content["facts"] = [fact for fact in content["facts"] if fact["id"] != "skydeck-needs-a-ticket"]
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    assert "Sam still has to buy a right to this if it needs one, from skydeck-tickets" in words
+    assert [buy["only_if_needed"] for buy in found["to_buy"]] == [True]
+    (shown,) = all_rights([sent], [found], [words])
+    (skydeck,) = shown["rights"]
+    assert skydeck["needs"] == "The FILE does not say whether people need a right to take part."
+    (offer,) = skydeck["offers"]
+    assert offer["uses"] == ("In the plan: Sam takes a place of it, if the OPTION needs a right.")
+    # Alex is covered by a BOOKING either way.
+    assert [booking["uses"] for booking in skydeck["bookings"]] == ["In the plan: Alex uses it."]
 
 
 def test_an_option_that_needs_a_right_is_shown_though_the_file_has_none_for_it() -> None:

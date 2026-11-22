@@ -479,7 +479,10 @@ function write(text, tied) {
   report.replaceChildren();
   tied.forEach((line, n) => {
     const words = made("span", line.warns ? "row warns" : "row", line.text);
-    if (line.step !== null) words.dataset.of = line.step;
+    // A line is about the step that it shows or warns of, and about each OFFER that it says
+    // somebody buys a place of.
+    const about = [...(line.step === null ? [] : [line.step]), ...line.offers.map((id) => `offer:${id}`)];
+    if (about.length) words.dataset.of = about.join(" ");
     if (line.record !== null) words.dataset.record = line.record;
     if (line.case !== null) words.dataset.record = `case:${line.case}`;
     report.append(words, n + 1 < tied.length ? "\n" : "");

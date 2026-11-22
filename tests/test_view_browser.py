@@ -545,6 +545,15 @@ def test_pointing_ties_a_booking_and_an_offer_to_the_report(chromium: Browser) -
         # The FACT that people need a right is about the OPTION and about the rights to it.
         page.locator("#report .row[data-record='skydeck-needs-a-ticket']").hover()
         lit(page, rights=["Skydeck visit"], marks=["Skydeck visit"], options=["Skydeck visit"])
+        # The warning that Sam still has to buy a right is about the step and about the OFFER.
+        warning = page.locator("#report .row.warns")
+        said = warning.text_content() or ""
+        assert said.startswith("    ! Sam still has to buy a right to this, from skydeck-tickets")
+        warning.hover()
+        lit(page, rights=["skydeck-tickets"], marks=["Skydeck visit"], options=["Skydeck visit"])
+        entries.nth(1).hover()
+        found = lit(page, rights=["skydeck-tickets"], marks=[])
+        assert said in found["rows"]
 
 
 def test_the_rights_have_the_edges_of_what_the_report_names(chromium: Browser) -> None:
@@ -567,6 +576,17 @@ def test_the_rights_have_the_edges_of_what_the_report_names(chromium: Browser) -
         case.wait_for()
         case.hover()
         lit(page, rights=["Skydeck visit", "skydeck-tickets"])
+    # The trip works if the FILE states what a BOOKING paid. In the one plan that the report
+    # gives for that case, Sam buys a place of the OFFER.
+    with opened(chromium, EXAMPLES / "a-ticket" / "depends-on-the-receipt.json") as page:
+        page.locator("#rights .entry.asked").wait_for()
+        plan = page.locator("#report .row", has_text="One plan that works then:")
+        plan.wait_for()
+        plan.hover()
+        lit(page, rights=["skydeck-tickets"])
+        # The FILE says all there is to say of the OFFER: it has no yellow edge.
+        asked = page.locator("#rights .entry.asked")
+        assert asked.locator(".entry-name").all_text_contents() == ["alex-skydeck-ticket"]
     # A FILE that says only that nobody needs a right has no such part on its page.
     with opened(chromium, EXAMPLES / "a-driver" / "works.json") as page:
         page.locator("#report .row").first.wait_for()

@@ -65,6 +65,30 @@ export function usesIn(report) {
   });
 }
 
+/**
+ * The places that a plan still buys, as a report states them: for each its OPTION, its OFFER,
+ * and whether somebody buys it only if the OPTION turns out to need a right. Only a report
+ * that shows a plan holds any, and a list that is not of that shape is none.
+ */
+export function toBuyIn(report) {
+  const stated = report !== null && typeof report === "object" && report.answer === "FEASIBLE" ? report.to_buy : null;
+  const isOne = (each) => each !== null && typeof each === "object" && typeof each.option === "string" && typeof each.offer === "string";
+  return Array.isArray(stated) && stated.every(isOne) ? stated : [];
+}
+
+/**
+ * The OFFERs that somebody buys a place of in the one plan that a report gives for each case
+ * in which the trip works: a list for each case, at the place of the case. Only a report with
+ * one plan for each of its cases holds any.
+ */
+export function boughtIn(report) {
+  const cases = casesIn(report);
+  const plans = cases.length && Array.isArray(report.plans) && report.plans.length === cases.length ? report.plans : [];
+  const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
+  if (!plans.every((plan) => isRecord(plan) && Array.isArray(plan.buys) && plan.buys.every((buy) => isRecord(buy) && typeof buy.offer === "string"))) return [];
+  return plans.map((plan) => [...new Set(plan.buys.map((buy) => buy.offer))]);
+}
+
 /** The OPTIONs that one of those things names: its own, and each that somebody has to buy a place for. */
 export function optionsOf(need) {
   const bought = Array.isArray(need.buys) ? need.buys.filter((buy) => buy !== null && typeof buy === "object").map((buy) => buy.option) : [];
