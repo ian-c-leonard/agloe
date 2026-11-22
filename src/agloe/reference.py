@@ -21,6 +21,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from heapq import heapify, heappop, heappush
 from itertools import combinations, groupby, pairwise, permutations, product
+from math import inf
 
 from agloe.file import Booking, Complete, File, Offer, Satisfies, StartsFrom, Want, WithObject
 
@@ -1264,10 +1265,13 @@ def _well_formed(file: File, itinerary: Itinerary) -> None:
     """An ITINERARY names PERSONs, PLACEs, OPTIONs and WAYs from the FILE, each OPTION once.
 
     An OBJECT is handed over in an OPTION, to a PERSON who takes part in it, and at most once
-    in one OPTION.
+    in one OPTION. In a FILE that lists an OBJECT, the steps come in the order they happen,
+    earlier starts first: where an OBJECT is turns on that order.
     """
     persons = {person.id for person in file.persons}
     objects = {thing.id for thing in file.objects}
+    if objects and any(before.start > after.start for before, after in pairwise(itinerary)):
+        raise ValueError("an ITINERARY lists its steps in the order they happen")
     places = {place.id for place in file.places}
     options = {option.id: option for option in file.options}
     ways = {way.id: way for way in file.ways}
@@ -1784,28 +1788,34 @@ def _chains(
     choice that works with the fewest hand-overs is kept, and among those the one with the
     OPTION listed first, then the PERSON listed first, going through the hand-overs in the
     order they happen. An order in which the OBJECT has no choice that works is left out.
+    Where another transfer brings the OBJECT, every order works, with no hand-over: which
+    OPTIONs the OBJECT is at hand for without that transfer still turns on the order.
 
     A result takes one order for each OBJECT. It holds the gaps that keep those orders, each
     from one OPTION to the next with no time between their starts; the hand-overs in each
     OPTION, by its position in the FILE; and how the hand-overs rank: how many they are, and
     then, for each OBJECT in the FILE's order, its hand-overs by the positions of the OPTION
-    and the PERSON in the FILE. The orders of two OBJECTs can go round in a circle together.
-    The timing finds that.
+    and the PERSON in the FILE.
+
+    Two kinds of order are left out, because no start times keep them. One puts an OPTION
+    with a later fixed start before one with an earlier fixed start. The other goes round
+    in a circle with the orders already taken for other OBJECTs, or with what the PERSONs
+    do. Each is seen as an order is added, so the orders of many OBJECTs are never combined
+    where they cannot go together.
 
     Every ITINERARY that works lists its OPTIONs in one order, and that order gives each
     OBJECT its own, so it is tried. The start times it has keep these gaps, so the rule for
-    start times finds times too. Where no OPTION of the plan requires an OBJECT that the
-    fourteenth CONSTRAINT asks about, there is nothing to order, and the result is None.
+    start times finds times too. Where no OPTION of the plan requires an OBJECT, there is
+    nothing to order, and the result is None.
     """
     options = file.options
     happening = [index for index, persons in enumerate(who) if persons]
-    followed = [
+    required = [
         thing.id
         for thing in file.objects
-        if thing.id not in world.brought
-        and any((options[index].id, thing.id) in world.needs for index in happening)
+        if any((options[index].id, thing.id) in world.needs for index in happening)
     ]
-    if not followed:
+    if not required:
         return None
     # The OPTIONs that come after each one: a PERSON does them later, or a chain of PERSONs does.
     later: dict[int, set[int]] = {index: set() for index in happening}
@@ -1820,19 +1830,29 @@ def _chains(
             if more:
                 after |= more
                 grew = True
+    fixed = {index: world.terms[options[index].id].fixed_start for index in happening}
+
+    def can_come_first(index: int, left: tuple[int, ...]) -> bool:
+        """Whether nothing else that is left has to come before this OPTION."""
+        mine = fixed[index]
+        for other in left:
+            theirs = fixed[other]
+            if index in later[other] or (mine is not None and theirs is not None and theirs < mine):
+                return False
+        return True
 
     def in_each_order(done: tuple[int, ...], left: tuple[int, ...]) -> Iterator[tuple[int, ...]]:
         if not left:
             yield done
         for index in left:
-            if not any(index in later[other] for other in left):
+            if can_come_first(index, left):
                 yield from in_each_order((*done, index), tuple(i for i in left if i != index))
 
     people = {person.id: number for number, person in enumerate(file.persons)}
     place_of = {option.id: number for number, option in enumerate(options)}
     # For each OBJECT, each order of its OPTIONs that works, with its hand-overs.
     for_each: list[list[tuple[tuple[int, ...], _Ranked]]] = []
-    for thing in followed:
+    for thing in required:
         matter = tuple(
             index
             for index in happening
@@ -1840,6 +1860,9 @@ def _chains(
         )
         working: list[tuple[tuple[int, ...], _Ranked]] = []
         for order in in_each_order((), matter):
+            if thing in world.brought:
+                working.append((order, ()))
+                continue
             visits = [(options[index].id, who[index], options[index].origin) for index in order]
             ways = [
                 tuple((place_of[option], people[person]) for option, person in run[1])
@@ -1850,15 +1873,25 @@ def _chains(
         if not working:
             return []
         for_each.append(working)
+
+    own = [(before, after, 0) for order in orders for before, after in pairwise(order)]
     found: list[_Chain] = []
-    for chosen in product(*for_each):
-        gaps = [(before, after, 0) for order, _ in chosen for before, after in pairwise(order)]
-        handed: dict[int, _Taken] = {}
-        for thing, (_, best) in zip(followed, chosen, strict=True):
-            for index, person in best:
-                handed[index] = (*handed.get(index, ()), (thing, file.persons[person].id))
-        ranked = tuple(best for _, best in chosen)
-        found.append((gaps, handed, (sum(map(len, ranked)), ranked)))
+
+    def together(gaps: list[tuple[int, int, int]], chosen: tuple[_Ranked, ...]) -> None:
+        """Add the order of the next OBJECT to those taken so far, where they can go together."""
+        if len(chosen) == len(for_each):
+            handed: dict[int, _Taken] = {}
+            for thing, best in zip(required, chosen, strict=True):
+                for index, person in best:
+                    handed[index] = (*handed.get(index, ()), (thing, file.persons[person].id))
+            found.append((gaps, handed, (sum(map(len, chosen)), chosen)))
+            return
+        for order, best in for_each[len(chosen)]:
+            longer = [*gaps, *((before, after, 0) for before, after in pairwise(order))]
+            if not _goes_round(len(options), [*own, *longer]):
+                together(longer, (*chosen, best))
+
+    together([], ())
     return found
 
 
@@ -2675,8 +2708,19 @@ def _timings(
         if spans
     ]
     # Each such WAY as it falls, then in each opening: before the first span, after each one.
-    # An opening is one more limit on when the WAY starts. It fixes no start either.
-    openings: list[list[int | None]] = [[None, *range(len(spans) + 1)] for _, spans in ruled_out]
+    # An opening is one more limit on when the WAY starts. It fixes no start either. An
+    # opening that is over before the WAY can start, or that begins after it has to have
+    # started, holds no time for it: the times of the TRIP rule it out, whatever else is
+    # chosen. So it is left out.
+    openings: list[list[int | None]] = []
+    for node, spans in ruled_out:
+        fits: list[int | None] = [None]
+        for opening in range(len(spans) + 1):
+            too_early = opening < len(spans) and spans[opening][0] - 1 < not_before.get(node, -inf)
+            too_late = opening > 0 and spans[opening - 1][1] + 1 > no_later.get(node, inf)
+            if not too_early and not too_late:
+                fits.append(opening)
+        openings.append(fits)
     if falls is not None:
         # The PERSON, the position and the place of each WAY, in the order of ``legs``. The
         # opening that holds the time of a WAY comes after each span that ends before it.

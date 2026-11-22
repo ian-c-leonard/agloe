@@ -80,6 +80,7 @@ from tests.stories import (
     stays,
     takes,
     trip,
+    trip_ends,
     trip_starts,
     way_between,
 )
@@ -1723,16 +1724,17 @@ def every_chain(
     world, the OBJECT goes to anybody who takes part or to nobody, also where it is not at
     hand. With ``everything``, all the OPTIONs that happen are put in one order and every
     OBJECT is handed about. Without it, each OBJECT that the rules say matters has an order
-    of its own among its own OPTIONs, so that the times come out as the rules say.
+    of its own among its own OPTIONs, so that the times come out as the rules say. An OBJECT
+    that another transfer brings has an order too, and no hand-over.
     """
     options = file.options
     people = [person.id for person in file.persons]
     happening = [index for index, persons in enumerate(who) if persons]
     things = [thing.id for thing in file.objects if thing.id not in world.brought]
     followed = [
-        thing
-        for thing in things
-        if any((options[index].id, thing) in world.needs for index in happening)
+        thing.id
+        for thing in file.objects
+        if any((options[index].id, thing.id) in world.needs for index in happening)
     ]
     if not followed:
         return None
@@ -1761,6 +1763,7 @@ def every_chain(
                 for index in order
                 for thing in mine
                 if world.does.get((options[index].id, thing)) in ("hands_over", "any")
+                and thing not in world.brought
             ]
             for chosen in product(*([None, *who[index]] for index, _ in slots)):
                 given = [
@@ -1774,7 +1777,7 @@ def every_chain(
     for combined in product(*for_each):
         gaps = [gap for some, _ in combined for gap in some]
         handed: dict[int, tuple[tuple[str, str], ...]] = {}
-        ranked: dict[str, list[tuple[int, int]]] = {thing: [] for thing in things}
+        ranked: dict[str, list[tuple[int, int]]] = {thing: [] for thing in (*things, *followed)}
         for _, given in combined:
             for index, thing, person in given:
                 handed[index] = (*handed.get(index, ()), (thing, person))
@@ -2351,10 +2354,10 @@ def test_two_objects_that_have_nothing_to_do_with_each_other_have_two_orders() -
     ]
 
 
-def test_a_plan_with_its_steps_the_wrong_way_round_in_time_is_not_put_right() -> None:
-    """In a FILE that lists an OBJECT, a plan is checked just as it lists its steps. Alex
-    walks to the gate at 9:00 am and back at 10:00 am. Listed the other way round, the first
-    walk does not start where Alex is."""
+def test_a_plan_with_its_steps_the_wrong_way_round_in_time_is_refused() -> None:
+    """In a FILE that lists an OBJECT, a plan lists its steps in the order they happen. Alex
+    walks to the gate at 9:00 am and back at 10:00 am. Listed the other way round, that is
+    no plan, and no check puts it right."""
     ways = [way_between("walk", "hotel", "gate")]
     facts = [takes("walk", "PT30M"), starts_from("alex", "hotel"), every_use("key")]
     file = trip(["alex"], ["hotel", "gate"], [], facts, [], ways, objects=["key"])
@@ -2363,8 +2366,38 @@ def test_a_plan_with_its_steps_the_wrong_way_round_in_time_is_not_put_right() ->
     back = Step(None, "gate", "hotel", ("alex",), seconds(10), seconds(10, 30), "walk")
     assert broken(file, world, (out, back)) == []
     assert works_as_listed(file, world, (out, back))
-    assert broken(file, world, (back, out)) == broken_as_listed(file, world, (back, out)) != []
     assert not works_as_listed(file, world, (back, out))
+    for check in (broken, broken_as_listed):
+        with pytest.raises(ValueError, match="in the order they happen"):
+            check(file, world, (back, out))
+
+
+def test_a_drop_that_is_listed_first_does_not_cover_an_earlier_check() -> None:
+    """Alex has the key and drops it at a desk at 10:00 am. Sam needs it there at 9:00 am.
+    Listed in the order they happen, Sam's check has no key. Listed with the drop first,
+    that is no plan."""
+    options = [stays("drop", "desk"), stays("need", "desk")]
+    facts = [
+        *at("drop", 10, length="PT0S"),
+        *at("need", 9, length="PT0S"),
+        has_object("alex", "key"),
+        keeps("drop", "key"),
+        requires_object("need", "key"),
+        every_use("key"),
+        every_transfer("key"),
+    ]
+    locks = [lock("drop", "alex"), lock("need", "sam")]
+    file = trip(["alex", "sam"], ["desk"], options, facts, locks, objects=["key"])
+    world = worst_case(file)
+    drop = Step("drop", "desk", "desk", ("alex",), seconds(10), seconds(10))
+    need = Step("need", "desk", "desk", ("sam",), seconds(9), seconds(9))
+    assert broken(file, world, (need, drop)) == [
+        Broken(Constraint.AT_HAND, "need", ("sam",), object="key")
+    ]
+    with pytest.raises(ValueError, match="in the order they happen"):
+        broken(file, world, (drop, need))
+    # The plan that works has Alex at Sam's check too, with the key.
+    assert checked(file).itinerary[0].persons == ("alex", "sam")
 
 
 def an_evening() -> File:
@@ -2482,3 +2515,153 @@ def test_whether_anything_works_is_settled_by_the_first_plan_found(
     assert timed < 20
     found = answers.check(file)
     assert asked(found) == [(Unknown("other ways", origin="hotel", destination="park"),)]
+
+
+# What the third review's FILEs showed.
+
+
+def test_an_object_that_another_transfer_brings_still_has_an_order() -> None:
+    """Alex has the bag and is LOCKed onto a bus to the park, which keeps the bag at the hotel
+    when it leaves, and into a check in the park at noon. Sam is LOCKed onto a train from the
+    hotel at 10:00 am. The train and the check require the bag, and nothing brings it to the
+    park. The bus can leave at any time.
+
+    With the bus before the train, it leaves at 10:00 am, and it is listed first: then the
+    bag is at the hotel for the train. That plan comes first by the rules, so the report
+    says that only the check in the park is not covered."""
+    options = [
+        moves("bus", "hotel", "park"),
+        moves("train", "hotel", "park"),
+        stays("check", "park"),
+    ]
+    facts = [
+        *whenever("bus"),
+        *at("train", 10),
+        *at("check", 12),
+        starts_from("alex", "hotel"),
+        starts_from("sam", "hotel"),
+        has_object("alex", "bag"),
+        keeps("bus", "bag"),
+        requires_object("train", "bag"),
+        does_with("train", "bag", "nothing"),
+        requires_object("check", "bag"),
+        does_with("check", "bag", "nothing"),
+        every_use("bag"),
+    ]
+    locks = [lock("bus", "alex"), lock("train", "sam"), lock("check", "alex"), trip_ends(12, 30)]
+    file = trip(["alex", "sam"], ["hotel", "park"], options, facts, locks, objects=["bag"])
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert asked(found) == [(Unknown("another transfer", about="bag"),)]
+    assert found.missing[0][0].at_hand_for == (("train", True, True), ("check", True, False))
+    world = with_these_at_best(file, [Unknown("another transfer", about="bag")])
+    shown = first_shown(file, world)
+    assert shown is not None
+    assert [(step.option, step.start) for step in shown] == [
+        ("bus", seconds(10)),
+        ("train", seconds(10)),
+        ("check", seconds(12)),
+    ]
+
+
+def keys_on_a_desk(checks: int, keys: int) -> File:
+    """So many checks at one desk at 10:00 am, each with its own PERSON, and so many keys
+    lying there. Each check requires each key."""
+    people = [f"person-{number}" for number in range(checks)]
+    things = [f"key-{number}" for number in range(keys)]
+    options = [stays(f"check-{number}", "desk") for number in range(checks)]
+    facts = [fact for number in range(checks) for fact in at(f"check-{number}", 10, length="PT5M")]
+    for thing in things:
+        facts += [lies_at(thing, "desk"), every_use(thing), every_transfer(thing)]
+        facts += [requires_object(f"check-{number}", thing) for number in range(checks)]
+    locks = [lock(f"check-{number}", people[number]) for number in range(checks)]
+    return trip(people, ["desk"], options, facts, locks, objects=things)
+
+
+def test_the_orders_of_two_objects_are_combined_only_where_they_can_go_together() -> None:
+    """Each key gives the checks an order, and the orders have to agree: two that put two
+    checks at one instant in opposite orders go round in a circle. With three checks and six
+    keys there are six orders that agree. The search builds those, and not each of the
+    46,656 ways to give every key an order of its own."""
+    its_own = reference._chains  # pyright: ignore[reportPrivateUsage]
+    for checks, keys, agree in ((2, 2, 2), (3, 6, 6)):
+        file = keys_on_a_desk(checks, keys)
+        world = worst_case(file)
+        who = tuple((f"person-{number}",) for number in range(checks))
+        orders = tuple((number,) for number in range(checks))
+        chains = its_own(file, world, who, orders)
+        assert chains is not None and len(chains) == agree
+        assert checked(file).answer is Answer.FEASIBLE
+
+
+def test_a_way_is_tried_only_in_the_openings_that_the_times_of_the_trip_leave(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Six travelers are LOCKed into a lunch in the park that can start at any time. The TRIP
+    starts at 9:47 am. Four spans rule the only WAY out, and three of them are over before
+    the TRIP starts. So each traveler has one opening to leave in, and not five."""
+    people = ["alex", "sam", "jo", "kit", "lee", "max"]
+    closed = [
+        {
+            "id": f"closed-{number}",
+            "complete": {
+                "from": "hotel",
+                "to": "park",
+                "leaving": {
+                    "earliest": moment(9, 15 * number),
+                    "latest": moment(9, 15 * number + 5),
+                },
+            },
+        }
+        for number in range(4)
+    ]
+    facts = [
+        *whenever("lunch", "PT30M"),
+        *(starts_from(person, "hotel") for person in people),
+        *closed,
+        has_object("alex", "key"),
+        requires_object("lunch", "key"),
+        every_use("key"),
+        every_transfer("key"),
+    ]
+    file = trip(
+        people, ["hotel", "park"], [stays("lunch", "park")], facts,
+        [trip_starts(9, 47), lock("lunch", *people)], objects=["key"],
+    )  # fmt: skip
+    world = with_these_at_best(file, [Unknown("other ways", origin="hotel", destination="park")])
+    timed = 0
+    its_own = reference._times  # pyright: ignore[reportPrivateUsage]
+
+    def counted(
+        count: int,
+        gaps: list[tuple[int, int, int]],
+        fixed: dict[int, int],
+        not_before: dict[int, int],
+        no_later: dict[int, int],
+    ) -> list[int] | None:
+        nonlocal timed
+        timed += 1
+        return its_own(count, gaps, fixed, not_before, no_later)
+
+    monkeypatch.setattr(reference, "_times", counted)
+    assert reference.any_works(file, world)
+    assert timed <= 2**6
+
+
+def test_an_order_that_the_fixed_starts_rule_out_is_not_tried() -> None:
+    """Three PERSONs have checks at 9:00 am, 10:00 am and 11:00 am, and each check requires
+    the key on the desk. Only one order of the three keeps their times, so only that one is
+    timed and checked."""
+    people = ["alex", "sam", "jo"]
+    options = [stays(f"check-{number}", "desk") for number in range(3)]
+    facts = [fact for number in range(3) for fact in at(f"check-{number}", 11 - number)]
+    facts += [lies_at("key", "desk"), every_use("key"), every_transfer("key")]
+    facts += [requires_object(f"check-{number}", "key") for number in range(3)]
+    locks = [lock(f"check-{number}", people[number]) for number in range(3)]
+    file = trip(people, ["desk"], options, facts, locks, objects=["key"])
+    who = tuple((person,) for person in people)
+    orders = tuple((number,) for number in range(3))
+    chains = reference._chains(file, worst_case(file), who, orders)  # pyright: ignore[reportPrivateUsage]
+    assert chains is not None
+    assert [gaps for gaps, _, _ in chains] == [[(2, 1, 0), (1, 0, 0)]]
+    assert [step.option for step in checked(file).itinerary] == ["check-2", "check-1", "check-0"]
