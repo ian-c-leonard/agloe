@@ -197,6 +197,21 @@ def test_an_option_says_so_where_the_file_does_not_say_whether_people_need_a_rig
     assert train["right"] == "Nobody needs a right to take part."
 
 
+def test_an_option_that_an_object_has_to_be_at_hand_for_is_marked() -> None:
+    """The trip might work if another transfer puts the bags at hand for the flight."""
+    sent, found, words = in_words(EXAMPLES / "the-bags" / "somebody-might.json")
+    (need,) = found["missing"][0]
+    assert [each["option"] for each in need["at_hand_for"]] == ["flight"]
+    (shown,) = all_options([sent], [found], [words])
+    asked = {option["id"]: option["cases"] for option in shown["options"]}
+    assert asked["flight"] == [0]
+    assert all(cases == [] for id, cases in asked.items() if id != "flight")
+    said = {option["id"]: option["asks"] for option in shown["options"]}
+    assert said["flight"] == [
+        "The trip might work if another transfer puts the bags at hand for Flight home."
+    ]
+
+
 def test_the_options_name_the_time_zone_only_where_a_row_shows_a_time() -> None:
     sent = drawn(STORY / "works.json")
     assert any(option["start"] for option in sent["options"])

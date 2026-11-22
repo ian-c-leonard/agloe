@@ -1327,6 +1327,7 @@ def made(times: list[tuple[str, str | None]]) -> Trip:
         "rights": [],
         "budgets": [],
         "capabilities": [],
+        "objects": [],
         "steps": [
             {
                 "option": "stay",
@@ -1450,6 +1451,7 @@ def some_trip(chosen: random.Random) -> Trip:
         "rights": [],
         "budgets": [],
         "capabilities": [],
+        "objects": [],
         "starts": bound("trip-start"),
         "ends": bound("trip-end"),
         "steps": steps,

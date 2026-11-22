@@ -243,6 +243,27 @@ def test_every_example_is_sent_as_a_trip_that_a_page_can_draw(path: Path) -> Non
         ]
         complete = file.requires_complete(capability["id"])
         assert capability["complete"] == (None if complete is None else complete.id)
+    # Every OBJECT of the FILE is sent, in the FILE's order, with each FACT about it.
+    assert [thing["id"] for thing in sent["objects"]] == [each.id for each in file.objects]
+    for thing in sent["objects"]:
+        starts = file.object_starts(thing["id"])
+        assert thing["starts"] == (
+            None
+            if starts is None
+            else {"person": starts.person, "place": starts.place, "record": starts.id}
+        )
+        needs = [(each.id, file.object_requirement(each.id, thing["id"])) for each in file.options]
+        assert [(each["option"], each["needed"], each["record"]) for each in thing["requires"]] == [
+            (option, fact.needed, fact.id) for option, fact in needs if fact is not None
+        ]
+        does = [(each.id, file.action(each.id, thing["id"])) for each in file.options]
+        assert [(each["option"], each["does"], each["record"]) for each in thing["transfers"]] == [
+            (option, fact.does, fact.id) for option, fact in does if fact is not None
+        ]
+        required = file.object_requirements_complete(thing["id"])
+        moved = file.transfers_complete(thing["id"])
+        assert thing["requires_complete"] == (None if required is None else required.id)
+        assert thing["transfers_complete"] == (None if moved is None else moved.id)
     # Each step that is an OPTION is one of them.
     ids = {option["id"] for option in sent["options"]}
     assert {step["option"] for step in sent["steps"]} - {None} <= ids
@@ -683,6 +704,48 @@ def test_the_budgets_of_the_file_are_sent_with_their_caps() -> None:
         "budget": None,
         "by": "alex",
     }
+
+
+def test_the_objects_of_the_file_are_sent_with_what_the_file_says_of_each() -> None:
+    """The bags are at the hotel. The flight requires them, and the hotel hands them over."""
+    sent = drawn(EXAMPLES / "the-bags" / "they-collect-them.json")
+    assert sent["objects"] == [
+        {
+            "id": "bags",
+            "name": "the bags",
+            # Where the OBJECT is when the TRIP starts: at a PLACE, and with no PERSON.
+            "starts": {"person": None, "place": "hotel", "record": "where-the-bags-start"},
+            "requires": [
+                {
+                    "option": "flight",
+                    "name": "Flight home",
+                    "needed": True,
+                    "record": "flight-needs-the-bags",
+                }
+            ],
+            "requires_complete": "every-use-of-the-bags",
+            "transfers": [
+                {
+                    "option": "collect-bags",
+                    "name": "Collect the bags",
+                    "does": "hands_over",
+                    "record": "hotel-releases-the-bags",
+                }
+            ],
+            "transfers_complete": "everything-that-moves-the-bags",
+        }
+    ]
+    # Alex has the bags when the TRIP starts, and the museum keeps them.
+    (bags,) = drawn(EXAMPLES / "the-bags" / "the-museum-keeps-them.json")["objects"]
+    assert bags["starts"] == {"person": "alex", "place": None, "record": "where-the-bags-start"}
+    assert ("museum-visit", "keeps") in [
+        (each["option"], each["does"]) for each in bags["transfers"]
+    ]
+    # The FILE does not say where the bags are when the TRIP starts.
+    (bags,) = drawn(EXAMPLES / "the-bags" / "nobody-said-where-they-are.json")["objects"]
+    assert bags["starts"] is None
+    # A FILE with no OBJECT is sent none.
+    assert drawn(EXAMPLES / "flight-home" / "works.json")["objects"] == []
 
 
 def test_the_capabilities_of_the_file_are_sent_with_who_has_each_and_what_requires_it() -> None:
@@ -1921,6 +1984,57 @@ def test_a_trip_that_says_something_of_the_rights_to_an_option_is_a_trip() -> No
         assert holds(sent)
 
 
+OBJECT: dict[str, Any] = {
+    "id": "key",
+    "name": "the key",
+    "starts": {"person": "alex", "place": None, "record": "alex-has-the-key"},
+    "requires": [{"option": "night", "name": "night", "needed": True, "record": "night-needs-it"}],
+    "requires_complete": "every-use-of-the-key",
+    "transfers": [
+        {"option": "night", "name": "night", "does": "keeps", "record": "night-keeps-it"}
+    ],
+    "transfers_complete": "everything-that-moves-the-key",
+}
+
+
+def _object(**other: object) -> Callable[[Trip], None]:
+    """The TRIP gets one OBJECT, which is good but for these parts."""
+    return _set("objects", to=[{**OBJECT, **other}])
+
+
+def _object_starts(**other: object) -> Callable[[Trip], None]:
+    return _object(starts={**OBJECT["starts"], **other})
+
+
+def _object_need(**other: object) -> Callable[[Trip], None]:
+    return _object(requires=[{**OBJECT["requires"][0], **other}])
+
+
+def _transfer(**other: object) -> Callable[[Trip], None]:
+    return _object(transfers=[{**OBJECT["transfers"][0], **other}])
+
+
+def test_a_trip_with_an_object_is_a_trip() -> None:
+    sent = good()
+    assert sent["objects"] == []
+    _object()(sent)
+    assert holds(sent)
+    # An OBJECT of which the FILE says nothing.
+    _object(
+        starts=None, requires=[], requires_complete=None, transfers=[], transfers_complete=None
+    )(sent)
+    assert holds(sent)
+    # One that lies at a PLACE when the TRIP starts.
+    _object_starts(person=None, place="hotel")(sent)
+    assert holds(sent)
+    # An OPTION hands it over, keeps it, or leaves it alone, and requires it or does not.
+    for does in ("hands_over", "keeps", "nothing"):
+        _transfer(does=does)(sent)
+        assert holds(sent)
+    _object_need(needed=False)(sent)
+    assert holds(sent)
+
+
 CAPABILITY: dict[str, Any] = {
     "id": "driving",
     "name": "driving",
@@ -2191,6 +2305,35 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "a payment that is no amount": _paid(amount="-1"),
     "a payment from a budget the trip does not have": _paid(budget="purse"),
     "a payment by a person the trip does not have": _paid(by="jo"),
+    "no objects": _drop("objects"),
+    "objects that are no list": _set("objects", to={}),
+    "an object that is no record": _set("objects", to=["key"]),
+    "an object with one thing more": _object(more=1),
+    "an object with a blank name": _object(name=" "),
+    "two objects with one id": _set("objects", to=[OBJECT, OBJECT]),
+    "an object that starts with a person and at a place": _object_starts(place="hotel"),
+    "an object that starts nowhere": _object_starts(person=None),
+    "an object that starts with a person the trip does not have": _object_starts(person="jo"),
+    "an object that starts at a place the trip does not have": _object_starts(
+        person=None, place="denver"
+    ),
+    "an object whose start has no fact": _object_starts(record=""),
+    "an object whose start is a place name": _object(starts="hotel"),
+    "an object whose requirements are no list": _object(requires={}),
+    "an option that requires an object and is no record": _object(requires=["night"]),
+    "an option of an object that the trip does not have": _object_need(option="dinner"),
+    "an option of an object with a blank name": _object_need(name=""),
+    "an option that requires an object as a number": _object_need(needed=1),
+    "an option of an object with no fact": _object_need(record=""),
+    "an object that names an option twice among what requires it": _object(
+        requires=[OBJECT["requires"][0]] * 2
+    ),
+    "an option that does something else with an object": _transfer(does="loses"),
+    "an option that moves an object and that the trip does not have": _transfer(option="dinner"),
+    "an object that names an option twice among what moves it": _object(
+        transfers=[OBJECT["transfers"][0]] * 2
+    ),
+    "an object whose complete set is no id": _object(requires_complete=7),
     "no capabilities": _drop("capabilities"),
     "capabilities that are no list": _set("capabilities", to={}),
     "a capability that is no record": _set("capabilities", to=["driving"]),

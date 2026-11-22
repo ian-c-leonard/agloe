@@ -62,8 +62,9 @@ FITTED = """() => {
 # What is lit on the page: the steps of the calendar, the steps with no time beside it, the
 # marks of the strip, the lines of the report, the PERSONs, the WANTs with the OPTIONs under
 # them, the OPTIONs of the FILE, the rights to them with their BOOKINGs and OFFERs, the
-# BUDGETs with their caps and payments, its WAYs, the travel that it lists in full, and the
-# CAPABILITIES with the PERSONs and the OPTIONs under them.
+# BUDGETs with their caps and payments, its WAYs, the travel that it lists in full, the
+# CAPABILITIES with the PERSONs and the OPTIONs under them, and the OBJECTs with the OPTIONs
+# under them.
 LIT = """() => {
   const first = (each) => each.title.split("\\n")[0];
   const all = (which) => [...document.querySelectorAll(which)];
@@ -77,6 +78,7 @@ LIT = """() => {
     persons: all("#persons .item.lit").map((each) => each.querySelector("h3").textContent),
     rights: all("#rights .lit").map((each) => each.querySelector("h3, b").textContent),
     budgets: all("#budgets .lit").map((each) => each.querySelector("h3, b").textContent),
+    objects: all("#objects .lit").map((each) => each.querySelector("h3, b").textContent),
     ways: all("#ways .item.lit").map((each) => each.querySelector("h3").textContent),
     travel: all("#travel .in-full.lit").map((each) => each.textContent),
     capabilities: all("#capabilities .lit").map((each) => each.querySelector("h3, b").textContent),
@@ -669,6 +671,86 @@ def test_pointing_ties_a_budget_its_caps_and_its_payments_to_the_report(chromium
         page.locator("#options .item").first.wait_for()
         assert page.locator("#budgets-part").is_hidden()
         assert page.locator("#persons .item-said p").count() == 0
+
+
+def test_pointing_ties_an_object_to_the_calendar_and_the_report(chromium: Browser) -> None:
+    """The bags are at the hotel. Alex collects them, and has them when the flight leaves."""
+    with opened(chromium, EXAMPLES / "the-bags" / "they-collect-them.json") as page:
+        card = page.locator("#objects .card")
+        card.wait_for()
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        assert card.locator(".card-name").text_content() == "the bags"
+        assert card.locator(".card-holds").text_content() == "The TRIP starts with it at the hotel."
+        entries = card.locator(".entry")
+        assert entries.locator(".entry-name").all_text_contents() == [
+            "Flight home",
+            "Collect the bags",
+        ]
+        assert entries.locator(".entry-says").all_text_contents() == [
+            "requires it",
+            "it can be handed over here",
+        ]
+        assert card.locator(".card-whole").all_text_contents() == [
+            "The FILE states every one of its OPTIONs that requires it.",
+            "The FILE states every OPTION that hands it over or keeps it.",
+        ]
+        # Pointing at the OBJECT lights up the lines of its own FACTs, and the lines that say
+        # where it is in the plan. It lights up no step.
+        card.locator(".card-name").hover()
+        found = lit(page, objects=["the bags"], marks=[])
+        said = [row.strip() for row in found["rows"]]
+        # They come in the order of the report: under the step, among what the plan relies
+        # on, and under "Where each OBJECT is:".
+        assert said[0] == "Alex takes the bags here."
+        assert ids_of(said[1:4]) == [
+            "where-the-bags-start",
+            "every-use-of-the-bags",
+            "everything-that-moves-the-bags",
+        ]
+        assert said[4:] == [
+            "the bags: at the hotel when the TRIP starts; with Alex from 2:45 pm (handed over in"
+            " Collect the bags)",
+            "Flight home requires the bags. Just before it starts: with Alex.",
+        ]
+        # The line that says who takes the bags is about the step and about the OBJECT.
+        page.locator("#report .row", has_text="Alex takes the bags here.").hover()
+        lit(page, objects=["the bags", "Collect the bags"], marks=["Collect the bags"])
+        # An OPTION under the OBJECT is its step: pointing at it lights up that step, its line
+        # in the plan, the line of the FACT, and the line that says where the bags are then.
+        entries.first.hover()
+        found = lit(page, objects=["Flight home"], marks=["Flight home"])
+        assert (
+            "    Flight home requires the bags. Just before it starts: with Alex." in found["rows"]
+        )
+        assert "flight-needs-the-bags" in ids_of(found["rows"])
+    # Nobody said where the bags are when the TRIP starts.
+    with opened(chromium, EXAMPLES / "the-bags" / "nobody-said-where-they-are.json") as page:
+        page.locator("#objects .card.asked").wait_for()
+        assert page.text_content("#objects .card-holds") == (
+            "The FILE does not say where it is when the TRIP starts."
+        )
+        case = page.locator("#report .row[data-record='case:0']")
+        case.wait_for()
+        case.hover()
+        lit(page, objects=["the bags"], persons=["Alex"])
+    # The trip might work if another transfer puts the bags at hand for the flight: the report
+    # names the flight, and its step and its row have the yellow edge.
+    with opened(chromium, EXAMPLES / "the-bags" / "somebody-might.json") as page:
+        page.locator("#objects .card.asked").wait_for()
+        asked = page.locator("#options .item.asked")
+        asked.wait_for()
+        assert asked.locator(".item-name").all_text_contents() == ["Flight home"]
+        assert page.locator("#calendar .mark.asked").count() == 1
+    # Nobody collects the bags, and the flight requires them.
+    with opened(chromium, EXAMPLES / "the-bags" / "nobody-collects-them.json") as page:
+        page.locator("#objects .card.clash").wait_for()
+        assert page.locator("#objects .entry.clash").count() >= 1
+    # A FILE with no OBJECT has no such part on its page.
+    with opened(chromium, EXAMPLES / "flight-home" / "works.json") as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#options .item").first.wait_for()
+        assert page.locator("#objects-part").is_hidden()
 
 
 def test_pointing_ties_a_way_to_the_calendar_and_the_report(chromium: Browser) -> None:
