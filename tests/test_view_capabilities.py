@@ -30,6 +30,7 @@ RED = " A red edge marks what the report names among what rules out every plan."
 YELLOW = " A yellow edge marks what the report names in what the FILE does not say."
 ALL = "The FILE states every one of its OPTIONs that requires it."
 NOT_ALL = "Other OPTIONs of the FILE may require it too: the FILE does not say that these are all."
+EACH = "The FILE says what each of its OPTIONs requires of this CAPABILITY."
 OF_ONE = "requires it of one PERSON who takes part"
 
 type Trip = dict[str, Any]
@@ -129,8 +130,8 @@ def test_a_capability_says_what_the_file_does_not_say_of_a_person() -> None:
     assert [(option["takes"], option["meets"]) for option in driving["options"]] == [
         ("Alex and Sam are each named by a LOCK.", None)
     ] * 2
-    # Each OPTION of this FILE has a FACT about driving: there is no other to speak of.
-    assert driving["whole"] is None
+    # Each OPTION of this FILE has a FACT about driving, and the page says that.
+    assert driving["whole"] == EACH
 
 
 def test_a_capability_is_marked_where_a_case_is_about_an_option_with_no_fact() -> None:
@@ -241,8 +242,10 @@ def test_a_capability_says_whether_its_options_are_all_that_require_it() -> None
     assert whole([can("alex", "swimming")]) == (
         "The FILE says of no OPTION whether it requires this CAPABILITY."
     )
-    # Every OPTION of the FILE has a FACT about it: there is no other to speak of.
-    assert whole([each, none]) is None
+    # Every OPTION of the FILE has a FACT about it. That is no FACT that these are all, and
+    # the page says only what it is.
+    assert whole([each, none]) == EACH
+    # A FILE with no OPTION has nothing to say here.
     assert whole([cannot("alex", "swimming")], options=()) is None
 
 

@@ -91,12 +91,13 @@ export function lines(text, report, trip) {
     }
   }
   // Who meets what each OPTION of the plan requires: the lines under their heading, up to the
-  // first line that is not set in as they are. Each is about the step that its OPTION is.
+  // first line that is not set in. A line starts with the name of its OPTION, whatever that
+  // name starts with. Each is about the step that its OPTION is.
   const met = requirementsIn(report);
   const heads = found.flatMap((line, at) => (line.text === MEETS ? [at] : []));
   if (trip !== null && trip.itinerary && met.length && heads.length === 1) {
     const under = [];
-    for (let at = heads[0] + 1; at < found.length && /^ {2}\S/.test(found[at].text); at += 1) under.push(at);
+    for (let at = heads[0] + 1; at < found.length && found[at].text.startsWith("  "); at += 1) under.push(at);
     const steps = met.map((each) => trip.steps.findIndex((step) => step.option === each.option));
     if (under.length === met.length && steps.every((step) => step >= 0) && under.every((at) => free(found[at]))) {
       under.forEach((at, n) => Object.assign(found[at], { step: steps[n], meets: n }));

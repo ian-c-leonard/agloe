@@ -129,6 +129,22 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
     assert requirements > 2
 
 
+def test_a_line_about_a_requirement_is_tied_whatever_the_name_of_its_option_starts_with(
+    tmp_path: Path,
+) -> None:
+    """The name of the first drive starts with a space. The report sets its line in further."""
+    content = json.loads((EXAMPLES / "a-driver" / "works.json").read_text())
+    content["options"][0]["name"] = " Drive to the dunes"
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    asked = asked_of(path)
+    assert "\n   Drive to the dunes requires driving a manual car of one PERSON." in asked["text"]
+    (found,) = lines_of([asked])
+    meets = [line for line in found if line["meets"] is not None]
+    assert [(line["meets"], line["step"]) for line in meets] == [(0, 0), (1, 1)]
+    assert meets[1]["text"].startswith("  Drive back to the hotel requires ")
+
+
 def test_a_warning_is_tied_to_the_step_above_it() -> None:
     """Alex and Sam would be too late for the flight if the train took its longest."""
     asked = asked_of(EXAMPLES / "flight-home" / "works-but-risky.json")

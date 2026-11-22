@@ -11,7 +11,7 @@
 // Nothing here judges a TRIP. Whether an ITINERARY SATISFIES a WANT is for the COMPILER to say:
 // the page puts the WANT, its OPTIONs and who takes part side by side, and says no more.
 
-import { casesAbout, casesIn, findsOf, listed, ruledOut, saidOf } from "./named.js";
+import { listed, marksBy } from "./named.js";
 import { whoIsIn } from "./who.js";
 
 /**
@@ -60,13 +60,7 @@ export function wants(trip, report = null, stated = null) {
   const place = new Map(trip.places.map((each) => [each.id, each.name]));
   const name = (id) => person.get(id);
   const who = whoIsIn(trip);
-  const ruled = ruledOut(report);
-  const needed = casesIn(report);
-  const marked = (records, about, otherwise) => {
-    const clash = records.filter((id) => ruled.has(id));
-    const cases = casesAbout(needed, about);
-    return { records, clash, finds: findsOf(clash), cases, asks: saidOf(cases, stated, otherwise) };
-  };
+  const marked = marksBy(report, stated);
   const shown = trip.wants.map((want) => ({
     id: want.id,
     name: want.name,

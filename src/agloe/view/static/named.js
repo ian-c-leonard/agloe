@@ -63,6 +63,24 @@ export function casesAbout(needed, about) {
 }
 
 /**
+ * What a part of the page marks of the things that it shows, by a report and by the words of
+ * the report for its cases, as lines.js finds them: give it the `records` of a thing, what
+ * says that a need of a case is `about` the thing, and what to say `otherwise`, where the
+ * page has no words for a case. `clash` holds the records that the report names as ruling out
+ * every plan, and `finds` says so. `cases` holds the cases that name the thing, as their
+ * places among the cases, and `asks` holds what the report says of them.
+ */
+export function marksBy(report, stated) {
+  const ruled = ruledOut(report);
+  const needed = casesIn(report);
+  return (records, about, otherwise) => {
+    const clash = records.filter((id) => ruled.has(id));
+    const cases = casesAbout(needed, about);
+    return { records, clash, finds: findsOf(clash), cases, asks: saidOf(cases, stated, otherwise) };
+  };
+}
+
+/**
  * What the report says of these cases, in its own lines: the line of the one case, or the
  * heading of the list and the line of each of these. `stated` holds those words, as lines.js
  * finds them. Where the page has no words for one of the cases, this says `otherwise`.

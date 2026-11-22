@@ -11,7 +11,7 @@
 // Nothing here judges a TRIP. An OPTION that no LOCK names and no plan uses is shown like any
 // other: it is in the FILE.
 
-import { casesAbout, casesIn, findsOf, optionsOf, ruledOut, saidOf } from "./named.js";
+import { marksBy, optionsOf } from "./named.js";
 import { clock, clocksOf, dateName, span } from "./times.js";
 import { whoIsIn } from "./who.js";
 
@@ -58,12 +58,9 @@ export function options(trip, report = null, stated = null) {
   if (trip === null || !trip.options.length) return { says: "", clash: false, asked: false, options: [] };
   const place = new Map(trip.places.map((each) => [each.id, each.name]));
   const who = whoIsIn(trip);
-  const ruled = ruledOut(report);
-  const needed = casesIn(report);
+  const marked = marksBy(report, stated);
   const shown = trip.options.map((option) => {
     const { step, lock, plan } = who(option.id);
-    const clash = option.records.filter((id) => ruled.has(id));
-    const cases = casesAbout(needed, (need) => optionsOf(need).includes(option.id));
     return {
       id: option.id,
       name: option.name,
@@ -74,11 +71,7 @@ export function options(trip, report = null, stated = null) {
       lock,
       plan,
       step,
-      records: option.records,
-      clash,
-      finds: findsOf(clash),
-      cases,
-      asks: saidOf(cases, stated, "The report names this OPTION in what the FILE does not say."),
+      ...marked(option.records, (need) => optionsOf(need).includes(option.id), "The report names this OPTION in what the FILE does not say."),
     };
   });
   const clash = shown.some((each) => each.clash.length > 0);

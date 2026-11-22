@@ -12,7 +12,7 @@
 // Nothing here judges a TRIP. Whether the PERSONs in an OPTION meet what it requires is for
 // the COMPILER to say: the page shows who meets a requirement only where the report names them.
 
-import { casesAbout, casesIn, findsOf, listed, requirementsIn, ruledOut, saidOf } from "./named.js";
+import { listed, marksBy, requirementsIn } from "./named.js";
 import { whoIsIn } from "./who.js";
 
 /** What an OPTION requires of a CAPABILITY, as the report words it. */
@@ -22,13 +22,17 @@ function requiresOf(of) {
 
 /**
  * Whether the OPTIONs under a CAPABILITY are all that require it, as far as the FILE says.
- * `others` says that the FILE has an OPTION with no FACT about the CAPABILITY. It never says
- * that an OPTION requires the CAPABILITY where the FILE names none that does.
+ * `others` says that the FILE has an OPTION with no FACT about the CAPABILITY. Where it has
+ * none, the FACTs under the CAPABILITY cover every OPTION of the FILE, with or without a FACT
+ * that they are all. It never says that an OPTION requires the CAPABILITY where the FILE names
+ * none that does.
  */
 function wholeOf(capability, others) {
   const some = capability.options.some((option) => option.of !== "none");
   if (capability.complete !== null) return some ? "The FILE states every one of its OPTIONs that requires it." : "The FILE states every one of its OPTIONs that requires it, and it names none.";
-  if (!others) return null;
+  // Each OPTION of the FILE has a FACT of its own about the CAPABILITY. A FILE with no OPTION
+  // has nothing to say here.
+  if (!others) return capability.options.length ? "The FILE says what each of its OPTIONs requires of this CAPABILITY." : null;
   if (some) return "Other OPTIONs of the FILE may require it too: the FILE does not say that these are all.";
   return capability.options.length ? "The FILE leaves open whether another of its OPTIONs requires this CAPABILITY." : "The FILE says of no OPTION whether it requires this CAPABILITY.";
 }
@@ -55,14 +59,8 @@ export function capabilities(trip, report = null, stated = null) {
   if (trip === null || !trip.capabilities.length) return { says: "", clash: false, asked: false, capabilities: [] };
   const who = whoIsIn(trip);
   const person = new Map(trip.persons.map((each) => [each.id, each.name]));
-  const ruled = ruledOut(report);
-  const needed = casesIn(report);
   const met = requirementsIn(report);
-  const marked = (records, about, otherwise) => {
-    const clash = records.filter((id) => ruled.has(id));
-    const cases = casesAbout(needed, about);
-    return { records, clash, finds: findsOf(clash), cases, asks: saidOf(cases, stated, otherwise) };
-  };
+  const marked = marksBy(report, stated);
   const shown = trip.capabilities.map((capability) => {
     const able = new Map(capability.has.map((each) => [each.person, each]));
     const asked = new Set(capability.options.map((each) => each.option));
