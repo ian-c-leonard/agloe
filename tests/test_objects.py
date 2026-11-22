@@ -92,6 +92,7 @@ from tests.stories import (
     trip,
     trip_ends,
     trip_starts,
+    way,
     way_between,
 )
 from tests.stories import at as moment
@@ -1825,14 +1826,24 @@ def every_chain(
 
 
 def those_that_matter(
-    file: File, world: World, who: tuple[tuple[str, ...], ...], orders: tuple[tuple[int, ...], ...]
+    file: File,
+    world: World,
+    who: tuple[tuple[str, ...], ...],
+    orders: tuple[tuple[int, ...], ...],
+    *hints: object,
 ) -> list[Chain] | None:
+    """Every order, whatever the search says about which orders it can leave out."""
     return every_chain(file, world, who, orders, everything=False)
 
 
 def all_of_them(
-    file: File, world: World, who: tuple[tuple[str, ...], ...], orders: tuple[tuple[int, ...], ...]
+    file: File,
+    world: World,
+    who: tuple[tuple[str, ...], ...],
+    orders: tuple[tuple[int, ...], ...],
+    *hints: object,
 ) -> list[Chain] | None:
+    """Every order of every OPTION, whatever the search says about which it can leave out."""
     return every_chain(file, world, who, orders, everything=True)
 
 
@@ -3753,13 +3764,14 @@ def test_a_hand_over_of_the_plan_is_left_undone_where_that_breaks_less() -> None
     assert trail == (on_the_desk, on_the_desk, frozenset({Where(person="sam")}))
 
 
-def five_at_each_hour(deposit_last: bool, stamp: bool = False) -> File:
+def five_at_each_hour(deposit_last: bool, stamp: int = 0) -> File:
     """Five travelers, each LOCKed into an appointment of their own at one desk at 9:00 am, at
     10:00 am and at 11:00 am. One traveler has the voucher, and their appointment at 9:00 am
     keeps it at the desk. Every other appointment requires it. The FILE lists that traveler's
     appointments first, or with ``deposit_last`` last, among those of each hour. With
     ``stamp``, the appointment listed first also requires a stamp that lies on the desk, and
-    can hand it over."""
+    can hand it over. With ``stamp`` at two, the same traveler's next appointment requires
+    the stamp too."""
     people = [f"person-{number}" for number in range(5)]
     listed = [*people[1:], people[0]] if deposit_last else people
     names = [f"{person}-at-{hour}" for hour in (9, 10, 11) for person in listed]
@@ -3771,6 +3783,7 @@ def five_at_each_hour(deposit_last: bool, stamp: bool = False) -> File:
     if stamp:
         facts += [lies_at("stamp", "desk"), requires_object(names[0], "stamp")]
         facts += [hands_over(names[0], "stamp"), every_use("stamp"), every_transfer("stamp")]
+        facts += [requires_object(names[5], "stamp")] if stamp > 1 else []
     locks = [lock(name, name.split("-at-")[0]) for name in names]
     things = ["voucher", "stamp"] if stamp else ["voucher"]
     return trip(people, ["desk"], options, facts, locks, objects=things)
@@ -4273,8 +4286,14 @@ def test_steps_at_one_time_do_not_have_every_order_timed(monkeypatch: pytest.Mon
     assert [step.option for step in found.itinerary] == in_order
     # A stamp that one appointment alone has to do with puts nothing in an order. So the
     # voucher is still the one OBJECT that orders the appointments.
-    with_a_stamp = five_at_each_hour(deposit_last=True, stamp=True)
+    with_a_stamp = five_at_each_hour(deposit_last=True, stamp=1)
     found, timed = timings_for_the_report(monkeypatch, with_a_stamp)
+    assert timed < 50
+    assert [step.option for step in found.itinerary] == in_order
+    # Nor does a stamp at two appointments of one traveler: the traveler does them one after
+    # the other, so the stamp leaves no choice of order.
+    stamped_twice = five_at_each_hour(deposit_last=True, stamp=2)
+    found, timed = timings_for_the_report(monkeypatch, stamped_twice)
     assert timed < 50
     assert [step.option for step in found.itinerary] == in_order
 
@@ -4393,12 +4412,17 @@ def conflicts_in_the_best_case(file: File) -> tuple[bool, int]:
 
 
 def eleven_signatures(
-    *more: Document, spans: Sequence[Document], others: Sequence[Document] = ()
+    *more: Document,
+    spans: Sequence[Document],
+    others: Sequence[Document] = (),
+    places: Sequence[str] = (),
+    ways: Sequence[Document] = (),
 ) -> File:
     """Eleven guests each sign at the hotel desk at 9:00 am, which takes no time. Each
     signature requires the register that lies at the hotel and can hand it over. A clerk at
     the airport requires the register at 9:05 am. The shuttle takes 15 minutes. ``others``
-    holds other OPTIONs, and ``more`` the FACTs about them."""
+    holds other OPTIONs, ``places`` other PLACEs, ``ways`` other WAYs, and ``more`` the FACTs
+    about them."""
     people = [f"guest-{number}" for number in range(11)]
     desks = [f"{person}-desk" for person in people]
     options = [*(stays(desk, "hotel") for desk in desks), stays("airport-desk", "airport")]
@@ -4413,9 +4437,11 @@ def eleven_signatures(
     facts += [every_use("register"), every_transfer("register"), *spans, *more]
     locks = [lock(desk, person) for desk, person in zip(desks, people, strict=True)]
     locks.append(lock("airport-desk", "clerk"))
-    ways = [way_between("shuttle", "hotel", "airport")]
-    places = ["hotel", "airport"]
-    return trip([*people, "clerk"], places, options, facts, locks, ways, objects=["register"])
+    all_ways = [way_between("shuttle", "hotel", "airport"), *ways]
+    everywhere = ["hotel", "airport", *places]
+    return trip(
+        [*people, "clerk"], everywhere, options, facts, locks, all_ways, objects=["register"]
+    )
 
 
 def no_way_leaves(id: str, earliest: str, latest: str) -> Document:
@@ -4492,6 +4518,84 @@ def test_the_time_to_cross_is_worked_out_only_from_the_places_that_matter() -> N
     locks = [lock("meeting", "alex")]
     file = trip(["alex"], stops, options, facts, locks, ways, objects=["pass"])
     search = compiler._Search(file, worst_case(file), plain=True)  # pyright: ignore[reportPrivateUsage]
-    worked_out = {origin for origin, _, _ in search._crossing}  # pyright: ignore[reportPrivateUsage]
+    worked_out = {origin for origin, _ in search._crossing}  # pyright: ignore[reportPrivateUsage]
     assert worked_out and worked_out <= {"stop-0", "stop-1"}
     assert compiler.works(file, worst_case(file))
+
+
+def test_a_connection_that_is_missed_does_not_count_for_the_time_to_cross() -> None:
+    """The register is at the hotel at 9:00 am and has to be at the airport at 9:05 am. A
+    shuttle from the hotel reaches the pier at 9:04 am, and the ferry on to the airport
+    leaves at 9:02 am. The two rides take five minutes together, but the ferry has left
+    when the shuttle gets there, and the taxi takes 15 minutes. The solver sees at once
+    that nothing works. With the ferry at 9:04 am, a guest brings the register."""
+
+    def by_ferry(minute: int) -> File:
+        return eleven_signatures(
+            *at("pier-shuttle", 9, 0, "PT4M"),
+            *at("ferry", 9, minute, "PT1M"),
+            spans=[complete(None, None)],
+            others=[moves("pier-shuttle", "hotel", "pier"), moves("ferry", "pier", "airport")],
+            places=["pier"],
+        )
+
+    works, conflicts = conflicts_in_the_best_case(by_ferry(2))
+    assert not works
+    assert conflicts < 1000
+    works, conflicts = conflicts_in_the_best_case(by_ferry(4))
+    assert works
+
+
+def test_a_way_with_no_known_length_does_not_count_for_the_time_to_cross() -> None:
+    """Besides the shuttle of 15 minutes, a tunnel joins the hotel and the airport, and
+    nobody said how long it takes. In the worst case it has no limit, so nothing follows it,
+    and the register that goes through it is at hand nowhere afterwards. The solver sees at
+    once that nothing works in the worst case."""
+    file = eleven_signatures(spans=[complete(None, None)], ways=[way("tunnel", "hotel", "airport")])
+    works, conflicts = conflicts_to_answer(file)
+    assert not works
+    assert conflicts < 1000
+    works, _ = conflicts_in_the_best_case(file)
+    assert works
+
+
+def four_on_a_bus() -> File:
+    """Four riders are LOCKed into the bus from the lodge, which gets to the resort at
+    8:20 am and can hand the voucher over. Alex has the voucher. Kim's check at 8:25 am
+    requires it. Alex's deposit keeps it, at any time, but Alex has to be there two hours
+    before it starts. Each rider also has three stays at the resort at any time, and nobody
+    said what those do with the voucher."""
+    riders = ["alex", "sam", "jo", "kim"]
+    stays_at = [f"{rider}-{number}" for rider in riders for number in range(3)]
+    options = [moves("bus", "lodge", "resort"), stays("kim-check", "resort")]
+    options += [stays("alex-deposit", "resort"), *(stays(name, "resort") for name in stays_at)]
+    facts = [*at("bus", 8, 0, "PT20M"), *at("kim-check", 8, 25, "PT5M")]
+    facts += [
+        any_time("alex-deposit"),
+        lasts("alex-deposit", "PT5M"),
+        cutoff("alex-deposit", "PT2H"),
+    ]
+    facts += [fact for name in stays_at for fact in whenever(name, "PT30M")]
+    facts += [starts_from(rider, "lodge") for rider in riders]
+    facts += [has_object("alex", "voucher"), hands_over("bus", "voucher")]
+    facts += [keeps("alex-deposit", "voucher"), requires_object("kim-check", "voucher")]
+    facts += [every_use("voucher"), complete(None, None)]
+    locks = [trip_starts(8), lock("bus", *riders), lock("kim-check", "kim")]
+    locks += [lock("alex-deposit", "alex")]
+    locks += [lock(name, name.split("-")[0]) for name in stays_at]
+    return trip(riders, ["lodge", "resort"], options, facts, locks, objects=["voucher"])
+
+
+def test_an_order_that_the_earliest_starts_rule_out_is_not_counted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kim needs the voucher at 8:25 am. Alex's deposit would leave it at the resort with no
+    hand-over, but it cannot start before 10:20 am, so it never comes before Kim's check.
+    The hand-over to Kim on the bus is then the one that no order can do without, and the
+    search stops at the plan that has it."""
+    found, timed = timings_for_the_report(monkeypatch, four_on_a_bus())
+    assert found.answer is Answer.FEASIBLE
+    assert timed < 100
+    assert [(step.option, step.handed) for step in found.itinerary if step.handed] == [
+        ("bus", (("voucher", "kim"),))
+    ]

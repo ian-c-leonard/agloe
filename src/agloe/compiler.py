@@ -431,8 +431,9 @@ class _Search:
         # the choice that takes the route, the route and the place of the WAY in it.
         self.moments: dict[tuple[int, reference.Route, int], cp_model.IntVar] = {}
         self.known = reference.Routes(file, world)
-        # The least time from a PLACE to each other PLACE, between two times or at any time.
-        self._crossing: dict[tuple[str, int | None, int | None], dict[str, int]] = {}
+        # The earliest anything is at each PLACE, setting out from a PLACE at a time or at
+        # any time.
+        self._crossing: dict[tuple[str, int | None], dict[str, int]] = {}
         self._legs: dict[str, list[tuple[str, int, int | None]]] | None = None
         self._closed: dict[tuple[str, str], list[tuple[int, int]]] = {}
         self._worth_trying: dict[tuple[str, str, bool], list[reference.Route]] = {}
@@ -804,6 +805,8 @@ class _Search:
             for source, given in handed.items():
                 if options[source].origin != start.place or source == index:
                     continue
+                if self.endless[source]:
+                    continue  # nothing follows it, so what is taken in it is at hand nowhere
                 over, by = fixed[source], fixed[index]
                 over = None if over is None else over + self.lasts[source]
                 takes = self._across(options[source].destination, options[index].origin, over, by)
@@ -819,90 +822,101 @@ class _Search:
         """The least time anything needs from one PLACE to another, or None where none gets there.
 
         A PERSON changes PLACE by a WAY or by an OPTION that moves, and an OBJECT only with
-        a PERSON. Each takes at least its shortest time.
+        a PERSON. Each takes at least its shortest time. A WAY or an OPTION with no limit to
+        how long it takes is left out: nothing follows it, so nothing it carries is at hand
+        anywhere afterwards.
 
         ``since`` and ``until`` are two times that the crossing lies between, where both
-        are known. Then an unlisted WAY counts only where it can leave between them: not
-        where the two times lie in one span in which COMPLETE FACTs rule it out. And an
-        OPTION that moves and starts at a fixed time counts only where it starts and is over
-        between them. With no times, neither is looked at. Either way the real time can be
-        longer and is never shorter.
+        are known. Then it sets out at the first and has to be there by the second. On the
+        way, an unlisted WAY leaves only outside the spans in which COMPLETE FACTs rule it
+        out, and an OPTION that moves at a fixed time is taken only where it starts no
+        earlier than the crossing got to it. With no times, none of that is looked at.
+        Either way the real time can be longer and is never shorter.
 
         The times from one PLACE are worked out once, and only from the PLACEs asked about.
         """
         if since is None or until is None:
-            since = until = None
+            since = None
         elif since > until:
             return None  # the second time is before the first
-        if (origin, since, until) not in self._crossing:
-            self._crossing[origin, since, until] = self._from(origin, since, until)
-        return self._crossing[origin, since, until].get(destination)
+        if (origin, since) not in self._crossing:
+            self._crossing[origin, since] = self._from(origin, since)
+        reached = self._crossing[origin, since].get(destination)
+        if reached is None or (until is not None and since is not None and reached > until):
+            return None
+        return reached - (since or 0)
 
-    def _from(self, origin: str, since: int | None, until: int | None) -> dict[str, int]:
-        """The least time from one PLACE to each PLACE that can be reached, for ``_across``."""
+    def _from(self, origin: str, since: int | None) -> dict[str, int]:
+        """For ``_across``: the earliest anything is at each PLACE, setting out from one.
+
+        With ``since`` that is a time, for setting out then. Without it, it is the least
+        time on the way, counted from zero.
+        """
         file, world = self.file, self.world
         if self._legs is None:
             # From each PLACE: where a listed WAY or an OPTION that moves leads, how long it
             # takes at least, and for an OPTION that moves its position in the FILE.
             legs: dict[str, list[tuple[str, int, int | None]]] = {}
             for way in file.ways:
-                shortest = world.takes[way.id][0]
+                shortest, longest = world.takes[way.id]
+                if longest is None:
+                    continue
                 legs.setdefault(way.origin, []).append((way.destination, shortest, None))
                 if way.both_ways:
                     legs.setdefault(way.destination, []).append((way.origin, shortest, None))
             for index, option in enumerate(file.options):
-                if self.moves[index] and self.usable[index]:
+                if self.moves[index] and self.usable[index] and not self.endless[index]:
                     ride = (option.destination, self.lasts[index], index)
                     legs.setdefault(option.origin, []).append(ride)
             self._legs = legs
         places = [place.id for place in file.places]
         unlisted = world.unlisted is None or bool(world.unlisted)
 
-        def leaves(here: str, there: str) -> bool:
-            """Whether an unlisted WAY of this world can leave between the two times."""
+        def leaves(here: str, there: str, at: int) -> int | None:
+            """When an unlisted WAY of this world can first leave, from this time on."""
             if world.unlisted is not None and (here, there) not in world.unlisted:
-                return False
-            if since is None or until is None:
-                return True
+                return None
+            if since is None:
+                return at
             if (here, there) not in self._closed:
                 self._closed[here, there] = reference.spans_closed(file, here, there)
-            return not any(
-                earliest <= since and until <= latest
-                for earliest, latest in self._closed[here, there]
-            )
+            for earliest, latest in self._closed[here, there]:
+                if earliest <= at <= latest:
+                    return latest + 1
+            return at
 
-        least = {origin: 0}
-        ahead = [(0, origin)]
+        def sets_out(ride: int | None, at: int) -> int | None:
+            """When a listed WAY or an OPTION that moves can first be taken, from this time on."""
+            start = None if ride is None else self.terms[ride].fixed_start
+            if start is None or since is None:
+                return at
+            return start if start >= at else None
+
+        earliest = {origin: since or 0}
+        ahead = [(since or 0, origin)]
         while ahead:
-            so_far, here = heappop(ahead)
-            if so_far > least[here]:
+            at, here = heappop(ahead)
+            if at > earliest[here]:
                 continue
             onward = [
-                (there, takes)
+                (there, leaving + takes)
                 for there, takes, ride in self._legs.get(here, ())
-                if ride is None or self._runs_between(ride, since, until)
+                for leaving in [sets_out(ride, at)]
+                if leaving is not None
             ]
             if unlisted:
                 onward += [
-                    (there, world.unlisted_takes)
+                    (there, leaving + world.unlisted_takes)
                     for there in places
-                    if there != here and leaves(here, there)
+                    if there != here
+                    for leaving in [leaves(here, there, at)]
+                    if leaving is not None
                 ]
-            for there, takes in onward:
-                if so_far + takes < least.get(there, inf):
-                    least[there] = so_far + takes
-                    heappush(ahead, (so_far + takes, there))
-        return least
-
-    def _runs_between(self, index: int, since: int | None, until: int | None) -> bool:
-        """Whether an OPTION that moves can start and be over between two times.
-
-        One that starts at no fixed time can. So can any, where the two times are not known.
-        """
-        start = self.terms[index].fixed_start
-        if start is None or since is None or until is None:
-            return True
-        return since <= start and start + self.lasts[index] <= until
+            for there, arrives in onward:
+                if arrives < earliest.get(there, inf):
+                    earliest[there] = arrives
+                    heappush(ahead, (arrives, there))
+        return earliest
 
     def _pass_through(
         self,

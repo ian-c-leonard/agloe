@@ -1875,6 +1875,7 @@ def _chains(
     who: tuple[tuple[str, ...], ...],
     orders: tuple[tuple[int, ...], ...],
     only_the_first_of_a_kind: bool = False,
+    soonest: Mapping[int, int] | None = None,
 ) -> Iterator[_Chain] | None:
     """Each order of the OPTIONs that matter to each OBJECT, with the hand-overs that work in it.
 
@@ -1915,11 +1916,15 @@ def _chains(
     with the same hand-overs. Whatever follows the one can follow the other, with the same
     hand-overs. ``_orders_differ_only_in_the_listing`` says when the earlier one then gives
     the ITINERARY that comes first, so that the later one is never the one shown.
+
+    ``soonest`` holds the earliest that some OPTIONs can start, whatever the order. An
+    OPTION that cannot start until after the fixed start of another never comes before it.
     """
     happening, required = _required_by(file, world, who)
     if not required:
         return None
-    return _orders_together(file, world, who, orders, happening, required, only_the_first_of_a_kind)
+    alike = only_the_first_of_a_kind
+    return _orders_together(file, world, who, orders, happening, required, alike, soonest or {})
 
 
 def _can_move(
@@ -2026,6 +2031,30 @@ def _chain_in_order(
     return _as_chain(file, required, gaps, tuple(ranked))
 
 
+def _with_what_follows(later: dict[int, set[int]]) -> dict[int, set[int]]:
+    """What comes after what, with everything that follows from it. It is added in place."""
+    grew = True
+    while grew:
+        grew = False
+        for after in later.values():
+            more = set[int]().union(*(later[index] for index in after)) - after
+            if more:
+                after |= more
+                grew = True
+    return later
+
+
+def _later_for_the_persons(
+    orders: tuple[tuple[int, ...], ...], happening: Sequence[int]
+) -> dict[int, set[int]]:
+    """What comes after each OPTION: a PERSON does it later, or a chain of PERSONs does."""
+    later: dict[int, set[int]] = {index: set() for index in happening}
+    for order in orders:
+        for place, index in enumerate(order):
+            later[index].update(order[place + 1 :])
+    return _with_what_follows(later)
+
+
 def _orders_together(
     file: File,
     world: World,
@@ -2033,7 +2062,8 @@ def _orders_together(
     orders: tuple[tuple[int, ...], ...],
     happening: Sequence[int],
     required: Sequence[str],
-    only_the_first_of_a_kind: bool = False,
+    only_the_first_of_a_kind: bool,
+    soonest: Mapping[int, int],
 ) -> Iterator[_Chain]:
     """What ``_chains`` gives, for the OPTIONs that happen and the OBJECTs they require.
 
@@ -2048,18 +2078,6 @@ def _orders_together(
     requiring = [theirs for theirs, _ in each]
     matters = [theirs for _, theirs in each]
     moved = [bool(theirs) for theirs in matters]
-
-    def closed(later: dict[int, set[int]]) -> dict[int, set[int]]:
-        """What comes after what, with everything that follows from it."""
-        grew = True
-        while grew:
-            grew = False
-            for after in later.values():
-                more = set[int]().union(*(later[index] for index in after)) - after
-                if more:
-                    after |= more
-                    grew = True
-        return later
 
     def by_position(option: str, person: str) -> tuple[int, int]:
         return (place_of[option], people[person])
@@ -2089,7 +2107,7 @@ def _orders_together(
         made: set[tuple[frozenset[int], frozenset[tuple[frozenset[Where], _Ranked]]]] = set()
 
         def can_come_first(index: int, left: tuple[int, ...]) -> bool:
-            mine = fixed[index]
+            mine = fixed[index] if fixed[index] is not None else soonest.get(index)
             for other in left:
                 theirs = fixed[other]
                 sooner = mine is not None and theirs is not None and theirs < mine
@@ -2129,12 +2147,7 @@ def _orders_together(
         if found is not None:
             yield (), found
 
-    # What comes after each OPTION: a PERSON does it later, or a chain of PERSONs does.
-    own: dict[int, set[int]] = {index: set() for index in happening}
-    for order in orders:
-        for place, index in enumerate(order):
-            own[index].update(order[place + 1 :])
-    closed(own)
+    own = _later_for_the_persons(orders, happening)
     # The OBJECTs taken so far: the orders still to try for the next one, what comes after
     # what with the orders taken, their gaps, and their hand-overs.
     taken: list[_Ordered] = [(in_each_order(0, own), own, [], ())]
@@ -2153,7 +2166,7 @@ def _orders_together(
         further = {index: set(after) for index, after in later.items()}
         for place, index in enumerate(order):
             further[index].update(order[place + 1 :])
-        closed(further)
+        _with_what_follows(further)
         taken.append((in_each_order(len(ranked), further), further, longer, ranked))
 
 
@@ -3017,18 +3030,17 @@ def _timings(
         plain = _times(count, gaps, fixed, not_before, no_later)
         if plain is not None:
             as_timed = {node: _step_in_file_order(file, step(node, plain[node])) for node in nodes}
-    alike = _orders_differ_only_in_the_listing(file, world, who, fixed, gaps, as_timed)
-    found = _chains(file, world, who, orders, True) if alike else _chains(file, world, who, orders)
+    alike = _orders_differ_only_in_the_listing(file, world, who, orders, fixed, gaps, as_timed)
+    soonest = _earliest_starts(count, gaps, fixed, not_before)
+    found = _chains(file, world, who, orders, alike, soonest)
     chains: Iterable[_Chain] = _NOTHING_TO_ORDER if found is None else found
     in_turn = any_will_do or found is None
     bound: list[_StepOrder] | None = None
     as_they_fall: list[int] | None = None
-    if not in_turn:
-        soonest = _earliest_starts(count, gaps, fixed, not_before)
-        if all(node in soonest for node in nodes):
-            lowest = {node: _step_in_file_order(file, step(node, soonest[node])) for node in nodes}
-            bound = sorted(lowest.values())
-            as_they_fall = sorted((node for node in nodes if node < listed), key=lowest.__getitem__)
+    if not in_turn and all(node in soonest for node in nodes):
+        lowest = {node: _step_in_file_order(file, step(node, soonest[node])) for node in nodes}
+        bound = sorted(lowest.values())
+        as_they_fall = sorted((node for node in nodes if node < listed), key=lowest.__getitem__)
     if found is not None:
         chains = chain(_to_try_first(file, world, who, [in_order, as_they_fall]), chains)
     least: list[tuple[int, tuple[_Ranked, ...]] | None] = []
@@ -3036,15 +3048,15 @@ def _timings(
     def fewest() -> tuple[int, tuple[_Ranked, ...]] | None:
         """The hand-overs that come first among those of every order, where that is known.
 
-        It is known where one OBJECT alone orders OPTIONs. Then ``_chains`` can make one
-        order of each kind, and every other order ends with the same hand-overs as one of
-        those. An order that cannot be timed is among them too, and that only makes the
-        result come earlier than it has to.
+        It is known where one OBJECT alone leaves a choice of order. Then ``_chains`` can
+        make one order of each kind, and every other order ends with the same hand-overs as
+        one of those. An order that cannot be timed can be among them, and that only makes
+        the result come earlier than it has to.
         """
         if not least:
             every = None
-            if _the_one_order(file, world, who) is not None:
-                every = _chains(file, world, who, orders, True)
+            if _the_one_order(file, world, who, orders) is not None:
+                every = _chains(file, world, who, orders, True, soonest)
             least.append(min((rank for _, _, rank in every or ()), default=None))
         return least[0]
 
@@ -3145,6 +3157,7 @@ def _orders_differ_only_in_the_listing(
     file: File,
     world: World,
     who: tuple[tuple[str, ...], ...],
+    orders: tuple[tuple[int, ...], ...],
     fixed: Mapping[int, int],
     gaps: list[tuple[int, int, int]],
     as_timed: Mapping[int, _StepOrder] | None,
@@ -3154,9 +3167,9 @@ def _orders_differ_only_in_the_listing(
     Then ``_chains`` can leave out an order that starts with the same OPTIONs as an order
     made before it, and leaves the OBJECT in the same places with the same hand-overs.
 
-    That is so where four things hold. One OBJECT alone puts two or more OPTIONs in an
-    order: an order of one OPTION says nothing. Each of those OPTIONs starts at a fixed
-    time. The timing can fall in one way only: ``as_timed`` holds how each step ranks in
+    That is so where four things hold. One OBJECT alone leaves a choice of order, as
+    ``_the_one_order`` says. Each of the OPTIONs it orders starts at a fixed time. The
+    timing can fall in one way only: ``as_timed`` holds how each step ranks in
     the listing as the rule times it, and is None otherwise. And each step that has to come
     before another by what the PERSONs do also ranks before it there.
 
@@ -3177,26 +3190,38 @@ def _orders_differ_only_in_the_listing(
     """
     if as_timed is None:
         return False
-    ordered = _the_one_order(file, world, who)
+    ordered = _the_one_order(file, world, who, orders)
     if ordered is None or any(index not in fixed for index in ordered):
         return False
     return all(as_timed[before] < as_timed[after] for before, after, _ in gaps)
 
 
 def _the_one_order(
-    file: File, world: World, who: tuple[tuple[str, ...], ...]
+    file: File,
+    world: World,
+    who: tuple[tuple[str, ...], ...],
+    orders: tuple[tuple[int, ...], ...],
 ) -> tuple[int, ...] | None:
-    """The OPTIONs that one OBJECT puts in an order, where no other OBJECT orders any.
+    """The OPTIONs that one OBJECT puts in an order, where no other OBJECT leaves a choice.
 
-    None where no OBJECT or more than one puts two or more OPTIONs in an order. An OBJECT
-    with one OPTION to order says nothing about what comes before what.
+    None where no OBJECT or more than one leaves a choice. An OBJECT leaves a choice where
+    two of its OPTIONs could come in either order. They cannot where a PERSON, or a chain of
+    PERSONs, does one after the other, or where they start at two different fixed times.
+    An OBJECT that leaves no choice has one order, and that order says nothing new.
     """
     happening, required = _required_by(file, world, who)
+    later = _later_for_the_persons(orders, happening)
+    fixed = {index: world.terms[file.options[index].id].fixed_start for index in happening}
+
+    def either_way(one: int, other: int) -> bool:
+        apart = fixed[one] is not None and fixed[other] is not None and fixed[one] != fixed[other]
+        return not apart and other not in later[one] and one not in later[other]
+
     ordered = [
         matters
         for thing in required
         for _, matters in [_ordered_by(file, world, who, happening, thing)]
-        if len(matters) > 1
+        if any(either_way(one, other) for one, other in combinations(matters, 2))
     ]
     return ordered[0] if len(ordered) == 1 else None
 
