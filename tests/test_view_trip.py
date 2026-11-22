@@ -842,7 +842,23 @@ def test_names_that_look_the_same_on_a_page_come_with_their_ids() -> None:
         "Anne  Marie (lunch)",
     ]
     assert holds(sent)
+    # So do two names that differ only in a character that a page shows nothing for: a soft
+    # hyphen, or a space of no width.
+    by_id["alex"]["name"], by_id["jo"]["name"] = "Member\u00adship", "Membership"
+    by_id["skydeck"]["name"], by_id["lunch"]["name"] = "Anne\u200bMarie", "AnneMarie"
+    file = parse(json.dumps(content))
+    sent = sent_for(file, compiler.check(file))
+    assert [each["name"] for each in sent["persons"]] == [
+        "Member\u00adship (alex)",
+        "Sam",
+        "Membership (jo)",
+    ]
+    assert [step["name"] for step in sent["steps"] if step["option"]] == [
+        "Anne\u200bMarie (skydeck)",
+        "AnneMarie (lunch)",
+    ]
     # A name that only differs in its capitals looks different, and comes as it is.
+    by_id["skydeck"]["name"], by_id["lunch"]["name"] = "Skydeck visit", "Lunch in the park"
     by_id["alex"]["name"], by_id["jo"]["name"] = "Alex", "alex"
     file = parse(json.dumps(content))
     sent = sent_for(file, compiler.check(file))

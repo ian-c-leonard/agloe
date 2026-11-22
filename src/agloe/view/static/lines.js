@@ -13,7 +13,7 @@
 //
 // Nothing here judges a TRIP. It finds what the report already says, line by line.
 
-import { boughtIn, casesIn, requirementsIn, toBuyIn } from "./named.js";
+import { boughtIn, cappedIn, casesIn, requirementsIn, toBuyIn } from "./named.js";
 
 /** A line that shows one step of a plan: "  2:00 pm to 3:00 pm: Museum visit, Alex and Sam". */
 const STEP = /^ {2}\d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+, .+$/;
@@ -59,7 +59,8 @@ function listsOf(report) {
  * that the line is a warning under its step. `meets` is null, or the place in `requirements`
  * of the report as JSON of the requirement that the line says somebody meets. `about` holds
  * what else the line is about, each as the page names a thing: `offer:ID` for an OFFER that
- * the line says somebody buys a place of, and `budget:ID` for a BUDGET that the line states.
+ * the line says somebody buys a place of, `budget:ID` for a BUDGET that the line states, and
+ * `cap:ID` for a cap that the line states under the plan of a case.
  *
  * The lines of a plan are tied to steps only where there is one line for each step that the
  * view sent, in the same order: then the two are the same plan. Lines are tied to records only
@@ -126,13 +127,22 @@ export function lines(text, report, trip) {
     }
   }
   // The one plan that the report gives for a case is under the line of the case, further in.
-  // It is tied to the OFFERs that somebody buys a place of in that plan.
+  // It is tied to the OFFERs that somebody buys a place of in that plan. Under it, the report
+  // states each cap with what that plan charges to it, on a line that starts with the id of
+  // the cap. Each of those is tied to its cap.
   const bought = boughtIn(report);
+  const capped = cappedIn(report);
   found.forEach((line, at) => {
-    if (line.case === null || bought[line.case] === undefined) return;
+    if (line.case === null) return;
+    const offers = bought[line.case] ?? [];
+    const caps = capped[line.case] ?? [];
     const inset = (text) => text.length - text.trimStart().length;
     for (let next = at + 1; next < found.length && found[next].text.trim() !== "" && inset(found[next].text) > inset(line.text); next += 1) {
-      if (free(found[next]) && found[next].text.trimStart().startsWith(ONE_PLAN)) found[next].about = bought[line.case].map((offer) => `offer:${offer}`);
+      if (!free(found[next])) continue;
+      const words = found[next].text.trimStart();
+      if (words.startsWith(ONE_PLAN)) found[next].about = offers.map((offer) => `offer:${offer}`);
+      const cap = caps.find((id) => words.startsWith(`${id}, on `));
+      if (cap !== undefined) found[next].about = [`cap:${cap}`];
     }
   });
   // The BUDGETs of the FILE, where the report states them: one to a line under their heading,

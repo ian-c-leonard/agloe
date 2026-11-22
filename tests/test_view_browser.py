@@ -651,6 +651,18 @@ def test_pointing_ties_a_budget_its_caps_and_its_payments_to_the_report(chromium
         page.locator("#budgets .card-name").hover()
         found = lit(page, budgets=["the trip money"], marks=[])
         assert found["rows"] == ["  the trip money: for Alex and Sam; it holds USD"]
+    # Under the one plan for a case, the report states the cap with what that plan charges
+    # to it. That line is about the cap.
+    with opened(chromium, EXAMPLES / "a-ticket" / "depends-on-the-receipt.json") as page:
+        page.locator("#budgets .entry").first.wait_for()
+        line = page.locator("#report .row", has_text="trip-cap, on the trip money:")
+        line.wait_for()
+        said = line.text_content()
+        line.hover()
+        lit(page, budgets=["trip-cap"], marks=[])
+        page.locator("#budgets .entry").first.hover()
+        found = lit(page, budgets=["trip-cap"], marks=[])
+        assert said in found["rows"]
     # A FILE with no BUDGET has no such part on its page.
     with opened(chromium, EXAMPLES / "flight-home" / "works.json") as page:
         page.locator("#report .row").first.wait_for()

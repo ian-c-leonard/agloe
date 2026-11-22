@@ -51,7 +51,8 @@ CAPABILITY whose name another of its kind has comes with its id, and a name that
 taken for something else comes in quotes. So the page tells two apart where the report does,
 in the same words.
 A page shows two names alike that a report in words does not: those that differ only in how
-an accent is put on a letter, or in how many spaces they hold. Those come with their ids too.
+an accent is put on a letter, in how many spaces they hold, or in characters that a page
+shows nothing for. Those come with their ids too.
 
 A day is sent as the stretch of it in which the clocks run on without a change. So most days
 are one stretch, from midnight to midnight. A day on which the clocks change is two, and each
@@ -453,7 +454,10 @@ def _names(
     """
 
     def looks(name: str) -> str:
-        return " ".join(unicodedata.normalize("NFC", name).split())
+        # A page shows nothing for a format character, such as a soft hyphen or a space of
+        # no width.
+        seen = "".join(each for each in name if unicodedata.category(each) != "Cf")
+        return " ".join(unicodedata.normalize("NFC", seen).split())
 
     def quoted(name: str) -> str:
         splits = any(mark in name for mark in ",:;") or (

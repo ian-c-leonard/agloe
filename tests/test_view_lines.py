@@ -222,6 +222,14 @@ def test_the_plan_that_a_report_gives_for_a_case_is_tied_to_the_offers_it_buys_f
     # The report states the BUDGETs of the FILE under that case. The line of each is tied to it.
     (pot,) = [line for line in found if line["about"] == ["budget:trip-money"]]
     assert pot["text"] == "  the trip money: for Alex and Sam; it holds USD"
+    # Under the plan, the report states the cap with what that plan charges to it.
+    (cap,) = [line for line in found if line["about"] == ["cap:trip-cap"]]
+    assert cap["text"].startswith("  trip-cap, on the trip money: 32.00 still to buy, of at most ")
+    assert (cap["record"], cap["case"]) == (None, None)
+    no_caps: list[Any] = [[{**asked["report"]["plans"][0], "caps": "trip-cap"}], [{"buys": []}]]
+    for plans in no_caps:
+        (other,) = lines_of([{**asked, "report": {**asked["report"], "plans": plans}}])
+        assert not any(line["about"] == ["cap:trip-cap"] for line in other)
 
 
 def renamed(asked: dict[str, Any], old: str, new: str) -> dict[str, Any]:

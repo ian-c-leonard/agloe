@@ -89,6 +89,19 @@ export function boughtIn(report) {
   return plans.map((plan) => [...new Set(plan.buys.map((buy) => buy.offer))]);
 }
 
+/**
+ * The caps that a report states under the one plan that it gives for each case in which the
+ * trip works: a list of their ids for each case, at the place of the case. Only a report with
+ * one plan for each of its cases holds any.
+ */
+export function cappedIn(report) {
+  const cases = casesIn(report);
+  const plans = cases.length && Array.isArray(report.plans) && report.plans.length === cases.length ? report.plans : [];
+  const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
+  if (!plans.every((plan) => isRecord(plan) && Array.isArray(plan.caps) && plan.caps.every((row) => isRecord(row) && typeof row.cap === "string"))) return [];
+  return plans.map((plan) => plan.caps.map((row) => row.cap));
+}
+
 /** The OPTIONs that one of those things names: its own, and each that somebody has to buy a place for. */
 export function optionsOf(need) {
   const bought = Array.isArray(need.buys) ? need.buys.filter((buy) => buy !== null && typeof buy === "object").map((buy) => buy.option) : [];
