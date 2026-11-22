@@ -782,8 +782,8 @@ class _Search:
             origin, destination = options[one].origin, options[other].origin
             if origin == destination:
                 continue
-            ahead = self._across(origin, destination, fixed[one], fixed[other])
-            back = self._across(destination, origin, fixed[other], fixed[one])
+            ahead = self._across(origin, destination, fixed[one])
+            back = self._across(destination, origin, fixed[other])
             first = model.new_bool_var(f"{thing} in {options[one].id} before {options[other].id}")
             if ahead is None:
                 model.add_bool_or([here.negated(), there.negated(), first.negated()])
@@ -807,9 +807,9 @@ class _Search:
                     continue
                 if self.endless[source]:
                     continue  # nothing follows it, so what is taken in it is at hand nowhere
-                over, by = fixed[source], fixed[index]
+                over = fixed[source]
                 over = None if over is None else over + self.lasts[source]
-                takes = self._across(options[source].destination, options[index].origin, over, by)
+                takes = self._across(options[source].destination, options[index].origin, over)
                 if takes is None:
                     continue
                 # The OBJECT comes from this hand-over: it is over and across by then.
@@ -821,9 +821,7 @@ class _Search:
                 early_enough.append(from_there)
             model.add_bool_or([here.negated(), *early_enough])
 
-    def _across(
-        self, origin: str, destination: str, since: int | None = None, until: int | None = None
-    ) -> int | None:
+    def _across(self, origin: str, destination: str, since: int | None = None) -> int | None:
         """The least time anything needs from one PLACE to another, or None where none gets there.
 
         A PERSON changes PLACE by a WAY or by an OPTION that moves, and an OBJECT only with
@@ -831,23 +829,18 @@ class _Search:
         how long it takes is left out: nothing follows it, so nothing it carries is at hand
         anywhere afterwards.
 
-        ``since`` is when the crossing sets out, where that is known, and ``until`` when it
-        has to be there, where that is known too. From a known time, an unlisted WAY leaves
-        only outside the spans in which COMPLETE FACTs rule it out, and an OPTION that moves
-        at a fixed time is taken only where it starts no earlier than the crossing got to
-        it. With no time to set out, none of that is looked at. Either way the real time can
-        be longer and is never shorter.
+        ``since`` is when the crossing sets out, where that is known. Then an unlisted WAY
+        leaves only outside the spans in which COMPLETE FACTs rule it out, and an OPTION
+        that moves at a fixed time is taken only where it starts no earlier than the
+        crossing got to it. With no time to set out, none of that is looked at. Either way
+        the real time can be longer and is never shorter.
 
         The times from one PLACE are worked out once, and only from the PLACEs asked about.
         """
-        if since is not None and until is not None and since > until:
-            return None  # it has to be there before it sets out
         if (origin, since) not in self._crossing:
             self._crossing[origin, since] = self._from(origin, since)
         reached = self._crossing[origin, since].get(destination)
-        if reached is None or (until is not None and since is not None and reached > until):
-            return None
-        return reached - (since or 0)
+        return None if reached is None else reached - (since or 0)
 
     def _from(self, origin: str, since: int | None) -> dict[str, int]:
         """For ``_across``: the earliest anything is at each PLACE, setting out from one.

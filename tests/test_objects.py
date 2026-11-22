@@ -4634,6 +4634,18 @@ def test_a_way_with_no_known_length_does_not_count_for_the_time_to_cross() -> No
     assert conflicts < 1000
     works, _ = conflicts_in_the_best_case(file)
     assert works
+    # The same for a ride at 9:02 am that nobody knows the length of.
+    by_ride = eleven_signatures(
+        starts_at("express", 9, 2),
+        cutoff("express", "PT0S"),
+        spans=[complete(None, None)],
+        others=[moves("express", "hotel", "airport")],
+    )
+    works, conflicts = conflicts_to_answer(by_ride)
+    assert not works
+    assert conflicts < 1000
+    works, _ = conflicts_in_the_best_case(by_ride)
+    assert works
 
 
 def four_on_a_bus() -> File:
@@ -4719,3 +4731,40 @@ def test_the_hand_overs_that_no_order_can_do_without_are_those_of_each_object_by
     assert not any(step.handed for step in shown)
     EveryOrder(monkeypatch).skipping_nothing()
     assert compiler.shown(file, world) == shown
+
+
+def test_two_uses_away_from_where_an_object_lies_need_the_time_between_them() -> None:
+    """The register lies at the hotel, where eleven guests sign at 8:00 am and each can take
+    it. A clerk at the airport requires it at 9:00 am and an officer at the harbour at
+    9:05 am. A shuttle of 15 minutes joins each two of the three PLACEs. A guest gets the
+    register to the airport in time, but not on to the harbour five minutes later. The
+    model says outright that the two uses are 15 minutes apart, so the solver need not try
+    each guest. With the officer at 9:15 am, a guest takes it to both."""
+
+    def two_desks(minute: int) -> File:
+        people = [f"guest-{number}" for number in range(11)]
+        desks = [f"{person}-desk" for person in people]
+        options = [stays(desk, "hotel") for desk in desks]
+        options += [stays("airport-desk", "airport"), stays("harbour-desk", "harbour")]
+        facts = [fact for desk in desks for fact in at(desk, 8, length="PT0S")]
+        facts += [*at("airport-desk", 9, length="PT0S"), *at("harbour-desk", 9, minute, "PT0S")]
+        facts += [starts_from(person, "hotel") for person in people]
+        facts += [starts_from("clerk", "airport"), starts_from("officer", "harbour")]
+        places = ["hotel", "airport", "harbour"]
+        ways = [way_between(f"{a}-{b}", a, b) for a, b in combinations(places, 2)]
+        facts += [takes(each["id"], "PT15M") for each in ways]
+        facts += [lies_at("register", "hotel"), complete(None, None)]
+        facts += [requires_object("airport-desk", "register")]
+        facts += [requires_object("harbour-desk", "register")]
+        facts += [hands_over(desk, "register") for desk in desks]
+        facts += [every_use("register"), every_transfer("register")]
+        locks = [lock(desk, person) for desk, person in zip(desks, people, strict=True)]
+        locks += [lock("airport-desk", "clerk"), lock("harbour-desk", "officer")]
+        everybody = [*people, "clerk", "officer"]
+        return trip(everybody, places, options, facts, locks, ways, objects=["register"])
+
+    works, conflicts = conflicts_to_answer(two_desks(5))
+    assert not works
+    assert conflicts < 1000
+    works, conflicts = conflicts_to_answer(two_desks(15))
+    assert works

@@ -3030,7 +3030,7 @@ def _timings(
         plain = _times(count, gaps, fixed, not_before, no_later)
         if plain is not None:
             as_timed = {node: _step_in_file_order(file, step(node, plain[node])) for node in nodes}
-    alike = _orders_differ_only_in_the_listing(file, world, who, orders, fixed, gaps, as_timed)
+    alike = _orders_differ_only_in_the_listing(file, world, who, fixed, gaps, as_timed)
     soonest = _earliest_starts(count, gaps, fixed, not_before)
     found = _chains(file, world, who, orders, alike, soonest)
     chains: Iterable[_Chain] = _NOTHING_TO_ORDER if found is None else found
@@ -3148,7 +3148,6 @@ def _orders_differ_only_in_the_listing(
     file: File,
     world: World,
     who: tuple[tuple[str, ...], ...],
-    orders: tuple[tuple[int, ...], ...],
     fixed: Mapping[int, int],
     gaps: list[tuple[int, int, int]],
     as_timed: Mapping[int, _StepOrder] | None,
@@ -3181,7 +3180,7 @@ def _orders_differ_only_in_the_listing(
     """
     if as_timed is None:
         return False
-    ordered = _the_one_order(file, world, who, orders)
+    ordered = _the_one_order(file, world, who)
     if ordered is None or any(index not in fixed for index in ordered):
         return False
     return all(as_timed[before] < as_timed[after] for before, after, _ in gaps)
@@ -3221,45 +3220,27 @@ def _fewest_hand_overs(
 
 
 def _the_one_order(
-    file: File,
-    world: World,
-    who: tuple[tuple[str, ...], ...],
-    orders: tuple[tuple[int, ...], ...],
+    file: File, world: World, who: tuple[tuple[str, ...], ...]
 ) -> tuple[int, ...] | None:
     """The OPTIONs that one OBJECT puts in an order, where no other OBJECT changes anything.
 
-    None where no OBJECT or more than one leaves a choice. An OBJECT leaves a choice where
-    two of its OPTIONs could come in either order. They cannot where a PERSON, or a chain of
-    PERSONs, does one after the other, or where they start at two different fixed times.
-
-    An OBJECT that leaves no choice has one order. That order changes nothing where each
-    of its OPTIONs starts at a fixed time: it says only what the times and the PERSONs say
-    already, and it moves no start. Where one of them starts at no fixed time, the order
-    can move that start, and the result is None.
+    None where no OBJECT or more than one leaves a choice. An OBJECT leaves a choice unless
+    every two of its OPTIONs start at two different fixed times. Then it has one order, the
+    order of those times, and that order says nothing new and moves no start.
     """
     happening, required = _required_by(file, world, who)
-    later = _later_for_the_persons(orders, happening)
     fixed = {index: world.terms[file.options[index].id].fixed_start for index in happening}
 
     def either_way(one: int, other: int) -> bool:
-        apart = fixed[one] is not None and fixed[other] is not None and fixed[one] != fixed[other]
-        return not apart and other not in later[one] and one not in later[other]
+        return fixed[one] is None or fixed[other] is None or fixed[one] == fixed[other]
 
-    several = [
+    open_to_choice = [
         matters
         for thing in required
         for _, matters in [_ordered_by(file, world, who, happening, thing)]
-        if len(matters) > 1
-    ]
-    open_to_choice = [
-        matters
-        for matters in several
         if any(either_way(one, other) for one, other in combinations(matters, 2))
     ]
-    settled = [matters for matters in several if matters not in open_to_choice]
-    if len(open_to_choice) != 1 or any(fixed[index] is None for each in settled for index in each):
-        return None
-    return open_to_choice[0]
+    return open_to_choice[0] if len(open_to_choice) == 1 else None
 
 
 def _to_try_first(
