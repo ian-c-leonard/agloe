@@ -2567,9 +2567,10 @@ def test_an_object_that_another_transfer_brings_still_has_an_order() -> None:
     ]
 
 
-def keys_on_a_desk(checks: int, keys: int) -> File:
+def keys_on_a_desk(checks: int, keys: int, handed: bool = True) -> File:
     """So many checks at one desk at 10:00 am, each with its own PERSON, and so many keys
-    lying there. Each check requires each key."""
+    lying there. Each check requires each key. With ``handed`` each check also hands each key
+    over, so that where a key is turns on the order of the checks."""
     people = [f"person-{number}" for number in range(checks)]
     things = [f"key-{number}" for number in range(keys)]
     options = [stays(f"check-{number}", "desk") for number in range(checks)]
@@ -2577,6 +2578,8 @@ def keys_on_a_desk(checks: int, keys: int) -> File:
     for thing in things:
         facts += [lies_at(thing, "desk"), every_use(thing), every_transfer(thing)]
         facts += [requires_object(f"check-{number}", thing) for number in range(checks)]
+        if handed:
+            facts += [hands_over(f"check-{number}", thing) for number in range(checks)]
     locks = [lock(f"check-{number}", people[number]) for number in range(checks)]
     return trip(people, ["desk"], options, facts, locks, objects=things)
 
@@ -2652,14 +2655,15 @@ def test_a_way_is_tried_only_in_the_openings_that_the_times_of_the_trip_leave(
 
 
 def test_an_order_that_the_fixed_starts_rule_out_is_not_tried() -> None:
-    """Three PERSONs have checks at 9:00 am, 10:00 am and 11:00 am, and each check requires
-    the key on the desk. Only one order of the three keeps their times, so only that one is
-    timed and checked."""
+    """Three PERSONs have checks at 9:00 am, 10:00 am and 11:00 am. Each check requires the
+    key on the desk and hands it over. Only one order of the three keeps their times, so only
+    that one is timed and checked."""
     people = ["alex", "sam", "jo"]
     options = [stays(f"check-{number}", "desk") for number in range(3)]
     facts = [fact for number in range(3) for fact in at(f"check-{number}", 11 - number)]
     facts += [lies_at("key", "desk"), every_use("key"), every_transfer("key")]
     facts += [requires_object(f"check-{number}", "key") for number in range(3)]
+    facts += [hands_over(f"check-{number}", "key") for number in range(3)]
     locks = [lock(f"check-{number}", people[number]) for number in range(3)]
     file = trip(people, ["desk"], options, facts, locks, objects=["key"])
     who = tuple((person,) for person in people)
@@ -3087,3 +3091,150 @@ def test_many_appointments_with_one_object_are_quick_for_the_solver() -> None:
     assert found.answer is Answer.FEASIBLE
     assert len(found.itinerary) == count
     assert found.objects[0].uses == (Use(f"stop-{count - 1}", True, (Where(person="alex"),)),)
+
+
+# What the review of the solver showed.
+
+
+def test_an_object_that_nothing_moves_puts_no_option_in_an_order() -> None:
+    """The key lies on the desk, and nothing hands it over or keeps it. Alex's check at
+    10:00 am and Sam's check at any time both require it. Where it is turns on no order, so
+    Sam's check is tied to nothing and starts when the TRIP starts."""
+    options = [stays("alex-check", "desk"), stays("sam-check", "desk")]
+    facts = [
+        *at("alex-check", 10),
+        *whenever("sam-check"),
+        lies_at("key", "desk"),
+        requires_object("alex-check", "key"),
+        requires_object("sam-check", "key"),
+        every_use("key"),
+        every_transfer("key"),
+    ]
+    locks = [trip_starts(8), lock("alex-check", "alex"), lock("sam-check", "sam")]
+    file = trip(["alex", "sam"], ["desk"], options, facts, locks, objects=["key"])
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [(step.option, step.start) for step in found.itinerary] == [
+        ("sam-check", seconds(8)),
+        ("alex-check", seconds(10)),
+    ]
+
+
+def test_eight_checks_of_a_key_that_nothing_moves_are_timed_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Eight PERSONs each have a check at 10:00 am that requires the key on the desk. The
+    checks have 40,320 orders, and none of them matters: the key stays where it is."""
+    file = keys_on_a_desk(8, 1, handed=False)
+    timed = 0
+    its_own = reference._times  # pyright: ignore[reportPrivateUsage]
+
+    def counted(
+        count: int,
+        gaps: list[tuple[int, int, int]],
+        fixed: dict[int, int],
+        not_before: dict[int, int],
+        no_later: dict[int, int],
+    ) -> list[int] | None:
+        nonlocal timed
+        timed += 1
+        return its_own(count, gaps, fixed, not_before, no_later)
+
+    monkeypatch.setattr(reference, "_times", counted)
+    assert answers.check(file).answer is Answer.FEASIBLE
+    assert timed < 10
+
+
+def test_the_hand_overs_shown_are_found_without_trying_every_choice() -> None:
+    """Thirty stays at one desk, each with eight PERSONs, and each hands the key over. The
+    first PERSON has the key, and the last stay requires it. There are more ways to hand the
+    key about than could ever be tried: nine to the power of thirty. The rules put no
+    hand-over first, and the search keeps only the first choice for each place the key can
+    be, so it comes back at once."""
+    people = [f"person-{number}" for number in range(8)]
+    options = [stays(f"stay-{number}", "desk") for number in range(30)]
+    facts = [has_object("person-0", "key"), requires_object("stay-29", "key")]
+    facts += [hands_over(f"stay-{number}", "key") for number in range(30)]
+    facts += [every_use("key"), every_transfer("key")]
+    file = trip(people, ["desk"], options, facts, [], objects=["key"])
+    world = worst_case(file)
+    visits = [(option.id, tuple(people), "desk") for option in file.options]
+    found = reference._first_hand_overs(  # pyright: ignore[reportPrivateUsage]
+        world, "key", visits, [Where(person="person-0")], lambda option, person: (0, 0)
+    )
+    assert found == ()
+    # With the key on the desk and only the last PERSON in the last stay, one hand-over is
+    # the fewest: to that PERSON, in the stay listed first.
+    alone = [*visits[:-1], ("stay-29", ("person-7",), "office")]
+
+    def by_position(option: str, person: str) -> tuple[int, int]:
+        return (int(option.removeprefix("stay-")), people.index(person))
+
+    assert reference._first_hand_overs(  # pyright: ignore[reportPrivateUsage]
+        world, "key", alone, [Where(place="desk")], by_position
+    ) == ((0, 7),)
+
+
+def a_stay_with_a_voucher(*more: Document, start: Document) -> File:
+    """Alex is LOCKed into an appointment at the hotel that requires the voucher. Sam starts
+    at the station and has nothing to do."""
+    options = [stays("appointment", "hotel"), stays("desk", "hotel")]
+    facts = [
+        *at("appointment", 10),
+        *at("desk", 9),
+        starts_from("alex", "hotel"),
+        starts_from("sam", "station"),
+        takes("walk", "PT5M"),
+        start,
+        requires_object("appointment", "voucher"),
+        every_use("voucher"),
+        every_transfer("voucher"),
+        *more,
+    ]
+    ways = [way_between("walk", "hotel", "station")]
+    places = ["hotel", "station"]
+    locks = [lock("appointment", "alex")]
+    return trip(["alex", "sam"], places, options, facts, locks, ways, objects=["voucher"])
+
+
+def test_nobody_is_brought_to_a_stay_for_an_object_that_they_can_never_have() -> None:
+    """The model considers a PERSON for a stay because of an OBJECT only where they can
+    have it at some time. A voucher that lies at the hotel is nobody's. One that Alex carries
+    is only Alex's. Where an OPTION hands it over, it can come to be anybody's."""
+
+    def left_out(file: File) -> set[tuple[int, int]]:
+        search = compiler._Search(file, worst_case(file))  # pyright: ignore[reportPrivateUsage]
+        return search.left_out
+
+    sam_at_the_appointment = (1, 0)
+    lying = a_stay_with_a_voucher(start=lies_at("voucher", "hotel"))
+    carried = a_stay_with_a_voucher(start=has_object("alex", "voucher"))
+    passed_on = a_stay_with_a_voucher(
+        hands_over("desk", "voucher"), start=lies_at("voucher", "hotel")
+    )
+    assert sam_at_the_appointment in left_out(lying)
+    assert sam_at_the_appointment in left_out(carried)
+    assert sam_at_the_appointment not in left_out(passed_on)
+    for file in (lying, carried, passed_on):
+        assert checked(file).answer is Answer.FEASIBLE
+
+
+def test_the_compiler_asks_its_solver_about_a_file_with_objects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The COMPILER gives the reference checker's report, and it gets there with its own
+    search: it does not hand a FILE with OBJECTs to the reference checker's search."""
+    searched: list[object] = []
+    its_own = answers.reports
+
+    def recorded(file: File, *how: object, **named: object) -> Iterator[Answer | Report]:
+        searched.append(how[0] if how else None)
+        return its_own(file, *how, **named)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(answers, "reports", recorded)
+    rng = Random(99)
+    for _ in range(30):
+        file = a_trip_to_fetch(rng)
+        searched.clear()
+        list(compiler.reports(file))
+        assert searched == [compiler.shown]

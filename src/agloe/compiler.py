@@ -451,6 +451,12 @@ class _Search:
         # it, with the OPTIONs that matter to it: those that require it or do something with
         # it, by position in the FILE. Where an OBJECT is turns on nothing else.
         self.matters: dict[str, list[int]] = {}
+        # Each PERSON and OPTION where the PERSON can gain by taking part because of an
+        # OBJECT: they can bring it, take it or leave it there. That takes a PERSON who can
+        # have the OBJECT at some time. Where no OPTION hands it over, that is only whoever
+        # has it when the TRIP starts, and nobody where it lies at a PLACE. Whether anybody
+        # else takes part changes nothing about the OBJECT then.
+        self.touches: set[tuple[int, int]] = set()
         for thing in file.objects:
             touched = [
                 index
@@ -458,9 +464,20 @@ class _Search:
                 if (option.id, thing.id) in world.needs or (option.id, thing.id) in world.does
             ]
             required = any((option.id, thing.id) in world.needs for option in file.options)
-            if required and thing.id not in world.brought:
-                self.matters[thing.id] = touched
-        self.touches = {index for matter in self.matters.values() for index in matter}
+            if not required or thing.id in world.brought:
+                continue
+            self.matters[thing.id] = touched
+            handed = any(
+                world.does.get((option.id, thing.id)) in ("hands_over", "any")
+                for option in file.options
+            )
+            start = world.starts.get(thing.id, Where())
+            holders = [
+                number
+                for number, person in enumerate(file.persons)
+                if handed or thing.id in world.starts_anywhere or start.person == person.id
+            ]
+            self.touches.update((number, index) for number in holders for index in touched)
 
     def _count_time(self) -> None:
         """When each OPTION starts, and its turn among OPTIONs that share an instant.
@@ -516,12 +533,12 @@ class _Search:
                     model.add(takes == 1)
                 # A PERSON gains nothing by staying somewhere unless a LOCK asks them to, the
                 # stay could meet a must of theirs, they have a CAPABILITY that the stay
-                # requires of one PERSON, or the stay matters to an OBJECT: they can bring
-                # it, take it or leave it there. Without the stay they are in the same PLACE
-                # at the same times, and every CONSTRAINT is as easy to meet or easier. So
-                # the model leaves such stays out.
+                # requires of one PERSON, or the stay matters to an OBJECT that they can
+                # have: they can bring it, take it or leave it there. Without the stay they
+                # are in the same PLACE at the same times, and every CONSTRAINT is as easy
+                # to meet or easier. So the model leaves such stays out.
                 wanted = index in meets[number] or (number, index) in supplies
-                wanted = wanted or index in self.touches
+                wanted = wanted or (number, index) in self.touches
                 if not self.usable[index] or (not self.moves[index] and not asked and not wanted):
                     self._rule_out(number, index)
         self._hold_to_the_requirements()
@@ -604,6 +621,20 @@ class _Search:
         """
         model, file, world = self.model, self.file, self.world
         options = file.options
+        moves = any((option.id, thing) in world.does for option in options)
+        if not moves and thing not in world.starts_anywhere:
+            # Nothing does anything with it, so it stays where it starts. An OPTION that
+            # requires it happens only there, or with the PERSON who has it.
+            start = world.starts.get(thing, Where())
+            for index in matter:
+                holder = [
+                    self.takes[number][index]
+                    for number, person in enumerate(file.persons)
+                    if person.id == start.person
+                ]
+                if start.place != options[index].origin:
+                    model.add_bool_or([self.used[index].negated(), *holder])
+            return
         origins = {options[index].origin for index in matter}
         spots = [
             *(Where(person=person.id) for person in file.persons),
