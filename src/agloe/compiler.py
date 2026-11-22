@@ -48,7 +48,9 @@ type _By = dict[tuple[int, int], reference.Route]  # the WAYs a PERSON takes aft
 # When a PERSON starts an unlisted WAY of those routes that a COMPLETE FACT could rule out, by
 # the place of the WAY in its route.
 type _Falls = dict[tuple[int, int, int], int]
-type _Choice = tuple[_Who, _Orders, _By | None, _Falls | None]
+# The OPTIONs that happen, in the order the solver has them happen: by start, then by turn.
+type _InOrder = tuple[int, ...]
+type _Choice = tuple[_Who, _Orders, _By | None, _Falls | None, _InOrder | None]
 # What the solver answered for each model it was asked about, by the digest of the model.
 type _Asked = dict[bytes, tuple[cp_model.CpSolver, object]]
 type _Amount = cp_model.LinearExpr | int  # seconds: a plain number, or one the solver works out
@@ -308,9 +310,14 @@ def _checked(
     before or after the span as the solver did, and tries no other side. The times are its
     own, by the usual rule. With ``any_will_do`` the question is only whether the choice
     works, and the first ITINERARY that the reference checker finds for it answers that.
+    It then tries the OPTIONs that matter to each OBJECT in the order the solver has them
+    first, and works out the hand-overs for that order itself. The solver's times keep that
+    order, so the reference checker need not look for another.
     """
-    who, orders, by, falls = choice
-    itinerary = reference.scheduled(file, world, who, orders, by, known, falls, any_will_do)
+    who, orders, by, falls, in_order = choice
+    itinerary = reference.scheduled(
+        file, world, who, orders, by, known, falls, any_will_do, in_order
+    )
     if itinerary is None:
         raise AssertionError("the solver chose PERSONs and orders that the rules refuse")
     return itinerary
@@ -1385,7 +1392,13 @@ class _Search:
             # The route after the last OPTION.
             takes(number, len(order) - 1, self.routes[number].get((here, count), []))
             orders.append(tuple(order))
-        return self._who(orders), tuple(orders), by, falls
+        happening = {index for order in orders for index in order}
+
+        def comes(index: int) -> tuple[int, int]:
+            return (solver.value(self.start[index]), solver.value(self.turn[index]))
+
+        in_order = tuple(sorted(happening, key=comes))
+        return self._who(orders), tuple(orders), by, falls, in_order
 
     def first_in_file_order(self) -> _Choice | None:
         """The choice of PERSONs and orders that "Which ITINERARY is shown" puts first."""
@@ -1429,7 +1442,7 @@ class _Search:
                 order.append(found)
                 here = found
             orders.append(tuple(order))
-        return self._who(orders), tuple(orders), None, None
+        return self._who(orders), tuple(orders), None, None, None
 
     def _only_order(self, number: int) -> tuple[int, ...] | None:
         """The OPTIONs this PERSON does, where they have nothing to choose, or None.

@@ -3754,3 +3754,81 @@ def test_an_order_is_given_up_at_the_first_option_where_the_object_is_not_at_han
         file = five_at_each_hour(deposit_last)
         assert compiler.works(file, worst_case(file))
         assert gone < 100
+
+
+def a_register_and_a_voucher() -> File:
+    """Four travelers, each LOCKed into an appointment of their own at one desk at each hour
+    from 9:00 am to noon. Every appointment requires the register that lies on the desk. One
+    traveler has the voucher, and their appointment at 9:00 am keeps it at the desk and can
+    hand the register over. Every other appointment requires the voucher. The FILE lists the
+    register first, and that traveler's appointments last among those of each hour."""
+    people = [f"person-{number}" for number in range(4)]
+    names = [
+        f"{person}-at-{hour}" for hour in (9, 10, 11, 12) for person in (*people[1:], people[0])
+    ]
+    deposit = "person-0-at-9"
+    options = [stays(name, "desk") for name in names]
+    facts = [fact for name in names for fact in at(name, int(name.rsplit("-", 1)[1]))]
+    facts += [lies_at("register", "desk"), hands_over(deposit, "register")]
+    facts += [requires_object(name, "register") for name in names]
+    facts += [has_object("person-0", "voucher"), keeps(deposit, "voucher")]
+    facts += [requires_object(name, "voucher") for name in names if name != deposit]
+    facts += [every_use("register"), every_transfer("register")]
+    facts += [every_use("voucher"), every_transfer("voucher")]
+    locks = [lock(name, name.split("-at-")[0]) for name in names]
+    return trip(people, ["desk"], options, facts, locks, objects=["register", "voucher"])
+
+
+def a_key_check_after_breakfast() -> File:
+    """Alex has breakfast from 8:45 am to 9:30 am, and a key check at any time. Four other
+    guests each have a key check at each hour from 9:00 am to noon. Each key check requires
+    the key that lies at the desk and can hand it over. Each stay lets in only the guest who
+    is LOCKed into it. The TRIP starts at 8:45 am. The FILE lists Alex's key check first."""
+    guests = [f"guest-{number}" for number in range(4)]
+    checks = [f"{guest}-at-{hour}" for hour in (9, 10, 11, 12) for guest in guests]
+    names = ["alex-check", "breakfast", *checks]
+    options = [stays(name, "desk") for name in names]
+    facts = [*whenever("alex-check"), *at("breakfast", 8, 45, "PT45M")]
+    facts += [fact for name in checks for fact in at(name, int(name.rsplit("-", 1)[1]), 0, "PT5M")]
+    facts += [lies_at("key", "desk"), every_use("key"), every_transfer("key")]
+    for name in ("alex-check", *checks):
+        facts += [requires_object(name, "key"), hands_over(name, "key")]
+    whose = {"alex-check": "alex", "breakfast": "alex"}
+    whose.update({name: name.split("-at-")[0] for name in checks})
+    for name, guest in whose.items():
+        facts += [needs_right(name), booking(name, guest), every_right(name)]
+    locks = [trip_starts(8, 45), *(lock(name, guest) for name, guest in whose.items())]
+    return trip(["alex", *guests], ["desk"], options, facts, locks, rights=True, objects=["key"])
+
+
+def test_the_first_answer_checks_the_plan_in_the_order_the_solver_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The solver's own search has every OPTION that matters to an OBJECT in an order that
+    works. To answer whether anything works, the reference checker tries that order first,
+    and it works. So it does not look for an order itself.
+
+    Its own search would take long in both of these FILEs. In the first, an order of the
+    register's appointments is made in full before the voucher rules out how it starts. In
+    the second, Alex's key check is tried before the checks at 9:00 am, where breakfast
+    leaves no time for it, with every order of the checks that come later."""
+    timed = gone = 0
+    times, further = reference._times, reference._one_further  # pyright: ignore[reportPrivateUsage]
+
+    def counted_times(*how: object) -> object:
+        nonlocal timed
+        timed += 1
+        return times(*how)  # type: ignore[arg-type]
+
+    def counted_further(*how: object) -> object:
+        nonlocal gone
+        gone += 1
+        return further(*how)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(reference, "_times", counted_times)
+    monkeypatch.setattr(reference, "_one_further", counted_further)
+    for file in (a_register_and_a_voucher(), a_key_check_after_breakfast()):
+        timed = gone = 0
+        assert compiler.works(file, worst_case(file))
+        assert timed < 5
+        assert gone < 100

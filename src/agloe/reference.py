@@ -20,7 +20,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from heapq import heapify, heappop, heappush
-from itertools import combinations, groupby, pairwise, permutations, product
+from itertools import chain, combinations, groupby, pairwise, permutations, product
 from math import inf
 
 from agloe.file import Booking, Complete, File, Offer, Satisfies, StartsFrom, Want, WithObject
@@ -1953,6 +1953,98 @@ def _can_move(
     }
 
 
+def _ordered_by(
+    file: File,
+    world: World,
+    who: tuple[tuple[str, ...], ...],
+    happening: Sequence[int],
+    thing: str,
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """The OPTIONs of a plan that have to do with one OBJECT, and those it puts in an order.
+
+    The first are the OPTIONs that require it or do something with it, as the FILE lists
+    them. The second are those that require it or can move it. An OBJECT that no OPTION of
+    the plan can move stays where it starts. So the order of the OPTIONs that require it
+    changes nothing, and it puts none in an order.
+    """
+    options = file.options
+    touched = tuple(
+        index
+        for index in happening
+        if (options[index].id, thing) in world.needs or (options[index].id, thing) in world.does
+    )
+    can_move = _can_move(file, world, who, happening, thing)
+    if not can_move:
+        return touched, ()
+    matters = tuple(
+        index
+        for index in happening
+        if (options[index].id, thing) in world.needs or index in can_move
+    )
+    return touched, matters
+
+
+def _as_chain(
+    file: File,
+    required: Sequence[str],
+    gaps: list[tuple[int, int, int]],
+    ranked: tuple[_Ranked, ...],
+) -> _Chain:
+    """One result of ``_chains``, from the gaps of the orders and the hand-overs of each OBJECT."""
+    handed: dict[int, _Taken] = {}
+    for each, theirs in zip(required, ranked, strict=True):
+        for index, person in theirs:
+            handed[index] = (*handed.get(index, ()), (each, file.persons[person].id))
+    return gaps, handed, (sum(map(len, ranked)), ranked)
+
+
+def _chain_in_order(
+    file: File, world: World, who: tuple[tuple[str, ...], ...], in_order: Sequence[int]
+) -> _Chain | None:
+    """What ``_chains`` gives for one order of all the OPTIONs of a plan, or None.
+
+    ``in_order`` holds the OPTIONs that happen, by position in the FILE, in an order that
+    keeps each PERSON's own. Each OBJECT that some OPTION of the plan requires takes the
+    order of its own OPTIONs from it, with the hand-overs that the rules put first in that
+    order. The result is None where an OBJECT has no choice of hand-overs that works in that
+    order, and where no OPTION of the plan requires an OBJECT.
+    """
+    happening = [index for index, persons in enumerate(who) if persons]
+    place = {index: number for number, index in enumerate(in_order)}
+    required = [
+        thing.id
+        for thing in file.objects
+        if any((file.options[index].id, thing.id) in world.needs for index in happening)
+    ]
+    if not required or any(index not in place for index in happening):
+        return None
+    options = file.options
+    people = {person.id: number for number, person in enumerate(file.persons)}
+    place_of = {option.id: number for number, option in enumerate(options)}
+
+    def by_position(option: str, person: str) -> tuple[int, int]:
+        return (place_of[option], people[person])
+
+    gaps: list[tuple[int, int, int]] = []
+    ranked: list[_Ranked] = []
+    for thing in required:
+        touched, matters = _ordered_by(file, world, who, happening, thing)
+        order = sorted(matters, key=place.__getitem__)
+        gaps += [(before, after, 0) for before, after in pairwise(order)]
+        if thing in world.brought:
+            ranked.append(())
+            continue
+        visits = [
+            (options[index].id, who[index], options[index].origin)
+            for index in (order if matters else touched)
+        ]
+        found = _first_hand_overs(world, thing, visits, _begins(file, world, thing), by_position)
+        if found is None:
+            return None
+        ranked.append(found)
+    return _as_chain(file, required, gaps, tuple(ranked))
+
+
 def _orders_together(
     file: File,
     world: World,
@@ -1970,29 +2062,10 @@ def _orders_together(
     fixed = {index: world.terms[options[index].id].fixed_start for index in happening}
     people = {person.id: number for number, person in enumerate(file.persons)}
     place_of = {option.id: number for number, option in enumerate(options)}
-    touched = [
-        tuple(
-            index
-            for index in happening
-            if (options[index].id, thing) in world.needs or (options[index].id, thing) in world.does
-        )
-        for thing in required
-    ]
-    # An OBJECT that no OPTION of the plan can move stays where it starts. So the order of
-    # the OPTIONs that require it changes nothing, and it puts none in an order. The others
-    # put in an order the OPTIONs that require them or can move them.
-    moving = [_can_move(file, world, who, happening, thing) for thing in required]
-    moved = [bool(theirs) for theirs in moving]
-    matters = [
-        tuple(
-            index
-            for index in happening
-            if (options[index].id, thing) in world.needs or index in can_move
-        )
-        if can_move
-        else ()
-        for thing, can_move in zip(required, moving, strict=True)
-    ]
+    each = [_ordered_by(file, world, who, happening, thing) for thing in required]
+    touched = [theirs for theirs, _ in each]
+    matters = [theirs for _, theirs in each]
+    moved = [bool(theirs) for theirs in matters]
 
     def closed(later: dict[int, set[int]]) -> dict[int, set[int]]:
         """What comes after what, with everything that follows from it."""
@@ -2086,11 +2159,7 @@ def _orders_together(
         longer = [*gaps, *((before, after, 0) for before, after in pairwise(order))]
         ranked = (*chosen, found)
         if len(ranked) == len(required):
-            handed: dict[int, _Taken] = {}
-            for each, theirs in zip(required, ranked, strict=True):
-                for index, person in theirs:
-                    handed[index] = (*handed.get(index, ()), (each, file.persons[person].id))
-            yield longer, handed, (sum(map(len, ranked)), ranked)
+            yield _as_chain(file, required, longer, ranked)
             continue
         further = {index: set(after) for index, after in later.items()}
         for place, index in enumerate(order):
@@ -2201,6 +2270,7 @@ def scheduled(
     known: Routes | None = None,
     falls: Mapping[tuple[int, int, int], int] | None = None,
     any_will_do: bool = False,
+    in_order: Sequence[int] | None = None,
 ) -> Itinerary | None:
     """The ITINERARY for one choice of PERSONs and orders, or None when it breaks a CONSTRAINT.
 
@@ -2228,9 +2298,14 @@ def scheduled(
 
     With ``any_will_do``, the ITINERARY is the first one found that works. It answers whether
     anything works for this choice, and it need not be the one that rules 9 to 11 put first.
+    ``in_order`` goes with ``any_will_do`` and ``by``. It holds the OPTIONs that happen, by
+    position in the FILE, in the order they happen in a plan that is known to work. The
+    OPTIONs that matter to each OBJECT are tried in that order first.
     """
     if by is not None:
-        return next(_timings(file, world, who, orders, by, falls, None, any_will_do), None)
+        first = in_order if any_will_do else None
+        found = _timings(file, world, who, orders, by, falls, None, any_will_do, first)
+        return next(found, None)
     known = known or Routes(file, world)
     return next(_schedules(file, world, who, orders, known, any_will_do), None)
 
@@ -2788,6 +2863,7 @@ def _timings(
     falls: Mapping[tuple[int, int, int], int] | None = None,
     chains: Iterable[_Chain] | None = None,
     any_will_do: bool = False,
+    in_order: Sequence[int] | None = None,
 ) -> Iterator[Itinerary]:
     """The ITINERARIES for one choice of PERSONs, orders and routes, one for each timing.
 
@@ -2805,17 +2881,26 @@ def _timings(
     hand-overs.
 
     Where an OPTION of the plan requires an OBJECT, each of those orders gives one ITINERARY:
-    it is timed as the rule times it, in the first way the timing can fall that works. The
-    ITINERARIES of the orders then come in the order of "Which ITINERARY is shown": the fewest
-    hand-overs, then the hand-overs listed first, then the steps that come first with their
-    times. So they are all found before the first is given. That holds too where another
-    transfer brings the OBJECT: which OPTIONs it has to be brought to is read off the
-    ITINERARY that comes first. Where no OPTION requires an OBJECT, or with ``any_will_do``,
-    each ITINERARY is given as soon as it is found, for each way the timing can fall.
+    it is timed as the rule times it, in the first way the timing can fall that works. Of
+    the ITINERARIES of the orders, only the one that "Which ITINERARY is shown" puts first
+    is given: the fewest hand-overs, then the hand-overs listed first, then the steps that
+    come first with their times. So they are all found before it is given, and only the
+    first so far is kept. That holds too where another transfer brings the OBJECT: which
+    OPTIONs it has to be brought to is read off the ITINERARY that comes first. Where no
+    OPTION requires an OBJECT, or with ``any_will_do``, each ITINERARY is given as soon as
+    it is found, for each way the timing can fall.
+
+    ``in_order`` holds the OPTIONs that happen in the order of a plan that is known to work.
+    Then the OPTIONs that matter to each OBJECT are tried in that order before any other.
+    The plan's own times keep that order, so the rule for start times has an answer for it,
+    and no other order has to be looked for. Every other order is still tried after it.
     """
     if chains is None:
         found = _chains(file, world, who, orders)
         chains = _NOTHING_TO_ORDER if found is None else found
+        known = None if in_order is None else _chain_in_order(file, world, who, in_order)
+        if found is not None and known is not None:
+            chains = chain([known], found)
     in_turn = any_will_do or chains is _NOTHING_TO_ORDER
     listed = len(file.options)
     legs: list[tuple[str, Leg]] = []  # each WAY taken: who takes it, and which one
@@ -2928,7 +3013,7 @@ def _timings(
             [sum(latest < falls[taken[node - listed]] for _, latest in spans)]
             for node, spans in ruled_out
         ]
-    working: list[tuple[tuple[int, tuple[_Ranked, ...]], Itinerary]] = []
+    first: tuple[_Comes, Itinerary] | None = None
     for more, handed, rank in chains:
         # Each order of the OPTIONs that matter to an OBJECT is more gaps. An order that goes
         # round in a circle with what the PERSONs do is no order, also where every step in
@@ -2977,15 +3062,13 @@ def _timings(
                 continue
             if in_turn:
                 yield itinerary
-            else:
-                working.append((rank, itinerary))
-                break  # this order is timed: the first way the timing can fall that works
-    if len(working) > 1:
-        working.sort(
-            key=lambda each: (each[0], [_step_in_file_order(file, step) for step in each[1]])
-        )
-    for _, itinerary in working:
-        yield itinerary
+                continue
+            comes = (rank, [_step_in_file_order(file, step) for step in itinerary])
+            if first is None or comes < first[0]:
+                first = (comes, itinerary)
+            break  # this order is timed: the first way the timing can fall that works
+    if first is not None:
+        yield first[1]
 
 
 def _closed(file: File, origin: str, destination: str) -> list[tuple[int, int]]:
@@ -3182,6 +3265,8 @@ def _settle(
 
 
 type _StepOrder = tuple[int, int, tuple[int, ...], int, int, int]
+# How an ITINERARY ranks among those of one choice: its hand-overs, then its steps in order.
+type _Comes = tuple[tuple[int, tuple[_Ranked, ...]], list[_StepOrder]]
 
 
 def _step_in_file_order(file: File, step: Step) -> _StepOrder:
