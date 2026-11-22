@@ -4229,3 +4229,21 @@ def test_the_search_stops_at_a_plan_that_no_order_can_beat(monkeypatch: pytest.M
     assert timed < 50
     assert not any(step.handed for step in found.itinerary)
     assert [step.start for step in found.itinerary if step.option == "kim-1"] == [seconds(8, 35)]
+
+
+def test_the_time_to_cross_counts_the_hours_in_which_no_unlisted_way_leaves() -> None:
+    """The search for a conflict takes FACTs out of the FILE. With the time and the length
+    of one guest's appointment taken out, that guest could bring the register early. The
+    other ten still require it at the hotel at 9:00 am, when the clerk requires it at the
+    airport. In the best case an unlisted WAY joins the two PLACEs, but the FILE lists every
+    WAY for that day. So between two fixed times of that day, only the shuttle crosses, and
+    the solver sees at once that nothing works."""
+    file = a_register_at_two_places()
+    left = Remaining(file).without("guest-0-desk-length").without("guest-0-desk-time")
+    world, open_pairs = reference.best_case_left(left)
+    assert world.unlisted is None or world.unlisted
+    search = compiler._Search(file, world, open_pairs, plain=True)  # pyright: ignore[reportPrivateUsage]
+    solver, status = search.ask()
+    assert search.read(solver, status) is None
+    assert solver.num_conflicts < 1000
+    assert not compiler.can_work(left)
