@@ -19,9 +19,10 @@ reference checker's own search then answers for the whole TRIP. That search trie
 so it is meant for small TRIPs.
 """
 
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence, Set
 from dataclasses import replace
 from hashlib import sha256
+from heapq import heappop, heappush
 from itertools import combinations
 from math import inf
 
@@ -35,7 +36,7 @@ from agloe.file import (
     StartsFrom,
     Want,
 )
-from agloe.reference import Itinerary, Remaining, World
+from agloe.reference import Itinerary, Remaining, Where, World
 
 _MOST_AT_ONCE = 60  # yes-or-no choices ranked in one solve: their weights must fit in 64 bits
 _FURTHEST = 2**62  # a time further than this from the first fixed time does not fit in 64 bits
@@ -48,7 +49,9 @@ type _By = dict[tuple[int, int], reference.Route]  # the WAYs a PERSON takes aft
 # When a PERSON starts an unlisted WAY of those routes that a COMPLETE FACT could rule out, by
 # the place of the WAY in its route.
 type _Falls = dict[tuple[int, int, int], int]
-type _Choice = tuple[_Who, _Orders, _By | None, _Falls | None]
+# The OPTIONs that happen, in the order the solver has them happen: by start, then by turn.
+type _InOrder = tuple[int, ...]
+type _Choice = tuple[_Who, _Orders, _By | None, _Falls | None, _InOrder | None]
 # What the solver answered for each model it was asked about, by the digest of the model.
 type _Asked = dict[bytes, tuple[cp_model.CpSolver, object]]
 type _Amount = cp_model.LinearExpr | int  # seconds: a plain number, or one the solver works out
@@ -78,13 +81,7 @@ def reports(file: File, ahead: bool = True) -> Iterator[Answer | Report]:
     Where the numbers of a FILE do not fit the solver, the reference checker starts over. Both
     are exact, so its answer is the one the solver proved. What was given before is not given
     again.
-
-    The solver's model has no OBJECTs. So the reference checker checks a FILE in which some
-    OPTION requires an OBJECT or might.
     """
-    if file.objects_asked_for():
-        yield from answers.reports(file, ahead=ahead)
-        return
     given: list[Answer | Report] = []
     try:
         asked: _Asked = {}
@@ -314,9 +311,14 @@ def _checked(
     before or after the span as the solver did, and tries no other side. The times are its
     own, by the usual rule. With ``any_will_do`` the question is only whether the choice
     works, and the first ITINERARY that the reference checker finds for it answers that.
+    It then tries the OPTIONs that matter to each OBJECT in the order the solver has them
+    first, and works out the hand-overs for that order itself. The solver's times keep that
+    order, so the reference checker need not look for another.
     """
-    who, orders, by, falls = choice
-    itinerary = reference.scheduled(file, world, who, orders, by, known, falls, any_will_do)
+    who, orders, by, falls, in_order = choice
+    itinerary = reference.scheduled(
+        file, world, who, orders, by, known, falls, any_will_do, in_order
+    )
     if itinerary is None:
         raise AssertionError("the solver chose PERSONs and orders that the rules refuse")
     return itinerary
@@ -429,9 +431,16 @@ class _Search:
         # the choice that takes the route, the route and the place of the WAY in it.
         self.moments: dict[tuple[int, reference.Route, int], cp_model.IntVar] = {}
         self.known = reference.Routes(file, world)
+        # The earliest anything is at each PLACE, setting out from a PLACE at a time or at
+        # any time.
+        self._crossing: dict[tuple[str, int | None], dict[str, int]] = {}
+        self._legs: dict[str, list[tuple[str, int, int | None]]] | None = None
+        self._closed: dict[tuple[str, str], list[tuple[int, int]]] = {}
         self._worth_trying: dict[tuple[str, str, bool], list[reference.Route]] = {}
         for number in range(len(file.persons)):
             self._lay_out_path(number)
+        for thing, matter in self.matters.items():
+            self._follow(thing, matter)
 
     def _read_the_world(self) -> None:
         """What the world says about each OPTION and WAY."""
@@ -451,6 +460,19 @@ class _Search:
             self.way_lasts[way.id] = None if longest is None else shortest
         unlisted = world.unlisted is None or bool(world.unlisted)
         self.facts = [fact for fact in file.facts if isinstance(fact, Complete)] if unlisted else []
+        # Each OBJECT that some OPTION requires in this world, unless another transfer brings
+        # it, with the OPTIONs that matter to it: those that require it or do something with
+        # it, by position in the FILE. Where an OBJECT is turns on nothing else.
+        self.matters: dict[str, list[int]] = {}
+        for thing in file.objects:
+            touched = [
+                index
+                for index, option in enumerate(file.options)
+                if (option.id, thing.id) in world.needs or (option.id, thing.id) in world.does
+            ]
+            required = any((option.id, thing.id) in world.needs for option in file.options)
+            if required and thing.id not in world.brought:
+                self.matters[thing.id] = touched
 
     def _count_time(self) -> None:
         """When each OPTION starts, and its turn among OPTIONs that share an instant.
@@ -494,7 +516,8 @@ class _Search:
         self.used = [model.new_bool_var(f"used {option.id}") for option in file.options]
         self.left_out: set[tuple[int, int]] = set()  # each PERSON and OPTION that is ruled out
         meets = self._hold_to_the_wants()
-        supplies = self._could_supply(meets)
+        carries = self._could_carry()
+        supplies = self._could_supply(meets, carries)
         for index, option in enumerate(file.options):
             model.add_max_equality(self.used[index], [0, *(row[index] for row in self.takes)])
             for number, person in enumerate(file.persons):
@@ -505,24 +528,87 @@ class _Search:
                 if asked:
                     model.add(takes == 1)
                 # A PERSON gains nothing by staying somewhere unless a LOCK asks them to, the
-                # stay could meet a must of theirs, or they have a CAPABILITY that the stay
-                # requires of one PERSON. Without the stay they are in the same PLACE at the
-                # same times, and every CONSTRAINT is as easy to meet or easier. So the model
-                # leaves such stays out.
+                # stay could meet a must of theirs, they have a CAPABILITY that the stay
+                # requires of one PERSON, or they can have an OBJECT that the stay requires,
+                # hands over or keeps: they can bring it, take it or leave it there. Without
+                # the stay they are in the same PLACE at the same times, and every CONSTRAINT
+                # is as easy to meet or easier. So the model leaves such stays out.
                 wanted = index in meets[number] or (number, index) in supplies
+                wanted = wanted or (number, index) in carries
                 if not self.usable[index] or (not self.moves[index] and not asked and not wanted):
                     self._rule_out(number, index)
         self._hold_to_the_requirements()
         self._hold_to_the_rights()
 
-    def _could_supply(self, meets: Sequence[set[int]]) -> set[tuple[int, int]]:
+    def _could_carry(self) -> set[tuple[int, int]]:
+        """Each PERSON and OPTION where the PERSON can gain by taking part because of an OBJECT.
+
+        The OPTION requires the OBJECT, hands it over or keeps it, and the PERSON can have the
+        OBJECT at some time: so they can bring it, take it or leave it there. A PERSON can
+        have it who has it when the TRIP starts, or who can take part in an OPTION that hands
+        it over. Nobody else ever has it, so whether they take part changes nothing about
+        where the OBJECT is.
+
+        An OPTION that only might keep the OBJECT gives nobody a reason. Where whoever has
+        the OBJECT stays out of it, the OBJECT might be in fewer places afterwards, and it is
+        at hand wherever it was at hand with more.
+
+        ``self.holders`` keeps, for each OBJECT that matters, the PERSONs who can have it.
+        """
+        file, world = self.file, self.world
+        everybody = range(len(file.persons))
+        self.holders: dict[str, set[int]] = {}
+        carries: set[tuple[int, int]] = set()
+        for thing, matter in self.matters.items():
+            start = world.starts.get(thing)
+            holders = {
+                number
+                for number, person in enumerate(file.persons)
+                if (start is None and thing in world.starts_anywhere)
+                or (start is not None and start.person == person.id)
+            }
+            gain: list[int] = []
+            for index in matter:
+                option = file.options[index].id
+                does = world.does.get((option, thing), "nothing")
+                if does in ("hands_over", "any"):
+                    holders |= {n for n in everybody if not self._shut_out(n, index)}
+                if (option, thing) in world.needs or does in ("hands_over", "keeps", "any"):
+                    gain.append(index)
+            self.holders[thing] = holders
+            carries.update((number, index) for number in holders for index in gain)
+        return carries
+
+    def _shut_out(self, number: int, index: int) -> bool:
+        """Whether this PERSON takes no part in this OPTION, whoever else does.
+
+        The OPTION cannot happen, a must-not keeps the PERSON out of it, they lack a
+        CAPABILITY that it requires of each PERSON, or it needs a right that they do not have
+        and can pay for no place of. More than this can keep a PERSON out. This only says who
+        is sure to be out, so that the model can leave out what turns on them.
+        """
+        file, world = self.file, self.world
+        option, person = file.options[index].id, file.persons[number].id
+        if not self.usable[index] or (number, index) in self.left_out:
+            return True
+        for (asking, capability), of in world.requires.items():
+            if asking == option and of == "each" and (person, capability) not in world.has:
+                return True
+        if option not in world.needs_right or (option, person) in world.rights:
+            return False
+        return not any((offer.id, person) in world.payable for offer in file.offers(option))
+
+    def _could_supply(
+        self, meets: Sequence[set[int]], carries: Set[tuple[int, int]]
+    ) -> set[tuple[int, int]]:
         """Each PERSON and stay where the PERSON may have to come to meet a requirement.
 
         The stay requires a CAPABILITY of one PERSON, and the PERSON has it. Two cases are
-        left out. Nobody comes where nobody else has a reason to be there: a LOCK, or a must
-        that the stay could meet, as ``meets`` says for each PERSON. Without them the stay
-        need not happen at all. And nobody comes for a CAPABILITY that a PERSON whom a LOCK
-        names in the stay has: that requirement is met whenever the stay happens.
+        left out. Nobody comes where nobody else has a reason to be there: a LOCK, a must
+        that the stay could meet, as ``meets`` says for each PERSON, or an OBJECT that they
+        can bring, take or leave there, as ``carries`` says. Without them the stay need not
+        happen at all. And nobody comes for a CAPABILITY that a PERSON whom a LOCK names in
+        the stay has: that requirement is met whenever the stay happens.
 
         An OPTION that moves is in the result too, and nothing reads it there: the model
         leaves nobody out of one.
@@ -532,11 +618,13 @@ class _Search:
         locked: dict[str, set[str]] = {}
         for lock in file.locks:
             locked.setdefault(lock.option, set()).update(lock.persons)
+        happens = {index for theirs in meets for index in theirs}
+        happens |= {index for _, index in carries}
         supplies: set[tuple[int, int]] = set()
         for (option, capability), of in world.requires.items():
             index = position[option]
             named = locked.get(option, set())
-            if of != "one" or not (named or any(index in theirs for theirs in meets)):
+            if of != "one" or not (named or index in happens):
                 continue
             if any((person, capability) in world.has for person in named):
                 continue
@@ -568,6 +656,374 @@ class _Search:
             for number in range(len(file.persons)):
                 if number not in able and (number, index) not in self.left_out:
                     self._rule_out(number, index)
+
+    def _follow(self, thing: str, matter: Sequence[int]) -> None:
+        """One OBJECT is at hand where it is required or handed over.
+
+        The OPTIONs that matter to it and happen form a path, in the order they happen: a
+        circuit through a point that stands for the start of the TRIP. An OPTION that comes
+        later on the path has a later turn and starts no earlier. Each PERSON's own order
+        gives turns too, so the path keeps to every one of them.
+
+        Along the path the model carries where the OBJECT might be: with each PERSON, at each
+        PLACE where one of these OPTIONs starts, or somewhere else. That is one place in a
+        possible world, and several where an OPTION might keep the OBJECT. An OPTION that
+        requires the OBJECT needs each of those places at hand: a PERSON who takes part, or
+        the PLACE where it starts. So does a hand-over, and after it the PERSON who took the
+        OBJECT has it. An OPTION that keeps it moves it from whoever takes part to the PLACE
+        where the OPTION starts. Where the world leaves the start to pick, the solver picks
+        it, and where an OPTION might do anything, the solver picks what it does.
+
+        The reference checker works out the order and the hand-overs again for the choice
+        the solver makes, and checks them. So this only has to say when some order and some
+        hand-overs work.
+        """
+        model, file, world = self.model, self.file, self.world
+        options = file.options
+        moves = any((option.id, thing) in world.does for option in options)
+        picked = thing in world.starts_anywhere and thing not in world.starts
+        if not picked and not (moves and self.holders[thing]):
+            # Nothing does anything with it, or nobody can ever have it. So it stays where
+            # it starts. An OPTION that requires it happens only there, or with the PERSON
+            # who has it.
+            start = world.starts.get(thing, Where())
+            holder = [
+                self.takes[number]
+                for number, person in enumerate(file.persons)
+                if person.id == start.person
+            ]
+            for index in matter:
+                required = (options[index].id, thing) in world.needs
+                if required and start.place != options[index].origin:
+                    model.add_bool_or([self.used[index].negated(), *(row[index] for row in holder)])
+            return
+        origins = {options[index].origin for index in matter}
+        spots = [
+            *(Where(person=person.id) for person in file.persons),
+            *(Where(place=place.id) for place in file.places if place.id in origins),
+            Where(),
+        ]
+        somewhere_else = len(spots) - 1
+
+        def some(what: str) -> list[cp_model.IntVar]:
+            return [model.new_bool_var(f"{thing} {what} {n}") for n in range(len(spots))]
+
+        # Where it starts. A PLACE where none of these OPTIONs starts is as good as anywhere
+        # else: the OBJECT is at hand for nothing there, and nothing moves it.
+        at_first = some("starts")
+        if thing in world.starts_anywhere and thing not in world.starts:
+            model.add_exactly_one(at_first)
+        else:
+            stated = world.starts.get(thing, Where())
+            begins = spots.index(stated) if stated in spots else somewhere_else
+            for n, spot in enumerate(at_first):
+                model.add(spot == (n == begins))
+
+        before = {index: some(f"before {options[index].id}") for index in matter}
+        after = {index: some(f"after {options[index].id}") for index in matter}
+        node = {index: n for n, index in enumerate(matter)}
+        start_of_trip = len(matter)
+        untouched = model.new_bool_var(f"nothing touches {thing}")
+        arcs: list[tuple[int, int, cp_model.LiteralT]] = [(start_of_trip, start_of_trip, untouched)]
+        handed: dict[int, cp_model.IntVar] = {}  # the choice that it is handed over in an OPTION
+        for index in matter:
+            arcs.append((node[index], node[index], self.used[index].negated()))
+            first = model.new_bool_var(f"{thing} first {options[index].id}")
+            last = model.new_bool_var(f"{thing} last {options[index].id}")
+            arcs += [(start_of_trip, node[index], first), (node[index], start_of_trip, last)]
+            for n in range(len(spots)):
+                _when(model.add(before[index][n] == at_first[n]), first)
+            for other in matter:
+                early, late = self.terms[index].fixed_start, self.terms[other].fixed_start
+                if other == index or (early is not None and late is not None and early > late):
+                    continue  # an OPTION with a later fixed start never comes first
+                then = model.new_bool_var(f"{thing}: {options[other].id} after {options[index].id}")
+                arcs.append((node[index], node[other], then))
+                _when(model.add(self.turn[other] >= self.turn[index] + 1), then)
+                _when(model.add(self.start[other] >= self.start[index]), then)
+                for n in range(len(spots)):
+                    _when(model.add(before[other][n] == after[index][n]), then)
+            given = self._pass_through(thing, index, spots, before[index], after[index])
+            if given is not None:
+                handed[index] = given
+        model.add_circuit(arcs)
+        self._leave_time_to_cross(thing, matter, handed)
+
+    def _leave_time_to_cross(
+        self, thing: str, matter: Sequence[int], handed: Mapping[int, cp_model.IntVar]
+    ) -> None:
+        """An OBJECT is at hand in two PLACEs only with the time to get from one to the other.
+
+        ``handed`` holds, for each OPTION that can hand the OBJECT over, the choice that it
+        does. The path of the OBJECT already says all of this. Said outright, the solver need
+        not find it out by trying.
+
+        The OBJECT is at the PLACE where an OPTION starts, at the time it starts, where the
+        OPTION requires it and where it is handed over in it: it lies there, or a PERSON who
+        takes part has it. It gets from PLACE to PLACE only with a PERSON. So between two
+        such OPTIONs at different PLACEs lies at least the least time anything needs from
+        the one to the other, as ``_across`` gives it.
+
+        An OBJECT that lies at a PLACE leaves it only by a hand-over in an OPTION that
+        starts there. Whoever takes it stays in that OPTION until it is over. So where the
+        OBJECT is at hand at another PLACE, some such OPTION hands it over, early enough to
+        be over and across by then. The same holds for an OBJECT that is nowhere the FILE
+        knows of: nothing hands it over, and it is at hand nowhere.
+        """
+        model, world, options = self.model, self.world, self.file.options
+        fixed = [each.fixed_start for each in self.terms]
+        trip_starts = self.file.trip_start()
+        opens = None if trip_starts is None else trip_starts.at
+
+        def there_by(
+            before: int, after: int, origin: str, takes_first: int, when: list[cp_model.LiteralT]
+        ) -> bool:
+            """The second OPTION starts late enough for the OBJECT to get there from the first.
+
+            ``origin`` is where the OBJECT sets out, once the first OPTION has started and
+            ``takes_first`` more seconds have gone by. ``when`` says when that holds. The
+            result is False where nothing gets there at all.
+
+            The least time on the way counts from when the first OPTION starts. Where it
+            starts at no fixed time, the TRIP's start says more: the OBJECT cannot set out
+            before then, and a ride that has left by then is no help however long the first
+            OPTION waits.
+            """
+            destination = options[after].origin
+            starts = fixed[before]
+            set_out = None if starts is None else starts + takes_first
+            takes = self._across(origin, destination, set_out)
+            if takes is None:
+                return False
+            _when(model.add(self.start[after] >= self.start[before] + takes_first + takes), *when)
+            if starts is None and opens is not None:
+                least = self._across(origin, destination, opens + takes_first)
+                if least is None:
+                    return False
+                arrives = opens + takes_first + least - self.zero
+                _when(model.add(self.start[after] >= arrives), *when)
+            return True
+
+        at_hand = [
+            (index, self.used[index])
+            for index in matter
+            if (options[index].id, thing) in world.needs
+        ]
+        at_hand += list(handed.items())
+        for (one, here), (other, there) in combinations(at_hand, 2):
+            if options[one].origin == options[other].origin:
+                continue
+            first = model.new_bool_var(f"{thing} in {options[one].id} before {options[other].id}")
+            if not there_by(one, other, options[one].origin, 0, [here, there, first]):
+                model.add_bool_or([here.negated(), there.negated(), first.negated()])
+            if not there_by(other, one, options[other].origin, 0, [here, there, first.negated()]):
+                model.add_bool_or([here.negated(), there.negated(), first])
+        start = world.starts.get(thing, Where())
+        if (thing in world.starts_anywhere and thing not in world.starts) or start.person:
+            return  # the solver picks where it starts, or a PERSON has it
+        for index, here in at_hand:
+            if options[index].origin == start.place:
+                continue
+            early_enough: list[cp_model.IntVar] = []
+            for source, given in handed.items():
+                if options[source].origin != start.place or source == index:
+                    continue
+                # The OBJECT comes from this hand-over: it is over and across by then.
+                name = f"{thing} comes to {options[index].id} from {options[source].id}"
+                from_there = model.new_bool_var(name)
+                model.add_implication(from_there, given)
+                over = self.lasts[source]
+                if there_by(source, index, options[source].destination, over, [from_there]):
+                    early_enough.append(from_there)
+                else:
+                    model.add(from_there == 0)
+            model.add_bool_or([here.negated(), *early_enough])
+
+    def _across(self, origin: str, destination: str, since: int | None = None) -> int | None:
+        """The least time anything needs from one PLACE to another, or None where none gets there.
+
+        A PERSON changes PLACE by a WAY or by an OPTION that moves, and an OBJECT only with
+        a PERSON. Each takes at least its shortest time. A WAY or an OPTION with no limit to
+        how long it takes is left out: nothing follows it, so nothing it carries is at hand
+        anywhere afterwards.
+
+        ``since`` is when the crossing sets out, where that is known. Then an unlisted WAY
+        leaves only outside the spans in which COMPLETE FACTs rule it out, and an OPTION
+        that moves at a fixed time is taken only where it starts no earlier than the
+        crossing got to it. With no time to set out, none of that is looked at. Either way
+        the real time can be longer and is never shorter.
+
+        The times from one PLACE are worked out once, and only from the PLACEs asked about.
+        """
+        if (origin, since) not in self._crossing:
+            self._crossing[origin, since] = self._from(origin, since)
+        reached = self._crossing[origin, since].get(destination)
+        return None if reached is None else reached - (since or 0)
+
+    def _from(self, origin: str, since: int | None) -> dict[str, int]:
+        """For ``_across``: the earliest anything is at each PLACE, setting out from one.
+
+        With ``since`` that is a time, for setting out then. Without it, it is the least
+        time on the way, counted from zero.
+        """
+        file, world = self.file, self.world
+        if self._legs is None:
+            # From each PLACE: where a listed WAY or an OPTION that moves leads, how long it
+            # takes at least, and for an OPTION that moves its position in the FILE.
+            legs: dict[str, list[tuple[str, int, int | None]]] = {}
+            for way in file.ways:
+                shortest, longest = world.takes[way.id]
+                if longest is None:
+                    continue
+                legs.setdefault(way.origin, []).append((way.destination, shortest, None))
+                if way.both_ways:
+                    legs.setdefault(way.destination, []).append((way.origin, shortest, None))
+            for index, option in enumerate(file.options):
+                if self.moves[index] and self.usable[index] and not self.endless[index]:
+                    ride = (option.destination, self.lasts[index], index)
+                    legs.setdefault(option.origin, []).append(ride)
+            self._legs = legs
+        places = [place.id for place in file.places]
+        unlisted = world.unlisted is None or bool(world.unlisted)
+
+        def leaves(here: str, there: str, at: int) -> int | None:
+            """When an unlisted WAY of this world can first leave, from this time on."""
+            if world.unlisted is not None and (here, there) not in world.unlisted:
+                return None
+            if since is None:
+                return at
+            if (here, there) not in self._closed:
+                self._closed[here, there] = reference.spans_closed(file, here, there)
+            for earliest, latest in self._closed[here, there]:
+                if earliest <= at <= latest:
+                    return latest + 1
+            return at
+
+        def sets_out(ride: int | None, at: int) -> int | None:
+            """When a listed WAY or an OPTION that moves can first be taken, from this time on."""
+            start = None if ride is None else self.terms[ride].fixed_start
+            if start is None or since is None:
+                return at
+            return start if start >= at else None
+
+        earliest = {origin: since or 0}
+        ahead = [(since or 0, origin)]
+        while ahead:
+            at, here = heappop(ahead)
+            if at > earliest[here]:
+                continue
+            onward = [
+                (there, leaving + takes)
+                for there, takes, ride in self._legs.get(here, ())
+                for leaving in [sets_out(ride, at)]
+                if leaving is not None
+            ]
+            if unlisted:
+                onward += [
+                    (there, leaving + world.unlisted_takes)
+                    for there in places
+                    if there != here
+                    for leaving in [leaves(here, there, at)]
+                    if leaving is not None
+                ]
+            for there, arrives in onward:
+                if arrives < earliest.get(there, inf):
+                    earliest[there] = arrives
+                    heappush(ahead, (arrives, there))
+        return earliest
+
+    def _pass_through(
+        self,
+        thing: str,
+        index: int,
+        spots: Sequence[Where],
+        before: Sequence[cp_model.IntVar],
+        after: Sequence[cp_model.IntVar],
+    ) -> cp_model.IntVar | None:
+        """What one OPTION that happens asks of an OBJECT, and where the OBJECT is after it.
+
+        ``before`` and ``after`` say, for each of ``spots``, whether the OBJECT might be
+        there just before the OPTION starts, and from its start on. The first spots are the
+        PERSONs, in the FILE's order. The result is the choice that the OBJECT is handed over
+        in the OPTION, or None where the OPTION hands nothing over.
+
+        The OPTION first checks what it requires, then keeps what it keeps, and then the
+        OBJECT is handed over in it. One that might keep the OBJECT leaves it in both places:
+        with whoever has it, and at the PLACE where the OPTION starts.
+        """
+        model, world = self.model, self.world
+        option = self.file.options[index]
+        used = self.used[index]
+        takes = [row[index] for row in self.takes]
+        persons = range(len(takes))
+        here = next(n for n, spot in enumerate(spots) if spot.place == option.origin)
+
+        def at_hand(*when: cp_model.LiteralT) -> None:
+            """Under these conditions, each place where the OBJECT might be is at hand."""
+            for n, spot in enumerate(spots):
+                if spot.person is not None:
+                    _when(model.add_bool_or([before[n].negated(), takes[n]]), *when)
+                elif n != here:
+                    _when(model.add(before[n] == 0), *when)
+
+        if (option.id, thing) in world.needs:
+            at_hand(used)
+        action = world.does.get((option.id, thing), "nothing")
+        # What is left to choose: which PERSON has the OBJECT handed over, where the OPTION
+        # hands it over, and whether the OPTION keeps it, where it might do anything.
+        gives: list[cp_model.IntVar] = []
+        given: cp_model.IntVar | None = None
+        quiet: list[cp_model.LiteralT] = [used]  # the OPTION happens, with no hand-over in it
+        if action in ("hands_over", "any"):
+            gives = [model.new_bool_var(f"{thing} to {n} in {option.id}") for n in persons]
+            given = model.new_bool_var(f"{thing} handed over in {option.id}")
+            model.add_max_equality(given, [0, *gives])
+            for n in persons:
+                model.add_implication(gives[n], takes[n])
+                at_hand(gives[n])
+            for n, spot in enumerate(spots):
+                # After a hand-over the PERSON who took it has it, and it is nowhere else.
+                taken = gives[n] if spot.person is not None else 0
+                _when(model.add(after[n] == taken), used, given)
+            quiet = [used, given.negated()]
+        keeping, leaving = quiet, quiet
+        if action == "any":
+            keeps = model.new_bool_var(f"{option.id} keeps {thing}")
+            model.add_at_most_one([*gives, keeps])
+            keeping, leaving = [*quiet, keeps], [*quiet, keeps.negated()]
+        elif gives:
+            model.add_at_most_one(gives)
+        # A PERSON who takes part and has the OBJECT, or might.
+        held = [model.new_bool_var(f"{n} has {thing} in {option.id}") for n in persons]
+        for n in persons:
+            model.add_min_equality(held[n], [before[n], takes[n]])
+        any_held = model.new_bool_var(f"somebody has {thing} in {option.id}")
+        model.add_max_equality(any_held, [0, *held])
+
+        def same(n: int, *when: cp_model.LiteralT) -> None:
+            _when(model.add(after[n] == before[n]), *when)
+
+        def joined(n: int, *when: cp_model.LiteralT) -> None:
+            """It is here afterwards where it was here, or somebody who takes part had it."""
+            _when(model.add_bool_or([after[n], before[n].negated()]), *when)
+            _when(model.add_bool_or([after[n], any_held.negated()]), *when)
+            _when(model.add(after[n] <= before[n] + any_held), *when)
+
+        for n, spot in enumerate(spots):
+            if action in ("keeps", "any"):
+                if spot.person is not None:
+                    _when(model.add(after[n] + held[n] == before[n]), *keeping)
+                elif n == here:
+                    joined(n, *keeping)
+                else:
+                    same(n, *keeping)
+                if action == "any":
+                    same(n, *leaving)
+            elif action == "might_keep" and n == here:
+                joined(n, *quiet)
+            else:
+                same(n, *quiet)
+        return given
 
     def _rule_out(self, number: int, index: int) -> None:
         """This PERSON takes no part in this OPTION, whatever else is chosen.
@@ -1132,7 +1588,13 @@ class _Search:
             # The route after the last OPTION.
             takes(number, len(order) - 1, self.routes[number].get((here, count), []))
             orders.append(tuple(order))
-        return self._who(orders), tuple(orders), by, falls
+        happening = {index for order in orders for index in order}
+
+        def comes(index: int) -> tuple[int, int]:
+            return (solver.value(self.start[index]), solver.value(self.turn[index]))
+
+        in_order = tuple(sorted(happening, key=comes))
+        return self._who(orders), tuple(orders), by, falls, in_order
 
     def first_in_file_order(self) -> _Choice | None:
         """The choice of PERSONs and orders that "Which ITINERARY is shown" puts first."""
@@ -1176,7 +1638,7 @@ class _Search:
                 order.append(found)
                 here = found
             orders.append(tuple(order))
-        return self._who(orders), tuple(orders), None, None
+        return self._who(orders), tuple(orders), None, None, None
 
     def _only_order(self, number: int) -> tuple[int, ...] | None:
         """The OPTIONs this PERSON does, where they have nothing to choose, or None.

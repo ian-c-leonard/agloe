@@ -7,16 +7,21 @@ from itertools import combinations, pairwise, permutations, product
 from random import Random
 
 import pytest
+from ortools.sat.python import cp_model
 
 from agloe import answers, compiler, reference, report
 from agloe.answers import Answer, Carried, Report, Stay, Use
 from agloe.file import (
+    Capability,
+    CompleteRequires,
     CompleteRequiresObject,
     CompleteTransfers,
     File,
     FileError,
+    Has,
     Object,
     ObjectStarts,
+    Requires,
     RequiresObject,
     WithObject,
     load,
@@ -52,12 +57,15 @@ from tests.stories import (
     any_time,
     booking,
     budget,
+    can,
+    cannot,
     cap,
     complete,
     cutoff,
     does_with,
     ends_at,
     every,
+    every_requirement,
     every_right,
     every_transfer,
     every_use,
@@ -70,9 +78,11 @@ from tests.stories import (
     lock,
     moves,
     must,
+    must_not,
     needs_no_right,
     needs_right,
     offer,
+    requires,
     requires_object,
     satisfies,
     seconds,
@@ -83,9 +93,11 @@ from tests.stories import (
     trip,
     trip_ends,
     trip_starts,
+    way,
     way_between,
 )
 from tests.stories import at as moment
+from tests.test_capabilities import with_capabilities
 from tests.test_cross_check import possible_world, random_trip
 
 
@@ -100,9 +112,9 @@ def whenever(option: str, length: str = "PT5M") -> list[Document]:
 
 
 def checked(file: File) -> Report:
-    """The reference checker's Report, once the COMPILER has given the same one."""
+    """The reference checker's Report, once the solver's own search has given the same one."""
     found = answers.check(file)
-    assert compiler.check(file) == found
+    assert answers.check(file, compiler.shown, compiler.works, compiler.can_work) == found
     return found
 
 
@@ -1288,8 +1300,7 @@ def test_the_unknown_facts_about_objects_have_a_fixed_order() -> None:
 
 
 def test_listing_an_object_that_nothing_requires_changes_no_answer() -> None:
-    """The solver's model has no OBJECTs, and it still checks such a FILE: nothing turns on
-    where the OBJECT is."""
+    """Nothing turns on where the OBJECT is, so the solver's model leaves it out."""
     rng = Random(404)
     seen: set[Answer] = set()
     for _ in range(60):
@@ -1706,6 +1717,42 @@ def test_the_best_and_worst_cases_settle_the_answer_with_objects() -> None:
     assert with_hand_overs > 5
 
 
+def ordered_by(
+    file: File, world: World, who: tuple[tuple[str, ...], ...], happening: list[int], thing: str
+) -> list[int]:
+    """The OPTIONs of a plan that one OBJECT puts in an order, as the rules page says.
+
+    Those that require it or can move it, where some OPTION can move it. An OPTION can move it
+    where it hands it over, or where it keeps it and a PERSON who takes part can have it. A
+    PERSON can have it who has it when the TRIP starts, or who takes part in an OPTION of the
+    plan that hands it over. "Might" counts as "does".
+    """
+    options = file.options
+    hands = [
+        index
+        for index in happening
+        if world.does.get((options[index].id, thing)) in ("hands_over", "any")
+    ]
+    can_have = {person for index in hands for person in who[index]}
+    if thing in world.starts:
+        can_have.add(world.starts[thing].person or "")
+    elif thing in world.starts_anywhere:
+        can_have.update(person.id for person in file.persons)
+    keeps_it = [
+        index
+        for index in happening
+        if world.does.get((options[index].id, thing)) in ("keeps", "might_keep")
+        and can_have.intersection(who[index])
+    ]
+    if not hands and not keeps_it:
+        return []
+    return [
+        index
+        for index in happening
+        if (options[index].id, thing) in world.needs or index in hands or index in keeps_it
+    ]
+
+
 type Chain = tuple[list[tuple[int, int, int]], dict[int, tuple[tuple[str, str], ...]], object]
 # One order of some OPTIONs as gaps, with hand-overs: an OPTION, an OBJECT and a PERSON.
 type Ordered = tuple[list[tuple[int, int, int]], list[tuple[int, str, str]]]
@@ -1725,7 +1772,8 @@ def every_chain(
     world, the OBJECT goes to anybody who takes part or to nobody, also where it is not at
     hand. With ``everything``, all the OPTIONs that happen are put in one order and every
     OBJECT is handed about. Without it, each OBJECT that the rules say matters has an order
-    of its own among its own OPTIONs, so that the times come out as the rules say. An OBJECT
+    of its own among its own OPTIONs, so that the times come out as the rules say: the
+    OPTIONs that require it or can move it, and none where no OPTION can move it. An OBJECT
     that another transfer brings has an order too, and no hand-over.
     """
     options = file.options
@@ -1742,18 +1790,8 @@ def every_chain(
     # Each group: the OPTIONs that are put in one order, and the OBJECTs handed about in them.
     groups: list[tuple[list[int], list[str]]] = [(happening, things)]
     if not everything:
-        groups = [
-            (
-                [
-                    index
-                    for index in happening
-                    if (options[index].id, thing) in world.needs
-                    or (options[index].id, thing) in world.does
-                ],
-                [thing],
-            )
-            for thing in followed
-        ]
+        groups = [(ordered_by(file, world, who, happening, thing), [thing]) for thing in followed]
+        # An OBJECT with no order is handed about nowhere: nothing hands it over.
     for_each: list[list[Ordered]] = []
     for matter, mine in groups:
         ways: list[Ordered] = []
@@ -1789,14 +1827,24 @@ def every_chain(
 
 
 def those_that_matter(
-    file: File, world: World, who: tuple[tuple[str, ...], ...], orders: tuple[tuple[int, ...], ...]
+    file: File,
+    world: World,
+    who: tuple[tuple[str, ...], ...],
+    orders: tuple[tuple[int, ...], ...],
+    *hints: object,
 ) -> list[Chain] | None:
+    """Every order, whatever the search says about which orders it can leave out."""
     return every_chain(file, world, who, orders, everything=False)
 
 
 def all_of_them(
-    file: File, world: World, who: tuple[tuple[str, ...], ...], orders: tuple[tuple[int, ...], ...]
+    file: File,
+    world: World,
+    who: tuple[tuple[str, ...], ...],
+    orders: tuple[tuple[int, ...], ...],
+    *hints: object,
 ) -> list[Chain] | None:
+    """Every order of every OPTION, whatever the search says about which it can leave out."""
     return every_chain(file, world, who, orders, everything=True)
 
 
@@ -1813,6 +1861,42 @@ def worlds_to_try(rng: Random, file: File) -> Iterator[World]:
     yield with_these_at_best(file, some)
 
 
+def never(*given: object) -> bool:
+    """Stands in for a short cut of the search that is switched off."""
+    return False
+
+
+def no_order_first(*given: object) -> list[object]:
+    """Stands in for the orders that the search tries before the others: there are none."""
+    return []
+
+
+class EveryOrder:
+    """Switches the search between its own way and one that skips nothing.
+
+    Its own way makes only some orders of the OPTIONs that matter to an OBJECT, tries some
+    orders before the others, and stops at an ITINERARY that none can come before. The other
+    way takes the orders that a stand-in gives and no other, times every one of them, and
+    ranks every ITINERARY that works.
+    """
+
+    SHORT_CUTS = ("_orders_differ_only_in_the_listing", "_nothing_comes_before", "_to_try_first")
+    OFF = (never, never, no_order_first)
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.monkeypatch = monkeypatch
+        self.built = {name: getattr(reference, name) for name in ("_chains", *self.SHORT_CUTS)}
+
+    def as_built(self) -> None:
+        for name, its_own in self.built.items():
+            self.monkeypatch.setattr(reference, name, its_own)
+
+    def skipping_nothing(self, chains: object | None = None) -> None:
+        self.monkeypatch.setattr(reference, "_chains", chains or self.built["_chains"])
+        for name, off in zip(self.SHORT_CUTS, self.OFF, strict=True):
+            self.monkeypatch.setattr(reference, name, off)
+
+
 def test_the_search_shows_the_plan_that_a_search_that_skips_nothing_shows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1821,14 +1905,14 @@ def test_the_search_shows_the_plan_that_a_search_that_skips_nothing_shows(
     every choice of hand-overs is timed and checked, and the rule picks among all of them.
     The ITINERARIES are the same, in the same order."""
     rng = Random(2024)
-    its_own = reference._chains  # pyright: ignore[reportPrivateUsage]
+    search = EveryOrder(monkeypatch)
     compared = with_hand_overs = with_two = 0
     for _ in range(150):
         file = a_trip_with_objects(rng, leave_out=0.1, with_ways=0.6, with_complete=0.3)
         for world in worlds_to_try(rng, file):
-            monkeypatch.setattr(reference, "_chains", its_own)
+            search.as_built()
             shown = itineraries(file, world)
-            monkeypatch.setattr(reference, "_chains", those_that_matter)
+            search.skipping_nothing(those_that_matter)
             assert itineraries(file, world) == shown
             compared += bool(shown)
             with_hand_overs += any(step.handed for plan in shown for step in plan)
@@ -1844,14 +1928,14 @@ def test_ordering_only_the_options_that_matter_misses_no_plan(
     """Here every OPTION that happens is put in every order, and every OBJECT is handed about
     in every way. Something works there exactly where the search finds something."""
     rng = Random(77)
-    its_own = reference._chains  # pyright: ignore[reportPrivateUsage]
+    search = EveryOrder(monkeypatch)
     works = fails = 0
     for _ in range(120):
         file = a_trip_with_objects(rng, leave_out=0.1, with_ways=0.6, with_complete=0.3)
         for world in worlds_to_try(rng, file):
-            monkeypatch.setattr(reference, "_chains", its_own)
+            search.as_built()
             found = bool(itineraries(file, world))
-            monkeypatch.setattr(reference, "_chains", all_of_them)
+            search.skipping_nothing(all_of_them)
             assert bool(itineraries(file, world)) == found
             works += found
             fails += not found
@@ -1993,12 +2077,13 @@ def test_fewer_requirements_are_never_harder_for_the_same_plan() -> None:
 
 
 def test_the_compiler_gives_the_reference_checkers_report_for_objects() -> None:
-    """The solver's model has no OBJECTs, so the COMPILER hands such a FILE over whole."""
+    """With the solver's own search for every part of it."""
     rng = Random(8)
     seen: set[Answer] = set()
-    for _ in range(40):
-        file = a_trip_with_objects(rng, leave_out=0.1, with_ways=0.5)
+    for _ in range(220):
+        file = a_trip_with_objects(rng, leave_out=0.12, with_ways=0.6, with_complete=0.3)
         found = answers.check(file)
+        assert answers.check(file, compiler.shown, compiler.works, compiler.can_work) == found
         assert compiler.check(file) == found
         seen.add(found.answer)
     assert seen == set(Answer)
@@ -2081,7 +2166,7 @@ def test_each_order_of_the_steps_is_timed_by_the_rule_before_the_orders_are_comp
     """Alex has a check at the hotel at any time, and an appointment in the park at noon that
     requires the key Alex carries. Sam has a check in the park at 10:00 am. Only an unlisted
     WAY joins the hotel to the park, and none leaves from 9:00 am to 10:00 am. Each check
-    does something with a key, so the two have an order.
+    hands the key over, so the two have an order.
 
     With Alex's check first, it is at 10:00 am, as late as it can be, and Alex travels at
     noon. With Sam's first, Alex's is at 10:00 am too, as early as it can be, and Alex
@@ -2099,7 +2184,7 @@ def test_each_order_of_the_steps_is_timed_by_the_rule_before_the_orders_are_comp
         {"id": "ways", "complete": span},
         has_object("alex", "key"),
         requires_object("meeting", "key"),
-        keeps("sam-check", "key"),
+        hands_over("sam-check", "key"),
         hands_over("alex-check", "key"),
         every_use("key"),
         every_transfer("key"),
@@ -2567,9 +2652,10 @@ def test_an_object_that_another_transfer_brings_still_has_an_order() -> None:
     ]
 
 
-def keys_on_a_desk(checks: int, keys: int) -> File:
+def keys_on_a_desk(checks: int, keys: int, handed: bool = True) -> File:
     """So many checks at one desk at 10:00 am, each with its own PERSON, and so many keys
-    lying there. Each check requires each key."""
+    lying there. Each check requires each key. With ``handed`` each check also hands each key
+    over, so that where a key is turns on the order of the checks."""
     people = [f"person-{number}" for number in range(checks)]
     things = [f"key-{number}" for number in range(keys)]
     options = [stays(f"check-{number}", "desk") for number in range(checks)]
@@ -2577,6 +2663,8 @@ def keys_on_a_desk(checks: int, keys: int) -> File:
     for thing in things:
         facts += [lies_at(thing, "desk"), every_use(thing), every_transfer(thing)]
         facts += [requires_object(f"check-{number}", thing) for number in range(checks)]
+        if handed:
+            facts += [hands_over(f"check-{number}", thing) for number in range(checks)]
     locks = [lock(f"check-{number}", people[number]) for number in range(checks)]
     return trip(people, ["desk"], options, facts, locks, objects=things)
 
@@ -2652,14 +2740,15 @@ def test_a_way_is_tried_only_in_the_openings_that_the_times_of_the_trip_leave(
 
 
 def test_an_order_that_the_fixed_starts_rule_out_is_not_tried() -> None:
-    """Three PERSONs have checks at 9:00 am, 10:00 am and 11:00 am, and each check requires
-    the key on the desk. Only one order of the three keeps their times, so only that one is
-    timed and checked."""
+    """Three PERSONs have checks at 9:00 am, 10:00 am and 11:00 am. Each check requires the
+    key on the desk and hands it over. Only one order of the three keeps their times, so only
+    that one is timed and checked."""
     people = ["alex", "sam", "jo"]
     options = [stays(f"check-{number}", "desk") for number in range(3)]
     facts = [fact for number in range(3) for fact in at(f"check-{number}", 11 - number)]
     facts += [lies_at("key", "desk"), every_use("key"), every_transfer("key")]
     facts += [requires_object(f"check-{number}", "key") for number in range(3)]
+    facts += [hands_over(f"check-{number}", "key") for number in range(3)]
     locks = [lock(f"check-{number}", people[number]) for number in range(3)]
     file = trip(people, ["desk"], options, facts, locks, objects=["key"])
     who = tuple((person,) for person in people)
@@ -2946,4 +3035,1877 @@ def test_a_way_that_cannot_leave_before_a_span_does_not_time_what_comes_before_i
     assert [(cover.person, cover.option, cover.budget) for cover in found.plans[0].buys] == [
         ("sam", "class", "cash"),
         ("alex", "prep", "card"),
+    ]
+
+
+# The solver.
+
+
+def with_a_signature(rng: Random, file: File) -> File:
+    """The same FILE, where an OPTION often requires a signature, and mostly one PERSON can sign.
+
+    So whoever fetches the bags often needs the other PERSON there to sign.
+    """
+    people = [person.id for person in file.persons]
+    signer = rng.choice(people)
+    facts: list[Has | Requires | CompleteRequires] = [
+        Has(f"{person}-signing", person, "signing", person == signer)
+        for person in people
+        if rng.random() < 0.9
+    ]
+    for option in file.options:
+        of = rng.choice(["one", "one", "one", "each", "none", None])
+        if of is not None:
+            facts.append(Requires(f"{option.id}-signing", option.id, "signing", of))
+    if rng.random() < 0.7:
+        facts.append(CompleteRequires("every-signing", "signing"))
+    listed = (Capability("signing", "signing"),)
+    return replace(file, capabilities=listed, facts=(*file.facts, *facts))
+
+
+def a_trip_with_a_key_to_sign_for(rng: Random) -> File:
+    """A deposit and a check at a desk, a key, and signatures that the stays require.
+
+    Mostly one PERSON can sign and another has the key. Mostly the check comes last, requires
+    the key and lets in only those who can sign, and the deposit keeps the key and requires
+    one signature. Each of these is otherwise at random, and so is who is LOCKed in. So a
+    stay often happens only for the key, and often needs a PERSON there who can sign and who
+    can never have the key.
+    """
+    people = ["alex", "sam", "jo"][: rng.choice([2, 2, 3])]
+    signers = [rng.choice(people)] if rng.random() < 0.7 else rng.sample(people, 2)
+    others = [person for person in people if person not in signers]
+    names = ["deposit", "counter", "check"] if rng.random() < 0.3 else ["deposit", "check"]
+    options = [stays(name, rng.choice(["desk"] * 5 + ["vault"])) for name in names]
+    facts: list[Document] = [takes("walk", "PT10M"), complete(None, None)]
+    for number, name in enumerate(names):
+        facts += at(name, 9 + number) if rng.random() < 0.8 else whenever(name)
+        last = name == "check"
+        does = rng.choice(
+            [None, "nothing", "keeps"] if last else ["keeps"] * 3 + ["hands_over", None]
+        )
+        if does is not None:
+            facts.append(does_with(name, "key", does))
+        if rng.random() < (0.8 if last else 0.2):
+            facts.append(requires_object(name, "key"))
+        of = rng.choice(["each"] * 3 + ["one", "none"] if last else ["one"] * 3 + ["each", "none"])
+        facts.append(requires(name, "signing", of))
+    holder = has_object(rng.choice(others if others and rng.random() < 0.7 else people), "key")
+    facts.append(rng.choice([holder, holder, holder, lies_at("key", "desk")]))
+    facts += [can(person, "signing", person in signers) for person in people]
+    facts += [every_requirement("signing"), every_use("key")]
+    facts += [every_transfer("key")] if rng.random() < 0.8 else []
+    some = rng.sample(people, rng.randrange(1, len(people)))
+    locks = [lock("check", *(signers if rng.random() < 0.6 else some))]
+    if rng.random() < 0.2:
+        locks.append(lock("deposit", rng.choice(people)))
+    ways = [way_between("walk", "desk", "vault")]
+    return trip(
+        people,
+        ["desk", "vault"],
+        options,
+        facts,
+        locks,
+        ways,
+        capabilities=["signing"],
+        objects=["key"],
+    )
+
+
+def trips_with_objects(rng: Random) -> list[File]:
+    """Random trips of every kind the other tests build, each with OBJECTs."""
+    trips = [a_trip_with_objects(rng, leave_out=0.12) for _ in range(120)]
+    trips += [
+        a_trip_with_objects(rng, leave_out=0.1, with_ways=0.8, with_complete=0.3)
+        for _ in range(100)
+    ]
+    trips += [
+        with_objects(
+            rng,
+            random_trip(rng, 0.15, ["alex", "sam"], with_wants=0.8, must_nots=0.3, whole_sets=0.4),
+        )
+        for _ in range(60)
+    ]
+    trips += [
+        with_objects(rng, random_trip(rng, 0.15, ["alex", "sam"], with_rights=0.4))
+        for _ in range(60)
+    ]
+    trips += [
+        with_objects(
+            rng,
+            random_trip(rng, 0.1, ["alex", "sam"], with_ends=0.5, with_ways=0.8, with_times=0.5),
+        )
+        for _ in range(60)
+    ]
+    # A stay that happens for an OBJECT can require a CAPABILITY, and a right.
+    trips += [with_a_signature(rng, a_trip_to_fetch(rng)) for _ in range(40)]
+    trips += [a_trip_with_a_key_to_sign_for(rng) for _ in range(150)]
+    trips += [
+        with_capabilities(
+            rng, with_objects(rng, random_trip(rng, 0.1, ["alex", "sam"], with_rights=0.4))
+        )
+        for _ in range(40)
+    ]
+    return trips
+
+
+def test_the_compiler_and_the_reference_checker_agree_on_trips_with_objects() -> None:
+    """The same answer ahead and the same Report for every TRIP."""
+    rng = Random(6161)
+    seen: set[Answer] = set()
+    handed = carried = unsettled = 0
+    for file in trips_with_objects(rng):
+        series = list(answers.reports(file))
+        assert list(compiler.reports(file)) == series
+        found = series[-1]
+        assert isinstance(found, Report)
+        seen.add(found.answer)
+        handed += any(step.handed for step in found.itinerary)
+        carried += bool(found.objects)
+        unsettled += any(
+            needed.unknown.what == "another transfer"
+            for enough in found.missing
+            for needed in enough
+        )
+    assert seen == set(Answer)
+    assert handed > 15
+    assert carried > 60
+    assert unsettled > 15
+
+
+def test_the_two_searches_agree_in_every_kind_of_world_with_objects() -> None:
+    """The same ITINERARY first, or none, in the worlds the answers and the evidence are built on.
+
+    Those are the worst case, the best case, an upper bound, worlds in which a few unknown
+    FACTs turn out well, and possible worlds chosen at random.
+    """
+    rng = Random(7171)
+    found: set[bool] = set()
+    handed = 0
+    for file in trips_with_objects(rng)[::3]:
+        for world in worlds_to_try(rng, file):
+            first = reference.first_shown(file, world)
+            assert compiler.shown(file, world) == first
+            assert compiler.works(file, world) == (first is not None)
+            found.add(first is not None)
+            handed += any(step.handed for step in first or ())
+    assert found == {True, False}
+    assert handed > 20
+
+
+def test_the_two_searches_agree_on_what_is_left_of_a_file_with_objects() -> None:
+    """With records taken out one after another, as the search for a conflict takes them."""
+    rng = Random(8181)
+    answers_seen: set[bool] = set()
+    reopened = 0
+    for file in trips_with_objects(rng)[::3]:
+        records = [*(fact.id for fact in file.facts), *(each.id for each in file.decisions)]
+        records += [want.id for want in file.wants if want.musts or want.must_nots]
+        left = Remaining(file)
+        for record in rng.sample(records, min(len(records), 5)):
+            left = left.without(record)
+            can = reference.can_work(left)
+            assert compiler.can_work(left) == can
+            answers_seen.add(can)
+            reopened += bool(left.might_do_anything())
+    assert answers_seen == {True, False}
+    assert reopened > 10
+
+
+def test_the_solver_brings_whoever_has_an_object_into_a_stay() -> None:
+    """Alex is LOCKed into an appointment that requires the key. Jo has the key. The solver
+    considers whoever can have an OBJECT for a stay that requires it, so it finds the plan
+    with Jo."""
+
+    def appointment(start: Document) -> File:
+        facts = [
+            *at("appointment", 10),
+            start,
+            requires_object("appointment", "key"),
+            every_use("key"),
+            every_transfer("key"),
+        ]
+        locks = [lock("appointment", "alex")]
+        options = [stays("appointment", "desk")]
+        return trip(["alex", "jo"], ["desk", "vault"], options, facts, locks, objects=["key"])
+
+    file = appointment(has_object("jo", "key"))
+    shown = compiler.shown(file, worst_case(file))
+    assert shown is not None and shown[0].persons == ("alex", "jo")
+    # With the key at another PLACE, nobody can bring it.
+    away = appointment(lies_at("key", "vault"))
+    assert compiler.shown(away, worst_case(away)) is None
+    assert checked(away).answer is Answer.INFEASIBLE
+
+
+def test_many_appointments_with_one_object_are_quick_for_the_solver() -> None:
+    """Eleven appointments in a row for one traveler, and the last requires the passport
+    that the traveler carries. The reference checker would try every order of the eleven.
+    The solver's own search gives the plan, and the reference checker only checks it."""
+    count = 11
+    options = [stays(f"stop-{number}", "desk") for number in range(count)]
+    facts = [fact for number in range(count) for fact in at(f"stop-{number}", 8 + number)]
+    facts += [
+        has_object("alex", "passport"),
+        requires_object(f"stop-{count - 1}", "passport"),
+        every_use("passport"),
+        every_transfer("passport"),
+    ]
+    locks = [lock(f"stop-{number}", "alex") for number in range(count)]
+    file = trip(["alex"], ["desk"], options, facts, locks, objects=["passport"])
+    found = compiler.check(file)
+    assert found.answer is Answer.FEASIBLE
+    assert len(found.itinerary) == count
+    assert found.objects[0].uses == (Use(f"stop-{count - 1}", True, (Where(person="alex"),)),)
+
+
+# What the review of the solver showed.
+
+
+@pytest.mark.parametrize("stated", [True, False])
+def test_an_object_that_nothing_moves_puts_no_option_in_an_order(stated: bool) -> None:
+    """The key lies on the desk, and nothing hands it over or keeps it. Alex's check at
+    10:00 am and Sam's check at any time both require it. Where it is turns on no order, so
+    Sam's check is tied to nothing and starts when the TRIP starts. That is so too where
+    the FILE does not state every transfer: a check might keep the key, but only from a
+    PERSON who has it, and nobody can have it."""
+    options = [stays("alex-check", "desk"), stays("sam-check", "desk")]
+    facts = [
+        *at("alex-check", 10),
+        *whenever("sam-check"),
+        lies_at("key", "desk"),
+        requires_object("alex-check", "key"),
+        requires_object("sam-check", "key"),
+        every_use("key"),
+        *([every_transfer("key")] if stated else []),
+    ]
+    locks = [trip_starts(8), lock("alex-check", "alex"), lock("sam-check", "sam")]
+    file = trip(["alex", "sam"], ["desk"], options, facts, locks, objects=["key"])
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [(step.option, step.start) for step in found.itinerary] == [
+        ("sam-check", seconds(8)),
+        ("alex-check", seconds(10)),
+    ]
+
+
+def test_eight_checks_of_a_key_that_nothing_moves_are_timed_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Eight PERSONs each have a check at 10:00 am that requires the key on the desk. The
+    checks have 40,320 orders, and none of them matters: the key stays where it is."""
+    file = keys_on_a_desk(8, 1, handed=False)
+    timed = 0
+    its_own = reference._times  # pyright: ignore[reportPrivateUsage]
+
+    def counted(
+        count: int,
+        gaps: list[tuple[int, int, int]],
+        fixed: dict[int, int],
+        not_before: dict[int, int],
+        no_later: dict[int, int],
+    ) -> list[int] | None:
+        nonlocal timed
+        timed += 1
+        return its_own(count, gaps, fixed, not_before, no_later)
+
+    monkeypatch.setattr(reference, "_times", counted)
+    assert answers.check(file).answer is Answer.FEASIBLE
+    assert timed < 10
+
+
+def test_the_hand_overs_shown_are_found_without_trying_every_choice() -> None:
+    """Thirty stays at one desk, each with eight PERSONs, and each hands the key over. The
+    first PERSON has the key, and the last stay requires it. There are more ways to hand the
+    key about than could ever be tried: nine to the power of thirty. The rules put no
+    hand-over first, and the search keeps only the first choice for each place the key can
+    be, so it comes back at once."""
+    people = [f"person-{number}" for number in range(8)]
+    options = [stays(f"stay-{number}", "desk") for number in range(30)]
+    facts = [has_object("person-0", "key"), requires_object("stay-29", "key")]
+    facts += [hands_over(f"stay-{number}", "key") for number in range(30)]
+    facts += [every_use("key"), every_transfer("key")]
+    file = trip(people, ["desk"], options, facts, [], objects=["key"])
+    world = worst_case(file)
+    visits = [(option.id, tuple(people), "desk") for option in file.options]
+    found = reference._first_hand_overs(  # pyright: ignore[reportPrivateUsage]
+        world, "key", visits, [Where(person="person-0")], lambda option, person: (0, 0)
+    )
+    assert found == ()
+    # With the key on the desk and only the last PERSON in the last stay, one hand-over is
+    # the fewest: to that PERSON, in the stay listed first.
+    alone = [*visits[:-1], ("stay-29", ("person-7",), "office")]
+
+    def by_position(option: str, person: str) -> tuple[int, int]:
+        return (int(option.removeprefix("stay-")), people.index(person))
+
+    assert reference._first_hand_overs(  # pyright: ignore[reportPrivateUsage]
+        world, "key", alone, [Where(place="desk")], by_position
+    ) == ((0, 7),)
+
+
+def a_stay_with_a_voucher(
+    *more: Document,
+    start: Document,
+    desk: Sequence[Document] | None = None,
+    rights: bool = False,
+    wants: Sequence[Document] = (),
+    capabilities: Sequence[str] = (),
+    others: Sequence[Document] = (),
+    locks: Sequence[Document] = (),
+) -> File:
+    """Alex is LOCKed into an appointment at the hotel that requires the voucher. Sam starts
+    at the station and has nothing to do. An hour before, the desk of the hotel is open.
+
+    ``desk`` says when the desk is open, where that is not 9:00 am. With ``rights``, the
+    story says whether the desk needs a right. ``others`` holds other OPTIONs, and ``locks``
+    other LOCKs.
+    """
+    options = [stays("appointment", "hotel"), stays("desk", "hotel"), *others]
+    facts = [
+        *at("appointment", 10),
+        *(at("desk", 9) if desk is None else desk),
+        starts_from("alex", "hotel"),
+        starts_from("sam", "station"),
+        takes("walk", "PT5M"),
+        start,
+        requires_object("appointment", "voucher"),
+        every_use("voucher"),
+        every_transfer("voucher"),
+        *([needs_no_right("appointment")] if rights else []),
+        *more,
+    ]
+    ways = [way_between("walk", "hotel", "station")]
+    places = ["hotel", "station"]
+    return trip(
+        ["alex", "sam"],
+        places,
+        options,
+        facts,
+        [lock("appointment", "alex"), *locks],
+        ways,
+        wants,
+        rights=rights,
+        capabilities=capabilities,
+        objects=["voucher"],
+    )
+
+
+def left_out_of(file: File) -> set[tuple[int, int]]:
+    """Each PERSON and OPTION that the solver's model of the worst case rules out."""
+    return compiler._Search(file, worst_case(file)).left_out  # pyright: ignore[reportPrivateUsage]
+
+
+def test_nobody_is_brought_to_a_stay_for_an_object_that_they_can_never_have() -> None:
+    """The model considers a PERSON for a stay because of an OBJECT only where they can
+    have it at some time. A voucher that lies at the hotel is nobody's. One that Alex carries
+    is only Alex's. Where an OPTION hands it over, it can come to be anybody's who can take
+    part there."""
+
+    sam_at_the_appointment = (1, 0)
+    lying = a_stay_with_a_voucher(start=lies_at("voucher", "hotel"))
+    carried = a_stay_with_a_voucher(start=has_object("alex", "voucher"))
+    passed_on = a_stay_with_a_voucher(
+        hands_over("desk", "voucher"), start=lies_at("voucher", "hotel")
+    )
+    assert sam_at_the_appointment in left_out_of(lying)
+    assert sam_at_the_appointment in left_out_of(carried)
+    assert sam_at_the_appointment not in left_out_of(passed_on)
+    for file in (lying, carried, passed_on):
+        assert checked(file).answer is Answer.FEASIBLE
+
+
+def test_the_compiler_asks_its_solver_about_a_file_with_objects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The COMPILER gives the reference checker's report, and it gets there with its own
+    search: it does not hand a FILE with OBJECTs to the reference checker's search."""
+    searched: list[object] = []
+    its_own = answers.reports
+
+    def recorded(file: File, *how: object, **named: object) -> Iterator[Answer | Report]:
+        searched.append(how[0] if how else None)
+        return its_own(file, *how, **named)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(answers, "reports", recorded)
+    rng = Random(99)
+    for _ in range(30):
+        file = a_trip_to_fetch(rng)
+        searched.clear()
+        list(compiler.reports(file))
+        assert searched == [compiler.shown]
+
+
+def test_nobody_can_have_an_object_from_an_option_that_they_are_sure_to_be_out_of() -> None:
+    """The desk hands the voucher over, an hour before Alex's appointment. Sam can have the
+    voucher only by taking part at the desk. Where Sam is sure to be out of the desk, the
+    model does not consider Sam for the appointment either: the desk needs a right that
+    only Alex has, it requires of each PERSON a CAPABILITY that Sam lacks, it would give Sam
+    what Sam must not get, or nobody knows when it is open."""
+    sam_at_the_appointment = (1, 0)
+    lying = lies_at("voucher", "hotel")
+    handed = hands_over("desk", "voucher")
+    anybody = a_stay_with_a_voucher(handed, start=lying)
+    assert sam_at_the_appointment not in left_out_of(anybody)
+    only_alex_has_a_right = a_stay_with_a_voucher(
+        handed, needs_right("desk"), booking("desk", "alex"), every_right("desk"), start=lying,
+        rights=True,
+    )  # fmt: skip
+    sam_cannot_sign = a_stay_with_a_voucher(
+        handed, requires("desk", "signing", "each"), cannot("sam", "signing"),
+        can("alex", "signing"), every_requirement("signing"), start=lying,
+        capabilities=["signing"],
+    )  # fmt: skip
+    sam_must_not = a_stay_with_a_voucher(
+        handed, satisfies("desk", "queueing"), every("queueing"), start=lying,
+        wants=[must_not("queueing", "sam")],
+    )  # fmt: skip
+    never_open = a_stay_with_a_voucher(handed, start=lying, desk=[])
+    for file in (only_alex_has_a_right, sam_cannot_sign, sam_must_not, never_open):
+        assert sam_at_the_appointment in left_out_of(file)
+        assert checked(file).answer is Answer.FEASIBLE
+    # A right that Sam can still buy lets Sam in.
+    sam_can_buy = a_stay_with_a_voucher(
+        handed, needs_right("desk"), booking("desk", "alex"), offer("desk", 1), start=lying,
+        rights=True,
+    )  # fmt: skip
+    assert sam_at_the_appointment not in left_out_of(sam_can_buy)
+
+
+def a_key_to_deposit() -> File:
+    """Alex has the key and cannot sign. Sam can. At 9:00 am the desk takes a key in, and
+    that requires somebody who can sign. At 10:00 am Sam is LOCKed into a check that
+    requires the key, and everybody at the check has to be able to sign."""
+    options = [stays("deposit", "desk"), stays("check", "desk")]
+    facts = [
+        *at("deposit", 9),
+        *at("check", 10),
+        has_object("alex", "key"),
+        keeps("deposit", "key"),
+        requires_object("check", "key"),
+        every_use("key"),
+        every_transfer("key"),
+        cannot("alex", "signing"),
+        can("sam", "signing"),
+        requires("deposit", "signing", "one"),
+        requires("check", "signing", "each"),
+        every_requirement("signing"),
+    ]
+    locks = [lock("check", "sam")]
+    return trip(
+        ["alex", "sam"], ["desk"], options, facts, locks, capabilities=["signing"], objects=["key"]
+    )
+
+
+def test_a_stay_that_happens_for_an_object_brings_whoever_meets_what_it_requires() -> None:
+    """Alex cannot come to the check, so the key has to lie on the desk by then. Alex leaves
+    it at the deposit, and Sam comes along to sign. No LOCK and no must takes anybody to the
+    deposit: it happens for the key. The solver still considers Sam for it."""
+    file = a_key_to_deposit()
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [(step.option, step.persons) for step in found.itinerary] == [
+        ("deposit", ("alex", "sam")),
+        ("check", ("sam",)),
+    ]
+    assert compiler.check(file) == found
+
+
+type Breaks = tuple[tuple[int, str | None], ...]  # where an OBJECT is not at hand, and for whom
+type Trail = tuple[frozenset[Where], ...]  # where an OBJECT might be, step after step
+type Run = tuple[Breaks, Trail]
+type Visit = tuple[str, tuple[str, ...], str]  # an OPTION, who takes part, and where it starts
+
+
+def left_by(
+    does: str, places: frozenset[Where], persons: Sequence[str], origin: str
+) -> frozenset[Where]:
+    """Where an OBJECT might be after an OPTION that keeps it, might keep it, or does neither."""
+    held = frozenset(each for each in places if each.person in persons)
+    there = frozenset({Where(place=origin)}) if held else frozenset[Where]()
+    if does == "keeps":
+        return (places - held) | there
+    return places | there if does == "might_keep" else places
+
+
+def every_way(
+    world: World,
+    thing: str,
+    visits: Sequence[Visit],
+    begins: Sequence[Where],
+    handed: dict[str, str],
+) -> Iterator[Run]:
+    """Each way one OBJECT can go through the OPTIONs of a plan. Nothing is skipped.
+
+    There is a way for each start. An OPTION that does whichever thing suits the plan gives
+    a way in which it leaves the OBJECT alone, then one in which it keeps it, and then, where
+    the plan has a hand-over there and the OBJECT is at hand, one in which it hands it over.
+    A hand-over of the plan that does not happen is broken. Each way says what it breaks,
+    and where the OBJECT might be when the TRIP starts and after each OPTION.
+    """
+
+    def go(position: int, places: frozenset[Where], broke: Breaks, trail: Trail) -> Iterator[Run]:
+        if position == len(visits):
+            yield broke, trail
+            return
+        option, persons, origin = visits[position]
+        reach = all(each.person in persons or each.place == origin for each in places)
+        if (option, thing) in world.needs and not reach:
+            broke = (*broke, (position, None))
+        action = world.does.get((option, thing), "nothing")
+        taker = handed.get(option)
+        not_taken = broke if taker is None else (*broke, (position, taker))
+        for does in ("nothing", "keeps") if action == "any" else (action,):
+            if does == "hands_over" and taker is not None and reach:
+                continue  # it is handed over, below
+            after = left_by(does, places, persons, origin)
+            yield from go(position + 1, after, not_taken, (*trail, after))
+        if taker is not None and action in ("hands_over", "any") and reach:
+            there = frozenset({Where(person=taker)})
+            yield from go(position + 1, there, broke, (*trail, there))
+
+    for start in begins:
+        yield from go(0, frozenset({start}), (), (frozenset({start}),))
+
+
+def test_the_way_an_object_goes_is_found_without_trying_every_way() -> None:
+    """Where a world leaves the start to pick, or lets an OPTION do whichever thing suits the
+    plan, an OBJECT can go many ways. The check takes the way that breaks the least, and the
+    first of those. It keeps one way for each set of places the OBJECT might be in, and that
+    gives the way that trying every one of them gives."""
+    rng = Random(4242)
+    people, places = ["alex", "sam", "jo"], ["desk", "vault"]
+    base = worst_case(trip(people, places, [stays("stay", "desk")], [], []))
+    anywhere = [*(Where(person=each) for each in people), *(Where(place=each) for each in places)]
+    anywhere.append(Where())
+    several = broke = picked = 0
+    for _ in range(1500):
+        visits = [
+            (f"stay-{number}", tuple(rng.sample(people, rng.randrange(1, 4))), rng.choice(places))
+            for number in range(rng.randrange(1, 8))
+        ]
+        does = {
+            (option, "key"): rng.choice(["keeps", "might_keep", "hands_over", "any", "any"])
+            for option, _, _ in visits
+            if rng.random() < 0.8
+        }
+        needs = frozenset((option, "key") for option, _, _ in visits if rng.random() < 0.4)
+        handed = {option: rng.choice(people) for option, _, _ in visits if rng.random() < 0.25}
+        begins = rng.choice([[Where(person="alex")], [Where(place="desk")], [Where()], anywhere])
+        world = replace(base, needs=needs, does=does)
+        ways = list(every_way(world, "key", visits, begins, handed))
+        first = min(ways, key=lambda way: len(way[0]))
+        found = reference._least_broken(  # pyright: ignore[reportPrivateUsage]
+            world, "key", visits, begins, handed
+        )
+        assert found == first
+        several += len(ways) > 1
+        broke += bool(first[0])
+        picked += len({way[0] for way in ways}) > 1
+    assert several > 500 and broke > 300 and picked > 300
+
+
+def test_many_sessions_that_might_do_anything_are_gone_through_once() -> None:
+    """Sixty sessions at one desk, and each does whichever thing suits the plan: it keeps the
+    badge that Alex carries or leaves it alone. The last requires the badge. There are more
+    ways for the badge to go than could ever be tried: two to the power of sixty."""
+    count = 60
+    visits = [(f"session-{number}", ("alex",), "desk") for number in range(count)]
+    base = worst_case(trip(["alex"], ["desk", "vault"], [stays("stay", "desk")], [], []))
+    world = replace(
+        base,
+        needs=frozenset({(f"session-{count - 1}", "badge")}),
+        does={(option, "badge"): "any" for option, _, _ in visits},
+    )
+    broke, trail = reference._least_broken(  # pyright: ignore[reportPrivateUsage]
+        world, "badge", visits, [Where(person="alex")], {}
+    )
+    assert broke == ()
+    assert set(trail) == {frozenset({Where(person="alex")})}
+    # Somewhere else, the last session is one that breaks. With the badge at the vault,
+    # nothing brings it, and the first way is the one in which every session leaves it alone.
+    away = [("session-0", ("alex",), "desk"), *visits[1:-1], (visits[-1][0], ("alex",), "vault")]
+    broke, trail = reference._least_broken(  # pyright: ignore[reportPrivateUsage]
+        world, "badge", away, [Where(place="desk")], {}
+    )
+    assert broke == ((count - 1, None),)
+    assert set(trail) == {frozenset({Where(place="desk")})}
+
+
+def test_a_conference_with_a_badge_is_reported_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Alex is LOCKed into twenty-four sessions and has the badge. Only the first session
+    requires it. Nobody said what the sessions do with it, or whether the last one needs a
+    right. The report says that the trip turns on that right, and it goes through the
+    sessions a few times, where the ways the badge could go are millions."""
+    count = 24
+    options = [stays(f"session-{number}", "hall") for number in range(count)]
+    facts = [
+        fact
+        for number in range(count)
+        for fact in at(f"session-{number}", 8 + number // 3, 20 * (number % 3), "PT15M")
+    ]
+    facts += [needs_no_right(f"session-{number}") for number in range(count - 1)]
+    facts += [has_object("alex", "badge"), requires_object("session-0", "badge")]
+    facts += [every_use("badge")]
+    locks = [lock(f"session-{number}", "alex") for number in range(count)]
+    file = trip(["alex"], ["hall"], options, facts, locks, rights=True, objects=["badge"])
+    gone = 0
+    its_own = reference._left  # pyright: ignore[reportPrivateUsage]
+
+    def counted(
+        does: str, places: frozenset[Where], persons: Sequence[str], origin: str
+    ) -> frozenset[Where]:
+        nonlocal gone
+        gone += 1
+        return its_own(does, places, persons, origin)
+
+    monkeypatch.setattr(reference, "_left", counted)
+    found = compiler.check(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert [needed.unknown.what for enough in found.missing for needed in enough] == [
+        "needs no right"
+    ]
+    assert gone < 5_000
+
+
+def a_voucher_on_the_desk(*more: Document) -> File:
+    """Four travelers are LOCKed into four, three, two and two sessions at one hotel, each at
+    any time. The voucher lies on the desk, and only the last session requires it."""
+    sessions = {"alex": 4, "sam": 3, "jo": 2, "kim": 2}
+    names = [f"{person}-{number}" for person, count in sessions.items() for number in range(count)]
+    options = [stays(name, "hotel") for name in names]
+    facts = [fact for name in names for fact in whenever(name, "PT30M")]
+    facts += [lies_at("voucher", "hotel"), requires_object(names[-1], "voucher")]
+    facts += [every_use("voucher"), *more]
+    locks = [trip_starts(8), *(lock(name, name.split("-")[0]) for name in names)]
+    return trip(list(sessions), ["hotel"], options, facts, locks, objects=["voucher"])
+
+
+def test_an_object_that_nobody_can_have_puts_no_option_in_an_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nobody said what a session does with the voucher, so each might keep it. But a session
+    keeps it only from a PERSON who has it, and nobody has it: it lies on the desk, and
+    nothing hands it over. So it stays there, and the 69,300 orders of the sessions are not
+    tried. The plan is timed as often as where the FILE states every transfer."""
+    timed = 0
+    its_own = reference._times  # pyright: ignore[reportPrivateUsage]
+
+    def counted(
+        count: int,
+        gaps: list[tuple[int, int, int]],
+        fixed: dict[int, int],
+        not_before: dict[int, int],
+        no_later: dict[int, int],
+    ) -> list[int] | None:
+        nonlocal timed
+        timed += 1
+        return its_own(count, gaps, fixed, not_before, no_later)
+
+    monkeypatch.setattr(reference, "_times", counted)
+    stated = answers.check(a_voucher_on_the_desk(every_transfer("voucher")))
+    with_every_transfer_stated, timed = timed, 0
+    found = answers.check(a_voucher_on_the_desk())
+    assert timed == with_every_transfer_stated
+    assert found.answer is stated.answer is Answer.FEASIBLE
+    assert found.itinerary == stated.itinerary
+    assert compiler.check(a_voucher_on_the_desk()) == found
+
+
+def test_an_option_that_keeps_an_object_from_whoever_has_it_is_in_the_order() -> None:
+    """Two appointments at one desk at 10:00 am. Alex has the bag. Sam's appointment requires
+    it, and Alex's keeps it. Alex's can take the bag from Alex, so the two have an order, and
+    the plan that works has Alex's first, though the FILE lists Sam's first. Where Jo has
+    the bag instead, Alex's appointment keeps it from nobody, and nothing brings it."""
+
+    def appointments(holder: str) -> File:
+        options = [stays("sam-uses", "desk"), stays("alex-leaves", "desk")]
+        facts = [
+            *at("sam-uses", 10),
+            *at("alex-leaves", 10, length="PT0S"),
+            has_object(holder, "bag"),
+            requires_object("sam-uses", "bag"),
+            keeps("alex-leaves", "bag"),
+            every_use("bag"),
+            every_transfer("bag"),
+        ]
+        locks = [lock("sam-uses", "sam"), lock("alex-leaves", "alex")]
+        return trip(["alex", "sam", "jo"], ["desk"], options, facts, locks, objects=["bag"])
+
+    found = checked(appointments("alex"))
+    assert found.answer is Answer.FEASIBLE
+    assert [step.option for step in found.itinerary] == ["alex-leaves", "sam-uses"]
+    with_jo = checked(appointments("jo"))
+    assert with_jo.answer is Answer.FEASIBLE
+    assert [(step.option, step.persons) for step in with_jo.itinerary] == [
+        ("sam-uses", ("sam", "jo")),
+        ("alex-leaves", ("alex",)),
+    ]
+
+
+def test_a_hand_over_of_the_plan_is_left_undone_where_that_breaks_less() -> None:
+    """The key lies on the desk. The plan hands it to Alex at 9:00 am. At 10:00 am Sam's stay
+    requires it, and the plan hands it to Sam there. In a world where the first stay does
+    whichever thing suits, the least that breaks is one thing: the first stay does not hand
+    the key over, and then Sam finds it on the desk. With it handed to Alex, both of Sam's
+    would break."""
+    base = worst_case(trip(["alex", "sam"], ["desk"], [stays("stay", "desk")], [], []))
+    world = replace(
+        base,
+        needs=frozenset({("at-ten", "key")}),
+        does={("at-nine", "key"): "any", ("at-ten", "key"): "hands_over"},
+    )
+    visits = [("at-nine", ("alex",), "desk"), ("at-ten", ("sam",), "desk")]
+    handed = {"at-nine": "alex", "at-ten": "sam"}
+    on_the_desk = frozenset({Where(place="desk")})
+    broke, trail = reference._least_broken(  # pyright: ignore[reportPrivateUsage]
+        world, "key", visits, [Where(place="desk")], handed
+    )
+    assert broke == ((0, "alex"),)
+    assert trail == (on_the_desk, on_the_desk, frozenset({Where(person="sam")}))
+
+
+def five_at_each_hour(deposit_last: bool, stamp: int = 0) -> File:
+    """Five travelers, each LOCKed into an appointment of their own at one desk at 9:00 am, at
+    10:00 am and at 11:00 am. One traveler has the voucher, and their appointment at 9:00 am
+    keeps it at the desk. Every other appointment requires it. The FILE lists that traveler's
+    appointments first, or with ``deposit_last`` last, among those of each hour. With
+    ``stamp``, the appointment listed first also requires a stamp that lies on the desk, and
+    can hand it over. With ``stamp`` at two, the same traveler's next appointment requires
+    the stamp too."""
+    people = [f"person-{number}" for number in range(5)]
+    listed = [*people[1:], people[0]] if deposit_last else people
+    names = [f"{person}-at-{hour}" for hour in (9, 10, 11) for person in listed]
+    options = [stays(name, "desk") for name in names]
+    facts = [fact for name in names for fact in at(name, int(name.rsplit("-", 1)[1]))]
+    facts += [has_object("person-0", "voucher"), keeps("person-0-at-9", "voucher")]
+    facts += [requires_object(name, "voucher") for name in names if name != "person-0-at-9"]
+    facts += [every_use("voucher"), every_transfer("voucher")]
+    if stamp:
+        facts += [lies_at("stamp", "desk"), requires_object(names[0], "stamp")]
+        facts += [hands_over(names[0], "stamp"), every_use("stamp"), every_transfer("stamp")]
+        facts += [requires_object(names[5], "stamp")] if stamp > 1 else []
+    locks = [lock(name, name.split("-at-")[0]) for name in names]
+    things = ["voucher", "stamp"] if stamp else ["voucher"]
+    return trip(people, ["desk"], options, facts, locks, objects=things)
+
+
+def test_an_order_is_given_up_at_the_first_option_where_the_object_is_not_at_hand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fifteen appointments, five at each hour. The deposit of the voucher has to come first
+    at 9:00 am: every other appointment requires the voucher on the desk. Where the FILE
+    lists the deposit last of the five, an order that starts with another appointment is
+    given up there, with the millions of orders that start the same way. So the first
+    answer takes as few steps as where the FILE lists the deposit first."""
+    gone = 0
+    its_own = reference._one_further  # pyright: ignore[reportPrivateUsage]
+
+    def counted(*how: object) -> object:
+        nonlocal gone
+        gone += 1
+        return its_own(*how)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(reference, "_one_further", counted)
+    for deposit_last in (False, True):
+        gone = 0
+        file = five_at_each_hour(deposit_last)
+        assert reference.any_works(file, worst_case(file))
+        assert gone < 100
+
+
+def a_register_and_a_voucher() -> File:
+    """Four travelers, each LOCKed into an appointment of their own at one desk at each hour
+    from 9:00 am to noon. Every appointment requires the register that lies on the desk. One
+    traveler has the voucher, and their appointment at 9:00 am keeps it at the desk and can
+    hand the register over. Every other appointment requires the voucher. The FILE lists the
+    register first, and that traveler's appointments last among those of each hour."""
+    people = [f"person-{number}" for number in range(4)]
+    names = [
+        f"{person}-at-{hour}" for hour in (9, 10, 11, 12) for person in (*people[1:], people[0])
+    ]
+    deposit = "person-0-at-9"
+    options = [stays(name, "desk") for name in names]
+    facts = [fact for name in names for fact in at(name, int(name.rsplit("-", 1)[1]))]
+    facts += [lies_at("register", "desk"), hands_over(deposit, "register")]
+    facts += [requires_object(name, "register") for name in names]
+    facts += [has_object("person-0", "voucher"), keeps(deposit, "voucher")]
+    facts += [requires_object(name, "voucher") for name in names if name != deposit]
+    facts += [every_use("register"), every_transfer("register")]
+    facts += [every_use("voucher"), every_transfer("voucher")]
+    locks = [lock(name, name.split("-at-")[0]) for name in names]
+    return trip(people, ["desk"], options, facts, locks, objects=["register", "voucher"])
+
+
+def a_key_check_after_breakfast() -> File:
+    """Alex has breakfast from 8:45 am to 9:30 am, and a key check at any time. Four other
+    guests each have a key check at each hour from 9:00 am to noon. Each key check requires
+    the key that lies at the desk and can hand it over. Each stay lets in only the guest who
+    is LOCKed into it. The TRIP starts at 8:45 am. The FILE lists Alex's key check first."""
+    guests = [f"guest-{number}" for number in range(4)]
+    checks = [f"{guest}-at-{hour}" for hour in (9, 10, 11, 12) for guest in guests]
+    names = ["alex-check", "breakfast", *checks]
+    options = [stays(name, "desk") for name in names]
+    facts = [*whenever("alex-check"), *at("breakfast", 8, 45, "PT45M")]
+    facts += [fact for name in checks for fact in at(name, int(name.rsplit("-", 1)[1]), 0, "PT5M")]
+    facts += [lies_at("key", "desk"), every_use("key"), every_transfer("key")]
+    for name in ("alex-check", *checks):
+        facts += [requires_object(name, "key"), hands_over(name, "key")]
+    whose = {"alex-check": "alex", "breakfast": "alex"}
+    whose.update({name: name.split("-at-")[0] for name in checks})
+    for name, guest in whose.items():
+        facts += [needs_right(name), booking(name, guest), every_right(name)]
+    locks = [trip_starts(8, 45), *(lock(name, guest) for name, guest in whose.items())]
+    return trip(["alex", *guests], ["desk"], options, facts, locks, rights=True, objects=["key"])
+
+
+def test_the_first_answer_checks_the_plan_in_the_order_the_solver_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The solver's own search has every OPTION that matters to an OBJECT in an order that
+    works. To answer whether anything works, the reference checker tries that order first,
+    and it works. So it does not look for an order itself.
+
+    Its own search would take long in both of these FILEs. In the first, an order of the
+    register's appointments is made in full before the voucher rules out how it starts. In
+    the second, Alex's key check is tried before the checks at 9:00 am, where breakfast
+    leaves no time for it, with every order of the checks that come later."""
+    timed = gone = 0
+    times, further = reference._times, reference._one_further  # pyright: ignore[reportPrivateUsage]
+
+    def counted_times(*how: object) -> object:
+        nonlocal timed
+        timed += 1
+        return times(*how)  # type: ignore[arg-type]
+
+    def counted_further(*how: object) -> object:
+        nonlocal gone
+        gone += 1
+        return further(*how)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(reference, "_times", counted_times)
+    monkeypatch.setattr(reference, "_one_further", counted_further)
+    for file in (a_register_and_a_voucher(), a_key_check_after_breakfast()):
+        timed = gone = 0
+        assert compiler.works(file, worst_case(file))
+        assert timed == 1
+        assert gone < 100
+    # The reference checker works out the hand-overs for the solver's order itself. Here
+    # Alex has to take the voucher at the desk of the hotel, and that is found at once too.
+    carried = a_stay_with_a_voucher(
+        hands_over("desk", "voucher"),
+        *at("visit", 11),
+        requires_object("visit", "voucher"),
+        start=lies_at("voucher", "hotel"),
+        others=[stays("visit", "station")],
+        locks=[lock("visit", "alex")],
+    )
+    timed = 0
+    assert compiler.works(carried, worst_case(carried))
+    assert timed == 1
+    found = checked(carried)
+    assert [(step.option, step.handed) for step in found.itinerary if step.handed] == [
+        ("desk", (("voucher", "alex"),))
+    ]
+
+
+def test_the_first_hand_overs_are_taken_wherever_they_leave_the_object() -> None:
+    """The key lies on the desk, and the last stay requires it at the office. Two ways bring
+    it there, and they leave it with different PERSONs. The search keeps one way for each
+    PERSON, and then takes the way that the rules put first: the fewest hand-overs, and not
+    the way that starts in the OPTION listed first, or the way that was found first."""
+    base = worst_case(trip(["alex", "sam", "jo"], ["desk"], [stays("stay", "desk")], [], []))
+    names = ["first", "second", "third", "use"]
+    world = replace(
+        base,
+        needs=frozenset({("use", "key")}),
+        does={(name, "key"): "hands_over" for name in names[:3]},
+    )
+    people = ["alex", "sam", "jo"]
+
+    def by_position(option: str, person: str) -> tuple[int, int]:
+        return (names.index(option), people.index(person))
+
+    def first_hand_overs(third: tuple[str, ...], use: tuple[str, ...]) -> object:
+        visits = [
+            ("first", ("sam",), "desk"),
+            ("second", ("alex",), "desk"),
+            ("third", third, "lobby"),
+            ("use", use, "office"),
+        ]
+        return reference._first_hand_overs(  # pyright: ignore[reportPrivateUsage]
+            world, "key", visits, [Where(place="desk")], by_position
+        )
+
+    # Alex takes it in the second stay and brings it: one hand-over. Or Sam takes it in the
+    # first stay and hands it to Jo in the third: two, and they start in the stay listed first.
+    assert first_hand_overs(("sam", "jo"), ("alex", "jo")) == ((1, 0),)
+    # Sam takes it in the first stay and brings it: one hand-over. Or Alex takes it in the
+    # second and hands it to Jo in the third: two, and that way is found before the other.
+    assert first_hand_overs(("alex", "jo"), ("sam", "jo")) == ((0, 1),)
+
+
+def test_an_object_that_is_out_of_reach_for_good_is_seen_before_anything_is_timed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The key lies at the vault, and nothing hands it over or keeps it. Alex's appointment
+    at the desk requires it. No order and no route changes that, so the choice is given up
+    before any start time is worked out."""
+    options = [stays("appointment", "desk")]
+    facts = [
+        *at("appointment", 10),
+        lies_at("key", "vault"),
+        requires_object("appointment", "key"),
+        every_use("key"),
+        every_transfer("key"),
+    ]
+    locks = [lock("appointment", "alex")]
+    file = trip(["alex"], ["desk", "vault"], options, facts, locks, objects=["key"])
+    timed = 0
+    its_own = reference._times  # pyright: ignore[reportPrivateUsage]
+
+    def counted(*how: object) -> object:
+        nonlocal timed
+        timed += 1
+        return its_own(*how)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(reference, "_times", counted)
+    assert not reference.any_works(file, worst_case(file))
+    assert timed == 0
+
+
+def answered_at_once(search: compiler._Search) -> tuple[bool, int]:  # pyright: ignore[reportPrivateUsage]
+    """Whether anything works in a model, and how many conflicts the solver went through.
+
+    The solver gives the same count every time. It gives up after a thousand conflicts,
+    and the test fails here: an answer that takes more is not one the solver sees at once.
+    """
+    solver = compiler._solver(relax=False)  # pyright: ignore[reportPrivateUsage]
+    solver.parameters.max_number_of_conflicts = 1000
+    status = solver.solve(search.model)
+    assert status != cp_model.UNKNOWN, "the solver went through a thousand conflicts"
+    return search.read(solver, status) is not None, solver.num_conflicts
+
+
+def conflicts_to_answer(file: File) -> tuple[bool, int]:
+    """Whether anything works in the worst case by the solver's own search, and how many
+    conflicts the solver went through to say so."""
+    search = compiler._Search(file, worst_case(file), plain=True)  # pyright: ignore[reportPrivateUsage]
+    return answered_at_once(search)
+
+
+def a_register_at_two_places(airport_at: int = 9, guests: int = 11) -> File:
+    """Eleven guests each have an appointment at the hotel desk at 9:00 am, and a clerk has
+    one at the airport. Every appointment requires the register, which lies at the hotel.
+    Each appointment at the hotel can hand it over. A shuttle takes 15 minutes."""
+    people = [f"guest-{number}" for number in range(guests)]
+    desks = [f"{person}-desk" for person in people]
+    options = [*(stays(desk, "hotel") for desk in desks), stays("airport-desk", "airport")]
+    facts = [fact for desk in desks for fact in at(desk, 9)]
+    facts += [*at("airport-desk", airport_at), starts_from("clerk", "airport")]
+    facts += [starts_from(person, "hotel") for person in people]
+    facts += [takes("shuttle", "PT15M"), complete(None, None)]
+    facts += [lies_at("register", "hotel"), requires_object("airport-desk", "register")]
+    for desk in desks:
+        facts += [hands_over(desk, "register"), requires_object(desk, "register")]
+    facts += [every_use("register"), every_transfer("register")]
+    locks = [lock(desk, person) for desk, person in zip(desks, people, strict=True)]
+    locks.append(lock("airport-desk", "clerk"))
+    ways = [way_between("shuttle", "hotel", "airport")]
+    places = ["hotel", "airport"]
+    return trip([*people, "clerk"], places, options, facts, locks, ways, objects=["register"])
+
+
+def a_pass_at_the_hotel(hour: int, minute: int) -> File:
+    """Alex is LOCKed into an admission at the hall at 4:00 pm that requires the pass. The
+    pass lies at the hotel, where a pickup of half an hour hands it over. Nine counters at
+    the hall, each at any time, can hand it over too. The walk takes 15 minutes."""
+    counters = [f"counter-{number}" for number in range(9)]
+    options = [stays("admission", "hall"), stays("pickup", "hotel")]
+    options += [stays(name, "hall") for name in counters]
+    facts = [*at("admission", 16), *at("pickup", hour, minute)]
+    for name in counters:
+        facts += [*whenever(name), hands_over(name, "pass")]
+    facts += [starts_from("alex", "hotel"), takes("walk", "PT15M"), complete(None, None)]
+    facts += [lies_at("pass", "hotel"), hands_over("pickup", "pass")]
+    facts += [requires_object("admission", "pass"), every_use("pass"), every_transfer("pass")]
+    ways = [way_between("walk", "hotel", "hall")]
+    locks = [lock("admission", "alex")]
+    return trip(["alex"], ["hotel", "hall"], options, facts, locks, ways, objects=["pass"])
+
+
+def test_an_object_cannot_be_at_hand_in_two_places_with_no_time_to_cross() -> None:
+    """The register is required at the hotel and at the airport at 9:00 am, and the shuttle
+    takes 15 minutes. The model says outright that the two are at least that far apart, so
+    the solver need not try each guest as the one who carries the register. An hour later
+    at the airport, there is time, and a guest brings it."""
+    works, conflicts = conflicts_to_answer(a_register_at_two_places())
+    assert not works
+    assert conflicts < 1000
+    works, conflicts = conflicts_to_answer(a_register_at_two_places(airport_at=10))
+    assert works
+    assert conflicts < 1000
+
+
+def test_an_object_leaves_the_place_where_it_lies_only_by_a_hand_over_there() -> None:
+    """The pass lies at the hotel, and the admission at the hall requires it at 4:00 pm. A
+    pickup at the hotel at 4:30 pm is too late, and the counters at the hall hand over only
+    what is at hand there. The model says outright that the pass leaves the hotel only by a
+    hand-over there, early enough to be over and across. At 3:15 pm the pickup of half an
+    hour and the walk just fit. A minute later they do not."""
+    works, conflicts = conflicts_to_answer(a_pass_at_the_hotel(16, 30))
+    assert not works
+    assert conflicts < 1000
+    just_in_time = compiler.check(a_pass_at_the_hotel(15, 15))
+    assert just_in_time.answer is Answer.FEASIBLE
+    assert [(step.option, step.handed) for step in just_in_time.itinerary if step.handed] == [
+        ("pickup", (("pass", "alex"),))
+    ]
+    works, conflicts = conflicts_to_answer(a_pass_at_the_hotel(15, 16))
+    assert not works
+    assert conflicts < 1000
+
+
+# Short cuts in the search for the ITINERARY shown.
+
+
+def a_trip_with_steps_at_one_time(rng: Random) -> File:
+    """Two or three PERSONs, each LOCKed into stays of their own at a desk, and one key.
+
+    Most stays start at 9:00 am or at 10:00 am, and some at any time. Each requires the key,
+    hands it over or keeps it, at random. So several OPTIONs that matter to the key start at
+    one instant, and the key has many orders to go through them in.
+    """
+    people = ["alex", "sam", "jo"][: rng.choice([2, 3, 3])]
+    names = [f"{person}-{number}" for person in people for number in range(rng.choice([1, 2, 2]))]
+    rng.shuffle(names)
+    options = [stays(name, rng.choice(["desk"] * 4 + ["vault"])) for name in names]
+    facts: list[Document] = [takes("walk", "PT10M"), complete(None, None)]
+    for name in names:
+        hour = rng.choice([9, 9, 10, None])
+        length = rng.choice(["PT0S", "PT15M", "PT30M"])
+        facts += whenever(name, length) if hour is None else at(name, hour, 0, length)
+        if rng.random() < 0.6:
+            facts.append(requires_object(name, "key"))
+        does = rng.choice(["hands_over", "hands_over", "keeps", None, None])
+        if does is not None:
+            facts.append(does_with(name, "key", does))
+    holder = has_object(rng.choice(people), "key")
+    facts.append(rng.choice([holder, lies_at("key", "desk"), lies_at("key", "desk")]))
+    facts += [every_use("key")]
+    facts += [every_transfer("key")] if rng.random() < 0.7 else []
+    things = ["key"]
+    if rng.random() < 0.5:
+        # A stamp as well, at a few of the stays. So two OBJECTs can order the steps.
+        things = rng.choice([["key", "stamp"], ["stamp", "key"]])
+        for name in rng.sample(names, min(len(names), rng.choice([1, 2, 2, 3]))):
+            if rng.random() < 0.7:
+                facts.append(requires_object(name, "stamp"))
+            does = rng.choice(["hands_over", "keeps", None])
+            if does is not None:
+                facts.append(does_with(name, "stamp", does))
+        whose = has_object(rng.choice(people), "stamp")
+        facts += [rng.choice([whose, lies_at("stamp", "desk")]), every_use("stamp")]
+        facts += [every_transfer("stamp")] if rng.random() < 0.7 else []
+    locks = [lock(name, name.split("-")[0]) for name in names]
+    locks += [trip_starts(8)] if rng.random() < 0.6 else []
+    ways = [way_between("walk", "desk", "vault")]
+    return trip(people, ["desk", "vault"], options, facts, locks, ways, objects=things)
+
+
+def a_trip_with_two_things_at_one_desk(rng: Random) -> File:
+    """Two PERSONs with five or six stays at one desk, a key that one of them has, and a
+    stamp that lies on the desk.
+
+    Mostly: a stay of both at 8:00 am can hand the key over, stays at any time keep the key
+    or require it, and stays at 9:00 am and 10:00 am require the stamp or can hand it over.
+    So the key leaves a choice of order among stays at any time, while the stamp orders
+    stays at fixed times, and the two orders have to go together. Each part is now and then
+    something else.
+    """
+
+    def mostly(usual: str, *others: str | None) -> str | None:
+        return usual if rng.random() < 0.85 else rng.choice(others)
+
+    people = ["sam", "jo"]
+    names = ["together", "sam-fixed", "sam-free", "jo-free", "jo-fixed", "jo-other"]
+    names = names if rng.random() < 0.85 else names[:5]
+    whose = {"together": people, "sam-fixed": ["sam"], "sam-free": ["sam"]}
+    whose.update({"jo-free": ["jo"], "jo-fixed": ["jo"], "jo-other": ["jo"]})
+    listed = names if rng.random() < 0.8 else rng.sample(names, len(names))
+    options = [stays(name, "desk") for name in listed]
+    facts: list[Document] = []
+    sam_at, jo_at = (10, 9) if rng.random() < 0.8 else rng.choice([(9, 10), (9, 9), (10, 10)])
+    hours = {"together": 8, "sam-fixed": sam_at, "jo-fixed": jo_at}
+    for name in listed:
+        fixed = name in hours and rng.random() < 0.95
+        facts += at(name, hours[name], length="PT5M") if fixed else whenever(name)
+    key_does = {"together": "hands_over", "sam-free": "keeps", "jo-free": "keeps"}
+    for name in listed:
+        does = mostly(key_does.get(name) or "", "keeps", None) or None
+        if does is not None:
+            facts.append(does_with(name, "key", does))
+    needs_key = "jo-other" if "jo-other" in listed else "jo-free"
+    facts.append(requires_object(mostly(needs_key, *listed) or needs_key, "key"))
+    facts += [has_object(mostly("sam", "jo") or "sam", "key"), lies_at("stamp", "desk")]
+    facts += [requires_object(mostly("jo-fixed", "sam-fixed") or "jo-fixed", "stamp")]
+    facts += [hands_over(mostly("sam-fixed", "jo-fixed") or "sam-fixed", "stamp")]
+    facts += [every_use("key"), every_transfer("key"), every_use("stamp")]
+    facts += [every_transfer("stamp")] if rng.random() < 0.9 else []
+    locks = [lock(name, *whose[name]) for name in listed]
+    locks += [trip_starts(8)] if rng.random() < 0.5 else []
+    things = ["key", "stamp"] if rng.random() < 0.8 else ["stamp", "key"]
+    return trip(people, ["desk"], options, facts, locks, objects=things)
+
+
+def test_the_short_cuts_show_the_plan_that_ranking_every_order_shows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The search leaves out an order that an order made before it always beats, and it
+    stops at an ITINERARY that none can come before. Here it makes every order, times each
+    one and ranks them all. The ITINERARY shown is the same. The solver chooses who takes
+    part, so that the comparison is about the orders alone."""
+    rng = Random(3131)
+    search = EveryOrder(monkeypatch)
+    left_out = stopped = with_hand_overs = compared = 0
+    alike, nothing_before = (
+        reference._orders_differ_only_in_the_listing,  # pyright: ignore[reportPrivateUsage]
+        reference._nothing_comes_before,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    def counted_alike(*given: object) -> bool:
+        nonlocal left_out
+        found = alike(*given)  # type: ignore[arg-type]
+        left_out += found
+        return found
+
+    def counted_stop(*given: object) -> bool:
+        nonlocal stopped
+        found = nothing_before(*given)  # type: ignore[arg-type]
+        stopped += found
+        return found
+
+    trips = [a_trip_with_steps_at_one_time(rng) for _ in range(300)]
+    trips += [a_trip_with_two_things_at_one_desk(rng) for _ in range(300)]
+    for file in trips:
+        for world in (worst_case(file), best_case(file), no_better_than(file, ())):
+            search.as_built()
+            monkeypatch.setattr(reference, "_orders_differ_only_in_the_listing", counted_alike)
+            monkeypatch.setattr(reference, "_nothing_comes_before", counted_stop)
+            shown = compiler.shown(file, world)
+            search.skipping_nothing()
+            assert compiler.shown(file, world) == shown
+            compared += shown is not None
+            with_hand_overs += any(step.handed for step in shown or ())
+    assert compared > 300
+    assert left_out > 40
+    assert stopped > 60
+    assert with_hand_overs > 50
+
+
+def test_an_order_is_left_out_only_where_what_comes_before_ranks_before() -> None:
+    """Alex and Sam each have a check at the desk at 9:00 am that requires the key lying
+    there, and Jo's check at 10:00 am can hand it over. Alex also has a note to hand in at
+    9:00 am, which takes no time, comes before Alex's check, and is listed last in the FILE.
+    With Alex's check before Sam's, the plan lists the note first. With Sam's first, it
+    lists Sam's check first, and that comes before the note. Both orders leave the key on
+    the desk. So the order that is made second gives the ITINERARY that comes first, and
+    the search may not leave it out."""
+    names = ["alex-check", "sam-check", "jo-check", "alex-note"]
+    options = [stays(name, "desk") for name in names]
+    facts = [
+        *at("alex-check", 9),
+        *at("sam-check", 9),
+        *at("jo-check", 10),
+        *at("alex-note", 9, length="PT0S"),
+        lies_at("key", "desk"),
+        requires_object("alex-check", "key"),
+        requires_object("sam-check", "key"),
+        hands_over("jo-check", "key"),
+        every_use("key"),
+        every_transfer("key"),
+    ]
+    locks = [lock(name, name.split("-")[0]) for name in names]
+    file = trip(["alex", "sam", "jo"], ["desk"], options, facts, locks, objects=["key"])
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [step.option for step in found.itinerary] == [
+        "sam-check",
+        "alex-note",
+        "alex-check",
+        "jo-check",
+    ]
+
+
+def test_an_order_is_left_out_only_where_one_object_orders_the_steps() -> None:
+    """Three stays at the desk at 9:00 am, listed as Sam's, Jo's and then Alex's. Alex has
+    the voucher and deposits it. Sam's stay requires the voucher, so the deposit comes
+    before it. Sam's and Jo's stays require the key that lies on the desk, and Jo's stay at
+    10:00 am can hand it over, so the key gives those three an order as well. With Jo's
+    first, the plan lists Jo's stay, the deposit and Sam's stay. With Sam's first, the
+    deposit has to be listed first of all, and it ranks last. Both orders leave the key on
+    the desk. Two OBJECTs order the steps here, so no order is left out for being like
+    another."""
+    names = ["sam-stay", "jo-stay", "deposit", "jo-later"]
+    options = [stays(name, "desk") for name in names]
+    facts = [
+        *at("sam-stay", 9),
+        *at("jo-stay", 9),
+        *at("deposit", 9),
+        *at("jo-later", 10),
+        has_object("alex", "voucher"),
+        keeps("deposit", "voucher"),
+        requires_object("sam-stay", "voucher"),
+        every_use("voucher"),
+        every_transfer("voucher"),
+        lies_at("key", "desk"),
+        requires_object("sam-stay", "key"),
+        requires_object("jo-stay", "key"),
+        hands_over("jo-later", "key"),
+        every_use("key"),
+        every_transfer("key"),
+    ]
+    locks = [lock("sam-stay", "sam"), lock("jo-stay", "jo"), lock("deposit", "alex")]
+    locks.append(lock("jo-later", "jo"))
+    things = ["voucher", "key"]
+    file = trip(["alex", "sam", "jo"], ["desk"], options, facts, locks, objects=things)
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [step.option for step in found.itinerary] == [
+        "jo-stay",
+        "deposit",
+        "sam-stay",
+        "jo-later",
+    ]
+    assert not any(step.handed for step in found.itinerary)
+
+
+def test_an_unlisted_way_crosses_once_the_span_that_rules_it_out_is_over() -> None:
+    """The key lies at the hotel, where Alex takes it at 9:30 am. Alex's meeting in the park
+    at 11:00 am requires it. Only an unlisted WAY joins the two, and none leaves from
+    9:00 am to 10:00 am. The pickup is inside that span and the meeting is after it, so
+    there is time to cross once the span is over."""
+    options = [stays("pickup", "hotel"), stays("meeting", "park")]
+    span = {"from": "hotel", "to": "park", "leaving": {"earliest": moment(9), "latest": moment(10)}}
+    facts = [
+        *at("pickup", 9, 30, "PT0S"),
+        *at("meeting", 11),
+        starts_from("alex", "hotel"),
+        {"id": "ways", "complete": span},
+        lies_at("key", "hotel"),
+        hands_over("pickup", "key"),
+        requires_object("meeting", "key"),
+        every_use("key"),
+        every_transfer("key"),
+    ]
+    locks = [lock("meeting", "alex")]
+    file = trip(["alex"], ["hotel", "park"], options, facts, locks, objects=["key"])
+    world = with_these_at_best(file, [Unknown("other ways", origin="hotel", destination="park")])
+    shown = first_shown(file, world)
+    assert shown is not None
+    assert [(step.option, step.handed) for step in shown if step.handed] == [
+        ("pickup", (("key", "alex"),))
+    ]
+    assert compiler.shown(file, world) == shown
+    assert compiler.works(file, world)
+
+
+def test_the_earliest_starts_count_from_fixed_starts_and_limits() -> None:
+    """Step 0 starts at a fixed time, and step 1 comes ten seconds or more after it. Step 2
+    is tied to nothing but its own limit. Step 3 has nothing to count from. Step 4 comes
+    after step 2 and after its own limit, and the later of the two counts. A fixed start
+    stays where it is, whatever comes before it and whatever its limit."""
+    gaps = [(0, 1, 10), (2, 4, 5), (1, 5, 100)]
+    soonest = reference._earliest_starts(  # pyright: ignore[reportPrivateUsage]
+        6, gaps, fixed={0: 1000, 5: 1050}, not_before={2: 300, 4: 400, 5: 2000}
+    )
+    assert soonest == {0: 1000, 1: 1010, 2: 300, 4: 400, 5: 1050}
+    later = reference._earliest_starts(  # pyright: ignore[reportPrivateUsage]
+        6, [(2, 4, 500)], fixed={}, not_before={2: 300, 4: 400}
+    )
+    assert later == {2: 300, 4: 800}
+
+
+def timings_for_the_report(monkeypatch: pytest.MonkeyPatch, file: File) -> tuple[Report, int]:
+    """The COMPILER's report on a FILE, and how often a plan was timed on the way to it."""
+    timed = 0
+    its_own = reference._times  # pyright: ignore[reportPrivateUsage]
+
+    def counted(*how: object) -> object:
+        nonlocal timed
+        timed += 1
+        return its_own(*how)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(reference, "_times", counted)
+    found = compiler.check(file)
+    monkeypatch.setattr(reference, "_times", its_own)
+    return found, timed
+
+
+def test_steps_at_one_time_do_not_have_every_order_timed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fifteen appointments, five at each of three hours, all about one voucher. They have
+    345,600 orders that work, and all of them give the same start times. The search makes
+    one order for each way the voucher can end up, and the report lists the deposit first
+    at 9:00 am, then the other appointments as the FILE lists them."""
+    found, timed = timings_for_the_report(monkeypatch, five_at_each_hour(deposit_last=True))
+    assert found.answer is Answer.FEASIBLE
+    assert timed < 50
+    people = ["person-0", "person-1", "person-2", "person-3", "person-4"]
+    in_order = [
+        *(f"{person}-at-9" for person in people),
+        *(f"{person}-at-{hour}" for hour in (10, 11) for person in (*people[1:], people[0])),
+    ]
+    assert [step.option for step in found.itinerary] == in_order
+    # A stamp that one appointment alone has to do with puts nothing in an order. So the
+    # voucher is still the one OBJECT that orders the appointments.
+    with_a_stamp = five_at_each_hour(deposit_last=True, stamp=1)
+    found, timed = timings_for_the_report(monkeypatch, with_a_stamp)
+    assert timed < 50
+    assert [step.option for step in found.itinerary] == in_order
+    # Nor does a stamp at two appointments of one traveler: the traveler does them one after
+    # the other, so the stamp leaves no choice of order.
+    stamped_twice = five_at_each_hour(deposit_last=True, stamp=2)
+    found, timed = timings_for_the_report(monkeypatch, stamped_twice)
+    assert timed < 50
+    assert [step.option for step in found.itinerary] == in_order
+
+
+def test_a_hand_over_among_steps_at_one_time_is_found_without_every_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Eleven guests each have an appointment at the hotel at 9:00 am that requires the
+    register and can hand it over. The clerk at the airport requires it at 10:00 am. So one
+    guest takes it, in the appointment that comes last of the eleven, and brings it. The
+    plan shown has the guest listed last go to the airport, so that guest's appointment is
+    the last one. The eleven have forty million orders, and the search makes one for each
+    way the register can end up. With four guests, every order can be ranked, and the plan
+    shown is the same."""
+    found, timed = timings_for_the_report(monkeypatch, a_register_at_two_places(airport_at=10))
+    assert found.answer is Answer.FEASIBLE
+    assert timed < 100
+    at_nine = [step for step in found.itinerary if step.option and step.start == seconds(9)]
+    assert [step.option for step in at_nine] == [f"guest-{number}-desk" for number in range(11)]
+    assert [step.handed for step in at_nine] == [*[()] * 10, (("register", "guest-10"),)]
+    few = a_register_at_two_places(airport_at=10, guests=4)
+    shown = compiler.shown(few, worst_case(few))
+    assert shown is not None and any(step.handed for step in shown)
+    EveryOrder(monkeypatch).skipping_nothing()
+    assert compiler.shown(few, worst_case(few)) == shown
+
+
+def four_at_a_pickup() -> File:
+    """Four travelers are all LOCKed into a pickup at 8:00 am that can hand the voucher
+    over, and then into four, three, two and two stays at any time. The voucher lies at the
+    hotel, where everything happens, and the last stay requires it. Nobody said what a stay
+    does with it."""
+    sessions = {"alex": 4, "sam": 3, "jo": 2, "kim": 2}
+    names = [f"{person}-{number}" for person, count in sessions.items() for number in range(count)]
+    options = [stays("pickup", "hotel"), *(stays(name, "hotel") for name in names)]
+    facts = [*at("pickup", 8, length="PT5M")]
+    facts += [fact for name in names for fact in whenever(name, "PT30M")]
+    facts += [lies_at("voucher", "hotel"), requires_object(names[-1], "voucher")]
+    facts += [hands_over("pickup", "voucher"), every_use("voucher")]
+    locks = [trip_starts(8), lock("pickup", *sessions)]
+    locks += [lock(name, name.split("-")[0]) for name in names]
+    return trip(list(sessions), ["hotel"], options, facts, locks, objects=["voucher"])
+
+
+def test_the_search_stops_at_a_plan_that_no_order_can_beat(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each of the four can have the voucher after the pickup, so each stay might keep it,
+    and the eleven stays have 69,300 orders. The order in which the stays fall anyway works
+    with no hand-over, and every stay starts as early as it can. No order can give a plan
+    that comes before that one, so the search stops there."""
+    found, timed = timings_for_the_report(monkeypatch, four_at_a_pickup())
+    assert found.answer is Answer.FEASIBLE
+    assert timed < 50
+    assert not any(step.handed for step in found.itinerary)
+    assert [step.start for step in found.itinerary if step.option == "kim-1"] == [seconds(8, 35)]
+
+
+def test_the_time_to_cross_counts_the_hours_in_which_no_unlisted_way_leaves() -> None:
+    """The search for a conflict takes FACTs out of the FILE. With the time and the length
+    of one guest's appointment taken out, that guest could bring the register early. The
+    other ten still require it at the hotel at 9:00 am, when the clerk requires it at the
+    airport. In the best case an unlisted WAY joins the two PLACEs, but the FILE lists every
+    WAY for that day. So between two fixed times of that day, only the shuttle crosses, and
+    the solver sees at once that nothing works."""
+    file = a_register_at_two_places()
+    left = Remaining(file).without("guest-0-desk-length").without("guest-0-desk-time")
+    world, open_pairs = reference.best_case_left(left)
+    assert world.unlisted is None or world.unlisted
+    search = compiler._Search(file, world, open_pairs, plain=True)  # pyright: ignore[reportPrivateUsage]
+    works, conflicts = answered_at_once(search)
+    assert not works
+    assert conflicts < 1000
+    assert not compiler.can_work(left)
+
+
+def four_on_a_shuttle() -> File:
+    """Four travelers are all LOCKed into the shuttle from the lodge to the resort at
+    8:00 am, which can hand the voucher over, and then into four, three, two and two
+    sessions at the resort at any time. The voucher lies at the lodge, and the last session
+    requires it. Nobody said what a session does with it."""
+    sessions = {"alex": 4, "sam": 3, "jo": 2, "kim": 2}
+    names = [f"{person}-{number}" for person, count in sessions.items() for number in range(count)]
+    options = [moves("shuttle", "lodge", "resort"), *(stays(name, "resort") for name in names)]
+    facts = [*at("shuttle", 8, length="PT20M")]
+    facts += [fact for name in names for fact in whenever(name, "PT30M")]
+    facts += [starts_from(person, "lodge") for person in sessions]
+    facts += [lies_at("voucher", "lodge"), requires_object(names[-1], "voucher")]
+    facts += [hands_over("shuttle", "voucher"), every_use("voucher"), complete(None, None)]
+    locks = [trip_starts(8), lock("shuttle", *sessions)]
+    locks += [lock(name, name.split("-")[0]) for name in names]
+    places = ["lodge", "resort"]
+    return trip(list(sessions), places, options, facts, locks, objects=["voucher"])
+
+
+def test_the_search_stops_at_a_plan_whose_hand_over_no_order_can_do_without(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kim's last session requires the voucher, so Kim has to take it on the shuttle. Every
+    order of the eleven sessions has that hand-over, and none has one that comes before it.
+    The order in which the sessions fall anyway has every step at the earliest it can
+    start. So the search stops there, where it would time 69,300 orders."""
+    found, timed = timings_for_the_report(monkeypatch, four_on_a_shuttle())
+    assert found.answer is Answer.FEASIBLE
+    assert timed < 50
+    assert [(step.option, step.handed) for step in found.itinerary if step.handed] == [
+        ("shuttle", (("voucher", "kim"),))
+    ]
+
+
+def conflicts_in_the_best_case(file: File) -> tuple[bool, int]:
+    """Whether anything works in the best case by the solver's own search, and how many
+    conflicts the solver went through to say so."""
+    world, open_pairs = reference.best_case_left(Remaining(file))
+    search = compiler._Search(file, world, open_pairs, plain=True)  # pyright: ignore[reportPrivateUsage]
+    return answered_at_once(search)
+
+
+def eleven_signatures(
+    *more: Document,
+    spans: Sequence[Document],
+    others: Sequence[Document] = (),
+    places: Sequence[str] = (),
+    ways: Sequence[Document] = (),
+    at_the_airport: Sequence[Document] | None = None,
+    decisions: Sequence[Document] = (),
+    sign_at_any_time: bool = False,
+) -> File:
+    """Eleven guests each sign at the hotel desk at 9:00 am, which takes no time. Each
+    signature requires the register that lies at the hotel and can hand it over. A clerk at
+    the airport requires the register at 9:05 am. The shuttle takes 15 minutes. ``others``
+    holds other OPTIONs, ``places`` other PLACEs, ``ways`` other WAYs, and ``more`` the FACTs
+    about them. ``at_the_airport`` says when the clerk's check is, where that is not
+    9:05 am, and ``decisions`` holds other DECISIONs. With ``sign_at_any_time``, the guests
+    sign at any time."""
+    people = [f"guest-{number}" for number in range(11)]
+    desks = [f"{person}-desk" for person in people]
+    options = [*(stays(desk, "hotel") for desk in desks), stays("airport-desk", "airport")]
+    options += others
+    facts = [
+        fact
+        for desk in desks
+        for fact in (whenever(desk, "PT0S") if sign_at_any_time else at(desk, 9, length="PT0S"))
+    ]
+    facts += at("airport-desk", 9, 5) if at_the_airport is None else at_the_airport
+    facts += [starts_from("clerk", "airport")]
+    facts += [starts_from(person, "hotel") for person in people]
+    facts += [takes("shuttle", "PT15M")]
+    facts += [lies_at("register", "hotel"), requires_object("airport-desk", "register")]
+    for desk in desks:
+        facts += [hands_over(desk, "register"), requires_object(desk, "register")]
+    facts += [every_use("register"), every_transfer("register"), *spans, *more]
+    locks = [lock(desk, person) for desk, person in zip(desks, people, strict=True)]
+    locks += [lock("airport-desk", "clerk"), *decisions]
+    all_ways = [way_between("shuttle", "hotel", "airport"), *ways]
+    everywhere = ["hotel", "airport", *places]
+    return trip(
+        [*people, "clerk"], everywhere, options, facts, locks, all_ways, objects=["register"]
+    )
+
+
+def no_way_leaves(id: str, earliest: str, latest: str) -> Document:
+    """A FACT that the FILE lists every way between any two PLACEs that leaves in a span."""
+    return {"id": id, "complete": {"leaving": {"earliest": earliest, "latest": latest}}}
+
+
+def test_two_spans_that_meet_rule_an_unlisted_way_out_as_one_does() -> None:
+    """The register is at the hotel at 9:00 am and has to be at the airport at 9:05 am. The
+    shuttle takes 15 minutes. One FACT lists every way that leaves until 9:02 am, and
+    another every way from the second after. Together they leave no time for an unlisted
+    WAY, and the solver sees at once that nothing works. With one second left open between
+    them, an unlisted WAY can leave then."""
+    day = "2027-05-15T{}-05:00[America/Chicago]"
+    spans = [
+        no_way_leaves("ways-early", day.format("00:00:00"), day.format("09:02:00")),
+        no_way_leaves("ways-late", day.format("09:02:01"), day.format("23:59:00")),
+    ]
+    works, conflicts = conflicts_in_the_best_case(eleven_signatures(spans=spans))
+    assert not works
+    assert conflicts < 1000
+    spans[1] = no_way_leaves("ways-late", day.format("09:02:02"), day.format("23:59:00"))
+    works, conflicts = conflicts_in_the_best_case(eleven_signatures(spans=spans))
+    assert works
+
+
+def test_a_ride_that_leaves_too_late_does_not_count_for_the_time_to_cross() -> None:
+    """An express from the hotel to the airport takes one minute and leaves at 3:00 pm. The
+    register has to cross between 9:00 am and 9:05 am, so the express is no help, and the
+    solver sees at once that nothing works. With the express at 9:02 am, a guest takes the
+    register along."""
+
+    def with_an_express(hour: int, minute: int) -> File:
+        return eleven_signatures(
+            *at("express", hour, minute, "PT1M"),
+            spans=[complete(None, None)],
+            others=[moves("express", "hotel", "airport")],
+        )
+
+    works, conflicts = conflicts_in_the_best_case(with_an_express(15, 0))
+    assert not works
+    assert conflicts < 1000
+    works, conflicts = conflicts_in_the_best_case(with_an_express(9, 2))
+    assert works
+
+
+def test_whoever_takes_an_object_stays_until_the_option_is_over() -> None:
+    """Each guest's appointment at the hotel takes half an hour from 9:00 am, and the clerk
+    requires the register at the airport at 9:00 am. Nobody said how long the shuttle takes,
+    so in the best case it takes no time. A guest who takes the register is still in the
+    appointment until 9:30 am. So no hand-over at the hotel is early enough, and the solver
+    sees at once that nothing works."""
+    file = a_register_at_two_places()
+    without = replace(file, facts=tuple(fact for fact in file.facts if fact.id != "shuttle-length"))
+    works, conflicts = conflicts_in_the_best_case(without)
+    assert not works
+    assert conflicts < 1000
+
+
+def test_the_time_to_cross_is_worked_out_only_from_the_places_that_matter() -> None:
+    """A line of 200 stops, with a ride from each to the next. Alex takes the pass at the
+    first stop and needs it at the second. The model works out the time to cross from those
+    two stops, and not between every two stops of the line."""
+    stops = [f"stop-{number}" for number in range(200)]
+    ways = [
+        way_between(f"ride-{a}", here, there) for a, (here, there) in enumerate(pairwise(stops))
+    ]
+    options = [stays("pickup", "stop-0"), stays("meeting", "stop-1")]
+    facts = [*at("pickup", 9, length="PT5M"), *at("meeting", 10), starts_from("alex", "stop-0")]
+    facts += [takes(each["id"], "PT5M") for each in ways]
+    facts += [lies_at("pass", "stop-0"), hands_over("pickup", "pass")]
+    facts += [requires_object("meeting", "pass"), every_use("pass"), every_transfer("pass")]
+    facts.append(complete(None, None))
+    locks = [lock("meeting", "alex")]
+    file = trip(["alex"], stops, options, facts, locks, ways, objects=["pass"])
+    search = compiler._Search(file, worst_case(file), plain=True)  # pyright: ignore[reportPrivateUsage]
+    worked_out = {origin for origin, _ in search._crossing}  # pyright: ignore[reportPrivateUsage]
+    assert worked_out and worked_out <= {"stop-0", "stop-1"}
+    assert compiler.works(file, worst_case(file))
+
+
+def test_a_connection_that_is_missed_does_not_count_for_the_time_to_cross() -> None:
+    """The register is at the hotel at 9:00 am and has to be at the airport at 9:05 am. A
+    shuttle from the hotel reaches the pier at 9:04 am, and the ferry on to the airport
+    leaves at 9:02 am. The two rides take five minutes together, but the ferry has left
+    when the shuttle gets there, and the taxi takes 15 minutes. The solver sees at once
+    that nothing works. With the ferry at 9:04 am, a guest brings the register."""
+
+    def by_ferry(minute: int) -> File:
+        return eleven_signatures(
+            *at("pier-shuttle", 9, 0, "PT4M"),
+            *at("ferry", 9, minute, "PT1M"),
+            spans=[complete(None, None)],
+            others=[moves("pier-shuttle", "hotel", "pier"), moves("ferry", "pier", "airport")],
+            places=["pier"],
+        )
+
+    works, conflicts = conflicts_in_the_best_case(by_ferry(2))
+    assert not works
+    assert conflicts < 1000
+    works, conflicts = conflicts_in_the_best_case(by_ferry(4))
+    assert works
+    # The same where the clerk's check is at any time and the TRIP ends at 9:05 am. The
+    # register still sets out at 9:00 am, so the missed ferry still does not count.
+    any_time_before_the_end = eleven_signatures(
+        *at("pier-shuttle", 9, 0, "PT4M"),
+        *at("ferry", 9, 2, "PT1M"),
+        spans=[complete(None, None)],
+        others=[moves("pier-shuttle", "hotel", "pier"), moves("ferry", "pier", "airport")],
+        places=["pier"],
+        at_the_airport=whenever("airport-desk", "PT0S"),
+        decisions=[trip_ends(9, 5)],
+    )
+    works, conflicts = conflicts_in_the_best_case(any_time_before_the_end)
+    assert not works
+    assert conflicts < 1000
+
+    # And where the guests sign at any time too, in a TRIP from 9:00 am to 9:05 am. Nobody
+    # signs before the TRIP starts, so the register still misses the ferry.
+    def within_five_minutes(minute: int) -> File:
+        return eleven_signatures(
+            *at("pier-shuttle", 9, 0, "PT4M"),
+            *at("ferry", 9, minute, "PT1M"),
+            spans=[complete(None, None)],
+            others=[moves("pier-shuttle", "hotel", "pier"), moves("ferry", "pier", "airport")],
+            places=["pier"],
+            at_the_airport=whenever("airport-desk", "PT0S"),
+            decisions=[trip_starts(9), trip_ends(9, 5)],
+            sign_at_any_time=True,
+        )
+
+    works, conflicts = conflicts_in_the_best_case(within_five_minutes(2))
+    assert not works
+    assert conflicts < 1000
+    works, conflicts = conflicts_in_the_best_case(within_five_minutes(4))
+    assert works
+
+
+def test_a_way_with_no_known_length_does_not_count_for_the_time_to_cross() -> None:
+    """Besides the shuttle of 15 minutes, a tunnel joins the hotel and the airport, and
+    nobody said how long it takes. In the worst case it has no limit, so nothing follows it,
+    and the register that goes through it is at hand nowhere afterwards. The solver sees at
+    once that nothing works in the worst case."""
+    file = eleven_signatures(spans=[complete(None, None)], ways=[way("tunnel", "hotel", "airport")])
+    works, conflicts = conflicts_to_answer(file)
+    assert not works
+    assert conflicts < 1000
+    works, _ = conflicts_in_the_best_case(file)
+    assert works
+    # The same for a ride at 9:02 am that nobody knows the length of.
+    by_ride = eleven_signatures(
+        starts_at("express", 9, 2),
+        cutoff("express", "PT0S"),
+        spans=[complete(None, None)],
+        others=[moves("express", "hotel", "airport")],
+    )
+    works, conflicts = conflicts_to_answer(by_ride)
+    assert not works
+    assert conflicts < 1000
+    works, _ = conflicts_in_the_best_case(by_ride)
+    assert works
+
+
+def four_on_a_bus() -> File:
+    """Four riders are LOCKed into the bus from the lodge, which gets to the resort at
+    8:20 am and can hand the voucher over. Alex has the voucher. Kim's check at 8:25 am
+    requires it. Alex's deposit keeps it, at any time, but Alex has to be there two hours
+    before it starts. Each rider also has three stays at the resort at any time, and nobody
+    said what those do with the voucher."""
+    riders = ["alex", "sam", "jo", "kim"]
+    stays_at = [f"{rider}-{number}" for rider in riders for number in range(3)]
+    options = [moves("bus", "lodge", "resort"), stays("kim-check", "resort")]
+    options += [stays("alex-deposit", "resort"), *(stays(name, "resort") for name in stays_at)]
+    facts = [*at("bus", 8, 0, "PT20M"), *at("kim-check", 8, 25, "PT5M")]
+    facts += [
+        any_time("alex-deposit"),
+        lasts("alex-deposit", "PT5M"),
+        cutoff("alex-deposit", "PT2H"),
+    ]
+    facts += [fact for name in stays_at for fact in whenever(name, "PT30M")]
+    facts += [starts_from(rider, "lodge") for rider in riders]
+    facts += [has_object("alex", "voucher"), hands_over("bus", "voucher")]
+    facts += [keeps("alex-deposit", "voucher"), requires_object("kim-check", "voucher")]
+    facts += [every_use("voucher"), complete(None, None)]
+    locks = [trip_starts(8), lock("bus", *riders), lock("kim-check", "kim")]
+    locks += [lock("alex-deposit", "alex")]
+    locks += [lock(name, name.split("-")[0]) for name in stays_at]
+    return trip(riders, ["lodge", "resort"], options, facts, locks, objects=["voucher"])
+
+
+def test_an_order_that_the_earliest_starts_rule_out_is_not_counted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kim needs the voucher at 8:25 am. Alex's deposit would leave it at the resort with no
+    hand-over, but it cannot start before 10:20 am, so it never comes before Kim's check.
+    The hand-over to Kim on the bus is then the one that no order can do without, and the
+    search stops at the plan that has it."""
+    found, timed = timings_for_the_report(monkeypatch, four_on_a_bus())
+    assert found.answer is Answer.FEASIBLE
+    assert timed < 100
+    assert [(step.option, step.handed) for step in found.itinerary if step.handed] == [
+        ("bus", (("voucher", "kim"),))
+    ]
+
+
+def test_the_hand_overs_that_no_order_can_do_without_are_those_of_each_object_by_itself(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sam has the key, and the stamp lies on the desk. Jo's check at any time requires the
+    key. Sam can hand the key to Jo at 8:00 am, or leave it on the desk after 10:00 am, in a
+    stay that keeps it. The second plan has no hand-over, so it comes first. Jo's check of
+    the stamp at 9:00 am and Sam's stay at 10:00 am that can hand the stamp over are in one
+    order by their times. That order may not hide the plan with no hand-over from the
+    search for the hand-overs that no order can do without. Ranking every order shows the
+    same plan."""
+    names = ["together", "sam-at-ten", "sam-leaves", "jo-leaves", "jo-at-nine", "jo-checks"]
+    options = [stays(name, "desk") for name in names]
+    facts = [
+        *at("together", 8, length="PT5M"),
+        *at("sam-at-ten", 10, length="PT5M"),
+        *whenever("sam-leaves"),
+        *whenever("jo-leaves"),
+        *at("jo-at-nine", 9, length="PT5M"),
+        *whenever("jo-checks"),
+        has_object("sam", "key"),
+        lies_at("stamp", "desk"),
+        hands_over("together", "key"),
+        hands_over("sam-at-ten", "stamp"),
+        keeps("sam-leaves", "key"),
+        keeps("jo-leaves", "key"),
+        requires_object("jo-at-nine", "stamp"),
+        requires_object("jo-checks", "key"),
+        every_use("key"),
+        every_transfer("key"),
+        every_use("stamp"),
+        every_transfer("stamp"),
+    ]
+    locks = [lock("together", "sam", "jo"), lock("sam-at-ten", "sam"), lock("sam-leaves", "sam")]
+    locks += [lock("jo-leaves", "jo"), lock("jo-at-nine", "jo"), lock("jo-checks", "jo")]
+    file = trip(["sam", "jo"], ["desk"], options, facts, locks, objects=["key", "stamp"])
+    world = worst_case(file)
+    shown = compiler.shown(file, world)
+    assert shown is not None
+    assert not any(step.handed for step in shown)
+    EveryOrder(monkeypatch).skipping_nothing()
+    assert compiler.shown(file, world) == shown
+
+
+def test_two_uses_away_from_where_an_object_lies_need_the_time_between_them() -> None:
+    """The register lies at the hotel, where eleven guests sign at 8:00 am and each can take
+    it. A clerk at the airport requires it at 9:00 am and an officer at the harbour at
+    9:05 am. A shuttle of 15 minutes joins each two of the three PLACEs. A guest gets the
+    register to the airport in time, but not on to the harbour five minutes later. The
+    model says outright that the two uses are 15 minutes apart, so the solver need not try
+    each guest. With the officer at 9:15 am, a guest takes it to both."""
+
+    def two_desks(minute: int) -> File:
+        people = [f"guest-{number}" for number in range(11)]
+        desks = [f"{person}-desk" for person in people]
+        options = [stays(desk, "hotel") for desk in desks]
+        options += [stays("airport-desk", "airport"), stays("harbour-desk", "harbour")]
+        facts = [fact for desk in desks for fact in at(desk, 8, length="PT0S")]
+        facts += [*at("airport-desk", 9, length="PT0S"), *at("harbour-desk", 9, minute, "PT0S")]
+        facts += [starts_from(person, "hotel") for person in people]
+        facts += [starts_from("clerk", "airport"), starts_from("officer", "harbour")]
+        places = ["hotel", "airport", "harbour"]
+        ways = [way_between(f"{a}-{b}", a, b) for a, b in combinations(places, 2)]
+        facts += [takes(each["id"], "PT15M") for each in ways]
+        facts += [lies_at("register", "hotel"), complete(None, None)]
+        facts += [requires_object("airport-desk", "register")]
+        facts += [requires_object("harbour-desk", "register")]
+        facts += [hands_over(desk, "register") for desk in desks]
+        facts += [every_use("register"), every_transfer("register")]
+        locks = [lock(desk, person) for desk, person in zip(desks, people, strict=True)]
+        locks += [lock("airport-desk", "clerk"), lock("harbour-desk", "officer")]
+        everybody = [*people, "clerk", "officer"]
+        return trip(everybody, places, options, facts, locks, ways, objects=["register"])
+
+    works, conflicts = conflicts_to_answer(two_desks(5))
+    assert not works
+    assert conflicts < 1000
+    works, conflicts = conflicts_to_answer(two_desks(15))
+    assert works
+
+
+def test_an_object_with_an_option_at_any_time_leaves_a_choice_of_order() -> None:
+    """Alex and Sam each have an appointment at 9:00 am about the voucher, so the voucher
+    leaves a choice of order. Jo's two stays require the stamp, and one can hand it over.
+    With both of Jo's stays at fixed times, the stamp has one order and moves no start, and
+    the voucher is the one OBJECT that orders the steps. With one of them at any time, the
+    order of the stamp can move that start, so the stamp counts as leaving a choice too."""
+
+    def the_one_order(*later: Document) -> tuple[int, ...] | None:
+        names = ["alex-deposit", "sam-check", "jo-early", "jo-later"]
+        options = [stays(name, "desk") for name in names]
+        facts = [
+            *at("alex-deposit", 9),
+            *at("sam-check", 9),
+            *at("jo-early", 9),
+            *later,
+            has_object("alex", "voucher"),
+            keeps("alex-deposit", "voucher"),
+            requires_object("sam-check", "voucher"),
+            lies_at("stamp", "desk"),
+            requires_object("jo-early", "stamp"),
+            requires_object("jo-later", "stamp"),
+            hands_over("jo-early", "stamp"),
+        ]
+        facts += [every_use(thing) for thing in ("voucher", "stamp")]
+        facts += [every_transfer(thing) for thing in ("voucher", "stamp")]
+        locks = [lock(name, name.split("-")[0]) for name in names]
+        things = ["voucher", "stamp"]
+        file = trip(["alex", "sam", "jo"], ["desk"], options, facts, locks, objects=things)
+        who = (("alex",), ("sam",), ("jo",), ("jo",))
+        return reference._the_one_order(file, worst_case(file), who)  # pyright: ignore[reportPrivateUsage]
+
+    assert the_one_order(*at("jo-later", 10)) == (0, 1)
+    assert the_one_order(*whenever("jo-later")) is None
+
+
+def test_an_unlisted_way_leaves_in_the_first_second_after_the_span() -> None:
+    """The register has to be at the airport at 9:05 am. The FILE lists every way that
+    leaves until 9:05 am, to the second. In the best case an unlisted WAY takes no time, but
+    it leaves a second after the span at the earliest, which is a second too late. The
+    solver sees that at once. With the span over a second sooner, the unlisted WAY leaves
+    at 9:05 am and is there in time."""
+    day = "2027-05-15T{}-05:00[America/Chicago]"
+    to_the_second = [no_way_leaves("ways", day.format("00:00:00"), day.format("09:05:00"))]
+    works, conflicts = conflicts_in_the_best_case(eleven_signatures(spans=to_the_second))
+    assert not works
+    assert conflicts < 1000
+    a_second_sooner = [no_way_leaves("ways", day.format("00:00:00"), day.format("09:04:59"))]
+    works, conflicts = conflicts_in_the_best_case(eleven_signatures(spans=a_second_sooner))
+    assert works
+
+
+def test_an_object_is_not_at_hand_in_two_places_that_nothing_joins() -> None:
+    """The register lies at the hotel and the clerk at the airport requires it an hour
+    after the guests sign. The FILE lists every way, and none joins the hotel and the
+    airport. The model says outright that nothing gets from the one to the other, so the
+    solver need not try each guest as the one who takes the register."""
+    file = a_register_at_two_places(airport_at=10)
+    apart = replace(
+        file,
+        ways=(),
+        facts=tuple(fact for fact in file.facts if fact.id != "shuttle-length"),
+    )
+    works, conflicts = conflicts_to_answer(apart)
+    assert not works
+    assert conflicts < 1000
+
+
+def four_on_a_shuttle_with_a_key(key_at: str) -> File:
+    """The four on the shuttle, and a key as well. Alex's last session requires the key,
+    which lies at the lodge or at the resort. Kim's last session requires the voucher,
+    which lies at the lodge. The shuttle can hand both over."""
+    file = four_on_a_shuttle()
+    key = [
+        ObjectStarts("key-start", "key", place=key_at),
+        RequiresObject("alex-3-requires-key", "alex-3", "key", True),
+        WithObject("shuttle-with-key", "shuttle", "key", "hands_over"),
+        CompleteRequiresObject("every-use-of-key", "key"),
+    ]
+    listed = (*file.objects, Object("key", "key"))
+    return replace(file, objects=listed, facts=(*file.facts, *key))
+
+
+def test_the_search_stops_at_the_hand_overs_that_each_object_needs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the key at the lodge too, Alex has to take the key on the shuttle and Kim the
+    voucher. With the key at the resort, only the voucher changes hands. Either way those
+    are the hand-overs that no order can do without, OBJECT by OBJECT, and the search stops
+    at the plan that has them."""
+    found, timed = timings_for_the_report(monkeypatch, four_on_a_shuttle_with_a_key("lodge"))
+    assert found.answer is Answer.FEASIBLE
+    assert timed < 100
+    assert [(step.option, step.handed) for step in found.itinerary if step.handed] == [
+        ("shuttle", (("voucher", "kim"), ("key", "alex")))
+    ]
+    found, timed = timings_for_the_report(monkeypatch, four_on_a_shuttle_with_a_key("resort"))
+    assert found.answer is Answer.FEASIBLE
+    assert timed < 100
+    assert [(step.option, step.handed) for step in found.itinerary if step.handed] == [
+        ("shuttle", (("voucher", "kim"),))
     ]
