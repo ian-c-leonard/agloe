@@ -164,16 +164,20 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .has.unsaid { border-style: dotted; border-color: var(--muted); color: var(--ink2); }
 .has.unsaid .has-name { font-weight: 500; }
 
-.options { display: grid; gap: 6px; }
-.option { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.5fr) minmax(0, 1.4fr); gap: 4px 18px; align-items: start; min-width: 0; overflow-wrap: anywhere; margin: 0; padding: 8px 14px 9px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; font-size: 12.5px; }
-.option-name { margin: 0; font: 600 13.5px/1.35 var(--text); }
-.option-where { color: var(--muted); }
-.option-said { display: grid; gap: 1px; color: var(--ink2); }
-@media (max-width: 700px) { .option { grid-template-columns: minmax(0, 1fr); } }
+.items { display: grid; gap: 6px; }
+.item { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.5fr) minmax(0, 1.4fr); gap: 4px 18px; align-items: start; min-width: 0; overflow-wrap: anywhere; margin: 0; padding: 8px 14px 9px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; font-size: 12.5px; }
+.item-name { margin: 0; font: 600 13.5px/1.35 var(--text); }
+.item-where { color: var(--muted); }
+.item-said { display: grid; gap: 1px; color: var(--ink2); }
+@media (max-width: 700px) { .item { grid-template-columns: minmax(0, 1fr); } }
 /* What the report names has its red or its yellow edge here too, inside the thing. */
-.card.clash, .entry.clash, .option.clash, .has.clash { border-style: solid; border-color: var(--stop); box-shadow: inset 0 0 0 1.5px var(--stop); }
-.card.asked, .entry.asked, .option.asked, .has.asked { border-style: solid; border-color: var(--warn); box-shadow: inset 0 0 0 1.5px var(--warn); }
-.card.lit, .entry.lit, .option.lit, .has.lit { background: var(--lit); }
+/* Under the WAYs, each FACT that the FILE lists every way of some travel. */
+.travel { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.in-full { padding: 5px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; font-size: 12.5px; color: var(--ink2); overflow-wrap: anywhere; }
+
+.card.clash, .entry.clash, .item.clash, .has.clash, .in-full.clash { border-style: solid; border-color: var(--stop); box-shadow: inset 0 0 0 1.5px var(--stop); }
+.card.asked, .entry.asked, .item.asked, .has.asked { border-style: solid; border-color: var(--warn); box-shadow: inset 0 0 0 1.5px var(--warn); }
+.card.lit, .entry.lit, .item.lit, .has.lit, .in-full.lit { background: var(--lit); }
 
 .key { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 12px; }
 .key span { display: inline-flex; align-items: center; gap: 6px; }

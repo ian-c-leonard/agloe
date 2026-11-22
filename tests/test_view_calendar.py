@@ -1275,6 +1275,19 @@ def an_option(id: str, name: str, place: str) -> dict[str, Any]:
     }
 
 
+def a_way(id: str, name: str, place: str) -> dict[str, Any]:
+    """A WAY as the view sends it, of which the FILE says nothing but where it goes."""
+    return {
+        "id": id,
+        "name": name,
+        "from": place,
+        "to": place,
+        "both_ways": True,
+        "length": None,
+        "records": [],
+    }
+
+
 def written(moment: datetime | None) -> dict[str, Any] | None:
     """A time as the view sends it, with no offset."""
     return None if moment is None else {"at": moment.isoformat(timespec="seconds"), "offset": None}
@@ -1308,6 +1321,8 @@ def made(times: list[tuple[str, str | None]]) -> Trip:
         "ends": None,
         "wants": [],
         "options": [an_option("stay", "Stay", "pier")],
+        "ways": [],
+        "complete_travel": [],
         "capabilities": [],
         "steps": [
             {
@@ -1426,6 +1441,8 @@ def some_trip(chosen: random.Random) -> Trip:
         "until": chosen.choice([None, None, "2030-01-01"]),
         "wants": [],
         "options": [an_option("o", "A name", places[0])],
+        "ways": [a_way("w", "A name", places[0])],
+        "complete_travel": [],
         "capabilities": [],
         "starts": bound("trip-start"),
         "ends": bound("trip-end"),

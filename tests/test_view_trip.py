@@ -30,7 +30,7 @@ import pytest
 from agloe import compiler
 from agloe import report as reports
 from agloe.answers import Answer, Report
-from agloe.file import File, instant, parse, read
+from agloe.file import Complete, File, instant, parse, read
 from agloe.reference import Step
 from agloe.view.trip import MOST_DAYS, holds, shown
 from tests.stories import (
@@ -170,6 +170,22 @@ def test_every_example_is_sent_as_a_trip_that_a_page_can_draw(path: Path) -> Non
         assert option["margin"] == (None if margin is None else margin.margin)
         named = {person for lock in file.locks if lock.option == each.id for person in lock.persons}
         assert option["locked"] == [person.id for person in file.persons if person.id in named]
+    # Every WAY of the FILE is sent, in the FILE's order, with what the FILE says of it.
+    assert [way["id"] for way in sent["ways"]] == [each.id for each in file.ways]
+    for way, listed in zip(sent["ways"], file.ways, strict=True):
+        assert (way["from"], way["to"], way["both_ways"]) == (
+            listed.origin,
+            listed.destination,
+            listed.both_ways,
+        )
+        length = file.duration(listed.id)
+        assert (way["length"] is None) is (length is None)
+        assert way["records"] == ([] if length is None else [length.id])
+    # So is each FACT that the FILE lists every way of some travel.
+    in_full = [fact for fact in file.facts if isinstance(fact, Complete)]
+    assert [(each["record"], each["from"], each["to"]) for each in sent["complete_travel"]] == [
+        (fact.id, fact.origin, fact.destination) for fact in in_full
+    ]
     # Every CAPABILITY of the FILE is sent, in the FILE's order, with each FACT about it.
     assert [each["id"] for each in sent["capabilities"]] == [each.id for each in file.capabilities]
     for capability in sent["capabilities"]:
@@ -473,6 +489,62 @@ def test_a_want_says_for_whom_it_is_a_must_not_and_whether_its_options_are_all_s
     (pizza,) = wants_of(EXAMPLES / "a-must" / "cannot-work.json")
     assert pizza["complete"] == "every-deep-dish-place"
     assert [each["option"] for each in pizza["options"]] == ["dinner-pizzeria"]
+
+
+def test_every_way_of_the_file_is_sent_with_what_the_file_says_of_it() -> None:
+    """A walk between the tower and the park, in both directions, that takes 20 minutes."""
+    sent = drawn(EXAMPLES / "a-must-not" / "works.json")
+    assert sent["ways"] == [
+        {
+            "id": "walk-from-tower",
+            "name": "the walk between Willis Tower and Millennium Park",
+            "from": "willis-tower",
+            "to": "park",
+            "both_ways": True,
+            "length": {"shortest": 20 * 60, "longest": 20 * 60, "contingent": False},
+            # The FACTs of the FILE that are about it.
+            "records": ["walk-from-tower-length"],
+        }
+    ]
+    assert sent["complete_travel"] == []
+    # A WAY in one direction only, one whose length the world decides, and one with no FACT.
+    file = trip(
+        ["alex"],
+        ["hotel", "pier", "park"],
+        [],
+        [takes_between("ferry", "PT20M", "PT40M")],
+        [],
+        ways=[
+            {"id": "ferry", "name": "ferry", "from": "hotel", "to": "pier"},
+            way_between("path", "pier", "park"),
+        ],
+    )
+    ferry, path = sent_for(file, Report(Answer.UNDETERMINED))["ways"]
+    assert (ferry["from"], ferry["to"], ferry["both_ways"]) == ("hotel", "pier", False)
+    assert ferry["length"] == {"shortest": 20 * 60, "longest": 40 * 60, "contingent": True}
+    assert (path["both_ways"], path["length"], path["records"]) == (True, None, [])
+
+
+def test_each_fact_that_the_file_lists_every_way_of_some_travel_is_sent() -> None:
+    """The FILE lists every way straight to Denver that leaves on the afternoon of the TRIP."""
+    sent = drawn(EXAMPLES / "ending-in-denver" / "cannot-work.json")
+    assert sent["complete_travel"] == [
+        {
+            "record": "every-way-to-denver",
+            # The FACT leaves the first PLACE out: it stands for every PLACE.
+            "from": None,
+            "to": "denver",
+            "earliest": time("2027-05-15T12:00:00"),
+            "latest": time("2027-05-15T19:30:00"),
+        }
+    ]
+    # A FACT that leaves both PLACEs out is about travel between any two.
+    (in_full,) = drawn(EXAMPLES / "a-day" / "cannot-work.json")["complete_travel"]
+    assert (in_full["record"], in_full["from"], in_full["to"]) == ("all-ways", None, None)
+    assert (in_full["earliest"], in_full["latest"]) == (
+        time("2027-05-14T00:00:00"),
+        time("2027-05-14T23:59:00"),
+    )
 
 
 def test_the_capabilities_of_the_file_are_sent_with_who_has_each_and_what_requires_it() -> None:
@@ -878,29 +950,29 @@ def around_a_change(*locked: str) -> File:
 def test_a_time_gives_its_offset_where_the_report_gives_offsets() -> None:
     """A dinner before Chicago's clocks go back, and a FACT about WAYs that covers the day after.
 
-    The view sends the times of the dinner, which are at one offset from UTC. The FACT has a
-    time at another. A report that names the FACT gives each time with its offset, and then
-    the view does the same.
+    The times of the dinner are at one offset from UTC, and the FACT has a time at another. A
+    report that names the FACT gives each time with its offset, and the view does the same.
     """
     span = {
         "earliest": f"2027-11-06T12:00:00-05:00{CHICAGO}",
         "latest": f"2027-11-07T12:00:00-06:00{CHICAGO}",
     }
-    file = trip(
-        ["alex"],
-        ["hotel", "pier"],
-        [stays("dinner", "hotel")],
-        [
-            {
-                "id": "dinner-time",
-                "option": "dinner",
-                "starts_at": f"2027-11-06T19:00:00-05:00{CHICAGO}",
-            },
-            lasts("dinner", "PT1H"),
-            {"id": "every-way", "complete": {"to": "pier", "leaving": span}},
-        ],
-        [lock("dinner", "alex")],
-    )
+    dinner: list[dict[str, Any]] = [
+        {
+            "id": "dinner-time",
+            "option": "dinner",
+            "starts_at": f"2027-11-06T19:00:00-05:00{CHICAGO}",
+        },
+        lasts("dinner", "PT1H"),
+    ]
+    every_way = {"id": "every-way", "complete": {"to": "pier", "leaving": span}}
+
+    def with_these(facts: list[dict[str, Any]]) -> File:
+        return trip(
+            ["alex"], ["hotel", "pier"], [stays("dinner", "hotel")], facts, [lock("dinner", "alex")]
+        )
+
+    file = with_these([*dinner, every_way])
     found = Report(Answer.INFEASIBLE, conflict=("every-way",))
     assert reports.clock_for(file, found).offsets
     assert "(UTC-6)" in reports.as_text(file, found)
@@ -909,10 +981,20 @@ def test_a_time_gives_its_offset_where_the_report_gives_offsets() -> None:
         time("2027-11-06T19:00:00", "UTC-5"),
         time("2027-11-06T20:00:00", "UTC-5"),
     )
-    # A report that names no time gives no offset. The times sent are all at one, so none has it.
+    # The view sends the span of the FACT whatever the report names. So the times that it sends
+    # are not all at one offset, and each gives its own.
     quiet = Report(Answer.UNDETERMINED)
     assert not reports.clock_for(file, quiet).offsets
     sent = sent_for(file, quiet)
+    (in_full,) = sent["complete_travel"]
+    assert (in_full["earliest"], in_full["latest"]) == (
+        time("2027-11-06T12:00:00", "UTC-5"),
+        time("2027-11-07T12:00:00", "UTC-6"),
+    )
+    assert sent["steps"][0]["start"] == time("2027-11-06T19:00:00", "UTC-5")
+    # Without the FACT, the times sent are all at one offset. A report that names no time
+    # gives no offset, and then none of them has one.
+    sent = sent_for(with_these(dinner), quiet)
     (step,) = sent["steps"]
     assert (step["start"], step["end"]) == (
         time("2027-11-06T19:00:00"),
@@ -1507,6 +1589,61 @@ OPTION: dict[str, Any] = {
 }
 
 
+WAY: dict[str, Any] = {
+    "id": "ferry",
+    "name": "ferry",
+    "from": "museum",
+    "to": "hotel",
+    "both_ways": False,
+    "length": {"shortest": 1200, "longest": 2400, "contingent": True},
+    "records": ["ferry-length"],
+}
+TRAVEL: dict[str, Any] = {
+    "record": "every-way",
+    "from": None,
+    "to": "hotel",
+    "earliest": {"at": "2027-05-15T09:00:00", "offset": None},
+    "latest": {"at": "2027-05-15T21:00:00", "offset": None},
+}
+
+
+def _way(**other: object) -> Callable[[Trip], None]:
+    """The TRIP gets one more WAY, which is good but for these parts."""
+
+    def change(sent: Trip) -> None:
+        sent["ways"] = [*sent["ways"], {**WAY, **other}]
+
+    return change
+
+
+def _travel(**other: object) -> Callable[[Trip], None]:
+    """The TRIP gets one FACT that the FILE lists every way of some travel, good but for these."""
+    return _set("complete_travel", to=[{**TRAVEL, **other}])
+
+
+def test_a_trip_with_one_more_way_is_a_trip() -> None:
+    sent = good()
+    assert [way["id"] for way in sent["ways"]] == ["walk"]
+    _way()(sent)
+    assert holds(sent)
+    # A WAY of which the FILE says no more than where it goes.
+    sent = good()
+    _way(both_ways=True, length=None, records=[])(sent)
+    assert holds(sent)
+
+
+def test_a_trip_with_travel_that_the_file_lists_in_full_is_a_trip() -> None:
+    sent = good()
+    assert sent["complete_travel"] == []
+    _travel()(sent)
+    assert holds(sent)
+    # Between any two PLACEs, and from one PLACE to another.
+    _travel(to=None)(sent)
+    assert holds(sent)
+    _travel(**{"from": "museum"})(sent)
+    assert holds(sent)
+
+
 CAPABILITY: dict[str, Any] = {
     "id": "driving",
     "name": "driving",
@@ -1674,6 +1811,37 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "an option of a want with no fact": _delivery(record=None),
     "a want that names an option twice": _want(options=[WANT["options"][0]] * 2),
     "an option of a want that the trip does not have": _delivery(option="dinner"),
+    "no ways": _drop("ways"),
+    "ways that are no list": _set("ways", to={}),
+    "a step that is none of the ways": _set("ways", to=[]),
+    "a way that is no record": _set("ways", to=["walk"]),
+    "a way with one thing more": _way(more=1),
+    "a way with a blank name": _way(name=" "),
+    "two ways with one id": _way(id="walk"),
+    "a way with the id of an option": _way(id="night"),
+    "a way from a place the trip does not have": _way(**{"from": "denver"}),
+    "a way to a place the trip does not have": _way(to="denver"),
+    "a way whose both ways is a number": _way(both_ways=1),
+    "a way with a length that is a number": _way(length=1200),
+    "a way whose longest is under its shortest": _way(
+        length={"shortest": 90, "longest": 60, "contingent": True}
+    ),
+    "a way with a range that the world does not decide": _way(
+        length={"shortest": 60, "longest": 90, "contingent": False}
+    ),
+    "a way that names a record twice": _way(records=["ferry-length", "ferry-length"]),
+    "no travel listed in full": _drop("complete_travel"),
+    "travel listed in full that is no list": _set("complete_travel", to={}),
+    "travel listed in full that is no record": _set("complete_travel", to=["every-way"]),
+    "travel listed in full with one thing more": _travel(more=1),
+    "travel listed in full with no fact": _travel(record=""),
+    "travel listed in full from a place the trip does not have": _travel(**{"from": "denver"}),
+    "travel listed in full to a place the trip does not have": _travel(to="denver"),
+    "travel listed in full with an end that is no time": _travel(latest="21:00"),
+    "travel listed in full with no start": _travel(earliest=None),
+    "two facts with one id that travel is listed in full": _set(
+        "complete_travel", to=[TRAVEL, TRAVEL]
+    ),
     "no capabilities": _drop("capabilities"),
     "capabilities that are no list": _set("capabilities", to={}),
     "a capability that is no record": _set("capabilities", to=["driving"]),

@@ -12,23 +12,13 @@
 // other: it is in the FILE.
 
 import { marksBy, optionsOf } from "./named.js";
-import { clock, clocksOf, dateName, span } from "./times.js";
+import { clock, clocksOf, dateName, lasts, span } from "./times.js";
 import { whoIsIn } from "./who.js";
 
 /** When an OPTION starts, as far as the FILE says. */
 function whenOf(option) {
   if (option.start !== null) return `Starts at ${clock(option.start)} on ${dateName(option.start.at)}.`;
   return option.any_time ? "Can start at any time." : "The FILE does not say when it starts.";
-}
-
-/**
- * How long an OPTION takes, as far as the FILE says. A length that the world decides in a range
- * is worded as a range, as the report words it, also where the two ends are the same.
- */
-function takesOf(option) {
-  if (option.length === null) return "The FILE does not say how long it takes.";
-  const { shortest, longest, contingent } = option.length;
-  return contingent ? `Takes between ${span(shortest)} and ${span(longest)}.` : `Takes ${span(shortest)}.`;
 }
 
 /** How early people must be there, as far as the FILE says. */
@@ -66,7 +56,7 @@ export function options(trip, report = null, stated = null) {
       name: option.name,
       where: option.from === option.to ? place.get(option.from) : `${place.get(option.from)} to ${place.get(option.to)}`,
       when: whenOf(option),
-      takes: takesOf(option),
+      takes: lasts(option.length),
       arrive: arriveOf(option),
       lock,
       plan,

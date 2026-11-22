@@ -404,7 +404,7 @@ def test_a_check_that_ends_without_a_report_has_stopped(does: str | None, tmp_pa
 EMPTY = (
     '{"zone": "UTC", "persons": [], "places": [], "itinerary": true, "days": [], '
     '"until": null, "starts": null, "ends": null, "steps": [], "wants": [], "options": [], '
-    '"capabilities": []}'
+    '"ways": [], "complete_travel": [], "capabilities": []}'
 )
 
 
