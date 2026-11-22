@@ -109,14 +109,14 @@ def test_a_person_says_which_budgets_they_may_draw_on() -> None:
     assert sam["pays"] == ["May draw on Meals.", "May draw on tickets."]
 
 
-def test_a_person_who_must_not_end_the_trip_at_a_place_says_so() -> None:
+def test_only_a_person_who_holds_the_want_must_end_the_trip_at_its_place() -> None:
     sent = drawn(EXAMPLES / "ending-in-denver" / "works.json")
     (want,) = [want for want in sent["wants"] if want["ends_at"] is not None]
-    want["musts"], want["must_nots"] = ["alex"], ["sam"]
+    want["musts"] = ["alex"]
     (shown,) = all_persons([sent])
     assert [person["ends"] for person in shown["persons"]] == [
         ["Must end the TRIP at Denver."],
-        ["Must not end the TRIP at Denver."],
+        [],
     ]
     # A WANT that an OPTION can deliver says nothing of where a PERSON ends the TRIP.
     want["ends_at"] = None

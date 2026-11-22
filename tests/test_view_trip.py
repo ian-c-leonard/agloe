@@ -19,7 +19,11 @@ night and in any time zone.
 import copy
 import functools
 import json
+import os
 import re
+import shutil
+import subprocess
+import unicodedata
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
@@ -32,7 +36,7 @@ from agloe import report as reports
 from agloe.answers import Answer, Report
 from agloe.file import Complete, File, instant, parse, read
 from agloe.reference import Step
-from agloe.view.trip import MOST_DAYS, holds, shown
+from agloe.view.trip import MOST_DAYS, holds, seen_as, shown
 from tests.stories import (
     EXAMPLES,
     any_time,
@@ -920,12 +924,83 @@ def test_names_that_look_the_same_on_a_page_come_with_their_ids() -> None:
         "Anne\u200bMarie (skydeck)",
         "AnneMarie (lunch)",
     ]
+    # Or in a character that only says how the sign before it is drawn, or that joins two
+    # others: a page shows nothing for it.
+    by_id["alex"]["name"], by_id["jo"]["name"] = (
+        "Central Caf\u00e9 \u2615",
+        "Central Caf\u00e9 \u2615\ufe0f",
+    )
+    by_id["skydeck"]["name"], by_id["lunch"]["name"] = "Anne\u034fMarie", "AnneMarie"
+    file = parse(json.dumps(content))
+    sent = sent_for(file, compiler.check(file))
+    assert [each["name"] for each in sent["persons"]] == [
+        "Central Caf\u00e9 \u2615 (alex)",
+        "Sam",
+        "Central Caf\u00e9 \u2615\ufe0f (jo)",
+    ]
+    assert [step["name"] for step in sent["steps"] if step["option"]] == [
+        "Anne\u034fMarie (skydeck)",
+        "AnneMarie (lunch)",
+    ]
+    # Or in how a character is set: a hyphen that does not break, two letters drawn as one
+    # sign, a space that does not break.
+    by_id["alex"]["name"], by_id["jo"]["name"] = "Saint-Malo", "Saint\u2011Malo"
+    by_id["skydeck"]["name"], by_id["lunch"]["name"] = "Sheffield tour", "Shef\ufb01eld\u00a0tour"
+    file = parse(json.dumps(content))
+    sent = sent_for(file, compiler.check(file))
+    assert [each["name"] for each in sent["persons"]] == [
+        "Saint-Malo (alex)",
+        "Sam",
+        "Saint\u2011Malo (jo)",
+    ]
+    assert [step["name"] for step in sent["steps"] if step["option"]] == [
+        "Sheffield tour (skydeck)",
+        "Shef\ufb01eld\u00a0tour (lunch)",
+    ]
     # A name that only differs in its capitals looks different, and comes as it is.
     by_id["skydeck"]["name"], by_id["lunch"]["name"] = "Skydeck visit", "Lunch in the park"
     by_id["alex"]["name"], by_id["jo"]["name"] = "Alex", "alex"
     file = parse(json.dumps(content))
     sent = sent_for(file, compiler.check(file))
     assert [each["name"] for each in sent["persons"]] == ["Alex", "Sam", "alex"]
+
+
+def test_what_a_page_shows_nothing_for_is_what_unicode_calls_default_ignorable() -> None:
+    """The view and the page tell the same characters, and a browser knows which they are."""
+    node = shutil.which("node")
+    if node is None:
+        if os.environ.get("CI"):
+            pytest.fail("the tests of the view need Node")
+        pytest.skip("needs Node")
+    listing = """
+    const found = [];
+    for (let point = 0; point <= 0x10ffff; point += 1) {
+      if (point >= 0xd800 && point <= 0xdfff) continue;
+      if (/\\p{Default_Ignorable_Code_Point}/u.test(String.fromCodePoint(point))) found.push(point);
+    }
+    process.stdout.write(JSON.stringify(found));
+    """
+    done = subprocess.run([node, "--eval", listing], capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
+    ignorable = set(json.loads(done.stdout))
+    assert len(ignorable) > 4000
+    # Between two letters, exactly these characters and the format characters leave no trace.
+    unseen = {point for point in range(0x110000) if seen_as(f"a{chr(point)}b") == "ab"}
+    formats = {point for point in range(0x110000) if unicodedata.category(chr(point)) == "Cf"}
+    assert unseen == ignorable | formats
+    # A sign that a page shows stays: a letter, an accent, a hyphen, a coffee cup.
+    for sign in ("a", "\u00e9", "-", "\u2615", "\u0301", "'"):
+        assert seen_as(f"a{sign}b") == unicodedata.normalize("NFC", f"a{sign}b"), sign
+    # Each accent is joined to its letter, and each run of spaces is one space.
+    assert seen_as("  Jose\u0301   Luis ") == "Jos\u00e9 Luis"
+    # A character that is another one set in another way is that one: two letters drawn as
+    # one sign, a wide letter, a hyphen that does not break.
+    assert seen_as("Shef\ufb01eld") == "Sheffield"
+    assert seen_as("\uff21irport") == "Airport"
+    assert seen_as("Saint\u2011Malo") == seen_as("Saint\u2010Malo") == "Saint-Malo"
+    # A dash is no hyphen, and a letter of another alphabet is another letter.
+    assert seen_as("Saint\u2013Malo") != "Saint-Malo"
+    assert seen_as("P\u0430ris") != "Paris"
 
 
 def test_every_option_of_the_file_is_sent_with_what_the_file_says_of_it() -> None:
@@ -2132,8 +2207,9 @@ def test_a_trip_with_a_want_is_a_trip() -> None:
     # A WANT with nobody for whom it is a must-not, and no OPTION.
     _want(must_nots=[], complete=None, options=[])(sent)
     assert holds(sent)
-    # A WANT about where the TRIP ends names a PLACE. No OPTION delivers such a WANT.
-    _want(ends_at="hotel", complete=None, options=[])(sent)
+    # A WANT about where the TRIP ends names a PLACE. No OPTION delivers such a WANT, and
+    # it is a must for each PERSON who holds it.
+    _want(ends_at="hotel", must_nots=[], complete=None, options=[])(sent)
     assert holds(sent)
     # A DEGREE OF SATISFACTION is from 0 to 10, both ends included.
     for degree in (0, 10):
@@ -2185,6 +2261,9 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "a want with an id that is no text": _want(id=7),
     "two wants with one id": _set("wants", to=[WANT, WANT]),
     "a want that is a must for a person the trip does not have": _want(musts=["jo"]),
+    "a want about where the trip ends that is a must-not for somebody": _want(
+        ends_at="hotel", complete=None, options=[]
+    ),
     "a want that names a person twice": _want(musts=["alex", "alex"]),
     "a want that is a must and a must-not for one person": _want(must_nots=["alex"]),
     "a want that is a must or a must-not for nobody": _want(musts=[], must_nots=[]),
