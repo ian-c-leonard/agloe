@@ -4,8 +4,8 @@
 // A report on a TRIP that cannot work names the FACTs, WANTs and DECISIONs that rule out every
 // plan. A report on a TRIP that depends on what the FILE does not say names, for each case in
 // which the trip works, the things that the case needs. A report that shows a plan names who
-// meets what each OPTION of the plan requires. Each part of the page marks what it shows of
-// those. Nothing here judges a TRIP: it reads what the report as JSON already holds.
+// meets what each OPTION of the plan requires, and which right each PERSON uses. Each part of
+// the page marks what it shows of those. Nothing here judges a TRIP: it reads what the report as JSON already holds.
 
 /** Names as a sentence joins them: Alex, Sam and Jo. */
 export function listed(names) {
@@ -49,6 +49,20 @@ export function requirementsIn(report) {
   const isText = (id) => typeof id === "string";
   const isOne = (each) => each !== null && typeof each === "object" && isText(each.option) && isText(each.capability) && Array.isArray(each.persons) && each.persons.every(isText);
   return Array.isArray(stated) && stated.every(isOne) ? stated : [];
+}
+
+/**
+ * Which right each PERSON uses for each OPTION of a plan, as a report states it: for each use
+ * its OPTION, its PERSON, and the BOOKING or the OFFER that gives the right (`by`). Only a
+ * report that shows a plan holds any, and a step that states none in that shape has none.
+ */
+export function usesIn(report) {
+  const steps = report !== null && typeof report === "object" && report.answer === "FEASIBLE" && Array.isArray(report.itinerary) ? report.itinerary : [];
+  const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
+  return steps.flatMap((step) => {
+    if (!isRecord(step) || typeof step.option !== "string" || !isRecord(step.rights)) return [];
+    return Object.entries(step.rights).flatMap(([person, by]) => (typeof by === "string" ? [{ option: step.option, person, by }] : []));
+  });
 }
 
 /** The OPTIONs that one of those things names: its own, and each that somebody has to buy a place for. */

@@ -61,6 +61,8 @@ def test_an_option_says_what_the_file_says_of_it() -> None:
         "takes": "Takes 1 h.",
         # The FILE does not say how early to be at the museum, and the page says that.
         "arrive": UNSAID,
+        # A FACT says that people need a right to the visit.
+        "right": "People need a right to take part.",
         "lock": "Alex and Sam are each named by a LOCK.",
         # The report shows no plan, so the page says nothing of one.
         "plan": None,
@@ -98,6 +100,8 @@ def test_an_option_says_what_the_file_says_of_it() -> None:
     assert cab["cases"] == [0]
     assert cab["asks"] == ["The trip works if Cab to O'Hare takes 45 min or less."]
     assert all(option["cases"] == [] for option in (visit, train, flight))
+    # A FACT says of the train, and another of the cab, that nobody needs a right to it.
+    assert (train["right"], cab["right"]) == ("Nobody needs a right to take part.",) * 2
 
 
 def test_an_option_says_who_takes_part_in_it_in_the_plan() -> None:
@@ -182,6 +186,15 @@ def test_a_range_with_two_ends_that_are_the_same_is_worded_as_the_report_words_i
     assert "visit-length: Museum visit takes between 1 h and 1 h" in words
     (shown,) = all_options([sent], [found], [words])
     assert shown["options"][0]["takes"] == "Takes between 1 h and 1 h."
+
+
+def test_an_option_says_so_where_the_file_does_not_say_whether_people_need_a_right() -> None:
+    sent = drawn(STORY / "works.json")
+    sent["rights"] = [each for each in sent["rights"] if each["option"] != "museum-visit"]
+    (shown,) = all_options([sent])
+    visit, train, *_ = shown["options"]
+    assert visit["right"] == "The FILE does not say whether people need a right to take part."
+    assert train["right"] == "Nobody needs a right to take part."
 
 
 def test_the_options_name_the_time_zone_only_where_a_row_shows_a_time() -> None:

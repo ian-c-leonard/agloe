@@ -193,6 +193,22 @@ def test_every_example_is_sent_as_a_trip_that_a_page_can_draw(path: Path) -> Non
     assert [(each["record"], each["from"], each["to"]) for each in sent["complete_travel"]] == [
         (fact.id, fact.origin, fact.destination) for fact in in_full
     ]
+    # What the FILE says of the rights to an OPTION is sent, in the FILE's order of OPTIONs.
+    said_of = {each["option"]: each for each in sent["rights"]}
+    assert list(said_of) == [each.id for each in file.options if each.id in said_of]
+    for each in file.options:
+        needed, complete = file.needs_right(each.id), file.rights_complete(each.id)
+        bookings, offers = file.bookings(each.id), file.offers(each.id)
+        if needed is None and complete is None and not bookings and not offers:
+            assert each.id not in said_of
+            continue
+        rights = said_of[each.id]
+        assert (None if rights["needs"] is None else rights["needs"]["needed"]) is needed
+        assert [booking["id"] for booking in rights["bookings"]] == [fact.id for fact in bookings]
+        assert [(offer["id"], offer["places"]) for offer in rights["offers"]] == [
+            (fact.id, fact.places) for fact in offers
+        ]
+        assert (rights["complete"] is None) is (complete is None)
     # Every CAPABILITY of the FILE is sent, in the FILE's order, with each FACT about it.
     assert [each["id"] for each in sent["capabilities"]] == [each.id for each in file.capabilities]
     for capability in sent["capabilities"]:
@@ -579,6 +595,35 @@ def test_each_fact_that_the_file_lists_every_way_of_some_travel_is_sent() -> Non
         time("2027-05-14T00:00:00"),
         time("2027-05-14T23:59:00"),
     )
+
+
+def test_the_rights_to_each_option_are_sent_as_far_as_the_file_says() -> None:
+    """Alex has a BOOKING for the Skydeck, and two places are still on OFFER at 32.00 USD."""
+    skydeck, talk, lunch = drawn(EXAMPLES / "a-ticket" / "not-bought-yet.json")["rights"]
+    assert skydeck == {
+        "option": "skydeck",
+        "name": "Skydeck visit",
+        "needs": {"needed": True, "record": "skydeck-needs-a-ticket"},
+        "bookings": [{"id": "alex-skydeck-ticket", "covers": ["alex"]}],
+        "offers": [
+            {"id": "skydeck-tickets", "places": 2, "price": {"amount": "32.00", "currency": "USD"}}
+        ],
+        # The FILE does not say that these are all the rights to the visit.
+        "complete": None,
+    }
+    # Nobody needs a right to the talk or to lunch, and the FILE says no more of rights to them.
+    for walk_up in (talk, lunch):
+        assert walk_up["needs"]["needed"] is False
+        assert (walk_up["bookings"], walk_up["offers"], walk_up["complete"]) == ([], [], None)
+    # The visit is sold out: a FACT says that the FILE lists every right to it.
+    (skydeck, *_) = drawn(EXAMPLES / "a-ticket" / "cannot-work.json")["rights"]
+    assert skydeck["complete"] == {"record": "skydeck-sold-out", "offers": []}
+    # An OFFER whose price nobody knows has none.
+    (skydeck, *_) = drawn(EXAMPLES / "a-ticket" / "depends-on-the-price.json")["rights"]
+    assert [offer["price"] for offer in skydeck["offers"]] == [None]
+    # An OPTION of which the FILE says nothing about rights is not among them.
+    file = trip(["alex"], ["pier"], [stays("swim", "pier")], [], [], rights=True)
+    assert sent_for(file, Report(Answer.UNDETERMINED))["rights"] == []
 
 
 def test_the_capabilities_of_the_file_are_sent_with_who_has_each_and_what_requires_it() -> None:
@@ -1695,6 +1740,55 @@ def test_a_trip_with_travel_that_the_file_lists_in_full_is_a_trip() -> None:
     assert holds(sent)
 
 
+RIGHTS: dict[str, Any] = {
+    "option": "night",
+    "name": "night",
+    "needs": {"needed": True, "record": "night-needs-a-room"},
+    "bookings": [{"id": "room", "covers": ["alex"]}],
+    "offers": [{"id": "rooms", "places": 2, "price": {"amount": "120.00", "currency": "USD"}}],
+    "complete": {"record": "every-room", "offers": ["rooms"]},
+}
+
+
+# The same OPTION once more, with no BOOKING and no OFFER.
+NO_MORE_RIGHTS: dict[str, Any] = {**RIGHTS, "bookings": [], "offers": [], "complete": None}
+
+
+def _rights(**other: object) -> Callable[[Trip], None]:
+    """The TRIP says this of the rights to one OPTION, which is good but for these parts."""
+    return _set("rights", to=[{**RIGHTS, **other}])
+
+
+def _booking(**other: object) -> Callable[[Trip], None]:
+    return _rights(bookings=[{**RIGHTS["bookings"][0], **other}])
+
+
+def _offer(**other: object) -> Callable[[Trip], None]:
+    return _rights(offers=[{**RIGHTS["offers"][0], **other}])
+
+
+def test_a_trip_that_says_something_of_the_rights_to_an_option_is_a_trip() -> None:
+    sent = good()
+    # The FILE says that nobody needs a right to the night, and no more.
+    (night,) = sent["rights"]
+    assert (night["option"], night["needs"]["needed"], night["bookings"]) == ("night", False, [])
+    _rights()(sent)
+    assert holds(sent)
+    # Nobody needs a right, and the FILE says no more.
+    walk_up = {"needed": False, "record": "night-is-open"}
+    _rights(needs=walk_up, bookings=[], offers=[], complete=None)(sent)
+    assert holds(sent)
+    # A BOOKING and nothing else, and an OFFER whose price nobody knows.
+    _rights(needs=None, offers=[], complete=None)(sent)
+    assert holds(sent)
+    _offer(price=None)(sent)
+    assert holds(sent)
+    # A price of nothing, and one below one.
+    for amount in ("0", "0.50"):
+        _offer(price={"amount": amount, "currency": "USD"})(sent)
+        assert holds(sent)
+
+
 CAPABILITY: dict[str, Any] = {
     "id": "driving",
     "name": "driving",
@@ -1905,6 +1999,39 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "travel listed in full with no start": _travel(earliest=None),
     "two facts with one id that travel is listed in full": _set(
         "complete_travel", to=[TRAVEL, TRAVEL]
+    ),
+    "no rights": _drop("rights"),
+    "rights that are no list": _set("rights", to={}),
+    "rights that are no record": _set("rights", to=["night"]),
+    "rights with one thing more": _rights(more=1),
+    "rights to an option the trip does not have": _rights(option="dinner"),
+    "rights to one option twice": _set("rights", to=[RIGHTS, NO_MORE_RIGHTS]),
+    "rights to an option with a blank name": _rights(name=" "),
+    "a need for a right that is a yes": _rights(needs=True),
+    "a need for a right with no fact": _rights(needs={"needed": True, "record": ""}),
+    "a need for a right that is a number": _rights(needs={"needed": 1, "record": "r"}),
+    "bookings that are no list": _rights(bookings={}),
+    "a booking that is no record": _rights(bookings=["room"]),
+    "a booking with no id": _booking(id=""),
+    "a booking that covers nobody": _booking(covers=[]),
+    "a booking that covers a person twice": _booking(covers=["alex", "alex"]),
+    "a booking that covers a person the trip does not have": _booking(covers=["jo"]),
+    "two bookings with one id": _rights(bookings=[RIGHTS["bookings"][0]] * 2),
+    "a booking with the id of an offer": _booking(id="rooms"),
+    "an offer that is no record": _rights(offers=["rooms"], complete=None),
+    "an offer with no place": _offer(places=0),
+    "an offer with places in words": _offer(places="2"),
+    "an offer with a price that is a number": _offer(price=120),
+    "an offer with a price in no currency": _offer(price={"amount": "120.00", "currency": " "}),
+    "an offer with a price that is no amount": _offer(price={"amount": "-1", "currency": "USD"}),
+    "a fact that the rights are all listed with no id": _rights(
+        complete={"record": "", "offers": []}
+    ),
+    "a fact that the rights are all listed that names another offer": _rights(
+        complete={"record": "every-room", "offers": ["beds"]}
+    ),
+    "a fact that the rights are all listed that names an offer twice": _rights(
+        complete={"record": "every-room", "offers": ["rooms", "rooms"]}
     ),
     "no capabilities": _drop("capabilities"),
     "capabilities that are no list": _set("capabilities", to={}),

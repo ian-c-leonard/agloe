@@ -2,7 +2,8 @@
 // as it is.
 //
 // The view sends each OPTION with what the FILE says of it: where it is, when it starts, how
-// long it takes, how early people must be there, and whom a LOCK names for it. This puts that
+// long it takes, how early people must be there, whether they need a right to take part, and
+// whom a LOCK names for it. This puts that
 // in words, as the report words it, and says plainly what the FILE does not say. Where the
 // report shows a plan, it says who takes part in the OPTION in that plan. It marks what the
 // report names: the records that rule out every plan, and the cases in which a trip that
@@ -13,7 +14,7 @@
 
 import { marksBy, optionsOf } from "./named.js";
 import { clock, clocksOf, dateName, lasts, span } from "./times.js";
-import { whoIsIn } from "./who.js";
+import { needsARight, whoIsIn } from "./who.js";
 
 /** When an OPTION starts, as far as the FILE says. */
 function whenOf(option) {
@@ -32,7 +33,7 @@ function arriveOf(option) {
  * view sends none.
  *
  * Each OPTION has its name, `where` it is, `when` it starts, how long it `takes`, how early to
- * `arrive`, and whom a LOCK names (`lock`). `plan` says who takes part in it in the plan of
+ * `arrive`, whether people need a `right` to take part, and whom a LOCK names (`lock`). `plan` says who takes part in it in the plan of
  * the report, and is null where the report shows no plan. `step` is the step of the TRIP that
  * it is, where the calendar holds it. Where a row shows a time, `says` names the time zone
  * whose clocks show it.
@@ -48,6 +49,7 @@ export function options(trip, report = null, stated = null) {
   if (trip === null || !trip.options.length) return { says: "", clash: false, asked: false, options: [] };
   const place = new Map(trip.places.map((each) => [each.id, each.name]));
   const who = whoIsIn(trip);
+  const needs = needsARight(trip);
   const marked = marksBy(report, stated);
   const shown = trip.options.map((option) => {
     const { step, lock, plan } = who(option.id);
@@ -58,6 +60,7 @@ export function options(trip, report = null, stated = null) {
       when: whenOf(option),
       takes: lasts(option.length),
       arrive: arriveOf(option),
+      right: needs(option.id).says,
       lock,
       plan,
       step,

@@ -405,7 +405,7 @@ EMPTY = (
     '{"zone": "UTC", "persons": [], "places": [], "starts_from": [], '
     '"itinerary": true, "days": [], '
     '"until": null, "starts": null, "ends": null, "steps": [], "wants": [], "options": [], '
-    '"ways": [], "complete_travel": [], "capabilities": []}'
+    '"ways": [], "complete_travel": [], "rights": [], "capabilities": []}'
 )
 
 

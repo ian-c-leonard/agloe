@@ -1,11 +1,26 @@
-// Who is in an OPTION of a FILE, as the page says it. There is no page in here, so the tests
-// run this as it is.
+// Who is in an OPTION of a FILE, and whether they need a right to be, as the page says it.
+// There is no page in here, so the tests run this as it is.
 //
-// The view sends every OPTION with the PERSONs that a LOCK names for it, and the steps of the
-// plan of the report with who takes part in each. Each part of the page that shows an OPTION
-// says the same of it, in the same words.
+// The view sends every OPTION with the PERSONs that a LOCK names for it, the steps of the
+// plan of the report with who takes part in each, and the FACT about whether a PERSON needs a
+// right to take part in an OPTION. Each part of the page that shows an OPTION says the same
+// of it, in the same words.
 
 import { listed } from "./named.js";
+
+/**
+ * Whether a PERSON needs a right to take part in each OPTION of a TRIP as the view sends it,
+ * as far as the FILE says: give it the id of an OPTION. `needed` is yes, no, or null where
+ * the FILE does not say, and `says` puts it in words.
+ */
+export function needsARight(trip) {
+  const stated = new Map(trip.rights.map((each) => [each.option, each.needs]));
+  return (id) => {
+    const needed = stated.get(id)?.needed ?? null;
+    const says = needed === null ? "The FILE does not say whether people need a right to take part." : needed ? "People need a right to take part." : "Nobody needs a right to take part.";
+    return { needed, says };
+  };
+}
 
 /**
  * What the page says of who is in each OPTION of a TRIP as the view sends it: give it the id
