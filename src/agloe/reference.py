@@ -2979,7 +2979,7 @@ def _timings(
         (node, spans)
         for node in range(listed, count)
         if unlisted(node)
-        for spans in [_closed(file, origin(node), destination(node))]
+        for spans in [spans_closed(file, origin(node), destination(node))]
         if spans
     ]
     # Each such WAY as it falls, then in each opening: before the first span, after each one.
@@ -3022,18 +3022,32 @@ def _timings(
     chains: Iterable[_Chain] = _NOTHING_TO_ORDER if found is None else found
     in_turn = any_will_do or found is None
     bound: list[_StepOrder] | None = None
+    as_they_fall: list[int] | None = None
     if not in_turn:
         soonest = _earliest_starts(count, gaps, fixed, not_before)
         if all(node in soonest for node in nodes):
             lowest = {node: _step_in_file_order(file, step(node, soonest[node])) for node in nodes}
             bound = sorted(lowest.values())
             as_they_fall = sorted((node for node in nodes if node < listed), key=lowest.__getitem__)
-            natural = _chain_in_order(file, world, who, as_they_fall)
-            if natural is not None:
-                chains = chain([natural], chains)
-    known = None if in_order is None else _chain_in_order(file, world, who, in_order)
-    if found is not None and known is not None:
-        chains = chain([known], chains)
+    if found is not None:
+        chains = chain(_to_try_first(file, world, who, [in_order, as_they_fall]), chains)
+    least: list[tuple[int, tuple[_Ranked, ...]] | None] = []
+
+    def fewest() -> tuple[int, tuple[_Ranked, ...]] | None:
+        """The hand-overs that come first among those of every order, where that is known.
+
+        It is known where one OBJECT alone orders OPTIONs. Then ``_chains`` can make one
+        order of each kind, and every other order ends with the same hand-overs as one of
+        those. An order that cannot be timed is among them too, and that only makes the
+        result come earlier than it has to.
+        """
+        if not least:
+            every = None
+            if _the_one_order(file, world, who) is not None:
+                every = _chains(file, world, who, orders, True)
+            least.append(min((rank for _, _, rank in every or ()), default=None))
+        return least[0]
+
     first: tuple[_Comes, Itinerary] | None = None
     for more, handed, rank in chains:
         # Each order of the OPTIONs that matter to an OBJECT is more gaps. An order that goes
@@ -3064,7 +3078,7 @@ def _timings(
                 yield itinerary
                 continue
             comes = (rank, [_step_in_file_order(file, each) for each in itinerary])
-            if _nothing_comes_before(comes, bound):
+            if _nothing_comes_before(comes, bound, fewest):
                 yield itinerary
                 return
             if first is None or comes < first[0]:
@@ -3102,21 +3116,29 @@ def _earliest_starts(
     return soonest
 
 
-def _nothing_comes_before(comes: _Comes, bound: list[_StepOrder] | None) -> bool:
+def _nothing_comes_before(
+    comes: _Comes,
+    bound: list[_StepOrder] | None,
+    fewest: Callable[[], tuple[int, tuple[_Ranked, ...]] | None],
+) -> bool:
     """Whether an ITINERARY comes first among those of one choice, whatever the others are.
 
     ``comes`` is how it ranks: its hand-overs, and its steps as it lists them. ``bound``
     holds every step of the plan at the earliest it can start, in the order of the listing,
-    or None where some step has no earliest start.
+    or None where some step has no earliest start. ``fewest`` gives the hand-overs that
+    come first among those of every order, or None where that is not known. It is asked
+    only where the answer turns on it.
 
-    It comes first where it has no hand-over and lists its steps exactly as ``bound`` has
-    them. No ITINERARY has fewer hand-overs than none. And none lists its steps before
-    ``bound``: each of its steps starts no earlier than the same step there, so its steps
-    put in the order of the listing come no earlier, one by one. However it lists them, that
-    comes no earlier than listing them in that order. An ITINERARY that ranks the same is
-    the same ITINERARY.
+    It comes first where its hand-overs are those and it lists its steps exactly as
+    ``bound`` has them. No ITINERARY has hand-overs that come before those, and none has
+    fewer hand-overs than none at all. And none lists its steps before ``bound``: each of
+    its steps starts no earlier than the same step there, so its steps put in the order of
+    the listing come no earlier, one by one. However it lists them, that comes no earlier
+    than listing them in that order. An ITINERARY that ranks the same is the same ITINERARY.
     """
-    return bound is not None and comes[0][0] == 0 and comes[1] == bound
+    if bound is None or comes[1] != bound:
+        return False
+    return comes[0][0] == 0 or comes[0] == fewest()
 
 
 def _orders_differ_only_in_the_listing(
@@ -3132,11 +3154,11 @@ def _orders_differ_only_in_the_listing(
     Then ``_chains`` can leave out an order that starts with the same OPTIONs as an order
     made before it, and leaves the OBJECT in the same places with the same hand-overs.
 
-    That is so where four things hold. One OBJECT alone puts OPTIONs in an order. Each of
-    those OPTIONs starts at a fixed time. The timing can fall in one way only: ``as_timed``
-    holds how each step ranks in the listing as the rule times it, and is None otherwise.
-    And each step that has to come before another by what the PERSONs do also ranks before
-    it there.
+    That is so where four things hold. One OBJECT alone puts two or more OPTIONs in an
+    order: an order of one OPTION says nothing. Each of those OPTIONs starts at a fixed
+    time. The timing can fall in one way only: ``as_timed`` holds how each step ranks in
+    the listing as the rule times it, and is None otherwise. And each step that has to come
+    before another by what the PERSONs do also ranks before it there.
 
     The order adds gaps between fixed starts only, and those move no start. So every order
     gives the same start times, and the ITINERARIES differ only in their hand-overs and in
@@ -3155,19 +3177,46 @@ def _orders_differ_only_in_the_listing(
     """
     if as_timed is None:
         return False
+    ordered = _the_one_order(file, world, who)
+    if ordered is None or any(index not in fixed for index in ordered):
+        return False
+    return all(as_timed[before] < as_timed[after] for before, after, _ in gaps)
+
+
+def _the_one_order(
+    file: File, world: World, who: tuple[tuple[str, ...], ...]
+) -> tuple[int, ...] | None:
+    """The OPTIONs that one OBJECT puts in an order, where no other OBJECT orders any.
+
+    None where no OBJECT or more than one puts two or more OPTIONs in an order. An OBJECT
+    with one OPTION to order says nothing about what comes before what.
+    """
     happening, required = _required_by(file, world, who)
     ordered = [
         matters
         for thing in required
         for _, matters in [_ordered_by(file, world, who, happening, thing)]
-        if matters
+        if len(matters) > 1
     ]
-    if len(ordered) != 1 or any(index not in fixed for index in ordered[0]):
-        return False
-    return all(as_timed[before] < as_timed[after] for before, after, _ in gaps)
+    return ordered[0] if len(ordered) == 1 else None
 
 
-def _closed(file: File, origin: str, destination: str) -> list[tuple[int, int]]:
+def _to_try_first(
+    file: File,
+    world: World,
+    who: tuple[tuple[str, ...], ...],
+    in_orders: Iterable[Sequence[int] | None],
+) -> list[_Chain]:
+    """What ``_chains`` would give for each of these orders of all the OPTIONs of a plan.
+
+    They are tried before any other, and every one of them is among the others too. So they
+    change how soon the search is over, and not what it finds.
+    """
+    found = [_chain_in_order(file, world, who, each) for each in in_orders if each is not None]
+    return [each for each in found if each is not None]
+
+
+def spans_closed(file: File, origin: str, destination: str) -> list[tuple[int, int]]:
     """The spans of time in which no unlisted WAY goes straight from one PLACE to another.
 
     These are the spans of the COMPLETE FACTs about the two PLACEs, earliest first, with spans
