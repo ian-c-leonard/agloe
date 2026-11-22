@@ -9,6 +9,8 @@ has no page in it, so Node runs it here, through ``view_part.mjs``.
 Nothing in it judges a TRIP. Who is at a PLACE at a time of a plan is for the COMPILER to say.
 """
 
+import json
+from pathlib import Path
 from typing import Any
 
 from agloe.file import read
@@ -190,6 +192,31 @@ def test_a_place_whose_name_is_the_word_for_the_place_of_the_card_is_in_quotatio
     assert [way["says"] for way in here["ways"]] == [
         "between here and Here and there, in both directions"
     ]
+
+
+def test_two_places_whose_names_look_alike_have_their_ids(tmp_path: Path) -> None:
+    """One name has a hyphen, and the other a hyphen that does not break."""
+    content = json.loads((EXAMPLES / "ending-in-denver" / "works.json").read_text())
+    by_id = {place["id"]: place for place in content["places"]}
+    by_id["hotel"]["name"], by_id["art-institute"]["name"] = "Saint-Malo", "Saint\u2011Malo"
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    assert found["answer"] == "FEASIBLE"
+    (shown,) = all_places([sent], [found], [words])
+    hotel, museum, ohare, _ = shown["places"]
+    # Each card has the id, and so has each sentence of another card that names the PLACE.
+    assert (hotel["name"], museum["name"]) == (
+        "Saint-Malo (hotel)",
+        "Saint\u2011Malo (art-institute)",
+    )
+    assert [way["says"] for way in hotel["ways"]] == [
+        "between here and Saint\u2011Malo (art-institute), in both directions"
+    ]
+    assert [way["says"] for way in museum["ways"]] == [
+        "between here and Saint-Malo (hotel), in both directions"
+    ]
+    assert ohare["options"][0]["says"] == "comes here from Saint\u2011Malo (art-institute)"
 
 
 def test_the_places_mark_what_the_report_says_the_file_does_not_say() -> None:
