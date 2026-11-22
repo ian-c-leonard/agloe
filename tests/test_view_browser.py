@@ -95,7 +95,7 @@ STANDS_FOR = """() => {
   const rowOf = (each) => Number(hue(each).slice(1));
   const wanted = new Set();
   for (const mark of all("#calendar .mark")) {
-    for (const stripe of all(".stripe", mark)) wanted.add(`${mark.dataset.step}:${rowOf(stripe)}`);
+    for (const stripe of all(".stripe", mark)) wanted.add(`${mark.dataset.of}:${rowOf(stripe)}`);
   }
   const there = new Set();
   for (const bar of all("#strip .bar")) {
@@ -104,7 +104,7 @@ STANDS_FOR = """() => {
     const count = Math.max(Math.round((parseFloat(bar.style.height) * people) / 100), 1);
     const block = Array.from({ length: count }, (_, n) => first + n);
     const rows = lines.length ? lines.map(rowOf) : block;
-    for (const step of bar.dataset.step.split(" ")) {
+    for (const step of bar.dataset.of.split(" ")) {
       for (const row of rows) there.add(`${step}:${row}`);
     }
   }
@@ -351,8 +351,13 @@ def test_pointing_ties_an_option_to_the_calendar_and_the_report(chromium: Browse
         assert cab.locator(".option-said p").all_text_contents() == [
             "Can start at any time.",
             "The FILE does not say how long it takes.",
+            "The FILE does not say how early people must be there.",
             "No LOCK names it.",
         ]
+        # A row shows a time, so the part says whose clocks show it.
+        assert " Times are on the clocks of America/Chicago." in (
+            page.text_content("#options-says") or ""
+        )
         assert page.locator("#calendar .mark").count() == 2
         # Pointing at the cab lights up the line of the case that names it, and the other way.
         cab.hover()
@@ -372,6 +377,39 @@ def test_pointing_ties_an_option_to_the_calendar_and_the_report(chromium: Browse
         train.hover()
         found = lit(page, options=["Blue Line to O'Hare"], marks=["Blue Line to O'Hare"])
         assert found["rows"][0].endswith(": Blue Line to O'Hare, Alex and Sam")
+
+
+def test_pointing_at_an_option_lights_up_no_other_that_its_case_names(
+    chromium: Browser, tmp_path: Path
+) -> None:
+    """Nobody has a BOOKING for the flight, and the FILE does not say how long the cab takes.
+
+    One case of the report names both the flight and the cab. A LOCK names the flight, so the
+    calendar holds it. No LOCK names the cab.
+    """
+    content = json.loads((EXAMPLES / "flight-home" / "depends-on-the-cab.json").read_text())
+    content["facts"] = [fact for fact in content["facts"] if fact["id"] != "flight-tickets"]
+    with opened(chromium, written(tmp_path, content)) as page:
+        case = page.locator("#report .row[data-record='case:0']")
+        case.wait_for()
+        said = case.text_content() or ""
+        assert "Flight home" in said and "Cab to O'Hare" in said
+        page.locator("#calendar .mark").first.wait_for()
+        asked = page.locator("#options .option.asked")
+        asked.first.wait_for()
+        assert asked.locator(".option-name").all_text_contents() == ["Flight home", "Cab to O'Hare"]
+        # The cab is no step of the calendar. Pointing at it lights up the case, and not the
+        # flight: not its row, and not its step.
+        asked.nth(1).hover()
+        lit(page, options=["Cab to O'Hare"], marks=[], rows=[said])
+        # Pointing at the flight lights up its step and the case, and not the cab.
+        asked.first.hover()
+        lit(page, options=["Flight home"], marks=["Flight home"], rows=[said])
+        page.locator("#calendar .mark.asked").hover()
+        lit(page, options=["Flight home"], marks=["Flight home"], rows=[said])
+        # Pointing at the line of the case lights up both: the case is about both.
+        case.hover()
+        lit(page, options=["Flight home", "Cab to O'Hare"], marks=["Flight home"], rows=[said])
 
 
 def test_a_long_name_under_a_want_lies_on_nothing(chromium: Browser, tmp_path: Path) -> None:

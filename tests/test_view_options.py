@@ -27,6 +27,8 @@ FILES = sorted(
     path for path in EXAMPLES.rglob("*.json") if not path.name.endswith(".expected.json")
 )
 SAYS = "Every OPTION of the FILE, with what the FILE says of it."
+CHICAGO = " Times are on the clocks of America/Chicago."
+UNSAID = "The FILE does not say how early people must be there."
 RED = " A red edge marks what the report names among what rules out every plan."
 YELLOW = " A yellow edge marks what the report names in what the FILE does not say."
 
@@ -72,7 +74,8 @@ def options_of(path: Path) -> Options:
 def test_an_option_says_what_the_file_says_of_it() -> None:
     """A visit, a train, a flight and a cab. The trip depends on how long the cab takes."""
     shown = options_of(STORY / "depends-on-the-cab.json")
-    assert shown["says"] == SAYS + YELLOW
+    # A row shows a time, so the part says whose clocks show it.
+    assert shown["says"] == SAYS + CHICAGO + YELLOW
     assert (shown["clash"], shown["asked"]) == (False, True)
     visit, train, flight, cab = shown["options"]
     assert visit == {
@@ -81,7 +84,8 @@ def test_an_option_says_what_the_file_says_of_it() -> None:
         "where": "the Art Institute",
         "when": "Starts at 2:30 pm on Saturday 15 May 2027.",
         "takes": "Takes 1 h.",
-        "arrive": None,
+        # The FILE does not say how early to be at the museum, and the page says that.
+        "arrive": UNSAID,
         "lock": "Alex and Sam are each named by a LOCK.",
         # The report shows no plan, so the page says nothing of one.
         "plan": None,
@@ -110,10 +114,11 @@ def test_an_option_says_what_the_file_says_of_it() -> None:
         "People must be there 45 min before it starts.",
     )
     # The FILE does not say how long the cab takes, and the report names the cab.
-    assert (cab["name"], cab["when"], cab["takes"]) == (
+    assert (cab["name"], cab["when"], cab["takes"], cab["arrive"]) == (
         "Cab to O'Hare",
         "Can start at any time.",
         "The FILE does not say how long it takes.",
+        UNSAID,
     )
     assert cab["cases"] == [0]
     assert cab["asks"] == ["The trip works if Cab to O'Hare takes 45 min or less."]
@@ -123,7 +128,7 @@ def test_an_option_says_what_the_file_says_of_it() -> None:
 def test_an_option_says_who_takes_part_in_it_in_the_plan() -> None:
     """Alex and Sam take the train to the flight, and no LOCK names the train."""
     shown = options_of(STORY / "works.json")
-    assert shown["says"] == SAYS
+    assert shown["says"] == SAYS + CHICAGO
     said = {option["name"]: option for option in shown["options"]}
     assert said["Museum visit"]["plan"] == "In the plan: Alex and Sam take part."
     train = said["Blue Line to O'Hare"]
@@ -143,9 +148,9 @@ def test_an_option_says_who_takes_part_in_it_in_the_plan() -> None:
 def test_an_option_has_the_words_for_each_kind_of_start_and_length() -> None:
     sent = drawn(STORY / "works.json")
     first = sent["options"][0]
-    kinds: list[tuple[dict[str, Any], str, str, str | None]] = [
+    kinds: list[tuple[dict[str, Any], str, str, str]] = [
         (
-            {"length": {"shortest": 1200, "longest": 2700}, "margin": 0},
+            {"length": {"shortest": 1200, "longest": 2700, "contingent": True}, "margin": 0},
             first["start"] and "Starts at 2:00 pm on Saturday 15 May 2027.",
             "Takes between 20 min and 45 min.",
             "Nobody has to be there before it starts.",
@@ -154,13 +159,27 @@ def test_an_option_has_the_words_for_each_kind_of_start_and_length() -> None:
             {"start": None, "any_time": False, "length": None, "margin": None},
             "The FILE does not say when it starts.",
             "The FILE does not say how long it takes.",
-            None,
+            UNSAID,
         ),
         (
-            {"length": {"shortest": 0, "longest": 0}, "margin": 3661},
+            {"length": {"shortest": 0, "longest": 0, "contingent": False}, "margin": 3661},
             "Starts at 2:00 pm on Saturday 15 May 2027.",
             "Takes no time.",
             "People must be there 1 h 1 min 1 s before it starts.",
+        ),
+        (
+            # A range that the world decides in, whose two ends are the same.
+            {"length": {"shortest": 3600, "longest": 3600, "contingent": True}},
+            "Starts at 2:00 pm on Saturday 15 May 2027.",
+            "Takes between 1 h and 1 h.",
+            UNSAID,
+        ),
+        (
+            # A time that Chicago's clocks show twice comes with its offset from UTC.
+            {"start": {"at": "2027-11-07T01:30:00", "offset": "UTC-5"}},
+            "Starts at 1:30 am (UTC-5) on Sunday 7 November 2027.",
+            "Takes 1 h.",
+            UNSAID,
         ),
     ]
     trips: list[Trip | None] = []
@@ -173,10 +192,36 @@ def test_an_option_has_the_words_for_each_kind_of_start_and_length() -> None:
         assert (option["when"], option["takes"], option["arrive"]) == (when, takes, arrive)
 
 
+def test_a_range_with_two_ends_that_are_the_same_is_worded_as_the_report_words_it(
+    tmp_path: Path,
+) -> None:
+    """The FILE says that the world decides how long the visit takes: between 1 h and 1 h."""
+    content = json.loads((STORY / "cannot-work.json").read_text())
+    (length,) = [fact for fact in content["facts"] if fact["id"] == "visit-length"]
+    del length["duration"]
+    length["contingent_duration"] = {"shortest": "PT1H", "longest": "PT1H"}
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    assert "visit-length" in found["conflict"]
+    assert "visit-length: Museum visit takes between 1 h and 1 h" in words
+    (shown,) = all_options([sent], [found], [words])
+    assert shown["options"][0]["takes"] == "Takes between 1 h and 1 h."
+
+
+def test_the_options_name_the_time_zone_only_where_a_row_shows_a_time() -> None:
+    sent = drawn(STORY / "works.json")
+    assert any(option["start"] for option in sent["options"])
+    for option in sent["options"]:
+        option["start"] = None
+    (shown,) = all_options([sent])
+    assert shown["says"] == SAYS
+
+
 def test_the_options_mark_what_the_report_names_as_ruling_out_every_plan() -> None:
     sent, found = with_its_report(STORY / "cannot-work.json")
     (shown,) = all_options([sent], [found])
-    assert shown["says"] == SAYS + RED
+    assert shown["says"] == SAYS + CHICAGO + RED
     assert shown["clash"] is True
     named = set(found["conflict"])
     for option in shown["options"]:
@@ -186,7 +231,7 @@ def test_the_options_mark_what_the_report_names_as_ruling_out_every_plan() -> No
     # Only what a report names is marked.
     odd: list[Any] = [None, {}, {**found, "answer": "FEASIBLE"}, {**found, "conflict": "x"}]
     for other in all_options([sent] * len(odd), odd):
-        assert other["says"] == SAYS
+        assert other["says"] == SAYS + CHICAGO
         assert all(option["clash"] == [] for option in other["options"])
 
 
@@ -226,9 +271,9 @@ def test_every_example_shows_its_options_in_the_words_of_the_report() -> None:
             if f": {called} takes " in words and option["takes"].startswith("Takes"):
                 lengths += 1
                 assert f": {called} t{option['takes'][1:-1]}" in words, name
-            if option["arrive"] and f" before {called} starts" in words:
+            early = option["arrive"]
+            if early != UNSAID and f" before {called} starts" in words:
                 margins += 1
-                early = option["arrive"]
                 if early.startswith("People must be there "):
                     span = early[len("People must be there ") : -len(" before it starts.")]
                     assert f" {span} before {called} starts" in words, name

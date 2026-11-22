@@ -12,7 +12,7 @@
 // other: it is in the FILE.
 
 import { casesAbout, casesIn, findsOf, listed, optionsOf, ruledOut, saidOf } from "./named.js";
-import { clock, dateName, span } from "./times.js";
+import { clock, clocksOf, dateName, span } from "./times.js";
 
 /** When an OPTION starts, as far as the FILE says. */
 function whenOf(option) {
@@ -20,16 +20,19 @@ function whenOf(option) {
   return option.any_time ? "Can start at any time." : "The FILE does not say when it starts.";
 }
 
-/** How long an OPTION takes, as far as the FILE says. */
+/**
+ * How long an OPTION takes, as far as the FILE says. A length that the world decides in a range
+ * is worded as a range, as the report words it, also where the two ends are the same.
+ */
 function takesOf(option) {
   if (option.length === null) return "The FILE does not say how long it takes.";
-  const { shortest, longest } = option.length;
-  return shortest === longest ? `Takes ${span(shortest)}.` : `Takes between ${span(shortest)} and ${span(longest)}.`;
+  const { shortest, longest, contingent } = option.length;
+  return contingent ? `Takes between ${span(shortest)} and ${span(longest)}.` : `Takes ${span(shortest)}.`;
 }
 
-/** How early people must be there, where the FILE says. */
+/** How early people must be there, as far as the FILE says. */
 function arriveOf(option) {
-  if (option.margin === null) return null;
+  if (option.margin === null) return "The FILE does not say how early people must be there.";
   return option.margin ? `People must be there ${span(option.margin)} before it starts.` : "Nobody has to be there before it starts.";
 }
 
@@ -38,9 +41,10 @@ function arriveOf(option) {
  * view sends none.
  *
  * Each OPTION has its name, `where` it is, `when` it starts, how long it `takes`, how early to
- * `arrive` (null where the FILE does not say), and whom a LOCK names (`lock`). `plan` says who
- * takes part in it in the plan of the report, and is null where the report shows no plan.
- * `step` is the step of the TRIP that it is, where the calendar holds it.
+ * `arrive`, and whom a LOCK names (`lock`). `plan` says who takes part in it in the plan of
+ * the report, and is null where the report shows no plan. `step` is the step of the TRIP that
+ * it is, where the calendar holds it. Where a row shows a time, `says` names the time zone
+ * whose clocks show it.
  *
  * `report` is the report as JSON, where the page has one. `clash` on an OPTION holds its
  * `records` that the report names as ruling out every plan, and `finds` says so. `cases` holds
@@ -83,6 +87,7 @@ export function options(trip, report = null, stated = null) {
   const asked = shown.some((each) => each.cases.length > 0);
   const says =
     "Every OPTION of the FILE, with what the FILE says of it." +
+    (trip.options.some((option) => option.start !== null) ? clocksOf(trip.zone) : "") +
     (clash ? " A red edge marks what the report names among what rules out every plan." : "") +
     (asked ? " A yellow edge marks what the report names in what the FILE does not say." : "");
   return { says, clash, asked, options: shown };

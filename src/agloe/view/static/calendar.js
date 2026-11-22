@@ -21,7 +21,7 @@
 // starts, how tall it is, whose columns it spans, and what its words are.
 
 import { casesAbout, casesIn, findsOf, listed, optionsOf, ruledOut, saidOf } from "./named.js";
-import { clock, dateName } from "./times.js";
+import { clock, clocksOf, dateName } from "./times.js";
 
 const DAY = 24 * 60 * 60; // seconds
 const ROOM = 20 * 60; // seconds of room above the first step of a day and below the last
@@ -86,7 +86,7 @@ function rulesOut(named, marked) {
 
 /** What the calendar holds, in words. */
 function saysOf(trip, timed) {
-  const clocks = ` Times are on the clocks of ${trip.zone}.`;
+  const clocks = clocksOf(trip.zone);
   const changes = trip.days.some((day) => day.offset !== null) ? " A column that names its offset from UTC starts or ends with a change of those clocks." : "";
   const cut = trip.until === null ? "" : ` The calendar shows the first ${trip.days.length} columns. It leaves out what comes after them, up to ${dateName(trip.until)}.`;
   const more = clocks + changes + cut;

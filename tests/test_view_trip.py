@@ -157,7 +157,13 @@ def test_every_example_is_sent_as_a_trip_that_a_page_can_draw(path: Path) -> Non
         assert (option["start"] is not None) is (stated is not None and stated.at is not None)
         assert option["any_time"] is (stated is not None and stated.at is None)
         assert option["length"] == (
-            None if length is None else {"shortest": length.shortest, "longest": length.longest}
+            None
+            if length is None
+            else {
+                "shortest": length.shortest,
+                "longest": length.longest,
+                "contingent": length.contingent,
+            }
         )
         assert option["margin"] == (None if margin is None else margin.margin)
         named = {person for lock in file.locks if lock.option == each.id for person in lock.persons}
@@ -560,7 +566,7 @@ def test_every_option_of_the_file_is_sent_with_what_the_file_says_of_it() -> Non
         "to": "art-institute",
         "start": time("2027-05-15T14:30:00"),
         "any_time": False,
-        "length": {"shortest": HOUR, "longest": HOUR},
+        "length": {"shortest": HOUR, "longest": HOUR, "contingent": False},
         "margin": None,
         "locked": ["alex", "sam"],
         # The FACTs and DECISIONs of the FILE that are about it, in the FILE's order.
@@ -578,7 +584,7 @@ def test_every_option_of_the_file_is_sent_with_what_the_file_says_of_it() -> Non
     # People must be at the airport 45 minutes before the flight.
     assert (flight["margin"], flight["length"]) == (
         45 * 60,
-        {"shortest": 9000, "longest": 9000},
+        {"shortest": 9000, "longest": 9000, "contingent": False},
     )
     # The FILE does not say how long the cab takes.
     assert (cab["name"], cab["any_time"], cab["length"], cab["locked"]) == (
@@ -597,8 +603,12 @@ def test_an_option_with_no_word_about_its_start_has_none() -> None:
     # The FILE says nothing of when this one starts, and of this one that it can start any time.
     assert (by_id["no-word"]["start"], by_id["no-word"]["any_time"]) == (None, False)
     assert (by_id["some-time"]["start"], by_id["some-time"]["any_time"]) == (None, True)
-    # A length that the FILE gives as a range.
-    assert by_id["ride"]["length"] == {"shortest": 20 * 60, "longest": 50 * 60}
+    # A length that the FILE gives as a range: the world decides in it.
+    assert by_id["ride"]["length"] == {
+        "shortest": 20 * 60,
+        "longest": 50 * 60,
+        "contingent": True,
+    }
     # Several LOCKs name the visit. Each PERSON they name is there once, in the FILE's order.
     assert by_id["visit"]["locked"] == ["alex", "jo"]
     assert by_id["open"]["locked"] == []
@@ -846,6 +856,35 @@ def test_times_at_two_offsets_each_give_theirs_whatever_the_report_names() -> No
     )
 
 
+def test_a_time_that_the_clocks_show_twice_gives_its_offset() -> None:
+    """Chicago's clocks show 1:30 am twice on 7 November 2027, an hour apart.
+
+    Only the offset says which of the two a departure is. So the view sends it, though this is
+    the one time it sends and the report names none.
+    """
+
+    def leaving_at(offset: str) -> Trip:
+        when = {
+            "id": "bus-time",
+            "option": "bus",
+            "starts_at": f"2027-11-07T01:30:00{offset}{CHICAGO}",
+        }
+        file = trip(["alex"], ["hotel"], [stays("bus", "hotel")], [when], [])
+        quiet = Report(Answer.UNDETERMINED)
+        assert not reports.clock_for(file, quiet).offsets
+        sent = sent_for(file, quiet)
+        assert holds(sent)
+        return sent["options"][0]["start"]
+
+    assert leaving_at("-05:00") == time("2027-11-07T01:30:00", "UTC-5")
+    assert leaving_at("-06:00") == time("2027-11-07T01:30:00", "UTC-6")
+    # An hour later the clocks show each time once, and one time alone gives no offset.
+    when = {"id": "bus-time", "option": "bus", "starts_at": f"2027-11-07T02:30:00-06:00{CHICAGO}"}
+    file = trip(["alex"], ["hotel"], [stays("bus", "hotel")], [when], [])
+    sent = sent_for(file, Report(Answer.UNDETERMINED))
+    assert sent["options"][0]["start"] == time("2027-11-07T02:30:00")
+
+
 def test_an_offset_is_written_as_the_report_writes_it() -> None:
     """India's clocks are five and a half hours ahead of UTC, and Nepal's change in 1986."""
     when = {
@@ -1084,9 +1123,14 @@ def test_a_day_that_ends_late_has_its_last_hour_in_a_stretch_of_its_own() -> Non
     ]
     assert holds(sent)
     # A stretch says its offset because the clocks change at its end, whatever else is sent.
+    # The clocks show 11:10 pm twice that night, so the time says which of the two it is.
     lone = alone(("2027-10-30T23:10:00+03:00[Asia/Beirut]", 300))
     assert lone["days"] == [day("2027-10-30", 0, 24 * HOUR, "UTC+3")]
-    assert lone["steps"][0]["start"] == time("2027-10-30T23:10:00")
+    assert lone["steps"][0]["start"] == time("2027-10-30T23:10:00", "UTC+3")
+    # Two hours before, the clocks show each time once: the stretch says its offset alone.
+    early = alone(("2027-10-30T21:10:00+03:00[Asia/Beirut]", 300))
+    assert early["days"] == [day("2027-10-30", 0, 24 * HOUR, "UTC+3")]
+    assert early["steps"][0]["start"] == time("2027-10-30T21:10:00")
     # A stay of an hour from the first 11:10 pm ends, by the clock, where it started.
     (short,) = alone(("2027-10-30T23:10:00+03:00[Asia/Beirut]", HOUR))["steps"]
     assert (short["start"], short["end"]) == (
@@ -1372,7 +1416,7 @@ OPTION: dict[str, Any] = {
     "to": "hotel",
     "start": {"at": "2027-05-15T19:00:00", "offset": None},
     "any_time": False,
-    "length": {"shortest": 3600, "longest": 5400},
+    "length": {"shortest": 3600, "longest": 5400, "contingent": True},
     "margin": 600,
     "locked": ["alex"],
     "records": ["dinner-time", "lock-dinner"],
@@ -1408,7 +1452,12 @@ def test_a_trip_with_one_more_option_is_a_trip() -> None:
     assert holds(sent)
     # One that can start at any time, and takes no time.
     sent = good()
-    _option(start=None, any_time=True, length={"shortest": 0, "longest": 0}, margin=0)(sent)
+    still = {"shortest": 0, "longest": 0, "contingent": False}
+    _option(start=None, any_time=True, length=still, margin=0)(sent)
+    assert holds(sent)
+    # A range that the world decides in can have two ends that are the same.
+    sent = good()
+    _option(length={"shortest": 3600, "longest": 3600, "contingent": True})(sent)
     assert holds(sent)
 
 
@@ -1452,11 +1501,24 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "an option with a time that can start at any time": _option(any_time=True),
     "an option whose any time is no yes or no": _option(start=None, any_time=1),
     "an option with a length that is a number": _option(length=3600),
-    "an option that takes less than no time": _option(length={"shortest": -1, "longest": 60}),
-    "an option whose longest is under its shortest": _option(
-        length={"shortest": 90, "longest": 60}
+    "an option that takes less than no time": _option(
+        length={"shortest": -1, "longest": 60, "contingent": True}
     ),
-    "an option with a length in words": _option(length={"shortest": "1 h", "longest": "1 h"}),
+    "an option whose longest is under its shortest": _option(
+        length={"shortest": 90, "longest": 60, "contingent": True}
+    ),
+    "an option with a length in words": _option(
+        length={"shortest": "1 h", "longest": "1 h", "contingent": False}
+    ),
+    "an option with a range that the world does not decide": _option(
+        length={"shortest": 60, "longest": 90, "contingent": False}
+    ),
+    "an option with a length that does not say whether the world decides": _option(
+        length={"shortest": 60, "longest": 60}
+    ),
+    "an option with a length that the world decides as a number": _option(
+        length={"shortest": 60, "longest": 60, "contingent": 1}
+    ),
     "an option with a margin below nothing": _option(margin=-1),
     "an option with a margin that is a yes": _option(margin=True),
     "an option that a lock names for a person the trip does not have": _option(locked=["jo"]),

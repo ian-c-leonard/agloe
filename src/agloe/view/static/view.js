@@ -66,13 +66,22 @@ function tiesOf(step) {
 }
 
 /**
+ * What a row for an OPTION is a drawing of: the step of the TRIP that the OPTION is, by its
+ * number, or the OPTION itself where the calendar holds no step for it. A name with a colon is
+ * the name of no step.
+ */
+function drawingOf(option, id) {
+  return option.step !== null ? String(option.step) : `option:${id}`;
+}
+
+/**
  * One mark of the calendar, put on its day: a block for an OPTION, or a line down each PERSON's
  * column for a WAY. The name of a WAY stands beside the line of the first PERSON who takes it,
  * as far as its day has room.
  */
 function put(body, mark, index, people, open, ticks) {
   const box = made("div", `mark ${looksOf(mark)}`);
-  Object.assign(box.dataset, { step: mark.step, records: tiesOf(mark).join(" "), mark: index });
+  Object.assign(box.dataset, { of: mark.step, records: tiesOf(mark).join(" "), mark: index });
   const columns = mark.last - mark.first + 1;
   const when = mark.late ? `${mark.when}, ${mark.late}` : mark.when;
   // A mark is never smaller than the eye can find, and never outside the hours of its column.
@@ -183,7 +192,7 @@ function draw(laid) {
   const untimed = laid.untimed.flatMap((step, n) => {
     const name = Object.assign(made("span", `${step.clash.length ? "clash" : ""}${step.asks.length ? " asked" : ""}`, `${step.name} (${step.who})`), { title: [...(step.finds ? [step.finds] : []), ...step.asks].join("\n") });
     // It is a step of the TRIP: pointing at it lights up that step, and no other.
-    Object.assign(name.dataset, { step: step.step, records: tiesOf(step).join(" ") });
+    Object.assign(name.dataset, { of: step.step, records: tiesOf(step).join(" ") });
     return n ? [", ", name] : [name];
   });
   part("calendar-untimed").replaceChildren("The FILE gives no time for these LOCKed OPTIONs: ", ...untimed, ".");
@@ -207,7 +216,7 @@ function bar(mark, people) {
   box.title = several ? [`${mark.of.length} steps too close together to show apart at this width:`, ...mark.of.flatMap(said)].join("\n") : wordsOf(one);
   // A click goes to the first of the marks that it stands for.
   Object.assign(box.dataset, {
-    step: [...new Set(mark.of.map((each) => each.step))].join(" "),
+    of: [...new Set(mark.of.map((each) => each.step))].join(" "),
     records: [...new Set(mark.of.flatMap(tiesOf))].join(" "),
     day: one.day,
     mark: one.index,
@@ -286,15 +295,14 @@ function drawWants(shown) {
   part("wants-says").textContent = shown.says;
   for (const want of shown.wants) {
     const card = Object.assign(made("article", `want${edges(want)}`), { title: marks(want).join("\n") });
-    card.dataset.records = tiesOf(want).join(" ");
+    Object.assign(card.dataset, { of: `want:${want.id}`, records: tiesOf(want).join(" ") });
     card.append(made("h3", "want-name", want.name));
     for (const words of [want.holds, want.ends]) if (words) card.append(made("p", "want-holds", words));
     const options = made("ul", "want-options");
     for (const option of want.options) {
       const item = made("li", `delivers${option.degree > 0 ? "" : " not"}${edges(option)}`);
       item.title = [option.name, option.says, option.takes, ...marks(option)].join("\n");
-      item.dataset.records = tiesOf(option).join(" ");
-      if (option.step !== null) item.dataset.step = option.step;
+      Object.assign(item.dataset, { of: drawingOf(option, option.option), records: tiesOf(option).join(" ") });
       item.append(made("b", "delivers-name", option.name), made("span", "delivers-says", option.says), made("span", "delivers-takes", option.takes));
       options.append(item);
     }
@@ -316,8 +324,7 @@ function drawOptions(shown) {
   part("options-says").textContent = shown.says;
   for (const option of shown.options) {
     const row = Object.assign(made("article", `option${edges(option)}`), { title: marks(option).join("\n") });
-    row.dataset.records = tiesOf(option).join(" ");
-    if (option.step !== null) row.dataset.step = option.step;
+    Object.assign(row.dataset, { of: drawingOf(option, option.id), records: tiesOf(option).join(" ") });
     const head = made("div", "option-head");
     head.append(made("h3", "option-name", option.name), made("p", "option-where", option.where));
     const said = made("div", "option-said");
@@ -356,7 +363,7 @@ function write(text, tied) {
   report.replaceChildren();
   tied.forEach((line, n) => {
     const words = made("span", line.warns ? "row warns" : "row", line.text);
-    if (line.step !== null) words.dataset.step = line.step;
+    if (line.step !== null) words.dataset.of = line.step;
     if (line.record !== null) words.dataset.record = line.record;
     if (line.case !== null) words.dataset.record = `case:${line.case}`;
     report.append(words, n + 1 < tied.length ? "\n" : "");
@@ -364,22 +371,24 @@ function write(text, tied) {
 }
 
 /**
- * Pointing at a step lights up that step and what the report says of it: its marks, its line
- * in the plan, what the report warns of there, and the lines of the records that are about it.
- * It lights up no other step, though a record may be about both. Pointing at the line of a
- * record, or at a time of the TRIP, lights up everything that the record is about.
+ * Pointing at a drawing lights up every drawing of the same thing and what the report says of
+ * it: the marks of a step, its line in the plan, what the report warns of there, and the lines
+ * of the records and of the cases that are about it. It lights up no drawing of another thing,
+ * though a record or a case may be about both. `data-of` says what a drawing is of: a step of
+ * the TRIP, an OPTION that is no step, or a WANT. Pointing at the line of a record or of a
+ * case, or at a time of the TRIP, lights up everything that it is about.
  */
 function light(target) {
-  const from = target instanceof Element ? target.closest("[data-step], [data-record], [data-records]") : null;
+  const from = target instanceof Element ? target.closest("[data-of], [data-record], [data-records]") : null;
   const ids = (each) => [each.dataset.record, ...(each.dataset.records ?? "").split(" ")].filter(Boolean);
   // A mark of the strip can stand for several steps.
-  const stepsOf = (each) => (each.dataset.step ?? "").split(" ").filter(Boolean);
+  const thingsOf = (each) => (each.dataset.of ?? "").split(" ").filter(Boolean);
   const records = new Set(from ? ids(from) : []);
-  const steps = new Set(from ? stepsOf(from) : []);
-  for (const each of document.querySelectorAll("[data-step], [data-record], [data-records]")) {
-    const theirs = stepsOf(each);
+  const things = new Set(from ? thingsOf(from) : []);
+  for (const each of document.querySelectorAll("[data-of], [data-record], [data-records]")) {
+    const theirs = thingsOf(each);
     const shares = ids(each).some((id) => records.has(id));
-    const same = from !== null && (steps.size && theirs.length ? theirs.some((step) => steps.has(step)) : shares);
+    const same = from !== null && (things.size && theirs.length ? theirs.some((thing) => things.has(thing)) : shares);
     each.classList.toggle("lit", same);
   }
 }

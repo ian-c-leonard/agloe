@@ -88,7 +88,7 @@ _OPTION: _Shape = {
     "locked": list,
     "records": list,
 }
-_LENGTH: _Shape = {"shortest": int, "longest": int}
+_LENGTH: _Shape = {"shortest": int, "longest": int, "contingent": bool}
 _WANT: _Shape = {
     "id": str,
     "name": str,
@@ -202,10 +202,12 @@ def shown(file: File, report: Report) -> Trip | None:
     held += [] if ends is None else [ends.at - 1 if closes else ends.at]
     try:
         days, until = _days(file, held)
-        # Each time gives its offset where the report's do, and where these are not at one.
+        # Each time gives its offset where the report's do, where these are not at one, and
+        # where the clocks show one of them twice: only its offset says which of the two it is.
         offsets = (
             reports.clock_for(file, report).offsets
             or len({local(moment, file.zone).utcoffset() for moment in times}) > 1
+            or any(_comes_twice(file, moment) for moment in times)
         )
 
         def time(moment: int | None) -> Trip | None:
@@ -282,8 +284,9 @@ def _said_of(
 
     ``start`` is the time that the FILE states. ``any_time`` says that the FILE lets it start
     at any time, which is not a time. With neither, the FILE does not say when it starts.
-    ``length`` is in seconds, from the shortest to the longest it can take. ``margin`` is how
-    many seconds before its start people must be there. Each is None where the FILE is silent.
+    ``length`` is in seconds, from the shortest to the longest it can take. It is ``contingent``
+    where the FILE states it as a range, in which the world decides. ``margin`` is how many
+    seconds before its start people must be there. Each is None where the FILE is silent.
     """
     length, margin = file.duration(option), file.cutoff(option)
     return {
@@ -291,7 +294,11 @@ def _said_of(
         "any_time": stated is not None and stated.at is None,
         "length": None
         if length is None
-        else {"shortest": length.shortest, "longest": length.longest},
+        else {
+            "shortest": length.shortest,
+            "longest": length.longest,
+            "contingent": length.contingent,
+        },
         "margin": None if margin is None else margin.margin,
     }
 
@@ -444,6 +451,12 @@ def _seconds_into_the_day(file: File, moment: int) -> int:
     """How far into its day a moment is, by the clock."""
     there = local(moment, file.zone)
     return there.hour * 3600 + there.minute * 60 + there.second
+
+
+def _comes_twice(file: File, moment: int) -> bool:
+    """Whether the clocks of the FILE's time zone show this time twice, as when they go back."""
+    there = local(moment, file.zone)
+    return there.replace(fold=1 - there.fold).utcoffset() != there.utcoffset()
 
 
 def _time(file: File, moment: int, with_its_offset: bool) -> Trip:
@@ -635,7 +648,8 @@ def _the_options(
     """The ids of the OPTIONs of such a TRIP, or None where these are not its OPTIONs.
 
     Each has an id of its own. It has a time or can start at any time, and never both. It
-    takes no less than no time, and no longer at its shortest than at its longest.
+    takes no less than no time, and no longer at its shortest than at its longest. Only a
+    length that the world decides in a range has two ends that differ.
     """
     ids: list[object] = []
     for option in cast("list[object]", options):
@@ -660,6 +674,8 @@ def _the_options(
                 return None
             span = cast("dict[str, int]", length)
             if not 0 <= span["shortest"] <= span["longest"]:
+                return None
+            if span["shortest"] != span["longest"] and not span["contingent"]:
                 return None
         ids.append(said["id"])
     return _all_different(ids)

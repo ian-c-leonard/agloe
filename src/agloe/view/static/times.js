@@ -45,6 +45,11 @@ export function clock(time, from = null) {
   return `${shown} on ${at.day} ${MONTHS[at.month - 1]}${at.year === day.year ? "" : ` ${at.year}`}`;
 }
 
+/** Whose clocks the times on the page are on. A part that shows a time says so. */
+export function clocksOf(zone) {
+  return ` Times are on the clocks of ${zone}.`;
+}
+
 /** A length of time as the report writes it: 45 min, 1 h, 2 h 30 min. */
 export function span(seconds) {
   const parts = [[Math.floor(seconds / 3600), "h"], [Math.floor(seconds / 60) % 60, "min"], [seconds % 60, "s"]];
