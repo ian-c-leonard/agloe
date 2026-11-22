@@ -7,6 +7,23 @@
 // meets what each OPTION of the plan requires, which right each PERSON uses, and where each
 // OBJECT is. Each part of the page marks what it shows of those. Nothing here judges a TRIP: it reads what the report as JSON already holds.
 
+/** How a name ends where the page shows its id after it. */
+const WITH_AN_ID = / \([a-z0-9]+(-[a-z0-9]+)*\)$/;
+
+/**
+ * A name as the page shows it, for a list that "or" joins: in quotation marks where it holds
+ * that word, as the report puts it, so that it reads as one name. The view sends a name in
+ * quotation marks already where it could be taken for something else, and with its id after
+ * it where another name looks like it. The quotation marks go on before the id.
+ */
+export function either(name) {
+  if (name.startsWith('"')) return name;
+  const id = name.match(WITH_AN_ID);
+  const bare = id === null ? name : name.slice(0, id.index);
+  if (!bare.toLowerCase().split(/\s+/).includes("or")) return name;
+  return `"${bare.replace(/\\/g, "\\\\")}"${id === null ? "" : id[0]}`;
+}
+
 /** Names as a sentence joins them: Alex, Sam and Jo. `last` is the word before the last one. */
 export function listed(names, last = "and") {
   return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} ${last} ${names[names.length - 1]}`;

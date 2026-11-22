@@ -25,6 +25,8 @@ SAYS = (
     "The OBJECTs of the FILE, each with where it is when the TRIP starts, the OPTIONs that the"
     " FILE says require it, and those that it says hand it over or keep it."
 )
+# Where a card gives a time of the plan.
+CLOCKS = " Times are on the clocks of America/Chicago."
 RED = " A red edge marks what the report names among what rules out every plan."
 YELLOW = " A yellow edge marks what the report names in what the FILE does not say."
 ALL_REQUIRE = "The FILE states every one of its OPTIONs that requires it."
@@ -55,8 +57,11 @@ def objects_of(name: str) -> Objects:
 def test_an_object_says_where_it_starts_what_requires_it_and_what_moves_it() -> None:
     """The bags are at the hotel. The flight requires them, and the hotel hands them over."""
     shown = objects_of("the-bags/they-collect-them")
-    assert shown["says"] == SAYS
+    # The card says when Alex takes the bags, so the part says whose clocks that time is on.
+    assert shown["says"] == SAYS + CLOCKS
     assert (shown["clash"], shown["asked"]) == (False, False)
+    # Alex carries the bags throughout: the card gives no time, and the part names no clocks.
+    assert objects_of("the-bags/they-carry-them")["says"] == SAYS
     (bags,) = shown["objects"]
     assert (bags["id"], bags["name"], bags["starts"]) == (
         "bags",
@@ -264,6 +269,32 @@ def test_an_object_that_might_be_in_one_of_several_places_says_each(tmp_path: Pa
         " (the FILE does not say what Flight home does with the bags)."
     )
     assert f"\n  the bags: {bags['plan'][len('In the plan: ') : -1]}\n" in words
+    assert shown["says"] == SAYS + CLOCKS
+    # A name that holds the word "or" is in quotation marks in such a list, as in the report:
+    # it is one name, and not two places where the OBJECT might be.
+    (museum,) = [place for place in content["places"] if place["id"] == "art-institute"]
+    museum["name"] = "Ripley's Believe It or Not!"
+    content["persons"][0]["name"] = "Tom or Jerry"
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    assert bags["plan"].startswith(
+        'In the plan: with "Tom or Jerry" when the TRIP starts; with "Tom or Jerry" or at'
+        ' "Ripley\'s Believe It or Not!" from 1:00 pm (the FILE does not say what Museum visit'
+    )
+    assert f"\n  the bags: {bags['plan'][len('In the plan: ') : -1]}\n" in words
+    assert bags["requires"][0]["plan"] == 'Just before it starts: with "Tom or Jerry".'
+    assert f"    Flight home requires the bags. {bags['requires'][0]['plan']}\n" in f"{words}\n"
+    # Where the page shows the id of such a name, the quotation marks go on before the id.
+    (hotel,) = [place for place in content["places"] if place["id"] == "hotel"]
+    museum["name"], hotel["name"] = "Believe It or Not", "Believe It  or Not"
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    assert ' or at "Believe It or Not" (art-institute) from 1:00 pm (' in bags["plan"]
+    assert ' or at "Believe It or Not" from 1:00 pm (' in words
 
 
 def test_an_option_of_the_plan_that_might_require_an_object_is_under_it(tmp_path: Path) -> None:

@@ -739,6 +739,10 @@ def test_pointing_ties_an_object_to_the_calendar_and_the_report(
             "Just before it starts: with Alex.",
             "In the plan: Alex takes part.",
         ]
+        # The card gives a time, so the part says whose clocks show it.
+        assert " Times are on the clocks of America/Chicago." in (
+            page.text_content("#objects-says") or ""
+        )
         # Pointing at the OBJECT lights up the lines of its own FACTs, and the lines that say
         # where it is in the plan. It lights up no step.
         card.locator(".card-name").hover()
@@ -805,6 +809,8 @@ def test_pointing_ties_an_object_to_the_calendar_and_the_report(
         assert card.locator(".card-plan").text_content() == (
             "In the plan: with Alex when the TRIP starts."
         )
+        # No card gives a time, and the part names no clocks.
+        assert "clocks" not in (page.text_content("#objects-says") or "")
         might = card.locator(".entry.not")
         assert might.locator(".entry-name").all_text_contents() == ["Museum visit"]
         assert might.locator(".entry-says").all_text_contents() == [

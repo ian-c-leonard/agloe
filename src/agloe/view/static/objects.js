@@ -14,8 +14,8 @@
 // those lines to the OBJECT, and the card of the OBJECT says the same, worded as the report
 // words it, from what the report as JSON holds.
 
-import { atHandFor, carriedIn, listed, marksBy } from "./named.js";
-import { clock } from "./times.js";
+import { atHandFor, carriedIn, either, listed, marksBy } from "./named.js";
+import { clock, clocksOf } from "./times.js";
 import { whoIsIn } from "./who.js";
 
 /** What a case of a report can need that is about whether an OPTION requires an OBJECT. */
@@ -95,13 +95,16 @@ export function objects(trip, report = null, stated = null) {
   // where it is not on the day that the plan starts.
   const startOf = new Map(trip.itinerary ? trip.steps.flatMap((step) => (step.option === null ? [] : [[step.option, step.start]])) : []);
   const first = trip.itinerary && trip.steps.length ? trip.steps[0].start : null;
-  // Where an OBJECT is, or each place it might be: with Alex or at the Art Institute. Null
-  // where the TRIP has no such PERSON or PLACE.
+  // Where an OBJECT is, or each place it might be: with Alex or at the Art Institute. Each
+  // name is as "or" joins it, as in the report. Null where the TRIP has no such PERSON or
+  // PLACE.
   const whereIs = (where) => {
-    const each = where.map((one) => (typeof one.person === "string" ? (people.has(one.person) ? `with ${people.get(one.person)}` : null) : places.has(one.place) ? `at ${places.get(one.place)}` : null));
+    const each = where.map((one) => (typeof one.person === "string" ? (people.has(one.person) ? `with ${either(people.get(one.person))}` : null) : places.has(one.place) ? `at ${either(places.get(one.place))}` : null));
     return each.includes(null) ? null : listed(each, "or");
   };
   const carried = new Map(carriedIn(report).map((each) => [each.object, each]));
+  // Whether a card gives a time of the plan. The part then says whose clocks it is on.
+  let timed = false;
   const shown = trip.objects.map((thing) => {
     // What the report says of this OBJECT in its plan: where it is from the start of the
     // TRIP on, and where it is just before each OPTION that requires it or might. All of it
@@ -118,6 +121,7 @@ export function objects(trip, report = null, stated = null) {
     const all = (said === null ? [] : said.uses).map((use) => ({ option: use.option, stated: use.stated, where: startOf.has(use.option) ? whereIs(use.where) : null }));
     const known = stays.length > 0 && !stays.includes(null) && all.every((use) => use.where !== null);
     const uses = known ? all : [];
+    timed ||= known && said.stays.some((stay) => stay.since !== null);
     // Where the OBJECT is just before an OPTION starts, where the report says that a FACT
     // has the OPTION require it.
     const before = (option) => {
@@ -179,6 +183,7 @@ export function objects(trip, report = null, stated = null) {
   const asked = all.some((each) => each.cases.length > 0);
   const says =
     "The OBJECTs of the FILE, each with where it is when the TRIP starts, the OPTIONs that the FILE says require it, and those that it says hand it over or keep it." +
+    (timed ? clocksOf(trip.zone) : "") +
     (clash ? " A red edge marks what the report names among what rules out every plan." : "") +
     (asked ? " A yellow edge marks what the report names in what the FILE does not say." : "");
   return { says, clash, asked, objects: shown };
