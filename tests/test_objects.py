@@ -4081,10 +4081,23 @@ def a_trip_with_steps_at_one_time(rng: Random) -> File:
     facts.append(rng.choice([holder, lies_at("key", "desk"), lies_at("key", "desk")]))
     facts += [every_use("key")]
     facts += [every_transfer("key")] if rng.random() < 0.7 else []
+    things = ["key"]
+    if rng.random() < 0.5:
+        # A stamp as well, at a few of the stays. So two OBJECTs can order the steps.
+        things = rng.choice([["key", "stamp"], ["stamp", "key"]])
+        for name in rng.sample(names, min(len(names), rng.choice([1, 2, 2, 3]))):
+            if rng.random() < 0.7:
+                facts.append(requires_object(name, "stamp"))
+            does = rng.choice(["hands_over", "keeps", None])
+            if does is not None:
+                facts.append(does_with(name, "stamp", does))
+        whose = has_object(rng.choice(people), "stamp")
+        facts += [rng.choice([whose, lies_at("stamp", "desk")]), every_use("stamp")]
+        facts += [every_transfer("stamp")] if rng.random() < 0.7 else []
     locks = [lock(name, name.split("-")[0]) for name in names]
     locks += [trip_starts(8)] if rng.random() < 0.6 else []
     ways = [way_between("walk", "desk", "vault")]
-    return trip(people, ["desk", "vault"], options, facts, locks, ways, objects=["key"])
+    return trip(people, ["desk", "vault"], options, facts, locks, ways, objects=things)
 
 
 def test_the_short_cuts_show_the_plan_that_ranking_every_order_shows(
@@ -4114,7 +4127,7 @@ def test_the_short_cuts_show_the_plan_that_ranking_every_order_shows(
         stopped += found
         return found
 
-    for _ in range(300):
+    for _ in range(400):
         file = a_trip_with_steps_at_one_time(rng)
         for world in (worst_case(file), best_case(file), no_better_than(file, ())):
             search.as_built()
@@ -4417,18 +4430,22 @@ def eleven_signatures(
     others: Sequence[Document] = (),
     places: Sequence[str] = (),
     ways: Sequence[Document] = (),
+    at_the_airport: Sequence[Document] | None = None,
+    decisions: Sequence[Document] = (),
 ) -> File:
     """Eleven guests each sign at the hotel desk at 9:00 am, which takes no time. Each
     signature requires the register that lies at the hotel and can hand it over. A clerk at
     the airport requires the register at 9:05 am. The shuttle takes 15 minutes. ``others``
     holds other OPTIONs, ``places`` other PLACEs, ``ways`` other WAYs, and ``more`` the FACTs
-    about them."""
+    about them. ``at_the_airport`` says when the clerk's check is, where that is not
+    9:05 am, and ``decisions`` holds other DECISIONs."""
     people = [f"guest-{number}" for number in range(11)]
     desks = [f"{person}-desk" for person in people]
     options = [*(stays(desk, "hotel") for desk in desks), stays("airport-desk", "airport")]
     options += others
     facts = [fact for desk in desks for fact in at(desk, 9, length="PT0S")]
-    facts += [*at("airport-desk", 9, 5), starts_from("clerk", "airport")]
+    facts += at("airport-desk", 9, 5) if at_the_airport is None else at_the_airport
+    facts += [starts_from("clerk", "airport")]
     facts += [starts_from(person, "hotel") for person in people]
     facts += [takes("shuttle", "PT15M")]
     facts += [lies_at("register", "hotel"), requires_object("airport-desk", "register")]
@@ -4436,7 +4453,7 @@ def eleven_signatures(
         facts += [hands_over(desk, "register"), requires_object(desk, "register")]
     facts += [every_use("register"), every_transfer("register"), *spans, *more]
     locks = [lock(desk, person) for desk, person in zip(desks, people, strict=True)]
-    locks.append(lock("airport-desk", "clerk"))
+    locks += [lock("airport-desk", "clerk"), *decisions]
     all_ways = [way_between("shuttle", "hotel", "airport"), *ways]
     everywhere = ["hotel", "airport", *places]
     return trip(
@@ -4544,6 +4561,20 @@ def test_a_connection_that_is_missed_does_not_count_for_the_time_to_cross() -> N
     assert conflicts < 1000
     works, conflicts = conflicts_in_the_best_case(by_ferry(4))
     assert works
+    # The same where the clerk's check is at any time and the TRIP ends at 9:05 am. The
+    # register still sets out at 9:00 am, so the missed ferry still does not count.
+    any_time_before_the_end = eleven_signatures(
+        *at("pier-shuttle", 9, 0, "PT4M"),
+        *at("ferry", 9, 2, "PT1M"),
+        spans=[complete(None, None)],
+        others=[moves("pier-shuttle", "hotel", "pier"), moves("ferry", "pier", "airport")],
+        places=["pier"],
+        at_the_airport=whenever("airport-desk", "PT0S"),
+        decisions=[trip_ends(9, 5)],
+    )
+    works, conflicts = conflicts_in_the_best_case(any_time_before_the_end)
+    assert not works
+    assert conflicts < 1000
 
 
 def test_a_way_with_no_known_length_does_not_count_for_the_time_to_cross() -> None:
@@ -4599,3 +4630,46 @@ def test_an_order_that_the_earliest_starts_rule_out_is_not_counted(
     assert [(step.option, step.handed) for step in found.itinerary if step.handed] == [
         ("bus", (("voucher", "kim"),))
     ]
+
+
+def test_the_hand_overs_that_no_order_can_do_without_are_those_of_each_object_by_itself(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sam has the key, and the stamp lies on the desk. Jo's check at any time requires the
+    key. Sam can hand the key to Jo at 8:00 am, or leave it on the desk after 10:00 am, in a
+    stay that keeps it. The second plan has no hand-over, so it comes first. Jo's check of
+    the stamp at 9:00 am and Sam's stay at 10:00 am that can hand the stamp over are in one
+    order by their times. That order may not hide the plan with no hand-over from the
+    search for the hand-overs that no order can do without. Ranking every order shows the
+    same plan."""
+    names = ["together", "sam-at-ten", "sam-leaves", "jo-leaves", "jo-at-nine", "jo-checks"]
+    options = [stays(name, "desk") for name in names]
+    facts = [
+        *at("together", 8, length="PT5M"),
+        *at("sam-at-ten", 10, length="PT5M"),
+        *whenever("sam-leaves"),
+        *whenever("jo-leaves"),
+        *at("jo-at-nine", 9, length="PT5M"),
+        *whenever("jo-checks"),
+        has_object("sam", "key"),
+        lies_at("stamp", "desk"),
+        hands_over("together", "key"),
+        hands_over("sam-at-ten", "stamp"),
+        keeps("sam-leaves", "key"),
+        keeps("jo-leaves", "key"),
+        requires_object("jo-at-nine", "stamp"),
+        requires_object("jo-checks", "key"),
+        every_use("key"),
+        every_transfer("key"),
+        every_use("stamp"),
+        every_transfer("stamp"),
+    ]
+    locks = [lock("together", "sam", "jo"), lock("sam-at-ten", "sam"), lock("sam-leaves", "sam")]
+    locks += [lock("jo-leaves", "jo"), lock("jo-at-nine", "jo"), lock("jo-checks", "jo")]
+    file = trip(["sam", "jo"], ["desk"], options, facts, locks, objects=["key", "stamp"])
+    world = worst_case(file)
+    shown = compiler.shown(file, world)
+    assert shown is not None
+    assert not any(step.handed for step in shown)
+    EveryOrder(monkeypatch).skipping_nothing()
+    assert compiler.shown(file, world) == shown

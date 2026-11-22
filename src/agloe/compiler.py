@@ -812,8 +812,13 @@ class _Search:
                 takes = self._across(options[source].destination, options[index].origin, over, by)
                 if takes is None:
                     continue
-                if over is None or by is None or over + takes <= by:
-                    early_enough.append(given)
+                # The OBJECT comes from this hand-over: it is over and across by then.
+                name = f"{thing} comes to {options[index].id} from {options[source].id}"
+                from_there = model.new_bool_var(name)
+                model.add_implication(from_there, given)
+                in_time = self.start[index] >= self.start[source] + self.lasts[source] + takes
+                _when(model.add(in_time), from_there)
+                early_enough.append(from_there)
             model.add_bool_or([here.negated(), *early_enough])
 
     def _across(
@@ -826,19 +831,17 @@ class _Search:
         how long it takes is left out: nothing follows it, so nothing it carries is at hand
         anywhere afterwards.
 
-        ``since`` and ``until`` are two times that the crossing lies between, where both
-        are known. Then it sets out at the first and has to be there by the second. On the
-        way, an unlisted WAY leaves only outside the spans in which COMPLETE FACTs rule it
-        out, and an OPTION that moves at a fixed time is taken only where it starts no
-        earlier than the crossing got to it. With no times, none of that is looked at.
-        Either way the real time can be longer and is never shorter.
+        ``since`` is when the crossing sets out, where that is known, and ``until`` when it
+        has to be there, where that is known too. From a known time, an unlisted WAY leaves
+        only outside the spans in which COMPLETE FACTs rule it out, and an OPTION that moves
+        at a fixed time is taken only where it starts no earlier than the crossing got to
+        it. With no time to set out, none of that is looked at. Either way the real time can
+        be longer and is never shorter.
 
         The times from one PLACE are worked out once, and only from the PLACEs asked about.
         """
-        if since is None or until is None:
-            since = None
-        elif since > until:
-            return None  # the second time is before the first
+        if since is not None and until is not None and since > until:
+            return None  # it has to be there before it sets out
         if (origin, since) not in self._crossing:
             self._crossing[origin, since] = self._from(origin, since)
         reached = self._crossing[origin, since].get(destination)

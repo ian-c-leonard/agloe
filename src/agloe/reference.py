@@ -3046,18 +3046,9 @@ def _timings(
     least: list[tuple[int, tuple[_Ranked, ...]] | None] = []
 
     def fewest() -> tuple[int, tuple[_Ranked, ...]] | None:
-        """The hand-overs that come first among those of every order, where that is known.
-
-        It is known where one OBJECT alone leaves a choice of order. Then ``_chains`` can
-        make one order of each kind, and every other order ends with the same hand-overs as
-        one of those. An order that cannot be timed can be among them, and that only makes
-        the result come earlier than it has to.
-        """
+        """Hand-overs that no ITINERARY of this choice has hand-overs before, where known."""
         if not least:
-            every = None
-            if _the_one_order(file, world, who, orders) is not None:
-                every = _chains(file, world, who, orders, True, soonest)
-            least.append(min((rank for _, _, rank in every or ()), default=None))
+            least.append(_fewest_hand_overs(file, world, who, orders, soonest))
         return least[0]
 
     first: tuple[_Comes, Itinerary] | None = None
@@ -3196,18 +3187,55 @@ def _orders_differ_only_in_the_listing(
     return all(as_timed[before] < as_timed[after] for before, after, _ in gaps)
 
 
+def _fewest_hand_overs(
+    file: File,
+    world: World,
+    who: tuple[tuple[str, ...], ...],
+    orders: tuple[tuple[int, ...], ...],
+    soonest: Mapping[int, int],
+) -> tuple[int, tuple[_Ranked, ...]] | None:
+    """Hand-overs that no ITINERARY of this choice has hand-overs before, as ``_chains`` ranks them.
+
+    Each OBJECT is taken by itself: of all the orders of its own OPTIONs, the hand-overs
+    that the rules put first. The other OBJECTs are not looked at, so an order counts here
+    that the orders of the others rule out, and one that cannot be timed. That only makes
+    the result come earlier than it has to. One order of each kind is enough: two orders
+    that start with the same OPTIONs and leave the OBJECT in the same places with the same
+    hand-overs end with the same hand-overs, whatever follows.
+
+    Put together, these are a lower limit for every ITINERARY. Its hand-overs of each
+    OBJECT come no earlier than these. So it has at least as many in all, and where it has
+    as many, it has as many of each OBJECT, and they come no earlier OBJECT by OBJECT.
+
+    None where some OBJECT has no order that works.
+    """
+    happening, required = _required_by(file, world, who)
+    least: list[_Ranked] = []
+    for thing in required:
+        alone = _orders_together(file, world, who, orders, happening, [thing], True, soonest)
+        ranked = [rank[1][0] for _, _, rank in alone]
+        if not ranked:
+            return None
+        least.append(min(ranked, key=lambda taken: (len(taken), taken)))
+    return sum(map(len, least)), tuple(least)
+
+
 def _the_one_order(
     file: File,
     world: World,
     who: tuple[tuple[str, ...], ...],
     orders: tuple[tuple[int, ...], ...],
 ) -> tuple[int, ...] | None:
-    """The OPTIONs that one OBJECT puts in an order, where no other OBJECT leaves a choice.
+    """The OPTIONs that one OBJECT puts in an order, where no other OBJECT changes anything.
 
     None where no OBJECT or more than one leaves a choice. An OBJECT leaves a choice where
     two of its OPTIONs could come in either order. They cannot where a PERSON, or a chain of
     PERSONs, does one after the other, or where they start at two different fixed times.
-    An OBJECT that leaves no choice has one order, and that order says nothing new.
+
+    An OBJECT that leaves no choice has one order. That order changes nothing where each
+    of its OPTIONs starts at a fixed time: it says only what the times and the PERSONs say
+    already, and it moves no start. Where one of them starts at no fixed time, the order
+    can move that start, and the result is None.
     """
     happening, required = _required_by(file, world, who)
     later = _later_for_the_persons(orders, happening)
@@ -3217,13 +3245,21 @@ def _the_one_order(
         apart = fixed[one] is not None and fixed[other] is not None and fixed[one] != fixed[other]
         return not apart and other not in later[one] and one not in later[other]
 
-    ordered = [
+    several = [
         matters
         for thing in required
         for _, matters in [_ordered_by(file, world, who, happening, thing)]
+        if len(matters) > 1
+    ]
+    open_to_choice = [
+        matters
+        for matters in several
         if any(either_way(one, other) for one, other in combinations(matters, 2))
     ]
-    return ordered[0] if len(ordered) == 1 else None
+    settled = [matters for matters in several if matters not in open_to_choice]
+    if len(open_to_choice) != 1 or any(fixed[index] is None for each in settled for index in each):
+        return None
+    return open_to_choice[0]
 
 
 def _to_try_first(
