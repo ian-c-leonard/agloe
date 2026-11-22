@@ -308,6 +308,39 @@ def test_pointing_ties_a_want_to_the_calendar_and_the_report(chromium: Browser) 
         assert ids_of(found["rows"]) == ["view"]
         page.locator("#report .row[data-record='view']").hover()
         lit(page, marks=[], wants=["a view from high up"])
+        # The line of a LOCK is about its OPTION: it lights up every drawing of that OPTION,
+        # the one under the WANT too, and no other line of the report.
+        page.locator("#report .row[data-record='lock-lunch']").hover()
+        found = lit(page, marks=["Lunch in the park"], wants=["Lunch in the park"])
+        assert found["options"] == ["Lunch in the park"]
+        assert ids_of(found["rows"]) == ["lock-lunch"]
+
+
+def test_an_option_under_a_want_that_is_lit_is_not_lit_itself(chromium: Browser) -> None:
+    """The trip works if lunch on the rooftop does not SATISFY a view from high up.
+
+    The case names the WANT and the lunch, and says nothing of the Skydeck visit, which is the
+    one OPTION under the WANT. So the WANT and the lunch are lit, and the visit looks as it did.
+    """
+    grounds = """() => {
+      const ground = (each) => getComputedStyle(each).backgroundColor;
+      const entries = [...document.querySelectorAll("#wants .delivers")];
+      return {
+        want: ground(document.querySelector("#wants .want.lit")),
+        unlit: entries.filter((each) => !each.classList.contains("lit")).map(ground),
+      };
+    }"""
+    with opened(chromium, EXAMPLES / "a-must-not" / "depends-on-the-lunch.json") as page:
+        case = page.locator("#report .row[data-record='case:0']")
+        case.wait_for()
+        page.locator("#wants .delivers").first.wait_for()
+        assert page.locator("#wants .delivers-name").all_text_contents() == ["Skydeck visit"]
+        case.hover()
+        lit(page, wants=["a view from high up"], options=["Lunch on the rooftop"])
+        found = page.evaluate(grounds)
+        # The visit has a ground of its own, which is not the ground of what is lit.
+        (visit,) = found["unlit"]
+        assert visit.startswith("rgb(") and visit != found["want"]
 
 
 def test_a_want_has_the_red_edge_of_what_the_report_names(chromium: Browser) -> None:

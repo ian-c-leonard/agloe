@@ -146,7 +146,8 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .want-whole { color: var(--muted); }
 .want-options { display: grid; gap: 4px; margin: 2px 0; padding: 0; list-style: none; }
 /* What the FILE says of an OPTION stands beside its name, and below it where the two do not fit. */
-.delivers { display: flex; flex-wrap: wrap; gap: 0 10px; padding: 5px 8px; border: 1.2px solid var(--ink); border-radius: 5px; font-size: 12.5px; }
+/* An OPTION under a WANT has a ground of its own: where only the WANT is lit, it is not. */
+.delivers { display: flex; flex-wrap: wrap; gap: 0 10px; padding: 5px 8px; border: 1.2px solid var(--ink); border-radius: 5px; background: var(--surface); font-size: 12.5px; }
 .delivers-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
 .delivers-says { flex: 0 1 auto; font: 500 11.5px/1.6 var(--mono); }
 .delivers-takes { flex: 1 0 100%; font-size: 11.5px; color: var(--ink2); }

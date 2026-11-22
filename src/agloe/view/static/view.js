@@ -375,21 +375,33 @@ function write(text, tied) {
  * it: the marks of a step, its line in the plan, what the report warns of there, and the lines
  * of the records and of the cases that are about it. It lights up no drawing of another thing,
  * though a record or a case may be about both. `data-of` says what a drawing is of: a step of
- * the TRIP, an OPTION that is no step, or a WANT. Pointing at the line of a record or of a
- * case, or at a time of the TRIP, lights up everything that it is about.
+ * the TRIP, an OPTION that is no step, or a WANT.
+ *
+ * The line of a record or of a case, and a time of the TRIP, are of no thing. Pointing at one
+ * lights up everything that is tied to it. A drawing that is tied to it is a drawing of what
+ * the line is about, so every other drawing of that thing lights up too.
  */
 function light(target) {
-  const from = target instanceof Element ? target.closest("[data-of], [data-record], [data-records]") : null;
+  const tied = "[data-of], [data-record], [data-records]";
+  const from = target instanceof Element ? target.closest(tied) : null;
+  const all = [...document.querySelectorAll(tied)];
   const ids = (each) => [each.dataset.record, ...(each.dataset.records ?? "").split(" ")].filter(Boolean);
   // A mark of the strip can stand for several steps.
   const thingsOf = (each) => (each.dataset.of ?? "").split(" ").filter(Boolean);
+  const isLine = (each) => each.classList.contains("row");
   const records = new Set(from ? ids(from) : []);
+  const shares = (each) => ids(each).some((id) => records.has(id));
   const things = new Set(from ? thingsOf(from) : []);
-  for (const each of document.querySelectorAll("[data-of], [data-record], [data-records]")) {
+  const ofAThing = things.size > 0;
+  // What a line is about: each thing with a drawing of its own that is tied to the line.
+  if (from !== null && !ofAThing) {
+    for (const each of all) if (!isLine(each) && thingsOf(each).length === 1 && shares(each)) things.add(thingsOf(each)[0]);
+  }
+  for (const each of all) {
     const theirs = thingsOf(each);
-    const shares = ids(each).some((id) => records.has(id));
-    const same = from !== null && (things.size && theirs.length ? theirs.some((thing) => things.has(thing)) : shares);
-    each.classList.toggle("lit", same);
+    const ofThese = theirs.some((thing) => things.has(thing));
+    const same = ofAThing ? (theirs.length ? ofThese : shares(each)) : shares(each) || (ofThese && !isLine(each));
+    each.classList.toggle("lit", from !== null && same);
   }
 }
 
