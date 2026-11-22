@@ -100,9 +100,9 @@ def whenever(option: str, length: str = "PT5M") -> list[Document]:
 
 
 def checked(file: File) -> Report:
-    """The reference checker's Report, once the COMPILER has given the same one."""
+    """The reference checker's Report, once the solver's own search has given the same one."""
     found = answers.check(file)
-    assert compiler.check(file) == found
+    assert answers.check(file, compiler.shown, compiler.works, compiler.can_work) == found
     return found
 
 
@@ -1288,8 +1288,7 @@ def test_the_unknown_facts_about_objects_have_a_fixed_order() -> None:
 
 
 def test_listing_an_object_that_nothing_requires_changes_no_answer() -> None:
-    """The solver's model has no OBJECTs, and it still checks such a FILE: nothing turns on
-    where the OBJECT is."""
+    """Nothing turns on where the OBJECT is, so the solver's model leaves it out."""
     rng = Random(404)
     seen: set[Answer] = set()
     for _ in range(60):
@@ -1993,12 +1992,13 @@ def test_fewer_requirements_are_never_harder_for_the_same_plan() -> None:
 
 
 def test_the_compiler_gives_the_reference_checkers_report_for_objects() -> None:
-    """The solver's model has no OBJECTs, so the COMPILER hands such a FILE over whole."""
+    """With the solver's own search for every part of it."""
     rng = Random(8)
     seen: set[Answer] = set()
-    for _ in range(40):
-        file = a_trip_with_objects(rng, leave_out=0.1, with_ways=0.5)
+    for _ in range(220):
+        file = a_trip_with_objects(rng, leave_out=0.12, with_ways=0.6, with_complete=0.3)
         found = answers.check(file)
+        assert answers.check(file, compiler.shown, compiler.works, compiler.can_work) == found
         assert compiler.check(file) == found
         seen.add(found.answer)
     assert seen == set(Answer)
@@ -2947,3 +2947,143 @@ def test_a_way_that_cannot_leave_before_a_span_does_not_time_what_comes_before_i
         ("sam", "class", "cash"),
         ("alex", "prep", "card"),
     ]
+
+
+# The solver.
+
+
+def trips_with_objects(rng: Random) -> list[File]:
+    """Random trips of every kind the other tests build, each with OBJECTs."""
+    trips = [a_trip_with_objects(rng, leave_out=0.12) for _ in range(120)]
+    trips += [
+        a_trip_with_objects(rng, leave_out=0.1, with_ways=0.8, with_complete=0.3)
+        for _ in range(100)
+    ]
+    trips += [
+        with_objects(
+            rng,
+            random_trip(rng, 0.15, ["alex", "sam"], with_wants=0.8, must_nots=0.3, whole_sets=0.4),
+        )
+        for _ in range(60)
+    ]
+    trips += [
+        with_objects(rng, random_trip(rng, 0.15, ["alex", "sam"], with_rights=0.4))
+        for _ in range(60)
+    ]
+    trips += [
+        with_objects(
+            rng,
+            random_trip(rng, 0.1, ["alex", "sam"], with_ends=0.5, with_ways=0.8, with_times=0.5),
+        )
+        for _ in range(60)
+    ]
+    return trips
+
+
+def test_the_compiler_and_the_reference_checker_agree_on_trips_with_objects() -> None:
+    """The same answer ahead and the same Report for every TRIP."""
+    rng = Random(6161)
+    seen: set[Answer] = set()
+    handed = carried = unsettled = 0
+    for file in trips_with_objects(rng):
+        series = list(answers.reports(file))
+        assert list(compiler.reports(file)) == series
+        found = series[-1]
+        assert isinstance(found, Report)
+        seen.add(found.answer)
+        handed += any(step.handed for step in found.itinerary)
+        carried += bool(found.objects)
+        unsettled += any(
+            needed.unknown.what == "another transfer"
+            for enough in found.missing
+            for needed in enough
+        )
+    assert seen == set(Answer)
+    assert handed > 15
+    assert carried > 60
+    assert unsettled > 15
+
+
+def test_the_two_searches_agree_in_every_kind_of_world_with_objects() -> None:
+    """The same ITINERARY first, or none, in the worlds the answers and the evidence are built on.
+
+    Those are the worst case, the best case, an upper bound, worlds in which a few unknown
+    FACTs turn out well, and possible worlds chosen at random.
+    """
+    rng = Random(7171)
+    found: set[bool] = set()
+    handed = 0
+    for file in trips_with_objects(rng)[::3]:
+        for world in worlds_to_try(rng, file):
+            first = reference.first_shown(file, world)
+            assert compiler.shown(file, world) == first
+            assert compiler.works(file, world) == (first is not None)
+            found.add(first is not None)
+            handed += any(step.handed for step in first or ())
+    assert found == {True, False}
+    assert handed > 20
+
+
+def test_the_two_searches_agree_on_what_is_left_of_a_file_with_objects() -> None:
+    """With records taken out one after another, as the search for a conflict takes them."""
+    rng = Random(8181)
+    answers_seen: set[bool] = set()
+    reopened = 0
+    for file in trips_with_objects(rng)[::3]:
+        records = [*(fact.id for fact in file.facts), *(each.id for each in file.decisions)]
+        records += [want.id for want in file.wants if want.musts or want.must_nots]
+        left = Remaining(file)
+        for record in rng.sample(records, min(len(records), 5)):
+            left = left.without(record)
+            can = reference.can_work(left)
+            assert compiler.can_work(left) == can
+            answers_seen.add(can)
+            reopened += bool(left.might_do_anything())
+    assert answers_seen == {True, False}
+    assert reopened > 10
+
+
+def test_the_solver_brings_whoever_has_an_object_into_a_stay() -> None:
+    """Alex is LOCKed into an appointment that requires the key. Jo has the key. The solver
+    leaves nobody out of a stay that matters to an OBJECT, so it finds the plan with Jo."""
+
+    def appointment(start: Document) -> File:
+        facts = [
+            *at("appointment", 10),
+            start,
+            requires_object("appointment", "key"),
+            every_use("key"),
+            every_transfer("key"),
+        ]
+        locks = [lock("appointment", "alex")]
+        options = [stays("appointment", "desk")]
+        return trip(["alex", "jo"], ["desk", "vault"], options, facts, locks, objects=["key"])
+
+    file = appointment(has_object("jo", "key"))
+    shown = compiler.shown(file, worst_case(file))
+    assert shown is not None and shown[0].persons == ("alex", "jo")
+    # With the key at another PLACE, nobody can bring it.
+    away = appointment(lies_at("key", "vault"))
+    assert compiler.shown(away, worst_case(away)) is None
+    assert checked(away).answer is Answer.INFEASIBLE
+
+
+def test_many_appointments_with_one_object_are_quick_for_the_solver() -> None:
+    """Eleven appointments in a row for one traveler, and the last requires the passport
+    that the traveler carries. The reference checker would try every order of the eleven.
+    The solver's own search gives the plan, and the reference checker only checks it."""
+    count = 11
+    options = [stays(f"stop-{number}", "desk") for number in range(count)]
+    facts = [fact for number in range(count) for fact in at(f"stop-{number}", 8 + number)]
+    facts += [
+        has_object("alex", "passport"),
+        requires_object(f"stop-{count - 1}", "passport"),
+        every_use("passport"),
+        every_transfer("passport"),
+    ]
+    locks = [lock(f"stop-{number}", "alex") for number in range(count)]
+    file = trip(["alex"], ["desk"], options, facts, locks, objects=["passport"])
+    found = compiler.check(file)
+    assert found.answer is Answer.FEASIBLE
+    assert len(found.itinerary) == count
+    assert found.objects[0].uses == (Use(f"stop-{count - 1}", True, (Where(person="alex"),)),)
