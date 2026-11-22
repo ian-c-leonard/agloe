@@ -320,8 +320,8 @@ function drawWants(shown) {
 }
 
 /**
- * A row for an OPTION or a WAY of the FILE: its name and where it is, and then what the page
- * says of it, in columns. `of` says what the row is a drawing of.
+ * A row for a PERSON, an OPTION or a WAY of the FILE: its name and where it is, and then what
+ * the page says of it, in columns. `of` says what the row is a drawing of.
  */
 function item(thing, of, columns) {
   const row = Object.assign(made("article", `item${edges(thing)}`), { title: marks(thing).join("\n") });
@@ -335,6 +335,22 @@ function item(thing, of, columns) {
     row.append(said);
   }
   return row;
+}
+
+/**
+ * Every PERSON of the FILE, a row for each: where the FILE says they start from, and where a
+ * WANT has them end the TRIP. The row has the colour of the PERSON's column in the calendar.
+ */
+function drawPersons(shown) {
+  const box = part("persons");
+  box.replaceChildren();
+  part("persons-part").hidden = !shown.persons.length;
+  part("persons-says").textContent = shown.says;
+  shown.persons.forEach((person, n) => {
+    const row = item(person, `person:${person.id}`, [person.ends]);
+    row.classList.add("of-a-person", `p${n % HUES}`);
+    box.append(row);
+  });
 }
 
 /**
@@ -412,6 +428,7 @@ function drawCapabilities(shown) {
  * the page has loaded it, and `of` is the TRIP that the part on the page is of.
  */
 const held = [
+  { id: "persons-part", load: () => import("./persons.js"), name: "persons", draw: drawPersons, words: null, of: undefined },
   { id: "wants-part", load: () => import("./wants.js"), name: "wants", draw: drawWants, words: null, of: undefined },
   { id: "options-part", load: () => import("./options.js"), name: "options", draw: drawOptions, words: null, of: undefined },
   { id: "ways-part", load: () => import("./ways.js"), name: "ways", draw: drawWays, words: null, of: undefined },
@@ -449,9 +466,10 @@ function write(text, tied) {
  * what it shows. A mark and a row have every record about their OPTION. An OPTION under a WANT
  * has the one FACT about the two, so pointing at it picks out that FACT. Pointing lights up no
  * drawing of another thing, though a record or a case may be about both. `data-of` says what a
- * drawing is of: a step of the TRIP, an OPTION or a WAY that is no step, a WANT, a CAPABILITY,
- * what the FILE says of one PERSON and one CAPABILITY, or a FACT that the FILE lists every way
- * of some travel. A WAY that somebody takes several times is a drawing of each of those steps.
+ * drawing is of: a step of the TRIP, an OPTION or a WAY that is no step, a PERSON, a WANT, a
+ * CAPABILITY, what the FILE says of one PERSON and one CAPABILITY, or a FACT that the FILE
+ * lists every way of some travel. A WAY that somebody takes several times is a drawing of each
+ * of those steps.
  *
  * The line of a record or of a case, and a time of the TRIP, are of no thing. Pointing at one
  * lights up everything that is tied to it. A drawing that is tied to it is a drawing of what

@@ -60,9 +60,9 @@ FITTED = """() => {
   return Math.abs(rows.getBoundingClientRect().width - room) < 1;
 }"""
 # What is lit on the page: the steps of the calendar, the steps with no time beside it, the
-# marks of the strip, the lines of the report, the WANTs with the OPTIONs under them, the
-# OPTIONs of the FILE, its WAYs, the travel that it lists in full, and the CAPABILITIES with
-# the PERSONs and the OPTIONs under them.
+# marks of the strip, the lines of the report, the PERSONs, the WANTs with the OPTIONs under
+# them, the OPTIONs of the FILE, its WAYs, the travel that it lists in full, and the
+# CAPABILITIES with the PERSONs and the OPTIONs under them.
 LIT = """() => {
   const first = (each) => each.title.split("\\n")[0];
   const all = (which) => [...document.querySelectorAll(which)];
@@ -73,6 +73,7 @@ LIT = """() => {
     rows: all("#report .row.lit").map((row) => row.textContent),
     wants: all("#wants .lit").map((each) => each.querySelector("h3, b").textContent),
     options: all("#options .item.lit").map((each) => each.querySelector("h3").textContent),
+    persons: all("#persons .item.lit").map((each) => each.querySelector("h3").textContent),
     ways: all("#ways .item.lit").map((each) => each.querySelector("h3").textContent),
     travel: all("#travel .in-full.lit").map((each) => each.textContent),
     capabilities: all("#capabilities .lit").map((each) => each.querySelector("h3, b").textContent),
@@ -447,6 +448,53 @@ def test_pointing_at_an_option_lights_up_no_other_that_its_case_names(
         # Pointing at the line of the case lights up both: the case is about both.
         case.hover()
         lit(page, options=["Flight home", "Cab to O'Hare"], marks=["Flight home"], rows=[said])
+
+
+def test_pointing_ties_a_person_to_the_report(chromium: Browser) -> None:
+    """Alex and Sam start from the hotel, and must end the TRIP in Denver."""
+    # The colour of the bar in each row, and of the line under each PERSON's name in the calendar.
+    colours = """() => {
+      const all = (which) => [...document.querySelectorAll(which)];
+      return {
+        rows: all("#persons .item").map((row) => getComputedStyle(row, "::before").backgroundColor),
+        columns: [...document.querySelector("#calendar .day").querySelectorAll(".person")].map(
+          (head) => getComputedStyle(head).borderBottomColor,
+        ),
+      };
+    }"""
+    with opened(chromium, EXAMPLES / "ending-in-denver" / "works.json") as page:
+        rows = page.locator("#persons .item")
+        rows.first.wait_for()
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        assert rows.locator(".item-name").all_text_contents() == ["Alex", "Sam"]
+        assert rows.locator(".item-where").all_text_contents() == ["Starts from the hotel."] * 2
+        assert rows.first.locator(".item-said p").all_text_contents() == [
+            "Must end the TRIP at Denver."
+        ]
+        # Each row has the colour of its PERSON's column in the calendar.
+        found = page.evaluate(colours)
+        assert found["rows"] == found["columns"]
+        assert len(set(found["rows"])) == 2
+        # Pointing at a PERSON lights up the line of the FACT about where they start from, and
+        # the other way round. It lights up no step.
+        rows.first.hover()
+        found = lit(page, persons=["Alex"], marks=[])
+        assert ids_of(found["rows"]) == ["alex-start"]
+        page.locator("#report .row[data-record='sam-start']").hover()
+        lit(page, persons=["Sam"], marks=[])
+    # The trip works if Alex can drive a manual car, or if Sam can.
+    with opened(chromium, EXAMPLES / "a-driver" / "depends-on-who-can-drive.json") as page:
+        asked = page.locator("#persons .item.asked")
+        asked.first.wait_for()
+        assert asked.locator(".item-name").all_text_contents() == ["Alex", "Sam"]
+        assert page.locator("#persons .item-where").first.text_content() == (
+            "The FILE does not say where this PERSON starts from."
+        )
+        case = page.locator("#report .row[data-record='case:0']")
+        case.wait_for()
+        case.hover()
+        lit(page, persons=["Alex"], capabilities=["driving a manual car", "Alex:"])
 
 
 def test_pointing_ties_a_way_to_the_calendar_and_the_report(chromium: Browser) -> None:

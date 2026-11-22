@@ -27,6 +27,9 @@ The page is sent every OPTION of the FILE too, whether or not a LOCK names it or
 it: where it is, when the FILE says it starts, how long it takes, how early people must be
 there, and whom a LOCK names for it. What the FILE does not say is sent as nothing.
 
+The page is sent each FACT about where a PERSON starts from. A PERSON with no such FACT has
+none here: nobody has said where they are before the TRIP.
+
 The page is sent every WAY of the FILE: the PLACEs it goes between, whether a PERSON can
 take it in both directions, and how long it takes. It is sent each FACT that the FILE lists
 every way of some travel: from which PLACE, to which, and within which span of time.
@@ -91,6 +94,7 @@ _TRIP: _Shape = {
     "zone": str,
     "persons": list,
     "places": list,
+    "starts_from": list,
     "itinerary": bool,
     "days": list,
     "until": (str, _NONE),
@@ -112,6 +116,7 @@ _WAY: _Shape = {
     "length": (dict, _NONE),
     "records": list,
 }
+_STARTS_FROM: _Shape = {"person": str, "place": str, "record": str}
 _TRAVEL: _Shape = {
     "record": str,
     "from": (str, _NONE),
@@ -273,6 +278,12 @@ def shown(file: File, report: Report) -> Trip | None:
             "zone": file.zone,
             "persons": [{"id": each.id, "name": people[each.id]} for each in file.persons],
             "places": [{"id": each.id, "name": sites[each.id]} for each in file.places],
+            # Each FACT about where a PERSON starts from, in the FILE's order of PERSONs.
+            "starts_from": [
+                {"person": fact.person, "place": fact.place, "record": fact.id}
+                for fact in (file.starts_from(each.id) for each in file.persons)
+                if fact is not None
+            ],
             "itinerary": planned,
             "days": [
                 {
@@ -765,6 +776,7 @@ def holds(trip: object) -> bool:
         and ways is not None
         # An OPTION and a WAY never have one id: ids are unique across the FILE.
         and not options & ways
+        and _are_where_persons_start_from(sent["starts_from"], persons, places)
         and _is_travel_listed_in_full(sent["complete_travel"], places)
         and all(_is_a_bound(sent[which], days) for which in ("starts", "ends"))
         and all(
@@ -846,6 +858,27 @@ def _the_ways(ways: object, places: frozenset[str]) -> frozenset[str] | None:
             return None
         ids.append(said["id"])
     return _all_different(ids)
+
+
+def _are_where_persons_start_from(
+    starts: object, persons: frozenset[str], places: frozenset[str]
+) -> bool:
+    """Whether these are the FACTs of such a TRIP about where a PERSON starts from.
+
+    Each is a FACT of its own, about a PERSON and a PLACE of the TRIP. A PERSON has one at most.
+    """
+    who: list[object] = []
+    records: list[object] = []
+    for fact in cast("list[object]", starts):
+        if not _fits(fact, _STARTS_FROM):
+            return False
+        said = cast("dict[str, object]", fact)
+        if not said["record"] or said["place"] not in places:
+            return False
+        who.append(said["person"])
+        records.append(said["record"])
+    named = _all_different(who)
+    return named is not None and named <= persons and _all_different(records) is not None
 
 
 def _is_travel_listed_in_full(travel: object, places: frozenset[str]) -> bool:
