@@ -171,6 +171,11 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .item-said { display: grid; gap: 1px; color: var(--ink2); }
 @media (max-width: 700px) { .item { grid-template-columns: minmax(0, 1fr); } }
 /* What the report names has its red or its yellow edge here too, inside the thing. */
+/* The row of a PERSON has a bar in the colour of their column in the calendar. It is inside
+   the row, so that an edge of the row leaves it as it is. */
+.item.of-a-person { position: relative; padding-left: 26px; }
+.item.of-a-person::before { content: ""; position: absolute; left: 11px; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; background: var(--hue); }
+
 /* Under the WAYs, each FACT that the FILE lists every way of some travel. */
 .travel { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .in-full { padding: 5px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; font-size: 12.5px; color: var(--ink2); overflow-wrap: anywhere; }

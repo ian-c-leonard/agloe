@@ -170,6 +170,13 @@ def test_every_example_is_sent_as_a_trip_that_a_page_can_draw(path: Path) -> Non
         assert option["margin"] == (None if margin is None else margin.margin)
         named = {person for lock in file.locks if lock.option == each.id for person in lock.persons}
         assert option["locked"] == [person.id for person in file.persons if person.id in named]
+    # Each FACT about where a PERSON starts from is sent, in the FILE's order of PERSONs.
+    started = [file.starts_from(person.id) for person in file.persons]
+    assert sent["starts_from"] == [
+        {"person": fact.person, "place": fact.place, "record": fact.id}
+        for fact in started
+        if fact is not None
+    ]
     # Every WAY of the FILE is sent, in the FILE's order, with what the FILE says of it.
     assert [way["id"] for way in sent["ways"]] == [each.id for each in file.ways]
     for way, listed in zip(sent["ways"], file.ways, strict=True):
@@ -489,6 +496,33 @@ def test_a_want_says_for_whom_it_is_a_must_not_and_whether_its_options_are_all_s
     (pizza,) = wants_of(EXAMPLES / "a-must" / "cannot-work.json")
     assert pizza["complete"] == "every-deep-dish-place"
     assert [each["option"] for each in pizza["options"]] == ["dinner-pizzeria"]
+
+
+def test_where_each_person_starts_from_is_sent_as_far_as_the_file_says() -> None:
+    """Alex and Sam start from the hotel."""
+    sent = drawn(EXAMPLES / "ending-in-denver" / "works.json")
+    assert sent["starts_from"] == [
+        {"person": "alex", "place": "hotel", "record": "alex-start"},
+        {"person": "sam", "place": "hotel", "record": "sam-start"},
+    ]
+    # A FILE that does not say where anybody starts from has no such FACT to send.
+    assert drawn(EXAMPLES / "flight-home" / "works.json")["starts_from"] == []
+    # The FACTs come in the FILE's order of PERSONs, whatever their order among the FACTs.
+    file = trip(
+        ["alex", "sam", "jo"],
+        ["hotel", "pier"],
+        [],
+        [
+            {"id": "jo-start", "person": "jo", "starts_from": "pier"},
+            {"id": "alex-start", "person": "alex", "starts_from": "hotel"},
+        ],
+        [],
+    )
+    sent = sent_for(file, Report(Answer.UNDETERMINED))
+    assert [(fact["person"], fact["place"]) for fact in sent["starts_from"]] == [
+        ("alex", "hotel"),
+        ("jo", "pier"),
+    ]
 
 
 def test_every_way_of_the_file_is_sent_with_what_the_file_says_of_it() -> None:
@@ -1589,6 +1623,23 @@ OPTION: dict[str, Any] = {
 }
 
 
+START: dict[str, Any] = {"person": "alex", "place": "museum", "record": "alex-start"}
+
+
+def _start(**other: object) -> Callable[[Trip], None]:
+    """The TRIP gets one FACT about where a PERSON starts from, good but for these parts."""
+    return _set("starts_from", to=[{**START, **other}])
+
+
+def test_a_trip_that_says_where_a_person_starts_from_is_a_trip() -> None:
+    sent = good()
+    assert sent["starts_from"] == []
+    _start()(sent)
+    assert holds(sent)
+    _set("starts_from", to=[START, {**START, "person": "sam", "record": "sam-start"}])(sent)
+    assert holds(sent)
+
+
 WAY: dict[str, Any] = {
     "id": "ferry",
     "name": "ferry",
@@ -1811,6 +1862,19 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "an option of a want with no fact": _delivery(record=None),
     "a want that names an option twice": _want(options=[WANT["options"][0]] * 2),
     "an option of a want that the trip does not have": _delivery(option="dinner"),
+    "no word on where persons start from": _drop("starts_from"),
+    "where persons start from that is no list": _set("starts_from", to={}),
+    "where a person starts from that is no record": _set("starts_from", to=["alex-start"]),
+    "where a person starts from with one thing more": _start(more=1),
+    "where a person the trip does not have starts from": _start(person="jo"),
+    "a person who starts from a place the trip does not have": _start(place="denver"),
+    "where a person starts from with no fact": _start(record=""),
+    "a person who starts from two places": _set(
+        "starts_from", to=[START, {**START, "place": "hotel", "record": "alex-start-2"}]
+    ),
+    "two persons whose starts are one fact": _set(
+        "starts_from", to=[START, {**START, "person": "sam"}]
+    ),
     "no ways": _drop("ways"),
     "ways that are no list": _set("ways", to={}),
     "a step that is none of the ways": _set("ways", to=[]),
