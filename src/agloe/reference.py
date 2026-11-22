@@ -2212,6 +2212,8 @@ def routes(
 
     def as_quick(origin: str, destination: str, stretch: Route) -> bool:
         """Whether one listed WAY between these PLACEs is never slower than this stretch."""
+        if (origin, destination) not in straight:
+            return False
         least = most = 0
         for way, _, _ in stretch:
             shortest, longest = (world.unlisted_takes,) * 2 if way is None else world.takes[way]
@@ -2220,7 +2222,7 @@ def routes(
             least, most = least + shortest, most + longest
         return any(
             shortest <= least and longest <= most
-            for shortest, longest in straight.get((origin, destination), ())
+            for shortest, longest in straight[origin, destination]
         )
 
     # The PLACEs from which some WAYs of this world lead to the destination. Where an unlisted
