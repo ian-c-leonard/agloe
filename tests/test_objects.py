@@ -2388,6 +2388,34 @@ def test_two_options_for_one_want_are_explained_at_once(monkeypatch: pytest.Monk
     assert tried <= 16
 
 
+def test_a_cloakroom_and_a_gallery_are_explained_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Alex brings four things and is LOCKed into the gallery at 10:00 am. A stop at the
+    cloakroom at 9:00 am does not refuse them. Nobody said what the cloakroom does with
+    them, or whether the gallery refuses them. For each thing, either the cloakroom keeps
+    it or the gallery does not refuse it: sixteen cases. The search finds those four groups,
+    each with the three FACTs about what the cloakroom does and the one about the gallery,
+    and tries a few hundred sets where the sets of four FACTs are tens of thousands."""
+    things = ["daypack", "camera", "stroller", "umbrella"]
+    facts = [*at("cloakroom", 9), *at("gallery", 10), *carried_by_alex(things)]
+    for thing in things:
+        facts += lets_in(thing, "cloakroom")
+    options = [stays("cloakroom", "museum"), stays("gallery", "museum")]
+    file = trip(["alex"], ["museum"], options, facts, [lock("gallery", "alex")], objects=things)
+    found, tried = sets_tried_for(monkeypatch, file)
+    either = [
+        (
+            Unknown("keeps", "cloakroom", about=thing),
+            Unknown("does not refuse", "gallery", about=thing),
+        )
+        for thing in things
+    ]
+    assert len(asked(found)) == 16
+    assert {frozenset(named) for named in asked(found)} == {
+        frozenset(chosen) for chosen in product(*either)
+    }
+    assert tried <= 256
+
+
 def test_each_choice_of_new_things_has_its_own_facts_that_no_set_can_do_without(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
