@@ -3714,7 +3714,7 @@ def _timings(
         """Whether some start times keep these gaps with what the PERSONs do."""
         return _times(count, [*gaps, *more], fixed, not_before, no_later) is not None
 
-    found = _chains(file, world, who, orders, alike, soonest, can_be_timed, empty)
+    found = _chains(file, world, who, orders, alike, soonest, can_be_timed, empty=empty)
     chains: Iterable[_Chain] = _NOTHING_TO_ORDER if found is None else found
     in_turn = any_will_do or found is None
     bound: list[_StepOrder] | None = None

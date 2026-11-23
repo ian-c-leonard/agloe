@@ -3107,7 +3107,7 @@ def ordered_by(
     can have it by then. An OPTION that refuses it can move it only by carrying it. A PERSON
     can have it in an OPTION who has it when the TRIP starts, or might, or who takes part
     before that OPTION in one that hands it over and does not refuse it. "Might" counts as
-    "does".
+    "does". An OPTION with nobody in it hands nothing over: nobody is there to have it.
     """
     options = file.options
     hands = [
@@ -3115,6 +3115,7 @@ def ordered_by(
         for index in happening
         if world.does.get((options[index].id, thing)) in ("hands_over", "any")
         and (options[index].id, thing) not in world.refuses
+        and who[index]
     ]
     if thing in world.starts:
         at_first = {world.starts[thing].person or ""}
@@ -3211,8 +3212,11 @@ def every_chain(
     who: tuple[tuple[str, ...], ...],
     orders: tuple[tuple[int, ...], ...],
     everything: bool,
+    empty: AbstractSet[int] = frozenset(),
 ) -> list[Chain] | None:
     """Every order of the OPTIONs of a plan with every choice of hand-overs and carries.
+
+    ``empty`` holds the OPTIONs that happen with nobody in them, by position in the FILE.
 
     Nothing is skipped. It stands in for the search's own way of choosing them. Every order
     is given, also one that a PERSON's own order rules out. In each OPTION that hands an
@@ -3227,7 +3231,7 @@ def every_chain(
     """
     options = file.options
     people = [person.id for person in file.persons]
-    happening = [index for index, persons in enumerate(who) if persons]
+    happening = [index for index, persons in enumerate(who) if persons or index in empty]
     things = [thing.id for thing in file.objects if thing.id not in world.brought]
     checked_by = world.needs | world.refuses
     followed = [
@@ -3302,9 +3306,10 @@ def those_that_matter(
     who: tuple[tuple[str, ...], ...],
     orders: tuple[tuple[int, ...], ...],
     *hints: object,
+    empty: AbstractSet[int] = frozenset(),
 ) -> list[Chain] | None:
     """Every order, whatever the search says about which orders it can leave out."""
-    return every_chain(file, world, who, orders, everything=False)
+    return every_chain(file, world, who, orders, everything=False, empty=empty)
 
 
 def all_of_them(
@@ -3313,9 +3318,10 @@ def all_of_them(
     who: tuple[tuple[str, ...], ...],
     orders: tuple[tuple[int, ...], ...],
     *hints: object,
+    empty: AbstractSet[int] = frozenset(),
 ) -> list[Chain] | None:
     """Every order of every OPTION, whatever the search says about which it can leave out."""
-    return every_chain(file, world, who, orders, everything=True)
+    return every_chain(file, world, who, orders, everything=True, empty=empty)
 
 
 def worlds_to_try(rng: Random, file: File) -> Iterator[World]:
