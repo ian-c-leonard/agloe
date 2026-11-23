@@ -2298,33 +2298,47 @@ def test_the_model_says_nothing_about_an_order_that_fixed_starts_rule_out() -> N
     could hand it to Jo, and a locker at 9:00 am keeps it. Coffee comes after the gallery,
     so it is no way for Alex to be rid of the camera before the gallery, and the model has
     no choice for that. The locker comes before, and the model has one."""
-    options = [stays("locker", "museum"), stays("gallery", "museum"), stays("coffee", "museum")]
-    facts = [
-        *at("locker", 9),
-        *at("gallery", 10),
-        *at("coffee", 11),
-        has_object("alex", "camera"),
-        keeps("locker", "camera"),
-        refuses_object("gallery", "camera"),
-        hands_over("coffee", "camera"),
-        every_use("camera"),
-        every_transfer("camera"),
-    ]
-    locks = [lock("gallery", "alex"), lock("coffee", "alex", "jo")]
-    file = trip(["alex", "jo"], ["museum"], options, facts, locks, objects=["camera"])
-    search = compiler._Search(file, worst_case(file), plain=True)  # pyright: ignore[reportPrivateUsage]
-    model: Any = search.model.proto
-    names = [str(each.name) for each in model.variables]
+
+    def choices(*more: Document, show: bool = False) -> list[str]:
+        """The names of the choices in the solver's model of the worst case."""
+        names = ["locker", "gallery", "coffee", *(["show"] if show else [])]
+        facts = [
+            *at("locker", 9),
+            *at("gallery", 10),
+            *at("coffee", 11),
+            has_object("alex", "camera"),
+            keeps("locker", "camera"),
+            refuses_object("gallery", "camera"),
+            hands_over("coffee", "camera"),
+            every_use("camera"),
+            every_transfer("camera"),
+            *more,
+        ]
+        locks = [lock("gallery", "alex"), lock("coffee", "alex", "jo")]
+        locks += [lock("show", "jo")] if show else []
+        options = [stays(name, "museum") for name in names]
+        file = trip(["alex", "jo"], ["museum"], options, facts, locks, objects=["camera"])
+        found = checked(file)
+        assert [(each.option, each.persons) for each in found.itinerary][:3] == [
+            ("locker", ("alex",)),
+            ("gallery", ("alex",)),
+            ("coffee", ("alex", "jo")),
+        ]
+        search = compiler._Search(file, worst_case(file), plain=True)  # pyright: ignore[reportPrivateUsage]
+        model: Any = search.model.proto
+        return [str(each.name) for each in model.variables]
+
+    names = choices()
     assert [name for name in names if " is rid of " in name] == [
         "0 is rid of camera in locker before gallery"
     ]
     assert "gallery after coffee" not in names
-    found = checked(file)
-    assert [(each.option, each.persons) for each in found.itinerary] == [
-        ("locker", ("alex",)),
-        ("gallery", ("alex",)),
-        ("coffee", ("alex", "jo")),
-    ]
+    # A show at noon refuses the camera too, and Jo is LOCKed into it. Jo can take the
+    # camera at coffee. The locker is over by then, so it is no way for Jo to be rid of what
+    # Jo takes at coffee, and the model has no choice for that either.
+    names = choices(*at("show", 12), refuses_object("show", "camera"), show=True)
+    assert "show after coffee" in names
+    assert not any(name.startswith("1 is rid of camera in locker") for name in names)
 
 
 def test_five_visitors_are_shown_at_once_whoever_might_have_the_bag(
