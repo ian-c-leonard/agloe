@@ -734,9 +734,10 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
             day = clock.day(step.start)
             lines += ["", f"{clock.day_name(step.start)} (times in {file.zone})"]
         end = "an unknown time" if step.end is None else clock.time(step.end, day)
-        who = _people(file, step.persons)
         what = _name(file, step.option or step.way)
-        lines.append(f"  {clock.time(step.start)} to {end}: {what}, {who}")
+        # An OPTION can happen with nobody in it: then the line names nobody.
+        who = f", {_people(file, step.persons)}" if step.persons else ""
+        lines.append(f"  {clock.time(step.start)} to {end}: {what}{who}")
         lines += [f"    ! {mark}" for mark in marks.get(number, [])]
         for thing, person in step.handed:
             taker = _people(file, (person,))

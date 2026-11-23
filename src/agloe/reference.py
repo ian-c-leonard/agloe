@@ -2806,7 +2806,7 @@ def _that_work(
     which PERSONs take part the fewest times, nor the one a report shows.
 
     An OPTION can happen with nobody in it. For each choice of PERSONs, each set of such
-    OPTIONs that ``_could_run_alone`` gives is tried, the smallest first.
+    OPTIONs that ``could_run_alone`` gives is tried, the smallest first.
     """
     best: list[tuple[_Shown, Itinerary]] = []
     fewest: int | None = None
@@ -2827,7 +2827,7 @@ def _that_work(
         # The OPTIONs that happen with nobody in them: no set first, then the smallest. A
         # set that holds one that works has an OPTION more and the same PERSONs, so it never
         # comes first, and something could be taken out of it. It is left out.
-        alone = _could_run_alone(file, world, who)
+        alone = could_run_alone(file, world, who)
         enough: list[frozenset[int]] = []
         for size in range(len(alone) + 1):
             for chosen in combinations(alone, size):
@@ -2856,12 +2856,15 @@ def _that_work(
     return shown
 
 
-def _could_run_alone(file: File, world: World, who: tuple[tuple[str, ...], ...]) -> list[int]:
+def could_run_alone(
+    file: File, world: World, who: tuple[tuple[str, ...], ...] | None = None
+) -> list[int]:
     """The OPTIONs that could happen with nobody in them to some purpose, by position in the FILE.
 
-    They are OPTIONs that this choice of PERSONs leaves out. Such an OPTION has a start it
-    can take. It requires no CAPABILITY: a requirement is about the PERSONs in the OPTION.
-    And it can move an OBJECT that some OPTION of the FILE requires or refuses: it carries
+    With ``who``, they are OPTIONs that this choice of PERSONs leaves out. Such an OPTION
+    has a start it can take. It requires no CAPABILITY: a requirement is about the PERSONs
+    in the OPTION. And it can move an OBJECT that some OPTION of the FILE requires or
+    refuses: it carries
     it, or might. An OPTION with nobody in it keeps nothing and hands nothing over, and it
     meets no must. So any other one changes nothing for anybody: a plan that works with it
     works without it, and rules 4 and 5 put the plan without it first.
@@ -2872,7 +2875,8 @@ def _could_run_alone(file: File, world: World, who: tuple[tuple[str, ...], ...])
     alone: list[int] = []
     for index, option in enumerate(file.options):
         terms = world.terms[option.id]
-        if who[index] or (terms.fixed_start is None and not terms.free_start):
+        taken = who is not None and bool(who[index])
+        if taken or (terms.fixed_start is None and not terms.free_start):
             continue
         if any((option.id, capability.id) in world.requires for capability in file.capabilities):
             continue
