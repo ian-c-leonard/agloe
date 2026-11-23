@@ -571,17 +571,18 @@ def _carried(
                     relied.add(done.id)
                 elif whole is not None:
                     relied.add(whole.id)
-            # Nobody knows when an OPTION with no known end is over. So the OBJECT might
-            # still be in it, and it might lie where it ends.
-            landed = {
-                Where(place=ends_at[each.option])
-                for each in before
-                if each.option is not None and ends[each.option] is None
-            }
             if (option, thing.id) in world.needs:
                 stated = file.requires_object(option, thing.id) is True
-                uses.append(Use(option, stated, in_order(before | landed)))
+                uses.append(Use(option, stated, in_order(before)))
             if (option, thing.id) in world.refuses:
+                # Nobody knows when an OPTION with no known end is over. So the OBJECT
+                # might still be in it, and it might lie where it ends. An OPTION that
+                # requires the OBJECT never finds it so: the plan would not be sure to hold.
+                landed = {
+                    Where(place=ends_at[each.option])
+                    for each in before
+                    if each.option is not None and ends[each.option] is None
+                }
                 stated = file.refuses_object(option, thing.id) is True
                 uses.append(Use(option, stated, in_order(before | landed), "refuses"))
             if after != before:
@@ -1018,9 +1019,9 @@ def _with_enough_of_each(
     and put a FACT that comes earlier in ``facts`` in the place of one of its FACTs, from
     the same group or, like it, from no group. That pick comes first. The groups are gone
     through in their order, and then the FACTs of no group: what is picked from the first
-    counts most. From one group, the picks of fewer FACTs come first, and those of one
-    number in the order of ``combinations``. The other pick takes as many from each group,
-    takes the same from every other group, and comes earlier among the picks from that one.
+    counts most. From one group, the picks of one number of FACTs come in the order of
+    ``combinations``. The other pick takes as many from each group, takes the same from
+    every other group, and comes earlier among the picks of that number from that one.
     """
     grouped = frozenset[Unknown]().union(*(group for group, _ in at_least))
     inside = [[fact for fact in facts if fact in group] for group, _ in at_least]

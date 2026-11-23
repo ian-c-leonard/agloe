@@ -1677,6 +1677,19 @@ def test_the_unknown_facts_about_objects_have_a_fixed_order() -> None:
     # Nothing is asked about an OBJECT that no OPTION requires or refuses, or might.
     unused = a_lunch(every_use("bags"))
     assert [each.what for each in unknowns(unused) if each.what != "other ways"] == []
+    # Only an OPTION that requires the OBJECT, or might, takes it along with no choice. Of
+    # one that a FACT says does not require it, nobody asks whether it does not carry it.
+    free = a_lunch(
+        has_object("alex", "bags"),
+        requires_object("lunch", "bags", False),
+        refuses_object("lunch", "bags"),
+    )
+    assert [each.what for each in unknowns(free) if each.option == "lunch"] == [
+        "keeps",
+        "does not keep",
+        "hands over",
+        "carries",
+    ]
 
 
 def test_listing_an_object_that_nothing_requires_changes_no_answer() -> None:
@@ -2493,6 +2506,34 @@ def sets_tried_for(monkeypatch: pytest.MonkeyPatch, file: File) -> tuple[Report,
     monkeypatch.setattr(answers, "with_these_at_best", its_own)
     assert answers.check(file) == found
     return found, tried
+
+
+def test_two_things_that_a_drive_might_take_along_are_explained_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A car and a trailer stand at the hotel. The drive requires both, and nobody says what
+    it does with them. Jo's errand at the hotel requires both an hour later. The trip works
+    if the drive carries neither. The search knows before it tries a set that every set
+    holds a FACT about what the drive does with each of the two: at its worst the drive
+    might take the thing along, because it requires it. So it tries no set of one FACT."""
+    options = [moves("drive", "hotel", "dunes"), stays("errand", "hotel")]
+    facts = [*at("drive", 8, 0, "PT1H"), *at("errand", 9)]
+    for thing in ("car", "trailer"):
+        facts += [lies_at(thing, "hotel"), requires_object("drive", thing)]
+        facts += [requires_object("errand", thing), does_with("errand", thing, "nothing")]
+        facts += [every_use(thing)]
+    locks = [lock("drive", "alex"), lock("errand", "jo")]
+    file = trip(
+        ["alex", "jo"], ["hotel", "dunes"], options, facts, locks, objects=["car", "trailer"]
+    )
+    found, tried = sets_tried_for(monkeypatch, file)
+    assert asked(found) == [
+        (
+            Unknown("does not carry", "drive", about="car"),
+            Unknown("does not carry", "drive", about="trailer"),
+        )
+    ]
+    assert tried == 21
 
 
 def test_a_visit_with_five_things_is_explained_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -4890,6 +4931,29 @@ def test_an_object_puts_its_options_in_an_order_only_where_one_can_move_it(state
         )
 
 
+def test_an_option_that_might_take_an_object_along_is_in_its_order_whatever_else_is_known() -> None:
+    """The key lies on the desk. Alex's check at 10:00 am requires it and leaves it alone.
+    Sam's check can start at any time and requires it, and nobody says what it does with
+    it. If all that is known is that it does not keep the key, it might still take the key
+    along, so it comes before Alex's check and starts as late as it can. If it does not
+    carry the key, nothing can move the key, and Sam's check starts when the TRIP starts."""
+    options = [stays("alex-check", "desk"), stays("sam-check", "desk")]
+    facts = [
+        *at("alex-check", 10),
+        *whenever("sam-check"),
+        lies_at("key", "desk"),
+        requires_object("alex-check", "key"),
+        does_with("alex-check", "key", "nothing"),
+        requires_object("sam-check", "key"),
+        every_use("key"),
+    ]
+    locks = [trip_starts(8), lock("alex-check", "alex"), lock("sam-check", "sam")]
+    file = trip(["alex", "sam"], ["desk"], options, facts, locks, objects=["key"])
+    for what, starts in (("does not keep", seconds(9, 55)), ("does not carry", seconds(8))):
+        said = with_these_at_best(file, [Unknown(what, "sam-check", about="key")])
+        assert start_of(first_shown(file, said), "sam-check") == starts, what
+
+
 def test_eight_checks_of_a_key_that_nothing_moves_are_timed_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -7247,6 +7311,24 @@ def test_two_carries_that_end_at_one_place_are_told_apart_by_their_times() -> No
     assert checked(neither).answer is Answer.INFEASIBLE
 
 
+def test_two_carries_are_told_apart_where_no_fixed_start_says_which_is_in_time() -> None:
+    """The desk can start at any time and takes five minutes, and the TRIP ends at 10:02 am.
+    The slow ferry lands at 10:00 am, too late for the desk. No fixed start of the desk
+    says so, so the choice of the slow ferry is given up only for its times, and the choice
+    of the fast one is still there to try."""
+    options = [moves("slow", "quay", "island"), moves("fast", "quay", "island")]
+    options += [stays("desk", "island")]
+    facts = [*at("slow", 9, 0, "PT1H"), *at("fast", 9, 5, "PT10M"), *whenever("desk")]
+    facts += [lies_at("bag", "quay"), carries("slow", "bag"), carries("fast", "bag")]
+    facts += [requires_object("desk", "bag")]
+    locks = [lock("slow", "alex"), lock("fast", "sam"), lock("desk", "jo"), trip_ends(10, 2)]
+    file = a_voyage(options, facts, locks)
+    plan = first_shown(file, worst_case(file))
+    assert carried_in(plan) == [("fast", ("bag",))]
+    assert start_of(plan, "desk") == seconds(9, 15)
+    assert checked(file).itinerary == plan
+
+
 def test_only_the_first_use_after_a_carry_waits_for_the_object() -> None:
     """A flight of ten minutes can leave at any time and carries the bag. Sam's counter at
     10:05 am can hand the bag over, and nobody takes it there. Jo's pick-up at 10:20 am
@@ -7370,24 +7452,33 @@ def test_a_bag_that_the_cabin_refuses_is_dropped_and_carried_in_the_hold() -> No
     assert checked(no_drop).answer is Answer.INFEASIBLE
 
 
-def nine_bags(*boats: tuple[str, int, int, str]) -> File:
+def nine_bags(*boats: tuple[str, int, int, str], count: int = 9, any_time: bool = False) -> File:
     """Nine things lie at the quay, and Alex's collection on the island at 11:00 am requires
     them all. Each boat goes across with its own traveler, and can carry every one of them:
-    its name, when it leaves, and how long it takes."""
+    its name, when it leaves, and how long it takes. ``count`` is how many of the things
+    there are. With ``any_time`` the collection can start at any time and takes half an
+    hour, Alex has dinner on the island at 11:30 am, and the TRIP ends at 12:25 pm: the
+    collection fits only before the dinner."""
     things = ["case", "trunk", "boots", "skis", "poles", "helmet", "wax", "tent", "stove"]
+    things = things[:count]
     riders = ["sam", "jo", "lee", "kim"]
     options = [moves(name, "quay", "island") for name, _, _, _ in boats]
     options.append(stays("collection", "island"))
     facts = [
         fact for name, hour, minute, length in boats for fact in at(name, hour, minute, length)
     ]
-    facts += at("collection", 11)
+    locks = [lock(name, rider) for (name, _, _, _), rider in zip(boats, riders, strict=False)]
+    locks.append(lock("collection", "alex"))
+    if any_time:
+        options.append(stays("dinner", "island"))
+        facts += [*whenever("collection", "PT30M"), *at("dinner", 11, 30)]
+        locks += [lock("dinner", "alex"), trip_ends(12, 25)]
+    else:
+        facts += at("collection", 11)
     for thing in things:
         facts += [lies_at(thing, "quay"), requires_object("collection", thing)]
         facts += [carries(name, thing) for name, _, _, _ in boats]
         facts += [every_use(thing), every_transfer(thing)]
-    locks = [lock(name, rider) for (name, _, _, _), rider in zip(boats, riders, strict=False)]
-    locks.append(lock("collection", "alex"))
     people = ["alex", *riders[: len(boats)]]
     return trip(people, ["quay", "island"], options, facts, locks, objects=things)
 
@@ -7409,6 +7500,22 @@ def test_many_objects_with_several_carries_each_are_not_tried_in_every_combinati
     found, timed = timings_for_the_report(monkeypatch, nine_bags(*easy, ("launch", 9, 30, "PT35M")))
     assert carried_in(found.itinerary) == [("barge", tuple(thing.id for thing in file.objects))]
     assert timed < 200
+
+
+def test_a_choice_of_carries_that_no_times_keep_is_left_out_where_no_fixed_start_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Five things and four boats, a thousand ways together. The collection can start at
+    any time and has to be over before Alex's dinner, so only the launch is there in time.
+    No fixed start of the collection says so. A way that no start times keep is still left
+    out for each thing by itself, and the plan is timed a few times."""
+    slow = [("barge", 9, 0, "PT3H"), ("raft", 9, 10, "PT3H"), ("tug", 9, 20, "PT3H")]
+    file = nine_bags(*slow, ("launch", 9, 30, "PT35M"), count=5, any_time=True)
+    found, timed = timings_for_the_report(monkeypatch, file)
+    assert found.answer is Answer.FEASIBLE
+    assert carried_in(found.itinerary) == [("launch", tuple(thing.id for thing in file.objects))]
+    assert start_of(found.itinerary, "collection") == seconds(10, 5)
+    assert timed < 60
 
 
 def a_missed_connection(*more: Document) -> File:
@@ -8140,6 +8247,14 @@ def test_an_open_refusal_is_followed_both_ways_where_the_option_takes_the_object
     for more in ([refuses_object("inspection", "bag")], lets_in("bag", "inspection")):
         stated_so = covered_without_another_transfer(a_day_of_checks(rows, [*lying, *more]))
         assert all(unsaid[check] == holds for check, holds in stated_so.items())
+    # A bag that Sam has at the lab is out of reach of the inspection, so it stays with Sam
+    # whatever the inspection does, and Sam has it at the lab afterwards.
+    rows = [INSPECTION, ("pickup", "sam", "lab", "lab", 10, 0, "PT30M")]
+    away = [has_object("sam", "bag"), requires_object("inspection", "bag")]
+    away += [carries("inspection", "bag"), requires_object("pickup", "bag")]
+    away += [does_with("pickup", "bag", "nothing")]
+    unsaid = covered_without_another_transfer(a_day_of_checks(rows, away))
+    assert not unsaid[("inspection", "requires")] and unsaid[("pickup", "requires")]
 
 
 def test_an_object_in_an_option_of_unknown_length_might_be_in_it_or_where_it_ends() -> None:
@@ -8325,6 +8440,10 @@ def test_a_warning_tells_a_sure_delay_from_one_that_might_happen() -> None:
     in_town = [SCAN, ("sort", "sam", "depot", "town", 9, 5, "PT1M")]
     in_town += [("pickup", "jo", "town", "town", 9, 10, "PT1M")]
     missed = Broken(Constraint.AT_HAND, "pickup", ("jo",), object="bag")
+    # A ride to town that takes up to half an hour brings the bag 25 minutes late, unless
+    # the scan took the bag along: then it never comes. So the WARNING gives no time.
+    slowly = [SCAN, ("sort", "sam", "depot", "town", 9, 5, ("PT1M", "PT30M"))]
+    slowly += [("pickup", "jo", "town", "town", 9, 10, "PT1M")]
     for rows, at_worst, words, cases in (
         (
             at_the_depot,
@@ -8338,6 +8457,12 @@ def test_a_warning_tells_a_sure_delay_from_one_that_might_happen() -> None:
             "bag might not be at hand when this starts.",
             {"carries": [missed], "nothing": []},
         ),
+        (
+            slowly,
+            missed,
+            "bag would not be at hand when this starts.",
+            {"carries": [missed], "nothing": [replace(missed, late=1500)]},
+        ),
     ):
         file = a_day_of_checks(rows, stated)
         found = checked(file)
@@ -8347,15 +8472,25 @@ def test_a_warning_tells_a_sure_delay_from_one_that_might_happen() -> None:
         for does, expected in cases.items():
             one_case = a_day_of_checks(rows, [*stated, does_with("scan", "bag", does)])
             assert at_the_longest(one_case, found.itinerary, "pickup") == expected
-    said = json.loads(json.dumps(report.as_json(file, found)))
-    assert said["at_worst"][-1] == {
-        "constraint": Constraint.AT_HAND.value,
-        "option": "pickup",
-        "persons": ["jo"],
-        "late": None,
-        "object": "bag",
-        "might": True,
-    }
+        if rows is in_town:
+            said = json.loads(json.dumps(report.as_json(file, found)))
+            assert said["at_worst"][-1] == {
+                "constraint": Constraint.AT_HAND.value,
+                "option": "pickup",
+                "persons": ["jo"],
+                "late": None,
+                "object": "bag",
+                "might": True,
+            }
+    # Where nobody says what the sort does either, the bag might be on the floor in time.
+    # So it might arrive up to 25 minutes late.
+    both_open = [fact for fact in stated if fact["id"] != "sort-with-bag"]
+    file = a_day_of_checks(at_the_depot, both_open)
+    found = checked(file)
+    assert about_the_bag(found.at_worst, "pickup") == [
+        replace(missed, late=1500, sooner=600, might=True)
+    ]
+    assert "    ! bag might arrive up to 25 min after this starts.\n" in report.as_text(file, found)
 
 
 def test_the_reason_for_where_an_object_might_be_names_what_the_file_does_not_say() -> None:
