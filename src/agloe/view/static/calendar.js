@@ -95,9 +95,12 @@ function saysOf(trip, timed) {
     return `The ITINERARY of the report.${more}`;
   }
   const empty = trip.days.length ? more : " So the calendar is empty.";
-  if (!trip.steps.length) return `The report shows no ITINERARY, and no LOCK names an OPTION.${empty}`;
-  if (!timed) return `The report shows no ITINERARY, and the FILE gives no time to the OPTIONs that a LOCK names.${empty}`;
-  return `The report shows no ITINERARY. The calendar holds only the OPTIONs that a LOCK names, at the times the FILE states.${more}`;
+  // A TRIP with no report yet says so, and has no ITINERARY to show either. The page speaks
+  // for itself: the COMPILER may have reported, and the page not have heard of it.
+  const why = trip.itinerary === null ? "The page has no report on this FILE yet" : "The report shows no ITINERARY";
+  if (!trip.steps.length) return `${why}, and no LOCK names an OPTION.${empty}`;
+  if (!timed) return `${why}, and the FILE gives no time to the OPTIONs that a LOCK names.${empty}`;
+  return `${why}. The calendar holds only the OPTIONs that a LOCK names, at the times the FILE states.${more}`;
 }
 
 /**

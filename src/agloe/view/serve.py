@@ -69,12 +69,14 @@ REFUSED_BY_BROWSERS = frozenset(
 ANSWERS = {"FEASIBLE", "INFEASIBLE", "UNDETERMINED"}
 # What a check can say, and what each of its events must hold. A check ends with one of ENDS.
 SHAPES: dict[str, dict[str, type | tuple[type, ...]]] = {
+    "read": {},
     "answer": {"answer": str, "seconds": (int, float)},
     "report": {"answer": str, "json": dict, "text": str, "seconds": (int, float)},
     "refused": {"problems": list},
     "unwritable": {},
 }
 ENDS = {"report", "refused", "unwritable"}
+WITH_A_TRIP = {"read", "report"}  # the events that come with the TRIP as a page draws it
 # The page loads nothing from any other host, sends nothing to one, and sits in no other page.
 POLICY = "default-src 'self'; frame-ancestors 'none'"
 
@@ -118,7 +120,7 @@ def _without_its_trip(line: bytes) -> object:
     read again as strictly as any event. Raises ValueError where the rest is no event either.
     """
     loose: object = json.loads(line.decode())
-    if not isinstance(loose, dict) or cast("Event", loose).get("kind") != "report":
+    if not isinstance(loose, dict) or cast("Event", loose).get("kind") not in WITH_A_TRIP:
         raise ValueError("a check printed something that is no event")
     rest = {name: held for name, held in cast("Event", loose).items() if name != "trip"}
     again = json.dumps(rest, allow_nan=False)
@@ -133,7 +135,8 @@ def _said(line: bytes) -> Event:
 
     A report is whole without the TRIP that the calendar draws. So a report comes with its TRIP
     where that is one a page can draw, and with none where it is not: what is wrong with a
-    calendar never costs the reader the report.
+    calendar never costs the reader the report. So it is with the TRIP that the check sends as
+    soon as it has read the FILE: that one says that it has no report.
     """
     try:
         said: object = json.loads(line.decode(), parse_constant=_no_number, parse_float=_finite)
@@ -143,7 +146,7 @@ def _said(line: bytes) -> Event:
         raise ValueError("a check printed something that is no event")
     event = cast("Event", said)
     kind = event.get("kind")
-    trip = event.pop("trip", None) if kind == "report" else None
+    trip = event.pop("trip", None) if kind in WITH_A_TRIP else None
     shape = SHAPES.get(kind) if isinstance(kind, str) else None
     if shape is None or set(event) != {"kind", *shape}:
         raise ValueError("a check printed something that is no event")
@@ -164,6 +167,9 @@ def _said(line: bytes) -> Event:
     if kind == "report":
         planned = cast("Event", trip).get("itinerary") if holds(trip) else None
         event["trip"] = trip if planned is (event["answer"] == "FEASIBLE") else None
+    if kind == "read":
+        # The TRIP of a FILE that has no report yet says so.
+        event["trip"] = trip if holds(trip) and cast("Event", trip)["itinerary"] is None else None
     return event
 
 

@@ -675,7 +675,10 @@ function show() {
   part("problems").hidden = !said.problems;
   // The lines of the report, each tied to the step or the record that it is about, once the
   // page can tie them. Until then, and where it cannot, the report is on the page as it is.
-  const tied = tie && said.report !== null ? tie.lines(said.report, said.calendar.report, said.calendar.trip) : null;
+  // Where the page draws the FILE ahead of any report on it, a report that is still on the
+  // page is on the FILE as it was: its lines are tied to nothing that the page draws.
+  const tied = tie && said.report !== null && !said.ahead ? tie.lines(said.report, said.calendar.report, said.calendar.trip) : null;
+  const drawnOld = said.past;
   const from = [said.report, said.calendar?.report, said.calendar?.trip, tie];
   if (from.some((each, n) => each !== written[n])) {
     written = from;
@@ -687,7 +690,7 @@ function show() {
   // Each part that shows what the FILE holds is put on the page once for each TRIP, like the
   // calendar. It needs no calendar, and a fault in it leaves the rest of the page as it is.
   for (const each of held) {
-    part(each.id).classList.toggle("old", said.old);
+    part(each.id).classList.toggle("old", drawnOld);
     if (said.calendar === null || each.words === null) part(each.id).hidden = true;
     else if (said.calendar.trip !== each.of) {
       each.of = said.calendar.trip;
@@ -705,7 +708,7 @@ function show() {
   // The answer and the report are on the page before the calendar is drawn. The calendar is
   // drawn once for each TRIP, so it stays as the reader left it while the page says more.
   part("calendar-part").hidden = said.calendar === null || lay === null;
-  part("calendar-part").classList.toggle("old", said.old);
+  part("calendar-part").classList.toggle("old", drawnOld);
   if (said.calendar === null || lay === null) return;
   if (lay === false) return noCalendar("The page could not load its calendar.");
   if (said.calendar.trip === drawn) return;
