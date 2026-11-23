@@ -8847,6 +8847,100 @@ def test_what_can_be_taken_out_of_a_plan_with_an_option_that_runs_alone() -> Non
     assert reference.needless(waiting, worst_case(waiting), plan) == [(1, "jo"), (1, None)]
 
 
+def test_an_option_stays_with_nobody_where_a_later_hand_over_counts_on_its_carry() -> None:
+    """A van takes Jo and the bag from A to B, and a pickup at B hands the bag to Jo. No
+    OPTION requires the bag, so no search would have the van run alone. In this plan the
+    hand-over counts on the carry all the same. Jo can be taken out of the van, and the
+    van stays: with the van gone, the bag is not at hand for the hand-over."""
+    options = [moves("van", "a", "b"), stays("pickup", "b")]
+    facts = [*at("van", 9), *at("pickup", 10), lies_at("bag", "a"), carries("van", "bag")]
+    facts += [hands_over("pickup", "bag"), every_use("bag"), every_transfer("bag")]
+    file = trip(["jo"], ["a", "b"], options, facts, [lock("pickup", "jo")], objects=["bag"])
+    world = worst_case(file)
+    assert reference.could_run_alone(file, world) == []
+    van = Step("van", "a", "b", ("jo",), seconds(9), seconds(9, 30), carried=("bag",))
+    pickup = Step("pickup", "b", "b", ("jo",), seconds(10), seconds(10, 30))
+    handed = replace(pickup, handed=(("bag", "jo"),))
+    assert broken_as_listed(file, world, (van, handed)) == []
+    assert broken_as_listed(file, world, (replace(van, persons=()), handed)) == []
+    gone = broken_as_listed(file, world, (handed,))
+    assert [(each.constraint, each.option) for each in gone] == [(Constraint.AT_HAND, "pickup")]
+    assert reference.needless(file, world, (van, handed)) == [(0, "jo")]
+    # With nothing handed over, the van can go too.
+    assert reference.needless(file, world, (van, pickup)) == [(0, "jo"), (0, None)]
+
+
+def test_an_option_with_nobody_in_it_is_in_no_order_for_what_it_hands_over() -> None:
+    """A van can carry the bag, and a FACT says that it hands the key over. Jo has the key
+    and is LOCKed into a desk that requires it and a pickup that requires the bag. With
+    nobody in the van, nobody is there to be handed the key. So the van can move the bag
+    and cannot move the key: the bag puts it in an order, and the key does not. With Jo in
+    the van, it can move both."""
+    options = [moves("van", "a", "b"), stays("desk", "b"), stays("pickup", "b")]
+    facts = [*at("van", 9), *at("desk", 10), *at("pickup", 11), starts_from("jo", "b")]
+    facts += [lies_at("bag", "a"), has_object("jo", "key")]
+    facts += [carries("van", "bag"), hands_over("van", "key")]
+    facts += [requires_object("pickup", "bag"), requires_object("desk", "key")]
+    facts += [every_use(thing) for thing in ("bag", "key")]
+    facts += [every_transfer(thing) for thing in ("bag", "key")]
+    locks = [lock("desk", "jo"), lock("pickup", "jo")]
+    file = trip(["jo"], ["a", "b"], options, facts, locks, objects=["bag", "key"])
+    world = worst_case(file)
+    alone, riding = ((1, 2),), ((0, 1, 2),)
+    can_move = reference._can_move  # pyright: ignore[reportPrivateUsage]
+    ordered = reference._ordered_by  # pyright: ignore[reportPrivateUsage]
+    assert can_move(file, world, alone, [0, 1, 2], "bag") == {0}
+    assert can_move(file, world, alone, [0, 1, 2], "key") == set()
+    assert ordered(file, world, alone, [0, 1, 2], "key") == ((1,), ())
+    assert ordered_by(file, world, ((), ("jo",), ("jo",)), alone, [0, 1, 2], "key") == []
+    assert can_move(file, world, riding, [0, 1, 2], "key") == {0}
+    with_jo = (("jo",), ("jo",), ("jo",))
+    assert ordered_by(file, world, with_jo, riding, [0, 1, 2], "key") == [0, 1]
+    found = checked(file)
+    assert [(each.option, each.persons, each.carried) for each in found.itinerary] == [
+        ("van", (), ("bag",)),
+        ("desk", ("jo",), ()),
+        ("pickup", ("jo",), ()),
+    ]
+
+
+def test_an_access_cutoff_is_for_persons_and_not_for_an_object_that_travels_alone() -> None:
+    """One van takes the bag from A to B and lands at 10:00 am. A second takes it on from B
+    to C at 10:00 am, and a PERSON would have to be there half an hour before. Nobody rides
+    either. The bag is at hand when the second van starts, and that is enough: the plan
+    works whatever happens."""
+    options = [moves("first-van", "a", "b"), moves("second-van", "b", "c"), stays("pickup", "c")]
+    facts: list[Document] = [
+        starts_at("first-van", 9),
+        lasts("first-van", "PT1H"),
+        cutoff("first-van", "PT0S"),
+        starts_at("second-van", 10),
+        lasts("second-van", "PT1H"),
+        cutoff("second-van", "PT30M"),
+        *at("pickup", 11),
+        needs_no_right("pickup"),
+        starts_from("jo", "c"),
+        lies_at("bag", "a"),
+        carries("first-van", "bag"),
+        carries("second-van", "bag"),
+        requires_object("pickup", "bag"),
+        every_use("bag"),
+        every_transfer("bag"),
+    ]
+    for van in ("first-van", "second-van"):
+        facts += [needs_right(van), every_right(van)]
+    places, locks = ["a", "b", "c"], [lock("pickup", "jo")]
+    file = trip(["jo"], places, options, facts, locks, rights=True, objects=["bag"])
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE and found.robust is True and not found.at_worst
+    assert [(each.option, each.persons, each.carried) for each in found.itinerary] == [
+        ("first-van", (), ("bag",)),
+        ("second-van", (), ("bag",)),
+        ("pickup", ("jo",), ()),
+    ]
+    assert compiler.check(file) == found
+
+
 def test_what_can_be_taken_out_names_the_way_by_its_step() -> None:
     """Jo starts at A, takes the bus to a visit at B that a LOCK names, and takes the bus
     back. The way back can be taken out, and the way there cannot. The answer says which
@@ -8873,7 +8967,9 @@ def test_how_much_the_check_of_what_can_be_taken_out_tries() -> None:
     """Twelve visits, each the only OPTION for a must of Jo's, and Jo is in each. A visit
     with nobody in it changes nothing, so it is never tried: Jo leaves and the visit goes,
     or Jo stays. That is four thousand plans to check, and not half a million. A van that
-    can carry the bags counts as one more thing that can go or stay, like the service."""
+    can carry the bags counts as one more thing that can go or stay, like the service. An
+    OPTION that a LOCK puts a PERSON into can never be left with nobody, so it counts for
+    nothing."""
     visits = [f"visit-{number}" for number in range(12)]
     facts: list[Document] = [starts_from("jo", "hall")]
     for number, visit in enumerate(visits):
@@ -8926,6 +9022,25 @@ def test_how_much_the_check_of_what_can_be_taken_out_tries() -> None:
     assert reference.needless(many, worst_case(many), nine) == [
         (position, None) for position in range(2, 11)
     ]
+
+    # Thirteen desks at one PLACE can each carry the bag that lies there, and a LOCK puts
+    # Jo into each. Nobody can be taken out, so there is nothing to try and nothing too large.
+    desks = [f"desk-{number}" for number in range(13)]
+    stated: list[Document] = [starts_from("jo", "hall"), lies_at("bag", "hall")]
+    for number, desk in enumerate(desks):
+        stated += [*at(desk, 9 + number // 2, 30 * (number % 2)), carries(desk, "bag")]
+    stated += [requires_object(desks[-1], "bag"), every_use("bag"), every_transfer("bag")]
+    locks = [lock(desk, "jo") for desk in desks]
+    held = trip(
+        ["jo"], ["hall"], [stays(desk, "hall") for desk in desks], stated, locks, objects=["bag"]
+    )
+    queue = tuple(
+        Step(desk, "hall", "hall", ("jo",), seconds(9 + n // 2, 30 * (n % 2)), None)
+        for n, desk in enumerate(desks)
+    )
+    queue = tuple(replace(each, end=each.start + 1800) for each in queue)
+    assert broken_as_listed(held, worst_case(held), queue) == []
+    assert reference.needless(held, worst_case(held), queue) == []
 
 
 def test_an_option_that_requires_a_capability_needs_a_person() -> None:
@@ -8994,7 +9109,8 @@ def test_a_plan_relies_on_the_facts_about_persons_of_an_option_with_nobody_in_it
     at 10:00 am and can carry the bag, which lies at A. Jo is LOCKed into a pickup at B that
     requires the bag. Where Jo can ride the van, Jo does: the van is listed first. Each of
     three FACTs about the PERSONs in the van keeps Jo out of it, so the van runs alone and Jo
-    takes the bus. The plan relies on that FACT: without it, another plan is shown."""
+    takes the bus. The plan relies on that FACT: where the FACT says the other thing, Jo
+    rides, and another plan is shown."""
 
     def shown(*about_the_van: Document, wants: Sequence[Document] = ()) -> tuple[bool, Report]:
         options = [moves("van", "a", "b"), stays("pickup", "b")]
@@ -9080,9 +9196,10 @@ def test_many_services_that_can_each_carry_the_bags_are_not_tried_in_every_combi
     """Ten vans leave the hotel for O'Hare with the service, and each can carry the bags.
     Any one of them is enough, so a thousand sets of them work. The service alone is the
     plan: it is listed first, and with it the travelers take as few WAYs as they can. So
-    the search times the plan with none and the plan with the service, and makes no set
-    after that. With the bags at O'Hare from the start, the plan with none is timed and no
-    other set is tried, though twenty vans have a million. A second route to O'Hare, a
+    the search times the plan with none and the plan with the service. It makes one set
+    more, finds no order left to try with it, and stops. With the bags at O'Hare from the
+    start, the plan with none is timed, one set more is made and none is tried, though
+    twenty vans have a million. A second route to O'Hare, a
     walk and a cab, changes nothing: the fewest WAYs are those of the shortest route.
     Where the Blue Line is the only WAY and Jo starts at the hotel, Jo has no route to the
     flight, and nothing is timed."""
