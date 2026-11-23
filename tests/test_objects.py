@@ -8444,11 +8444,11 @@ def test_the_walk_says_each_place_where_an_object_is_in_some_case() -> None:
     that is not sure to happen. A check fails in the worst case where it fails in some
     case. A WARNING and what a report reads for another transfer both rest on that.
 
-    The plans hand the OBJECT over or carry it by choice only where a FACT says that the
-    OPTION can, as every plan that a report shows does. Where nobody knows what an OPTION
-    does, the worst case has it hand nothing over and carry nothing by choice, so a plan
-    that counts on either there is broken, and the walk does not follow what would happen
-    if the OPTION could."""
+    The plans hand the OBJECT over or carry it by choice only where the world under test
+    settles that the OPTION can: a FACT of the FILE says so, or the world has an unknown
+    FACT turn out so. Where the world leaves open what an OPTION does, the worst case has
+    it hand nothing over and carry nothing by choice. A plan that counts on either there is
+    broken, and the walk does not follow what would happen if the OPTION could."""
     rng = Random(404)
     cases_of = {
         "nothing": ["nothing"],

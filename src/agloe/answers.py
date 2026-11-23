@@ -756,8 +756,12 @@ def _missing(file: File, works: Works, shown: Shown) -> tuple[tuple[Missing, ...
                             continue
                         listed = [place[fact] for fact in stated]
                         found[number, frozenset(stated)] = (listed, (*stated, *some))
-                in_order = sorted(found.items(), key=lambda each: (each[1][0], each[0][0]))
-                enough = [named for _, (_, named) in in_order]
+                enough = [
+                    named
+                    for _, (_, named) in sorted(
+                        found.items(), key=lambda each: (each[1][0], each[0][0])
+                    )
+                ]
                 if enough:
                     alone = count + size == 1
                     return tuple(
