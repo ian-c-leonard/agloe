@@ -31,7 +31,7 @@ const ABOUT_REQUIRING = new Set(["does not require"]);
 /** What a case of a report can need that is about whether an OPTION refuses an OBJECT. */
 const ABOUT_REFUSING = new Set(["does not refuse"]);
 /** What a case of a report can need that is about what an OPTION does with an OBJECT. */
-const ABOUT_MOVING = new Set(["hands over", "keeps", "does not keep", "carries"]);
+const ABOUT_MOVING = new Set(["hands over", "keeps", "does not keep", "does not carry", "does not keep or carry", "carries"]);
 
 /**
  * How an OBJECT came to be where it is from the start of an OPTION, as the report words it:
@@ -41,7 +41,8 @@ const HOW = new Map([
   ["handed over", (option) => `handed over in ${option}`],
   ["kept", (option) => `kept by ${option}`],
   ["kept if held", (option, thing) => `kept by ${option} if anybody there has ${thing}`],
-  ["might be kept", (option, thing) => `the FILE does not say what ${option} does with ${thing}`],
+  ["unknown action", (option, thing) => `the FILE does not say what ${option} does with ${thing}`],
+  ["unknown requirement", (option, thing) => `the FILE does not say whether ${option} requires ${thing}`],
   ["carried", () => "carried"],
 ]);
 
@@ -138,8 +139,8 @@ export function objects(trip, report = null, stated = null) {
   // Where an OBJECT is, or each place it might be: with Alex, at the Art Institute or in the
   // flight home. Each name is as "or" joins it, as in the report. A place with no name is
   // somewhere the FILE does not name, and an OBJECT that might be with any PERSON, at any
-  // PLACE or somewhere the FILE does not name is nobody knows where. Null where the TRIP has
-  // no such PERSON, PLACE or OPTION.
+  // PLACE or somewhere the FILE does not name is nobody knows where, whatever OPTION it might
+  // be in too. Null where the TRIP has no such PERSON, PLACE or OPTION.
   const whereIs = (where) => {
     const one = (each) => {
       if (typeof each.person === "string") return people.has(each.person) ? `with ${either(people.get(each.person))}` : null;
@@ -149,7 +150,8 @@ export function objects(trip, report = null, stated = null) {
     };
     const each = where.map(one);
     if (each.includes(null)) return null;
-    return where.length === people.size + places.size + 1 ? "nobody knows where" : listed(each, "or");
+    const outside = where.filter((spot) => typeof spot.option !== "string");
+    return outside.length === people.size + places.size + 1 ? "nobody knows where" : listed(each, "or");
   };
   const carried = new Map(carriedIn(report).map((each) => [each.object, each]));
   // Whether a card gives a time of the plan. The part then says whose clocks it is on.
@@ -165,8 +167,9 @@ export function objects(trip, report = null, stated = null) {
       if (where === null || stay.since === null) return where === null ? null : `${where} when the TRIP starts`;
       if (!startOf.has(stay.since) || !named.has(stay.since)) return null;
       const ends = endOf.get(stay.since) ?? null;
-      // An OBJECT that was carried lies where the OPTION ends, from the time it ends.
-      if (stay.how === "arrived") return ends === null ? null : `${where} from ${clock(ends, first)} (where ${named.get(stay.since)} ends)`;
+      // An OBJECT that was in an OPTION, or might have been, lies where the OPTION ends, from
+      // the time it ends. Where nobody knows that time, it lies there when the OPTION ends.
+      if (stay.how === "arrived") return ends === null ? `${where} when ${named.get(stay.since)} ends` : `${where} from ${clock(ends, first)} (where ${named.get(stay.since)} ends)`;
       const how = HOW.get(stay.how);
       if (how === undefined) return null;
       return `${where} from ${clock(startOf.get(stay.since), first)} (${how(named.get(stay.since), thing.name)})`;

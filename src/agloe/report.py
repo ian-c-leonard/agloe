@@ -120,6 +120,7 @@ def as_json(file: File, report: Report) -> dict[str, object]:
         rights: dict[str | None, dict[str, str]] = {}
         for cover in report.rights:
             rights.setdefault(cover.option, {})[cover.person] = cover.by
+        carried = _carried_in(report)
         out["itinerary"] = [
             {
                 ("way" if step.option is None else "option"): step.option or step.way,
@@ -128,7 +129,7 @@ def as_json(file: File, report: Report) -> dict[str, object]:
                 "end": None if step.end is None else written(step.end, file.zone),
                 **({"rights": rights[step.option]} if step.option in rights else {}),
                 **({"hands_over": dict(step.handed)} if step.handed else {}),
-                **({"carries": list(step.carried)} if step.carried else {}),
+                **({"carries": carried[step.option]} if step.option in carried else {}),
             }
             for step in report.itinerary
         ]
@@ -382,6 +383,21 @@ def _to_buy(report: Report) -> dict[tuple[str, str, str | None], list[Cover]]:
     return buyers
 
 
+def _carried_in(report: Report) -> dict[str | None, list[str]]:
+    """The OBJECTs that are carried in each OPTION of the plan shown, in the report's order.
+
+    An OBJECT is carried where the travelers choose that, and where it goes along with no
+    choice: the OPTION requires it and carries it. Either way it is in the OPTION from its
+    start. An OBJECT that only might go along is not among them.
+    """
+    carried: dict[str | None, list[str]] = {}
+    for thing in report.objects:
+        for stay in thing.stays:
+            if stay.how == "carried":
+                carried.setdefault(stay.since, []).append(thing.object)
+    return carried
+
+
 def _where_as_json(where: Where) -> dict[str, str | None]:
     """Where an OBJECT is: the PERSON who has it, the PLACE where it lies, or the OPTION it is in.
 
@@ -410,6 +426,10 @@ def _broken_as_json(file: File, report: Report, found: Broken) -> dict[str, obje
     out["late"] = None if found.late is None else length_written(found.late)
     if found.object is not None:
         out["object"] = found.object
+    if found.sooner is not None:
+        out["sooner"] = length_written(found.sooner)
+    if found.might:
+        out["might"] = True
     return out
 
 
@@ -474,6 +494,8 @@ _ABOUT_AN_OBJECT = (
     "does not refuse",
     "keeps",
     "does not keep",
+    "does not carry",
+    "does not keep or carry",
     "hands over",
     "carries",
     "starts with",
@@ -705,6 +727,7 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
     else:
         lines = ["FEASIBLE: this trip works."]
     marks = _marks(file, report)
+    carried = _carried_in(report)
     day = None
     for number, (step, _) in enumerate(_lines(report.itinerary)):
         if clock.day(step.start) != day:
@@ -718,7 +741,7 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
         for thing, person in step.handed:
             taker = _people(file, (person,))
             lines.append(f"    {taker} takes {_names(file.objects)[thing]} here.")
-        for thing in step.carried:
+        for thing in carried.get(step.option, []):
             lines.append(f"    This carries {_names(file.objects)[thing]}.")
     if not report.itinerary:
         lines += ["", "Nobody has to do anything."]
@@ -825,16 +848,21 @@ def _carried_in_words(
             stays.append(f"{where} when the TRIP starts")
             continue
         name = _name(file, stay.since)
-        over = ends[stay.since]
-        if stay.how == "arrived" and over is not None:
-            # It lies there from the end of the OPTION that carried it.
-            stays.append(f"{where} from {clock.time(over, first_day)} (where {name} ends)")
+        if stay.how == "arrived":
+            # It lies there from the end of the OPTION that it was in, or might have been
+            # in. Where nobody knows when that OPTION ends, nobody knows from when.
+            over = ends[stay.since]
+            if over is None:
+                stays.append(f"{where} when {name} ends")
+            else:
+                stays.append(f"{where} from {clock.time(over, first_day)} (where {name} ends)")
             continue
         how = {
             "handed over": f"handed over in {name}",
             "kept": f"kept by {name}",
             "kept if held": f"kept by {name} if anybody there has {thing}",
-            "might be kept": f"the FILE does not say what {name} does with {thing}",
+            "unknown action": f"the FILE does not say what {name} does with {thing}",
+            "unknown requirement": f"the FILE does not say whether {name} requires {thing}",
             "carried": "carried",
         }[stay.how or ""]
         stays.append(f"{where} from {clock.time(starts[stay.since], first_day)} ({how})")
@@ -854,9 +882,11 @@ def _where(file: File, where: Sequence[Where]) -> str:
     """Where an OBJECT is, or each place it might be: with Alex or at the Art Institute.
 
     A place with no name is somewhere the FILE does not name. An OBJECT that might be with
-    any PERSON, at any PLACE or somewhere the FILE does not name is nobody knows where.
+    any PERSON, at any PLACE or somewhere the FILE does not name is nobody knows where. An
+    OPTION that it might be in is not one of those: it is named beside the others.
     """
-    if len(where) == len(file.persons) + len(file.places) + 1:
+    outside = [each for each in where if each.option is None]
+    if len(outside) == len(file.persons) + len(file.places) + 1:
         return "nobody knows where"
     people, places = _names(file.persons, "or"), _names(file.places, "or")
 
@@ -916,6 +946,9 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
     stops here. An OBJECT that would not be at hand has one mark at its step, whatever needs
     it there: the OPTION requires it, or it is handed over or carried there. The mark says
     how long after the start of the step the OBJECT would arrive, where a finding knows.
+    It says "might" where the OBJECT might also be at hand: nobody knows whether an OPTION
+    took it along. Where the OBJECT might be in one of several OPTIONs, it says between
+    which two times the OBJECT would arrive, or up to which time it might.
     """
     lines = _lines(report.itinerary)
     line_of = {
@@ -925,13 +958,14 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
         step.option: number for number, (step, _) in enumerate(lines) if step.option is not None
     }
     together: dict[tuple[int, Constraint, int | None], list[str]] = {}
-    # At each line, each OBJECT that would not be at hand, with how late it would arrive.
-    not_at_hand: dict[int, dict[str, int | None]] = {}
+    # At each line, each OBJECT that would not be at hand: the finding says how late it
+    # would arrive, and whether it might be at hand after all.
+    not_at_hand: dict[int, dict[str, Broken]] = {}
     for found in report.at_worst:
         number = line_of[found.step] if found.step is not None else line_of_option[found.option]
         if found.constraint is Constraint.AT_HAND and found.object is not None:
             # Each finding about this OBJECT at this step has the same delay.
-            not_at_hand.setdefault(number, {})[found.object] = found.late
+            not_at_hand.setdefault(number, {})[found.object] = found
             continue
         together.setdefault((number, found.constraint, found.late), []).extend(found.persons)
     marks: dict[int, list[str]] = {}
@@ -965,11 +999,17 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
         for thing in file.objects:
             if thing.id not in missing:
                 continue
-            late = missing[thing.id]
+            late, sooner = missing[thing.id].late, missing[thing.id].sooner
+            would = "might" if missing[thing.id].might else "would"
             if late is None:
-                mark = f"{things[thing.id]} would not be at hand when this starts."
+                mark = f"{things[thing.id]} {would} not be at hand when this starts."
+            elif sooner is None:
+                mark = f"{things[thing.id]} {would} arrive {_span(late)} after this starts."
+            elif missing[thing.id].might:
+                mark = f"{things[thing.id]} might arrive up to {_span(late)} after this starts."
             else:
-                mark = f"{things[thing.id]} would arrive {_span(late)} after this starts."
+                between = f"between {_span(sooner)} and {_span(late)}"
+                mark = f"{things[thing.id]} would arrive {between} after this starts."
             marks.setdefault(number, []).append(mark)
     return marks
 
@@ -1130,6 +1170,8 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
             "does not refuse": f"{name} does not refuse {thing}",
             "keeps": f"{name} keeps {thing}",
             "does not keep": f"{name} does not keep {thing}",
+            "does not carry": f"{name} does not carry {thing}",
+            "does not keep or carry": f"{name} neither keeps nor carries {thing}",
             "hands over": f"{thing} can be handed over in {name}",
             "carries": f"{name} can carry {thing}",
         }[unknown.what]

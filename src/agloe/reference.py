@@ -58,8 +58,10 @@ class Step:
     nobody knows how long the step takes.
 
     ``handed`` holds each hand-over in an OPTION: an OBJECT, and the PERSON who has it from the
-    start of the OPTION. ``carried`` holds each OBJECT that is carried in an OPTION: it is in
-    the OPTION from its start, and lies at the PLACE where the OPTION ends from its end.
+    start of the OPTION. ``carried`` holds each OBJECT that the travelers choose to carry in
+    an OPTION: it is in the OPTION from its start, and lies at the PLACE where the OPTION ends
+    from its end. An OBJECT that the OPTION requires and carries goes along with no choice,
+    and needs no entry here.
     """
 
     option: str | None
@@ -113,7 +115,10 @@ class Broken:
     requires it, ``persons`` holds everybody who takes part, and so it does where the OBJECT
     cannot be carried there. Where it cannot be handed over there, ``persons`` holds the
     PERSON who was to have it. ``late`` says how long after the OPTION starts the OBJECT
-    would be at hand, where it is in an OPTION that ends at the PLACE where this one starts.
+    would be at hand at the latest, where it is in an OPTION that ends at the PLACE where
+    this one starts. Where it might be in several such OPTIONs, ``sooner`` says how long
+    after the start the first of them ends. ``might`` says that the OBJECT might also be at
+    hand when the OPTION starts.
 
     An OBJECT in an OPTION that refuses it names the OPTION and the ``object``. ``persons``
     holds each PERSON who takes part and has the OBJECT just before the OPTION starts, or
@@ -130,6 +135,8 @@ class Broken:
     cap: str | None = None
     capability: str | None = None
     object: str | None = None
+    might: bool = False
+    sooner: int | None = None
 
 
 @dataclass(frozen=True)
@@ -184,12 +191,22 @@ class World:
     not in it requires nothing. ``has`` holds each PERSON and CAPABILITY where the PERSON has it.
 
     ``needs`` holds each OPTION and OBJECT where the OPTION requires the OBJECT, and
-    ``refuses`` each one where the OPTION refuses it. ``does`` says
+    ``refuses`` each one where the OPTION refuses it. ``open_needs`` holds those of
+    ``needs`` that nobody is sure of: no FACT says whether the OPTION requires the OBJECT,
+    and the worst of the ways at once has it require it. ``does`` says
     what an OPTION does with an OBJECT: "hands_over", "keeps" or "carries". A pair that is not
-    in it leaves the OBJECT alone. Two more values are no single possible world. "might_keep"
-    is the worst of the ways at once: the OPTION hands nothing over and carries nothing, and
-    nobody knows whether it keeps the OBJECT. "any" is the best of them: the OPTION does
-    whichever of the four suits the plan.
+    in it leaves the OBJECT alone. An OPTION that requires the OBJECT and carries it takes
+    it along whenever it happens, whether or not a plan chooses that: ``goes_along`` says
+    so. Five more values are no single possible world.
+    "might_keep" is the worst of the ways at once for an OPTION that does not require the
+    OBJECT: it hands nothing over and carries nothing, and nobody knows whether it keeps
+    the OBJECT. "might_take" is the worst for an OPTION that requires the OBJECT, or might:
+    nobody knows whether it keeps it, and nobody knows whether it takes it along.
+    "might_carry" is the second alone, where all that is known is that such an OPTION does
+    not keep the OBJECT. "any" is the best of them: the OPTION does whichever of the four
+    suits the plan. "carries_unless_refused" is in no world that ``_world`` makes. A
+    report uses it to say what the FILE's own OPTIONs do without another transfer: the
+    OPTION takes the OBJECT along with no choice, and nobody knows whether it refuses it.
     ``starts`` says where each OBJECT is when the TRIP starts. An OBJECT that is in
     ``starts_anywhere`` starts with whichever PERSON or at whichever PLACE suits the plan, or
     somewhere the FILE does not name, and each of those is one possible world. An OBJECT
@@ -220,6 +237,7 @@ class World:
     requires: Mapping[tuple[str, str], str] = field(default_factory=dict[tuple[str, str], str])
     has: frozenset[tuple[str, str]] = frozenset()
     needs: frozenset[tuple[str, str]] = frozenset()
+    open_needs: frozenset[tuple[str, str]] = frozenset()
     refuses: frozenset[tuple[str, str]] = frozenset()
     does: Mapping[tuple[str, str], str] = field(default_factory=dict[tuple[str, str], str])
     starts: Mapping[str, Where] = field(default_factory=dict[str, Where])
@@ -244,11 +262,11 @@ class Unknown:
     PERSON and a CAPABILITY it is "has". ``about`` names the CAPABILITY.
 
     For an OPTION and an OBJECT it is "does not require", "does not refuse", or one of the
-    four ways that what the OPTION does with the OBJECT can help: "keeps", "does not keep",
-    "hands over" and "carries". For an OBJECT it is "starts with" a PERSON or "starts at" a
-    PLACE, or "another transfer": something outside the FILE that puts the OBJECT at hand
-    where a plan needs it, and takes it out of an OPTION that refuses it. ``about`` names the
-    OBJECT.
+    six ways that what the OPTION does with the OBJECT can help: "keeps", "does not keep",
+    "does not carry", "does not keep or carry", "hands over" and "carries". For an OBJECT
+    it is "starts with" a PERSON or "starts at" a PLACE, or "another transfer": something
+    outside the FILE that puts the OBJECT at hand where a plan needs it, and takes it out
+    of an OPTION that refuses it. ``about`` names the OBJECT.
     """
 
     what: str
@@ -308,7 +326,15 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
             if file.refuses_object(option.id, thing.id) is None:
                 out.append(Unknown("does not refuse", option.id, about=thing.id))
             if file.does_with(option.id, thing.id) is None:
-                out += [Unknown(what, option.id, about=thing.id) for what in _ACTIONS]
+                # Only an OPTION that requires the OBJECT, or might, takes it along with
+                # no choice. So only of such an OPTION does it help to know that it does
+                # not carry the OBJECT.
+                might_take = file.requires_object(option.id, thing.id) is not False
+                out += [
+                    Unknown(what, option.id, about=thing.id)
+                    for what in _ACTIONS
+                    if might_take or what not in _ABOUT_GOING_ALONG
+                ]
         if file.needs_right(option.id) is True and file.rights_complete(option.id) is None:
             for person in file.persons:
                 if file.booking(option.id, person.id) is None:
@@ -358,7 +384,16 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
 
 
 # How what an OPTION does with an OBJECT can help.
-_ACTIONS = ("keeps", "does not keep", "hands over", "carries")
+_ACTIONS = (
+    "keeps",
+    "does not keep",
+    "does not carry",
+    "does not keep or carry",
+    "hands over",
+    "carries",
+)
+# Those that say something only of an OPTION that requires the OBJECT, or might.
+_ABOUT_GOING_ALONG = ("does not carry", "does not keep or carry")
 _STARTS = ("starts with", "starts at")  # where an OBJECT can turn out to start
 
 
@@ -814,6 +849,7 @@ def _world(
     # of an OBJECT's transfers is not COMPLETE, another transfer might bring it or take it
     # away at best. Where it is COMPLETE, the best start is whichever suits the plan.
     needs: set[tuple[str, str]] = set()
+    open_needs: set[tuple[str, str]] = set()
     refuses: set[tuple[str, str]] = set()
     acts: dict[tuple[str, str], str] = {}
     begins: dict[str, Where] = {}
@@ -824,6 +860,8 @@ def _world(
         "hands over": "hands_over",
         "carries": "carries",
         "does not keep": "nothing",
+        "does not carry": "might_keep",
+        "does not keep or carry": "nothing",
     }
     favoured = {
         (each.what, each.option, each.about): each
@@ -839,6 +877,8 @@ def _world(
             required = file.requires_object(*pair)
             if required is None:
                 required = not well(Unknown("does not require", option.id, about=thing.id))
+                if required:
+                    open_needs.add(pair)
             if required:
                 needs.add(pair)
             refused = file.refuses_object(*pair)
@@ -848,8 +888,16 @@ def _world(
                 refuses.add(pair)
             action = file.does_with(*pair)
             if action is None and kind is not None:
+                # An OPTION that requires the OBJECT takes it along where it carries it. So
+                # where nobody knows what such an OPTION does, it might: also where all
+                # that is known is that it does not keep the OBJECT.
                 found = [what for what in _ACTIONS if (what, *pair) in favoured]
-                action = turns_out[found[0]] if found else "might_keep"
+                if not found:
+                    action = "might_take" if required else "might_keep"
+                elif found[0] == "does not keep" and required:
+                    action = "might_carry"
+                else:
+                    action = turns_out[found[0]]
             if action is not None and action != "nothing":
                 acts[pair] = action
         start = file.object_starts(thing.id)
@@ -879,6 +927,7 @@ def _world(
         requires,
         frozenset(has),
         frozenset(needs),
+        frozenset(open_needs),
         frozenset(refuses),
         acts,
         begins,
@@ -1737,19 +1786,72 @@ def arrived(
     return frozenset(there.get(each, each) for each in places) if there else places
 
 
+def goes_along(world: World, option: str, thing: str) -> str | None:
+    """Whether an OBJECT goes along in an OPTION with no choice: "sure", "might" or None.
+
+    It does where the OPTION requires the OBJECT and carries it. Where nobody is sure that
+    the OPTION requires it, it might: a plan that chooses the carry has the OBJECT go along
+    for sure, and a plan that does not has to hold with both.
+    """
+    pair = (option, thing)
+    if world.does.get(pair) != "carries" or pair not in world.needs:
+        return None
+    return "might" if pair in world.open_needs else "sure"
+
+
 def _left(
-    does: str, places: frozenset[Where], persons: Sequence[str], origin: str
+    does: str,
+    places: frozenset[Where],
+    persons: Sequence[str],
+    origin: str,
+    option: str,
+    refused: bool = False,
 ) -> frozenset[Where]:
-    """Where an OBJECT might be once an OPTION has kept it, might have kept it, or has not.
+    """Where an OBJECT might be once an OPTION has done what it does with no choice.
 
     An OPTION that keeps it moves it from whoever takes part to the PLACE where the OPTION
-    starts. One that might keep it leaves it in both places.
+    starts. One that might keep it leaves it in both places. One that might take it along
+    leaves it where it was and in the OPTION, where it is at hand in one of the places it
+    might be. "might_take" is both: it might keep it, and it might take it along.
+    "might_carry" is the second alone.
+
+    An OPTION that refuses the OBJECT takes it from no PERSON. It keeps nothing, and it
+    takes along only what lies at the PLACE where it starts.
+
+    "carries_unless_refused" is for an OPTION that takes the OBJECT along with no choice,
+    where nobody knows whether it refuses it. What lies where it starts is in the OPTION.
+    What a PERSON who takes part has might be: it stays with them if the OPTION refuses it.
     """
-    if does == "keeps":
-        return frozenset(Where(place=origin) if each.person in persons else each for each in places)
-    if does == "might_keep":
-        return places | {Where(place=origin) for each in places if each.person in persons}
-    return places
+    held = {each for each in places if each.person in persons}
+    lying = {each for each in places if each.place == origin}
+    after = places
+    if not refused and held:
+        if does == "keeps":
+            after = (places - held) | {Where(place=origin)}
+        elif does in ("might_keep", "might_take"):
+            after = places | {Where(place=origin)}
+    if does in ("might_take", "might_carry") and (lying or (held and not refused)):
+        after = after | {Where(option=option)}
+    if does == "carries_unless_refused" and (lying or held):
+        after = (places - lying) | {Where(option=option)}
+    return after
+
+
+def _moved(
+    places: frozenset[Where], persons: Sequence[str], origin: str, refused: bool, to: Where
+) -> frozenset[Where]:
+    """Where an OBJECT might be once an OPTION has moved it from each place where it was at hand.
+
+    That is a hand-over, a carry that the travelers choose, and a carry that is no choice.
+    The OBJECT is at hand where it lies at the PLACE where the OPTION starts, or a PERSON who
+    takes part has it. An OPTION that refuses the OBJECT takes it from no PERSON. Where the
+    OBJECT might be somewhere else, it is still there in that case. So afterwards it is
+    where the OPTION put it, or in a place where it was out of reach.
+    """
+    reached = {
+        each for each in places if each.place == origin or (each.person in persons and not refused)
+    }
+    return (places - reached) | {to} if reached else places
 
 
 def _least_broken(
@@ -1785,7 +1887,11 @@ def _least_broken(
     than that end. Then it checks what it requires and what it refuses, then keeps what it
     keeps, and then the OBJECT is handed over or carried in it. An OPTION that refuses the
     OBJECT takes it from no PERSON: it keeps the OBJECT from nobody, and nobody takes the
-    OBJECT there. It carries the OBJECT only where no PERSON who takes part has it. In a
+    OBJECT there. It carries the OBJECT only where no PERSON who takes part has it. A
+    hand-over and a carry move the OBJECT from each place where it is at hand, also in a
+    plan that they break: where the OBJECT might be out of reach, it is still there in
+    that case, and it is moved in the other. An OPTION that requires the OBJECT and carries
+    it takes it along in the same way, whether or not the requirement is met. In a
     world that leaves nothing to pick there is one way to go. An OPTION that does whichever
     thing suits the plan gives a way for each: it leaves the OBJECT alone, it keeps it, it
     hands it over as the plan says, or it carries it as the plan says. Where it does not
@@ -1812,6 +1918,7 @@ def _least_broken(
         refused = (option, thing) in world.refuses
         taker = handed.get(option)
         loaded = option in carried
+        along = goes_along(world, option, thing)
         # Whatever was carried in an OPTION that is over lies where that OPTION ends.
         found_there: dict[frozenset[Where], _Way] = {}
         for places, way in reached.items():
@@ -1834,24 +1941,24 @@ def _least_broken(
                     continue  # with no hand-over planned, that is "nothing"
                 if action == "any" and does == "carries" and not loaded:
                     continue  # and so is a carry that is not planned
-                after = places if refused else _left(does, places, persons, origin)
+                after = _left(does, places, persons, origin, option, refused)
                 found = broken
                 at_hand = within_reach(after, persons, origin)
                 if taker is not None:
-                    if does == "hands_over" and at_hand and not refused:
-                        after = frozenset({Where(person=taker)})
-                    else:
-                        # Not handed over: it stays, or is kept.
-                        if refused:
-                            found = (*found, (position, Constraint.REFUSED, taker))
-                        if does != "hands_over" or not at_hand:
-                            found = (*found, (position, Constraint.AT_HAND, taker))
-                if loaded:
-                    if does == "carries" and at_hand and not (refused and held):
-                        after = frozenset({Where(option=option)})
-                    elif does != "carries" or not at_hand:
-                        # Not carried: it stays, or is kept.
-                        found = (*found, (position, Constraint.AT_HAND, _CARRY))
+                    if refused:
+                        found = (*found, (position, Constraint.REFUSED, taker))
+                    if does != "hands_over" or not at_hand:
+                        found = (*found, (position, Constraint.AT_HAND, taker))
+                    if does == "hands_over" and not refused:
+                        after = _moved(after, persons, origin, False, Where(person=taker))
+                if loaded and (does != "carries" or not at_hand):
+                    found = (*found, (position, Constraint.AT_HAND, _CARRY))
+                if does == "carries" and (loaded or along == "sure"):
+                    # It is carried by choice, or it goes along with no choice, and the
+                    # plan has no entry for that.
+                    after = _moved(after, persons, origin, refused, Where(option=option))
+                elif along == "might":
+                    after = _left("might_carry", after, persons, origin, option, refused)
                 known = following.get(after)
                 if known is None or (len(found), (*picks, pick)) < (len(known[1]), known[0]):
                     following[after] = ((*picks, pick), found, (*trail, after), (*seen, places))
@@ -1978,9 +2085,18 @@ def _one_further(
         for does in ("nothing", "keeps", "hands_over", "carries") if action == "any" else (action,):
             if does not in ("hands_over", "carries"):
                 # It takes the OBJECT from no PERSON where it refuses it.
-                keep(places if refused else _left(does, places, persons, origin), arrivals, taken)
+                keep(_left(does, places, persons, origin, option, refused), arrivals, taken)
                 continue
-            if action != "any":  # with "any" that is "nothing"
+            along = goes_along(world, option, thing)
+            if along == "sure":
+                # It goes along with no choice: the OPTION requires it, so it is at hand.
+                keep(frozenset({Where(option=option)}), arrivals, taken)
+                continue
+            if along == "might":
+                # A plan that does not choose the carry has to hold with both.
+                gone = _left("might_carry", places, persons, origin, option, refused)
+                keep(gone, arrivals, taken)
+            elif action != "any":  # with "any" that is "nothing"
                 keep(places, arrivals, taken)
             if in_use is None or not at_hand:
                 continue
@@ -2064,15 +2180,20 @@ def _objects(file: File, world: World, order: list[_Placed]) -> list[Broken]:
 
     An OBJECT that is not at hand can be on its way: it is in an OPTION that ends at the
     PLACE where this one starts. Then the Broken says how long after the start of this
-    OPTION that one ends. One OPTION can ask for an OBJECT twice: it requires it and
-    carries it. Both findings are the same then, and one is given.
+    OPTION that one ends. Where the OBJECT might be in several such OPTIONs, it says when
+    the last of them ends, and when the first does. It has no delay where the OBJECT might
+    be somewhere that it does not come from. Whether the OBJECT might be at hand after all
+    is said apart from that: it is so where one of the places it might be is at hand. One
+    OPTION can ask for an OBJECT twice: it requires it and carries it. Both findings are
+    the same then, and one is given.
     """
     steps = {step.option: step for _, step in order if step.option is not None}
     out: list[Broken] = []
     for thing, visits, (broken, _, seen) in _as_planned(file, world, (step for _, step in order)):
         for position, constraint, taker in broken:
-            option, persons, _, _ = visits[position]
+            option, persons, origin, _ = visits[position]
             late: int | None = None
+            sooner: int | None = None
             if taker is not None and taker != _CARRY:
                 who: tuple[str, ...] = (taker,)
             elif constraint is Constraint.REFUSED:
@@ -2080,12 +2201,16 @@ def _objects(file: File, world: World, order: list[_Placed]) -> list[Broken]:
                 who = _in_file_order_of_persons(file, have)
             else:
                 who = _in_file_order_of_persons(file, persons)
-            aboard = [each.option for each in seen[position]]
-            if constraint is Constraint.AT_HAND and len(aboard) == 1 and aboard[0] is not None:
-                carrier, here = steps[aboard[0]], steps[option]
-                if carrier.end is not None and carrier.destination == here.origin:
-                    late = carrier.end - here.start
-            found = Broken(constraint, option, who, late, object=thing)
+            away = [each for each in seen[position] if not within_reach({each}, persons, origin)]
+            carriers = [steps[each.option] for each in away if each.option is not None]
+            ends = [carrier.end for carrier in carriers if carrier.destination == origin]
+            known = [end for end in ends if end is not None]
+            unmet = constraint is Constraint.AT_HAND and bool(away)
+            if unmet and len(known) == len(away):
+                late = max(known) - steps[option].start
+                sooner = min(known) - steps[option].start if min(known) < max(known) else None
+            might = unmet and len(away) < len(seen[position])
+            found = Broken(constraint, option, who, late, object=thing, might=might, sooner=sooner)
             if found not in out:
                 out.append(found)
     return out
@@ -2278,7 +2403,7 @@ def _can_move(
     for index in happening:
         pair = (options[index].id, thing)
         action = world.does.get(pair)
-        if action in ("carries", "any"):
+        if action in ("carries", "any", "might_take", "might_carry"):
             moving.add(index)
         elif pair in world.refuses:
             continue
@@ -2472,6 +2597,20 @@ def _orders_together(
     def visit(index: int) -> _Visit:
         return _Visit(options[index].id, who[index], options[index].origin)
 
+    def can_arrive(arrivals: Iterable[tuple[str, str]]) -> bool:
+        """Whether fixed starts leave the time for each of these arrivals.
+
+        An arrival is from an OPTION that the OBJECT is in to one that uses it afterwards,
+        which starts no earlier than the first ends. Where both start at fixed times, that
+        holds or it does not, whatever else is chosen.
+        """
+        for carrier, user in arrivals:
+            leaves, used = fixed[place_of[carrier]], fixed[place_of[user]]
+            lasts = world.terms[carrier].shortest
+            if leaves is not None and used is not None and used < leaves + lasts:
+                return False
+        return True
+
     def choices(done: tuple[int, ...], reached: _Reached) -> Iterator[_Choice]:
         """Each choice that a finished order leaves, with its arrivals by position in the FILE."""
         for taken, arrivals in _first_of(reached):
@@ -2486,7 +2625,9 @@ def _orders_together(
         comes after what and the fixed starts. The OBJECT is taken through the OPTIONs as
         the order is made. So an order is given up at the first OPTION where the OBJECT
         cannot be at hand whatever was handed over or carried, or where a PERSON has it in
-        an OPTION that refuses it, and with it every order that starts the same way. Where
+        an OPTION that refuses it, and with it every order that starts the same way. A way
+        that counts on an arrival that fixed starts leave no time for is given up there
+        too. Where
         another transfer brings the OBJECT, every order works, with no hand-over and no
         carry. An OBJECT that nothing moves has no order, and is taken through the OPTIONs
         that check it as the FILE lists them.
@@ -2522,6 +2663,9 @@ def _orders_together(
                     further = _one_further(
                         world, thing, reached, visit(index), by_position, ends_at
                     )
+                    further = {
+                        spot: taken for spot, taken in further.items() if can_arrive(spot[1])
+                    }
                     if not further:
                         continue
                 if only_the_first_of_a_kind:

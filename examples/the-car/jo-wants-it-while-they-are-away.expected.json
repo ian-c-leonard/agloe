@@ -1,0 +1,13 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "drive-out-time",
+    "errand-time",
+    "drive-out-needs-the-car",
+    "drive-out-carries-the-car",
+    "errand-needs-the-car",
+    "everything-that-moves-the-car",
+    "lock-drive-out",
+    "lock-errand"
+  ]
+}

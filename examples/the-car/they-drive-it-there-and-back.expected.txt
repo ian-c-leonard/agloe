@@ -1,0 +1,32 @@
+FEASIBLE: this trip works.
+
+Saturday 17 July 2027 (times in America/Chicago)
+  8:00 am to 9:00 am: Drive to the dunes, Alex and Sam
+    This carries the car.
+  11:00 am to 12:00 pm: Drive back to the hotel, Alex and Sam
+    This carries the car.
+
+The plan relies on these FACTs and DECISIONs:
+  alex-start: Alex starts from the hotel
+  sam-start: Sam starts from the hotel
+  drive-out-time: Drive to the dunes starts at 8:00 am on Saturday 17 July 2027
+  drive-out-length: Drive to the dunes takes 1 h
+  drive-out-arrival: nobody has to be at the hotel before Drive to the dunes starts
+  drive-out-is-open: nobody needs a right to take part in Drive to the dunes
+  drive-back-time: Drive back to the hotel starts at 11:00 am on Saturday 17 July 2027
+  drive-back-length: Drive back to the hotel takes 1 h
+  drive-back-arrival: nobody has to be at the Indiana Dunes before Drive back to the hotel starts
+  drive-back-is-open: nobody needs a right to take part in Drive back to the hotel
+  where-the-car-starts: the TRIP starts with the car at the hotel
+  drive-out-needs-the-car: Drive to the dunes requires the car
+  drive-out-carries-the-car: Drive to the dunes can carry the car
+  drive-back-needs-the-car: Drive back to the hotel requires the car
+  drive-back-carries-the-car: Drive back to the hotel can carry the car
+  every-use-of-the-car: of the OPTIONs in this FILE, only Drive to the dunes and Drive back to the hotel require the car, and none refuses the car
+  lock-drive-out: Alex and Sam take part in Drive to the dunes
+  lock-drive-back: Alex and Sam take part in Drive back to the hotel
+
+Where each OBJECT is:
+  the car: at the hotel when the TRIP starts; in Drive to the dunes from 8:00 am (carried); at the Indiana Dunes from 9:00 am (where Drive to the dunes ends); in Drive back to the hotel from 11:00 am (carried); at the hotel from 12:00 pm (where Drive back to the hotel ends)
+    Drive to the dunes requires the car. Just before it starts: at the hotel.
+    Drive back to the hotel requires the car. Just before it starts: at the Indiana Dunes.

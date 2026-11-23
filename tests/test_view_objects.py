@@ -384,6 +384,55 @@ def test_a_case_marks_the_option_that_an_object_has_to_stay_out_of() -> None:
     assert all(each["cases"] == [] for each in (*bags["requires"], *bags["transfers"]))
 
 
+def test_an_object_that_goes_along_with_no_choice_reads_as_the_report_reads(
+    tmp_path: Path,
+) -> None:
+    """Each drive requires the car and carries it, so the car goes where the drive goes."""
+    sent, found, words = in_words(EXAMPLES / "the-car" / "they-drive-it-there-and-back.json")
+    (shown,) = all_objects([sent], [found], [words])
+    (car,) = shown["objects"]
+    assert car["plan"] == (
+        "In the plan: at the hotel when the TRIP starts; in Drive to the dunes from 8:00 am"
+        " (carried); at the Indiana Dunes from 9:00 am (where Drive to the dunes ends); in Drive"
+        " back to the hotel from 11:00 am (carried); at the hotel from 12:00 pm (where Drive"
+        " back to the hotel ends)."
+    )
+    assert f"\n  the car: {car['plan'][len('In the plan: ') : -1]}\n" in words
+    # Only the drive there, and nobody says how long it takes. The car is at the dunes when
+    # the drive ends, and the card gives no time for that.
+    content = json.loads((EXAMPLES / "the-car" / "they-drive-it-there-and-back.json").read_text())
+    content["options"] = [each for each in content["options"] if each["id"] == "drive-out"]
+    content["decisions"] = [each for each in content["decisions"] if each["lock"] == "drive-out"]
+    there = [fact for fact in content["facts"] if fact.get("option") != "drive-back"]
+    path = tmp_path / "trip.json"
+    content["facts"] = [fact for fact in there if fact["id"] != "drive-out-length"]
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    (shown,) = all_objects([sent], [found], [words])
+    (car,) = shown["objects"]
+    assert car["plan"] == (
+        "In the plan: at the hotel when the TRIP starts; in Drive to the dunes from 8:00 am"
+        " (carried); at the Indiana Dunes when Drive to the dunes ends."
+    )
+    assert f"\n  the car: {car['plan'][len('In the plan: ') : -1]}\n" in words
+    # No FACT says whether the drive requires the car. If it does, the car goes along. So
+    # the card names both places, from the start of the drive and again from its end.
+    unsaid = ("drive-out-needs-the-car", "every-use-of-the-car")
+    content["facts"] = [fact for fact in there if fact["id"] not in unsaid]
+    content["facts"] += refusing_nothing(content, "car")
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    assert found["answer"] == "FEASIBLE"
+    (shown,) = all_objects([sent], [found], [words])
+    (car,) = shown["objects"]
+    assert car["plan"] == (
+        "In the plan: at the hotel when the TRIP starts; at the hotel or in Drive to the dunes"
+        " from 8:00 am (the FILE does not say whether Drive to the dunes requires the car); at"
+        " the hotel or at the Indiana Dunes from 9:00 am (where Drive to the dunes ends)."
+    )
+    assert f"\n  the car: {car['plan'][len('In the plan: ') : -1]}\n" in words
+
+
 def test_an_object_that_might_be_anywhere_says_that_nobody_knows_where_it_is(
     tmp_path: Path,
 ) -> None:
@@ -406,10 +455,31 @@ def test_an_object_that_might_be_anywhere_says_that_nobody_knows_where_it_is(
     (visit,) = bags["refuses"]
     assert visit["plan"] == f"Just before it starts: {elsewhere} does not name."
     assert f"\n    Museum visit refuses the bags. {visit['plan']}\n" in f"{words}\n"
+    # An OPTION that the bags might be in is not one of those places. A list that is as long
+    # and has an OPTION in it names each place. With all of them, nobody knows where.
+    anywhere = found["objects"][0]["path"][0]["where"]
+    assert len(anywhere) == len(content["persons"]) + len(content["places"]) + 1
+    named = "with Sam, at the hotel, at the Art Institute, at O'Hare, at Denver, somewhere"
+    for where, said in (
+        (
+            [*anywhere[1:], {"option": "flight"}],
+            f"{named} the FILE does not name or in Flight home",
+        ),
+        ([*anywhere, {"option": "flight"}], "nobody knows where"),
+    ):
+        other = json.loads(json.dumps(found))
+        other["objects"][0]["path"][0]["where"] = where
+        (shown,) = all_objects([sent], [other])
+        plan = shown["objects"][0]["plan"]
+        assert plan.startswith(f"In the plan: {said} when the TRIP starts; "), plan
 
 
 def test_an_object_that_might_be_in_one_of_several_places_says_each(tmp_path: Path) -> None:
-    """The FILE does not say what the museum does with the bags. The cloakroom returns them."""
+    """The FILE does not say what the museum does with the bags. The cloakroom returns them.
+
+    The flight requires the bags, and the FILE does not say what it does with them. So they
+    might also go along in it, and lie where it ends once it is over.
+    """
     content = json.loads((STORY / "the-museum-keeps-them.json").read_text())
     gone = ("museum-checks-the-bags", "everything-that-moves-the-bags")
     content["facts"] = [fact for fact in content["facts"] if fact["id"] not in gone]
@@ -422,8 +492,9 @@ def test_an_object_that_might_be_in_one_of_several_places_says_each(tmp_path: Pa
     assert bags["plan"] == (
         "In the plan: with Alex when the TRIP starts; with Alex or at the Art Institute from"
         " 1:00 pm (the FILE does not say what Museum visit does with the bags); with Alex from"
-        " 2:30 pm (handed over in Pick up at the cloakroom); with Alex or at O'Hare from 5:00 pm"
-        " (the FILE does not say what Flight home does with the bags)."
+        " 2:30 pm (handed over in Pick up at the cloakroom); with Alex, at O'Hare or in Flight"
+        " home from 5:00 pm (the FILE does not say what Flight home does with the bags); with"
+        " Alex, at O'Hare or at Denver from 7:30 pm (where Flight home ends)."
     )
     assert f"\n  the bags: {bags['plan'][len('In the plan: ') : -1]}\n" in words
     assert shown["says"] == SAYS + CLOCKS
@@ -652,11 +723,20 @@ def test_a_case_marks_the_option_under_an_object_that_shows_what_the_case_is_abo
     assert bags["cases"] == [0]
     assert [each["cases"] for each in bags["transfers"] if each["name"] == "Museum visit"] == [[]]
     # A case about what an OPTION does with the OBJECT marks that OPTION there.
-    keeps = {"what": "does not keep", "option": "museum-visit", "object": "bags"}
-    (shown,) = all_objects([sent], [{**found, "missing": [[keeps]]}])
-    (bags,) = shown["objects"]
-    assert [each["cases"] for each in bags["transfers"] if each["name"] == "Museum visit"] == [[0]]
-    assert all(each["cases"] == [] for each in bags["requires"])
+    for what in (
+        "hands over",
+        "keeps",
+        "does not keep",
+        "does not carry",
+        "does not keep or carry",
+        "carries",
+    ):
+        does = {"what": what, "option": "museum-visit", "object": "bags"}
+        (shown,) = all_objects([sent], [{**found, "missing": [[does]]}])
+        (bags,) = shown["objects"]
+        marked = [each["cases"] for each in bags["transfers"] if each["name"] == "Museum visit"]
+        assert marked == [[0]], what
+        assert all(each["cases"] == [] for each in bags["requires"])
 
 
 def test_the_objects_mark_what_the_report_names_as_ruling_out_every_plan() -> None:

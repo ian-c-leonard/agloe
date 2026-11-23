@@ -32,6 +32,7 @@ The plan relies on these FACTs and DECISIONs:
   hold-carries-the-bags: Flight home can carry the bags
   collection-needs-the-bags: Jo collects the bags requires the bags
   every-use-of-the-bags: of the OPTIONs in this FILE, only Jo collects the bags requires the bags, and only Flight home refuses the bags
+  everything-that-moves-the-bags: the FILE states every OPTION that hands over, keeps or carries the bags: Bag drop and Flight home
   trip-start: the TRIP starts at 3:30 pm on Saturday 15 May 2027
   lock-flight: Alex and Sam take part in Flight home
   lock-collection: Jo takes part in Jo collects the bags
