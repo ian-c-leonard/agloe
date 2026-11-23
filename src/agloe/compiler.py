@@ -1180,13 +1180,15 @@ class _Search:
             aboard = spots.index(Where(option=option.id))
             for n in range(len(spots)):
                 _when(model.add(after[n] == (n == aboard)), loads)
-            if action == "carries" and (option.id, thing) in world.needs:
-                # An OPTION that requires the OBJECT and carries it takes it along whenever
-                # it happens: that carry is no choice.
-                model.add_implication(used, loads)
-        # An OPTION that requires the OBJECT, and of which nobody knows what it does with
-        # it, might take it along. Then the OBJECT might be in the OPTION afterwards.
-        might_take = action in ("might_take", "might_carry")
+        # An OPTION that requires the OBJECT and carries it takes it along whenever it
+        # happens: that is no choice. Where nobody is sure that it requires the OBJECT, it
+        # might, unless the plan chooses the carry.
+        along = reference.goes_along(world, option.id, thing)
+        if along == "sure" and loads is not None:
+            model.add_implication(used, loads)
+        # So might an OPTION that requires the OBJECT, and of which nobody knows what it
+        # does with it. Then the OBJECT might be in the OPTION afterwards.
+        might_take = action in ("might_take", "might_carry") or along == "might"
         in_it = spots.index(Where(option=option.id)) if might_take else -1
         if refused:
             # Nobody who takes part has the OBJECT just before, or might. So the OPTION

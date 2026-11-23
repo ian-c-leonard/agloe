@@ -6829,8 +6829,8 @@ def test_an_option_checks_what_it_requires_before_it_carries() -> None:
 
 def test_an_object_that_an_option_requires_and_carries_always_goes_along() -> None:
     """The ferry requires the bag and carries it, as a drive requires its car. So the bag
-    goes where the ferry goes: a plan in which the ferry sails and the bag stays does not
-    work. A kiosk at the quay that requires the bag half an hour later misses it."""
+    goes where the ferry goes, whether or not the plan says so: that carry is no choice. A
+    kiosk at the quay that requires the bag half an hour later misses it either way."""
     file = a_crossing(
         lies_at("bag", "quay"),
         carries("ferry", "bag"),
@@ -6839,22 +6839,17 @@ def test_an_object_that_an_option_requires_and_carries_always_goes_along() -> No
     )
     world = settled(file)
     kiosk = step("kiosk", "quay", 9, "sam", minute=30)
-    assert broken(file, world, (sail("alex"), kiosk)) == [bag_not_at_hand("ferry", "alex")]
-    assert broken(file, world, (sail("alex", carried=("bag",)), kiosk)) == [
-        bag_not_at_hand("kiosk", "sam")
-    ]
-    assert (
-        whereabouts(file, world, (sail("alex", carried=("bag",)), kiosk))["bag"][1] == IN_THE_FERRY
-    )
-    # A ferry that does not require the bag leaves the choice: see the test of the choice.
-    # And the search has no plan in which the bag stays.
-    locked = replace(
-        file,
-        decisions=(answers.Lock("a", "ferry", ("alex",)), answers.Lock("b", "kiosk", ("sam",))),
-    )
+    for ferry in (sail("alex"), sail("alex", carried=("bag",))):
+        assert broken(file, world, (ferry, kiosk)) == [bag_not_at_hand("kiosk", "sam")]
+        assert whereabouts(file, world, (ferry, kiosk))["bag"][1] == IN_THE_FERRY
+    # The search has no plan in which the bag stays, and it lists no carry: the travelers
+    # choose nothing there.
+    ferry, errand = answers.Lock("a", "ferry", ("alex",)), answers.Lock("b", "kiosk", ("sam",))
+    locked = replace(file, decisions=(ferry, errand))
     assert first_shown(locked, world) is None
-    without = replace(locked, decisions=locked.decisions[:1])
-    assert carried_in(first_shown(without, world)) == [("ferry", ("bag",))]
+    alone = first_shown(replace(file, decisions=(ferry,)), world)
+    assert alone is not None and carried_in(alone) == []
+    assert whereabouts(file, world, alone)["bag"] == (AT_THE_QUAY, IN_THE_FERRY)
 
 
 def test_nothing_takes_an_object_out_of_the_option_that_carries_it() -> None:
