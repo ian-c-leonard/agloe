@@ -3367,15 +3367,27 @@ def smallest_sets(file: File) -> list[tuple[Unknown, ...]]:
 
     They ask for the fewest things that the FILE does not list. Among those, the settled
     sets come first, whatever their size: the ones with no other transfer. Then they have
-    the fewest FACTs. "Hands over" is left out where "does not keep" is enough in its place,
-    and so is "carries".
+    the fewest FACTs. A set is left out where it is enough with a FACT that says less in the
+    place of one of its FACTs about what an OPTION does with an OBJECT: an OPTION that
+    hands the OBJECT over neither keeps nor carries it, one that keeps it does not carry
+    it, and one that carries it does not keep it.
     """
     every_one = unknowns(file)
     facts = [unknown for unknown in every_one if unknown.what not in NEW]
     found = [unknown for unknown in every_one if unknown.what in NEW]
 
-    def weaker(some: tuple[Unknown, ...], asked: Unknown) -> tuple[Unknown, ...]:
-        return tuple(replace(u, what="does not keep") if u == asked else u for u in some)
+    neither = "does not keep or carry"
+    less = {
+        "hands over": [neither, "does not keep", "does not carry"],
+        neither: ["does not keep", "does not carry"],
+        "keeps": ["does not carry"],
+        "carries": ["does not keep"],
+    }
+
+    def said_with_less(some: tuple[Unknown, ...]) -> Iterator[tuple[Unknown, ...]]:
+        for asked in some:
+            for what in less.get(asked.what, []):
+                yield tuple(replace(u, what=what) if u == asked else u for u in some)
 
     for count in range(len(found) + 1):
         new = list(combinations(found, count))
@@ -3393,10 +3405,7 @@ def smallest_sets(file: File) -> list[tuple[Unknown, ...]]:
                     return [
                         some
                         for some in enough
-                        if not any(
-                            u.what in ("hands over", "carries") and weaker(some, u) in enough
-                            for u in some
-                        )
+                        if not any(other in enough for other in said_with_less(some))
                     ]
     return []
 
@@ -7470,3 +7479,88 @@ def test_a_choice_that_comes_first_is_kept_beside_one_that_counts_on_no_arrival(
         ("claim", (), (("bag", "alex"),)),
     ]
     assert checked(file).itinerary == shown
+
+
+# An OBJECT that an OPTION requires and carries, where the FILE leaves something open.
+
+
+def test_an_option_that_requires_an_object_might_take_it_along_where_nobody_says_what_it_does() -> (
+    None
+):
+    """The bag lies at the quay, the ferry requires it, and nobody says what the ferry does
+    with it. It might carry it, and then the bag goes along. So a kiosk at the quay cannot
+    count on the bag half an hour later. It can where the ferry does not carry the bag."""
+    file = a_crossing(
+        lies_at("bag", "quay"),
+        requires_object("ferry", "bag"),
+        requires_object("kiosk", "bag"),
+        every_use("bag"),
+    )
+    plan = (sail("alex"), step("kiosk", "quay", 9, "sam", minute=30))
+    worst = worst_case(file)
+    assert broken(file, worst, plan) == [bag_not_at_hand("kiosk", "sam")]
+    assert whereabouts(file, worst, plan)["bag"][1] == AT_THE_QUAY | IN_THE_FERRY
+    enough = {"does not carry", "does not keep or carry", "keeps", "hands over"}
+    for what in (
+        "keeps",
+        "does not keep",
+        "does not carry",
+        "does not keep or carry",
+        "hands over",
+    ):
+        said = with_these_at_best(file, [Unknown(what, "ferry", about="bag")])
+        assert (broken(file, said, plan) == []) is (what in enough), what
+    # A ferry that does not require the bag takes nothing along with no choice.
+    free = a_crossing(
+        lies_at("bag", "quay"),
+        requires_object("ferry", "bag", False),
+        requires_object("kiosk", "bag"),
+        every_use("bag"),
+    )
+    assert broken(free, worst_case(free), plan) == []
+
+
+def test_does_not_keep_is_enough_where_the_object_may_go_along() -> None:
+    """Alex has the bag on a ferry that requires it, and needs it at a hut on the island an
+    hour after the ferry lands. If the ferry keeps the bag, it lies at the quay. If it does
+    not keep it, the bag is with Alex or goes along, and either way it is at hand on the
+    island."""
+    file = a_crossing(
+        has_object("alex", "bag"),
+        requires_object("ferry", "bag"),
+        requires_object("hut", "bag"),
+        every_use("bag"),
+    )
+    plan = (sail("alex"), step("hut", "island", 11, "alex"))
+    worst = worst_case(file)
+    assert broken(file, worst, plan) == [bag_not_at_hand("hut", "alex")]
+    assert whereabouts(file, worst, plan)["bag"][1] == WITH_ALEX | AT_THE_QUAY | IN_THE_FERRY
+    said = with_these_at_best(file, [Unknown("does not keep", "ferry", about="bag")])
+    assert broken(file, said, plan) == []
+    assert just_before(file, said, plan)["bag"] == (WITH_ALEX, WITH_ALEX | ON_THE_ISLAND)
+
+
+def test_an_object_might_go_along_where_nobody_says_whether_the_option_requires_it() -> None:
+    """A FACT says that the ferry carries the bag, and none says whether it requires it. If
+    it does, the bag goes along. So a plan that does not choose the carry has to hold with
+    the bag at the quay and with the bag on the island. A plan that chooses it has the bag
+    on the island for sure."""
+    file = a_crossing(
+        lies_at("bag", "quay"),
+        carries("ferry", "bag"),
+        requires_object("kiosk", "bag"),
+        requires_object("office", "bag"),
+        *lets_in("bag", "ferry", "kiosk", "office"),
+        every_transfer("bag"),
+    )
+    worst = worst_case(file)
+    assert ("ferry", "bag") in worst.open_needs
+    kiosk = step("kiosk", "quay", 9, "sam", minute=30)
+    office = step("office", "island", 10, "sam")
+    assert broken(file, worst, (sail("alex"), kiosk)) == [bag_not_at_hand("kiosk", "sam")]
+    assert broken(file, worst, (sail("alex"), office)) == [bag_not_at_hand("office", "sam")]
+    assert broken(file, worst, (sail("alex", carried=("bag",)), office)) == []
+    # With the FACT that the ferry does not require the bag, the choice is the travelers'.
+    said = with_these_at_best(file, [Unknown("does not require", "ferry", about="bag")])
+    assert broken(file, said, (sail("alex"), kiosk)) == []
+    assert broken(file, said, (sail("alex", carried=("bag",)), office)) == []
