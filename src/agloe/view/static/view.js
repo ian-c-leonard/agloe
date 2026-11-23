@@ -32,9 +32,7 @@ const TIED = "[data-of], [data-record], [data-records]";
 const GROUPS = "#strip, #calendar, #calendar-untimed, #drawings > .part, #report";
 /** What a drawing is known by while the page stays as it is: what it is of and what it is tied to. */
 const keyOf = (each) => [each.dataset.of, each.dataset.record, each.dataset.records].join("|");
-const stops = new Map(); // for each part, the drawing that Tab stops at: what it shows, as `shownBy` tells it
-let onKey = null; // the drawing that the keyboard is on: its part, itself, and its place among the drawings of the part
-let waits = null; // where the keyboard was when the page took its drawing away and had none to put in its place, until the reader does something else
+let byKeys = false; // whether the reader last used the keyboard, and not the pointer
 
 function made(tag, className, text = "") {
   return Object.assign(document.createElement(tag), { className, textContent: text });
@@ -676,12 +674,17 @@ function reveal(from) {
   report.scrollTop += (lines[0].top + lines[0].bottom) / 2 - (box.top + box.bottom) / 2;
 }
 
-/** What the pointer is on, or else the drawing that the keyboard is on, or nothing. */
+/**
+ * What the reader points at: with the pointer, or with the keyboard. It is what they used
+ * last that counts. After a key, it is the drawing that the keyboard is on, or nothing. After
+ * a move of the pointer, it is what the pointer is on, and where that is nothing drawn, the
+ * drawing that the keyboard is on.
+ */
 function pointedAt() {
+  const held = document.activeElement !== null && document.activeElement.matches(TIED) ? document.activeElement : null;
+  if (byKeys) return held;
   const under = [...document.querySelectorAll(":hover")].pop() ?? null;
-  if (under !== null && under.closest(TIED) !== null) return under;
-  const held = document.activeElement;
-  return held !== null && held.matches(TIED) ? held : null;
+  return under !== null && under.closest(TIED) !== null ? under : held;
 }
 
 /** What is pointed at is lit again, after the page has written or drawn anew. */
@@ -694,42 +697,6 @@ function drawingsIn(group) {
   return [...group.querySelectorAll(TIED)].filter((each) => each.offsetParent !== null);
 }
 
-/** The kinds of drawing, by the class that each has. */
-const KINDS = ["mark", "bar", "item", "card", "entry", "has", "in-full", "person", "row", "bound-says", "way-name"];
-
-/**
- * What a drawing shows, in words that stay the same when the page draws its FILE anew: the
- * name on it, under the name of its card where it is on one. The number of a step does not
- * stay the same, so a line of the report about a step goes by the name of that step.
- */
-function staysOf(each) {
-  if (each.classList.contains("row")) {
-    if (each.dataset.record) return `record ${each.dataset.record}`;
-    const of = (each.dataset.of ?? "").split(" ");
-    const step = of.find((token) => /^[0-9]+$/.test(token));
-    const drawn = step === undefined ? null : document.querySelector(`#calendar .mark[data-of~="${step}"]`);
-    if (drawn === null) return `about ${of.join(" ")}`;
-    return `${each.classList.contains("warns") ? "warns of" : "says"} ${drawn.title.split("\n")[0]} ${of.filter((token) => token !== step).join(" ")}`;
-  }
-  const card = each.closest(".card");
-  const on = card !== null && card !== each ? card.querySelector(".card-name").textContent : "";
-  const name = each.querySelector(":scope > .item-head > .item-name, :scope > .card-name, :scope > .entry-name");
-  return `${on} / ${name !== null ? name.textContent : each.title !== "" ? each.title.split("\n")[0] : each.textContent}`;
-}
-
-/**
- * What each of these drawings of one part shows, so that no two are told alike: its kind, its
- * words, and which of several such it is, in the order of the page.
- */
-function shownBy(all) {
-  const seen = new Map();
-  return all.map((each) => {
-    const what = `${KINDS.find((kind) => each.classList.contains(kind)) ?? each.tagName} ${staysOf(each)}`;
-    seen.set(what, (seen.get(what) ?? 0) + 1);
-    return `${what} #${seen.get(what)}`;
-  });
-}
-
 /**
  * The keyboard reaches what the pointer does. In each part of the page, and in the report,
  * one drawing takes the keyboard by Tab: the one that it was on last there, or the first. The
@@ -737,36 +704,16 @@ function shownBy(all) {
  * Tab, however many drawings it holds. The drawing that the keyboard is on is lit as under
  * the pointer.
  *
- * A drawing is made anew when the page draws again. Each part then stops Tab at the drawing
- * that shows the same as the one before. Where the keyboard was on a drawing that the page
- * took away, it goes to that one. Where no drawing shows the same any more, it goes to the
- * one that now stands nearest in that part. A part can have nothing drawn for a while: the
- * report has no line to go to between a change to the FILE and the report on it. The page
- * then keeps the place, and takes the keyboard to it once the part is drawn again, unless
- * the reader has done something else in the meantime.
+ * The page never moves the keyboard by itself. Where it draws a part again, the drawings of
+ * that part are new ones, and Tab stops at the first. A drawing that the keyboard was on is
+ * then gone: the keyboard is on nothing, nothing is lit by it, and the next Tab goes on from
+ * where it was. The page does not guess which new drawing is the old one.
  */
 function reach() {
-  const free = document.activeElement === null || document.activeElement === document.body;
   for (const group of document.querySelectorAll(GROUPS)) {
     const all = drawingsIn(group);
-    if (!all.length) continue;
-    const shown = shownBy(all);
-    // The keyboard was on a drawing of this part, which the page has taken away, now or before.
-    const left = onKey !== null && onKey.group === group.id && !onKey.on.isConnected ? onKey : waits !== null && waits.group === group.id ? waits : null;
-    const kept = stops.has(group.id) ? shown.indexOf(stops.get(group.id)) : -1;
-    const at = kept >= 0 ? kept : left !== null ? Math.min(left.at, all.length - 1) : 0;
-    all.forEach((each, n) => {
-      each.tabIndex = n === at ? 0 : -1;
-    });
-    stops.set(group.id, shown[at]);
-    if (left === null) continue;
-    onKey = waits = null;
-    if (free) all[at].focus();
-  }
-  // The part that the keyboard was in has nothing drawn now. The page keeps the place.
-  if (onKey !== null && !onKey.on.isConnected) {
-    waits = { group: onKey.group, at: onKey.at };
-    onKey = null;
+    const stop = all.find((each) => each.getAttribute("tabindex") === "0") ?? all[0];
+    for (const each of all) each.tabIndex = each === stop ? 0 : -1;
   }
 }
 
@@ -959,48 +906,46 @@ const view = new EventSource("events");
 view.onmessage = (message) => hear(JSON.parse(message.data));
 // The page no longer hears the view. What it shows stays, marked, until the view speaks again.
 view.onerror = () => hear({ kind: "lost" });
-// The reader has done something else: the page takes the keyboard to no place that it kept.
-for (const kind of ["mousedown", "keydown", "focusin"]) {
+// What the reader used last, the keyboard or the pointer, says what is pointed at. A drawing
+// that scrolls under a pointer at rest is not pointed at: only a pointer that moves is.
+addEventListener(
+  "keydown",
+  () => {
+    byKeys = true;
+  },
+  true,
+);
+for (const kind of ["mousemove", "mousedown"]) {
   addEventListener(
     kind,
     () => {
-      waits = null;
+      if (!byKeys) return;
+      byKeys = false;
+      light(pointedAt());
     },
     true,
   );
 }
-// What was pointed at last is lit: the drawing that the pointer came onto, or the one that the
-// keyboard went to. While the pointer is on nothing that is drawn, and when it leaves the page,
-// what the keyboard is on is lit.
-document.querySelector("main").addEventListener("mouseover", () => light(pointedAt()));
+document.querySelector("main").addEventListener("mouseover", () => {
+  if (!byKeys) light(pointedAt());
+});
 document.querySelector("main").addEventListener("mouseleave", () => light(pointedAt()));
-// The keyboard is on a drawing: it is lit, and it is the one stop for Tab in its part.
+// The keyboard is on a drawing: it is lit, and it is the one stop for Tab in its part. The
+// keyboard is on something else: what the reader points at otherwise is lit.
 document.querySelector("main").addEventListener("focusin", (event) => {
   const drawing = event.target instanceof Element && event.target.matches(TIED) ? event.target : null;
   const group = drawing === null ? null : drawing.closest(GROUPS);
   if (group === null) {
-    onKey = null;
     light(pointedAt());
     return;
   }
-  const all = drawingsIn(group);
-  onKey = { group: group.id, on: drawing, at: all.indexOf(drawing) };
-  stops.set(group.id, shownBy(all)[onKey.at]);
-  for (const each of all) each.tabIndex = each === drawing ? 0 : -1;
+  for (const each of drawingsIn(group)) each.tabIndex = each === drawing ? 0 : -1;
   light(drawing);
 });
-// The keyboard leaves a drawing for nothing else on the page: nothing is lit by it. A drawing
-// that the page has taken away to draw it anew is another matter: `reach` finds the new one.
+// The keyboard leaves a drawing for nothing else on the page, or the page takes the drawing
+// away: what the reader points at otherwise is lit, once the page has drawn.
 document.querySelector("main").addEventListener("focusout", (event) => {
-  const left = event.target;
-  if (event.relatedTarget !== null || !(left instanceof Element)) return;
-  // A drawing says that it has lost the keyboard while the page is taking it away. Whether
-  // it is still on the page is known only once the page has drawn.
-  queueMicrotask(() => {
-    if (!left.isConnected || document.activeElement === left) return;
-    onKey = null;
-    light(pointedAt());
-  });
+  if (event.relatedTarget === null) queueMicrotask(() => light(pointedAt()));
 });
 // The arrow keys, Home and End move the keyboard through the drawings of one part.
 document.querySelector("main").addEventListener("keydown", (event) => {

@@ -648,29 +648,49 @@ def test_the_keyboard_lights_up_what_the_pointer_does(chromium: Browser, tmp_pat
         assert page.evaluate(on) == ["rights-part", "Flight home"]
         page.keyboard.press("Shift+Tab")
         assert page.evaluate(on) == ["options-part", "Blue Line to O'Hare"]
-        # The pointer is on something that is no drawing: what the keyboard is on stays lit.
-        page.locator("#options-part h2").hover()
+        page.keyboard.press("Tab")
+        assert page.evaluate(on) == ["rights-part", "Flight home"]
+        page.keyboard.press("Shift+Tab")
         lit(page, options=["Blue Line to O'Hare"], marks=["Blue Line to O'Hare"])
-        # The pointer lights up what it is on. When it leaves, what the keyboard is on is
-        # lit again.
-        page.locator("#persons .item").first.hover()
+        # What the reader used last says what is lit. The pointer moves onto a PERSON: that
+        # PERSON is lit. A key is pressed: what the keyboard is on is lit, with the pointer
+        # at rest where it was.
+        alex = page.locator("#persons .item").first
+        alex.hover()
         lit(page, persons=["Alex"], options=[])
+        page.keyboard.press("ArrowUp")
+        assert page.evaluate(on) == ["options-part", "Museum visit"]
+        lit(page, persons=[], options=["Museum visit"])
+        # A drawing that comes under a pointer at rest, as when the page scrolls, is not
+        # pointed at.
+        alex.evaluate("(row) => row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))")
+        page.wait_for_timeout(100)
+        lit(page, persons=[], options=["Museum visit"])
+        # The pointer moves: what it is on is lit again. On something that is no drawing, and
+        # off the page, it leaves what the keyboard is on lit.
+        alex.scroll_into_view_if_needed()
+        box = alex.bounding_box()
+        assert box is not None
+        page.mouse.move(box["x"] + 30, box["y"] + 12)
+        page.mouse.move(box["x"] + 40, box["y"] + 14)
+        lit(page, persons=["Alex"], options=[])
+        page.locator("#options-part h2").hover()
+        lit(page, persons=[], options=["Museum visit"], marks=["Museum visit"])
         page.mouse.move(2, 2)
-        lit(page, persons=[], options=["Blue Line to O'Hare"])
-        # The page draws a FILE that has changed. The keyboard stays on the drawing of the
-        # same thing.
+        lit(page, persons=[], options=["Museum visit"])
+        # The page draws a FILE that has changed, and its drawings are new ones. The page does
+        # not guess which of them is the one that the keyboard was on: the keyboard is on
+        # nothing, and nothing is lit. The next Tab goes on from where the keyboard was.
         changed = json.loads(path.read_text())
         changed["persons"][0]["name"] = "Alexandra"
         put(path, json.dumps(changed).encode())
         page.locator("#persons .item-name", has_text="Alexandra").wait_for()
         page.locator("#report .row", has_text="Alexandra").first.wait_for()
-        assert page.evaluate(on) == ["options-part", "Blue Line to O'Hare"]
-        lit(page, options=["Blue Line to O'Hare"], marks=["Blue Line to O'Hare"])
-        # Each part still stops Tab at the drawing that the keyboard was on there last.
+        assert page.evaluate("() => document.activeElement === document.body")
+        lit(page, options=[], marks=[], rows=[])
         page.keyboard.press("Tab")
-        assert page.evaluate(on) == ["rights-part", "Flight home"]
-        page.keyboard.press("Shift+Tab")
-        assert page.evaluate(on) == ["options-part", "Blue Line to O'Hare"]
+        assert page.evaluate(on) == ["options-part", "Museum visit"]
+        lit(page, options=["Museum visit"], marks=["Museum visit"])
         # In the report, one line takes the keyboard, and the arrow keys go from line to line
         # of those that are about something on the page.
         page.locator("#report").focus()
@@ -692,64 +712,34 @@ def test_the_keyboard_lights_up_what_the_pointer_does(chromium: Browser, tmp_pat
         assert first != last
         # With the keyboard on something that is no drawing, nothing is lit.
         page.locator("#contents .to").first.focus()
+        page.keyboard.press("Shift+Tab")
         lit(page, marks=[], options=[], rows=[], persons=[])
-        # The keyboard is on the line of the report about the train. The FILE changes so that
-        # the plan has one step less before it. The keyboard stays on the line about the
-        # train: a step goes by its name, and not by its number.
-        train = page.locator("#report .row", has_text=": Blue Line to O'Hare, ").first
-        train.focus()
-        lit(page, marks=["Blue Line to O'Hare"])
-        fewer = json.loads(path.read_text())
-        fewer["decisions"] = [each for each in fewer["decisions"] if each["id"] != "lock-visit"]
-        put(path, json.dumps(fewer).encode())
-        page.wait_for_function(
-            "() => !document.getElementById('report').textContent.includes('lock-visit')"
-        )
-        page.locator("#calendar .mark").first.wait_for()
-        assert ": Blue Line to O'Hare, " in page.evaluate(on)[1]
-        lit(page, marks=["Blue Line to O'Hare"])
-        # The keyboard is on the WANT, and the FILE changes so that the WANT is gone. The
-        # keyboard is then on nothing, and the page does not take it back to the WANT when
-        # the WANT is there again.
-        page.locator("#wants .card").focus()
-        lit(page, wants=["ending the trip in Denver"])
-        gone: Document = {**fewer, "wants": []}
-        put(path, json.dumps(gone).encode())
-        page.locator("#wants-part").wait_for(state="hidden")
-        assert page.evaluate("() => document.activeElement === document.body")
-        page.locator("header").click()
-        put(path, json.dumps(fewer).encode())
-        page.locator("#wants .card").wait_for()
-        page.locator("#report .row[data-record='ending-in-denver']").wait_for()
-        assert page.evaluate("() => document.activeElement === document.body")
-        lit(page, wants=[])
         # Each part has one drawing that Tab stops at, however many it holds.
         stops = page.evaluate(
-            """() => [...document.querySelectorAll("#calendar-part, #drawings > .part")]
+            """() => [...document.querySelectorAll("#calendar, #drawings > .part")]
               .filter((part) => !part.hidden)
               .map((part) => [...part.querySelectorAll("[data-of], [data-record]")])
               .map((drawings) => drawings.filter((each) => each.tabIndex === 0).length)"""
         )
         # The calendar, the PERSONs, the PLACEs, the WANTs, the OPTIONs, the rights and the WAYs.
         assert stops == [1] * 7
-    # The keyboard is on a drawing before the report comes. Its line of the report is brought
-    # into view when the report is there, and the keyboard stays on the drawing.
+    # The pointer is on a drawing before the report comes. When the report is there, its
+    # line about that drawing is brought into view.
     first, answer, report = (json.dumps(event) for event in checked(path.read_bytes()))
     (tmp_path / "python.first").write_text(f"{first}\n{answer}\n")
     (tmp_path / "python.report").write_text(f"{report}\n")
     go = tmp_path / "python.go"
     waits = 'cat "$0.first"\nwhile [ ! -e "$0.go" ]; do sleep 0.05; done\ncat "$0.report"'
-    drawn = "() => document.querySelectorAll('#options .item').length > 0"
+    drawn = "() => document.querySelectorAll('#wants .card').length > 0"
     held = stand_in(tmp_path, waits)
     with opened(chromium, path, wide=1500, tall=700, python=held, once=drawn) as page:
-        train = page.locator("#options .item", has_text="Flight home")
-        train.focus()
-        lit(page, options=["Flight home"])
+        page.locator("#wants .card .card-name").hover()
+        lit(page, wants=["ending the trip in Denver"])
         go.write_text("")
         page.locator("#report .row").first.wait_for()
-        assert page.evaluate(on) == ["options-part", "Flight home"]
-        lit(page, options=["Flight home"], marks=["Flight home"])
-        page.wait_for_function(f"() => ({PLACED})().shown >= 1")
+        found = lit(page, wants=["ending the trip in Denver"])
+        assert ids_of(found["rows"]) == ["ending-in-denver"]
+        page.wait_for_function(f"() => ({PLACED})().shown === 1")
     # A TRIP of two days has a strip above its calendar. The strip is a part for the keyboard,
     # and so is the calendar, after its own box: Tab goes from one to the next.
     with opened(chromium, EXAMPLES / "several-days" / "works-but-risky.json") as page:
