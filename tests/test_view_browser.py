@@ -1446,7 +1446,7 @@ def test_pointing_ties_an_object_to_the_calendar_and_the_report(
         ]
         assert card.locator(".card-whole").all_text_contents() == [
             "The FILE states every one of its OPTIONs that requires it or refuses it.",
-            "The FILE states every OPTION that hands it over or keeps it.",
+            "The FILE states every OPTION that hands it over, keeps it or carries it.",
         ]
         # The card says where the report says the bags are in its plan, worded as the report
         # words it: throughout, and just before the OPTION that requires them starts.
