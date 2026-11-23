@@ -41,7 +41,7 @@ from agloe.file import FileError, read
 from agloe.view import View
 from agloe.view.check import checked
 from agloe.view.serve import PAGE, REFUSED_BY_BROWSERS
-from agloe.view.trip import shown
+from agloe.view.trip import holds, shown
 from tests.stories import EXAMPLES, lasts, lock, needs_no_right, stays
 
 STORY = EXAMPLES / "flight-home"
@@ -192,8 +192,13 @@ def test_a_page_is_sent_the_file_then_the_answer_then_the_report(name: str, tmp_
     shutil.copy(STORY / f"{name}.json", path)
     expected = json.loads((STORY / f"{name}.expected.json").read_text())
     with serving(path) as view:
-        file, answer, report = Sent(view).until("report")
+        file, first, answer, report = Sent(view).until("report")
     assert file == {"kind": "file", "name": "trip.json", "revision": 1, "view": view.id}
+    # Before any answer comes the TRIP as the page draws it from the FILE alone. It says that
+    # it has no report, and its steps are the OPTIONs that a LOCK names.
+    assert first == {"kind": "read", "revision": 1, "trip": shown(read(path))}
+    assert first["trip"]["itinerary"] is None
+    assert holds(first["trip"])
     assert (answer["kind"], answer["answer"]) == ("answer", expected["answer"])
     assert report["answer"] == expected["answer"]
     assert report["json"] == expected
@@ -215,7 +220,7 @@ def test_a_file_that_changes_is_checked_again(tmp_path: Path) -> None:
         assert sent.until("report")[-1]["answer"] == "FEASIBLE"
         put(path, STORY / "cannot-work.json")
         again = sent.until("report")
-    assert kinds(again) == ["file", "answer", "report"]
+    assert kinds(again) == ["file", "read", "answer", "report"]
     assert {event["revision"] for event in again} == {2}
     assert again[-1]["json"] == json.loads((STORY / "cannot-work.expected.json").read_text())
 
@@ -252,7 +257,7 @@ def test_a_file_that_is_written_in_two_steps_is_checked_at_each(tmp_path: Path) 
         done = sent.until("report")
     assert kinds(half) == ["file", "refused"]
     assert half[-1]["problems"][0].startswith("not readable as JSON")
-    assert kinds(done) == ["file", "answer", "report"]
+    assert kinds(done) == ["file", "read", "answer", "report"]
     assert done[0]["revision"] > half[0]["revision"]
 
 
@@ -271,7 +276,7 @@ def test_a_file_that_breaks_the_format_has_no_report(tmp_path: Path) -> None:
         mended = sent.until("report")
     assert kinds(first) == ["file", "refused"]
     assert first[-1]["problems"] == list(refused.value.problems)
-    assert kinds(mended) == ["file", "answer", "report"]
+    assert kinds(mended) == ["file", "read", "answer", "report"]
 
 
 def test_a_file_that_cannot_be_read_has_no_report(tmp_path: Path) -> None:
@@ -287,7 +292,7 @@ def test_a_file_that_cannot_be_read_has_no_report(tmp_path: Path) -> None:
         back = sent.until("report")
     assert kinds(away) == ["file", "unreadable"]
     assert away[-1]["problem"] == "No such file or directory"
-    assert kinds(back) == ["file", "answer", "report"]
+    assert kinds(back) == ["file", "read", "answer", "report"]
 
 
 @pytest.mark.parametrize("ending", [b"\n", b"\r\n", b"\r"], ids=["LF", "CRLF", "CR"])
@@ -462,6 +467,65 @@ def test_a_report_reaches_a_page_whatever_its_trip_is(
     assert sent[-1]["trip"] == (json.loads(EMPTY) if reaches else None)
 
 
+@pytest.mark.parametrize(
+    ("trip", "reaches"),
+    [
+        (f', "trip": {EMPTY.replace("true", "null")}', True),
+        # No TRIP, one that a page cannot draw, and one that says it came with a report.
+        (', "trip": null', False),
+        ("", False),
+        (', "trip": {}', False),
+        (f', "trip": {EMPTY}', False),
+        (f', "trip": {EMPTY.replace("true", "false")}', False),
+        (
+            f', "trip": {EMPTY.replace("true", "null").replace('"days": []', '"days": [1e400]')}',
+            False,
+        ),
+    ],
+    ids=[
+        "a TRIP",
+        "none",
+        "missing",
+        "empty",
+        "with a plan",
+        "with a report",
+        "too large a number",
+    ],
+)
+def test_what_a_check_read_reaches_a_page_whatever_its_trip_is(
+    trip: str, reaches: bool, tmp_path: Path
+) -> None:
+    """Before any answer, a check sends the TRIP as a page draws it from the FILE alone.
+
+    A page is sent that TRIP where it is one it can draw and says that it has no report, and
+    none where it is not. The answer and the report follow all the same.
+    """
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    read_it = f'{{"kind": "read"{trip}}}'
+    report = (
+        '{"kind": "report", "answer": "FEASIBLE", "json": {"answer": "FEASIBLE"}, '
+        '"text": "FEASIBLE: this trip works.", "seconds": 1}'
+    )
+    does = f"echo '{read_it}'\necho '{report}'"
+    with serving(path, python=stand_in(tmp_path, does)) as view:
+        sent = Sent(view).until("report", within=20)
+    assert kinds(sent) == ["file", "read", "report"]
+    expected = json.loads(EMPTY.replace("true", "null")) if reaches else None
+    assert sent[1] == {"kind": "read", "revision": 1, "trip": expected}
+    assert sent[-1]["text"] == "FEASIBLE: this trip works."
+
+
+def test_what_a_check_read_holds_nothing_but_its_trip(tmp_path: Path) -> None:
+    """An event with one thing more is no event, and the check that printed it has stopped."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    does = """echo '{"kind": "read", "trip": null, "answer": "FEASIBLE"}'"""
+    with serving(path, python=stand_in(tmp_path, does)) as view:
+        sent = Sent(view).until("stopped", within=20)
+    assert kinds(sent) == ["file", "stopped"]
+
+
 def test_a_fault_in_what_makes_the_drawing_costs_the_calendar_and_not_the_report(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -469,13 +533,14 @@ def test_a_fault_in_what_makes_the_drawing_costs_the_calendar_and_not_the_report
         raise RuntimeError("a fault in the drawing")
 
     monkeypatch.setattr("agloe.view.trip.shown", fails)
-    file, answer, report = sent_for((STORY / "works.json").read_bytes())
-    assert kinds([file, answer, report]) == ["file", "answer", "report"]
+    file, first, answer, report = sent_for((STORY / "works.json").read_bytes())
+    assert kinds([file, first, answer, report]) == ["file", "read", "answer", "report"]
     assert report["text"] == (STORY / "works.expected.txt").read_text()
     assert report["json"] == json.loads((STORY / "works.expected.json").read_text())
-    assert report["trip"] is None
+    assert (first["trip"], report["trip"]) == (None, None)
     # The page shows the answer and the report, and has no TRIP for the calendar.
-    (said,) = page_says([[file, answer, report]])
+    (said,) = page_says([[file, first, answer, report]])
+    assert said[2]["calendar"] is None
     assert said[-1]["line"] == "FEASIBLE: this trip works."
     assert said[-1]["calendar"] == {"trip": None, "report": report["json"]}
 
@@ -512,7 +577,7 @@ def test_a_file_with_a_name_that_is_no_text_is_checked_like_any_other(tmp_path: 
         pytest.skip("this file system takes no such name")
     with serving(path) as view:
         sent = Sent(view).until("report")
-    assert kinds(sent) == ["file", "answer", "report"]
+    assert kinds(sent) == ["file", "read", "answer", "report"]
     assert sent[0]["name"] == path.name
 
 
@@ -644,7 +709,7 @@ def test_the_view_serves_the_answer_and_the_report_without_what_they_do_not_need
         assert asked(view, "/state.js")[0] == 200
         for name in optional:
             assert asked(view, f"/{name}")[0] == 404
-        assert kinds(Sent(view).until("report")) == ["file", "answer", "report"]
+        assert kinds(Sent(view).until("report")) == ["file", "read", "answer", "report"]
     # Without a file that the answer and the report need, there is no view.
     (tmp_path / "static" / "state.js").unlink()
     with pytest.raises(OSError, match=r"state\.js"):
@@ -711,7 +776,7 @@ def test_the_command_serves_the_view_until_it_is_stopped(
     try:
         with urllib.request.urlopen(address, timeout=20) as reply:
             assert reply.status == 200
-        assert kinds(Sent(address).until("report")) == ["file", "answer", "report"]
+        assert kinds(Sent(address).until("report")) == ["file", "read", "answer", "report"]
         started.send_signal(stop)
         assert started.wait(timeout=20) == 0
     finally:
@@ -876,8 +941,8 @@ def test_the_page_says_what_the_report_says() -> None:
     series = [sent_for(path.read_bytes()) for path in FILES]
     for path, sent, said in zip(FILES, series, page_says(series), strict=True):
         name = f"{path.parent.name}/{path.stem}"
-        assert kinds(sent) == ["file", "answer", "report"], name
-        at_first, on_file, on_answer, on_report = said
+        assert kinds(sent) == ["file", "read", "answer", "report"], name
+        at_first, on_file, on_read, on_answer, on_report = said
         assert at_first["mark"] == "waiting", name
         expected = json.loads(beside(path, ".expected.json").read_text())
         words = beside(path, ".expected.txt").read_text()
@@ -886,15 +951,22 @@ def test_the_page_says_what_the_report_says() -> None:
         assert not any(answer in on_file["line"] for answer in ANSWERS), name
         assert on_file["report"] is None, name
         assert on_file["calendar"] is None, name
+        # The view has read the FILE: the page draws it, with no report, and still no answer.
+        ahead = {"trip": sent[1]["trip"], "report": None}
+        assert sent[1]["trip"]["itinerary"] is None, name
+        assert (on_read["mark"], on_read["line"]) == (on_file["mark"], on_file["line"]), name
+        assert (on_read["calendar"], on_read["ahead"], on_read["report"]) == (ahead, True, None), (
+            name
+        )
         # The answer comes ahead of the report, and the page says that the report is on its way.
         assert on_answer["mark"] == expected["answer"].lower(), name
         assert on_answer["line"].startswith(expected["answer"]), name
         assert on_answer["report"] is None, name
-        assert on_answer["calendar"] is None, name
+        assert (on_answer["calendar"], on_answer["ahead"]) == (ahead, True), name
         assert on_report["mark"] == kind_of(expected), name
         assert on_report["line"] == words.split("\n")[0], name
         assert on_report["report"] == words, name
-        assert on_report["old"] is False, name
+        assert (on_report["old"], on_report["ahead"]) == (False, False), name
         # The calendar is of the TRIP that came with the report.
         assert on_report["calendar"] == {"trip": sent[-1]["trip"], "report": expected}, name
         assert sent[-1]["trip"]["itinerary"] is (expected["answer"] == "FEASIBLE"), name
@@ -911,28 +983,37 @@ def test_the_page_marks_a_report_on_the_file_as_it_was() -> None:
     last = sent_for((STORY / "works.json").read_bytes(), 4)
     (said,) = page_says([[*first, *second, *refused, *last]])
     words = (STORY / "works.expected.txt").read_text()
-    changed, answered, reported = said[4:7]
+    changed, read_again, answered, reported = said[5:9]
     # The FILE changed: the report on the page is on the FILE as it was, and the page says so.
     assert changed["mark"] == "checking"
     assert not any(answer in changed["line"] for answer in ANSWERS)
-    assert (changed["report"], changed["old"]) == (words, True)
-    assert answered["line"].startswith("INFEASIBLE")
-    assert (answered["report"], answered["old"]) == (words, True)
-    # The calendar on the page is the one of that report, and it is marked with it.
+    assert (changed["report"], changed["old"], changed["ahead"]) == (words, True, False)
+    # Until the view has read the FILE as it is now, the page draws the TRIP of that report,
+    # and it is marked with it.
     kept = {"trip": first[-1]["trip"], "report": first[-1]["json"]}
-    assert changed["calendar"] == answered["calendar"] == kept
+    assert changed["calendar"] == kept
     # The page says so of all that it still shows of that FILE, and names no part of it.
     assert changed["note"].endswith("What the page shows below is on the FILE as it was before.")
+    # The view has read the FILE as it is now: the page draws that FILE, with no report. The
+    # report in words is still the one on the FILE as it was, and the page says which is which.
+    ahead = {"trip": second[1]["trip"], "report": None}
+    assert (read_again["calendar"], read_again["ahead"]) == (ahead, True)
+    assert (read_again["report"], read_again["old"]) == (words, True)
+    assert read_again["note"].endswith("The report below is on the FILE as it was before.")
+    assert answered["line"].startswith("INFEASIBLE")
+    assert (answered["report"], answered["old"]) == (words, True)
+    assert (answered["calendar"], answered["ahead"]) == (ahead, True)
     assert reported["line"] == "INFEASIBLE: this trip cannot work."
-    assert reported["old"] is False
+    assert (reported["old"], reported["ahead"]) == (False, False)
     assert reported["calendar"] == {"trip": second[-1]["trip"], "report": second[-1]["json"]}
     assert reported["calendar"] != changed["calendar"]
     # A FILE that breaks the format has no report: the page shows the problems, and no answer.
-    broken = said[8]
+    # The view could not read it, so the page still draws the TRIP of the last report.
+    broken = said[10]
     assert broken["mark"] == "refused"
     assert broken["problems"] == ["/facts/0: fits no known shape"]
     assert not any(answer in broken["line"] for answer in ANSWERS)
-    assert broken["old"] is True
+    assert (broken["old"], broken["ahead"]) == (True, False)
     assert broken["calendar"] == reported["calendar"]
     assert said[-1]["line"] == "FEASIBLE: this trip works."
     assert said[-1]["problems"] is None
@@ -940,28 +1021,34 @@ def test_the_page_marks_a_report_on_the_file_as_it_was() -> None:
 
 def test_the_page_takes_no_answer_for_another_state_of_the_file() -> None:
     """An event that names another revision than the page was last told of is passed over."""
-    file, answer, report = sent_for((STORY / "cannot-work.json").read_bytes(), 1)
+    file, first, answer, report = sent_for((STORY / "cannot-work.json").read_bytes(), 1)
     newer: dict[str, Any] = {"kind": "file", "name": "trip.json", "revision": 2, "view": "one"}
-    (said,) = page_says([[file, newer, answer, report, {"kind": "stopped", "revision": 1}]])
+    late = [first, answer, report, {"kind": "stopped", "revision": 1}]
+    (said,) = page_says([[file, newer, *late]])
     for after_it in said[2:]:
         assert after_it["mark"] == "checking"
         assert after_it["report"] is None
+        # The page draws nothing of the FILE as it was either.
+        assert after_it["calendar"] is None
         assert not any(word in after_it["line"] for word in ANSWERS)
 
 
 def test_the_page_says_when_a_check_has_stopped() -> None:
     """An answer that came before the check stopped was proved, so it stays on the page."""
-    file, answer, report = sent_for((STORY / "cannot-work.json").read_bytes(), 1)
+    file, first, answer, report = sent_for((STORY / "cannot-work.json").read_bytes(), 1)
     stopped = {"kind": "stopped", "revision": 1}
-    early, late = page_says([[file, stopped], [file, answer, stopped]])
+    early, late = page_says([[file, stopped], [file, first, answer, stopped]])
     assert early[-1]["mark"] == "stopped"
     assert not any(word in early[-1]["line"] for word in ANSWERS)
+    assert early[-1]["calendar"] is None
     assert late[-1]["mark"] == "stopped"
     assert late[-1]["line"].startswith("INFEASIBLE")
     assert late[-1]["report"] is None
+    # What the view read of the FILE stays on the page: the check stopped, and the FILE is there.
+    assert late[-1]["calendar"] == {"trip": first["trip"], "report": None}
     # The next state of the FILE starts afresh.
     again = sent_for((STORY / "cannot-work.json").read_bytes(), 2)
-    (said,) = page_says([[file, answer, stopped, *again]])
+    (said,) = page_says([[file, first, answer, stopped, *again]])
     assert said[-1]["line"] == report["text"].split("\n")[0]
 
 
@@ -996,7 +1083,10 @@ def test_the_page_keeps_the_answer_of_a_report_that_cannot_be_written() -> None:
         "decisions": [lock("fireworks", "alex")],
     }
     sent = sent_for(json.dumps(document).encode())
-    assert kinds(sent) == ["file", "answer", "unwritable"]
+    # The TRIP holds a time that cannot be written, so the view has none to send before the
+    # report either.
+    assert kinds(sent) == ["file", "read", "answer", "unwritable"]
+    assert sent[1]["trip"] is None
     (said,) = page_says([sent])
     assert said[-1]["mark"] == "feasible"
     assert said[-1]["line"].startswith("FEASIBLE")
@@ -1010,14 +1100,17 @@ def test_the_page_says_when_it_no_longer_hears_the_view() -> None:
     first = sent_for((STORY / "works.json").read_bytes(), 1)
     again = sent_for((STORY / "works.json").read_bytes(), 1)
     (said,) = page_says([[*first, {"kind": "lost"}, *again]])
-    lost = said[4]
+    lost = said[5]
     assert lost["mark"] == "lost"
     assert not any(word in lost["line"] for word in ANSWERS)
     assert lost["old"] is True
     assert lost["report"] == (STORY / "works.expected.txt").read_text()
+    # What the page draws stays too: the TRIP of that report, marked with it.
+    assert lost["calendar"] == {"trip": first[-1]["trip"], "report": first[-1]["json"]}
+    assert lost["ahead"] is False
     # The view speaks again: the page starts afresh on the FILE that the view tells it of.
-    assert said[5]["mark"] == "checking"
-    assert said[5]["old"] is True
+    assert said[6]["mark"] == "checking"
+    assert said[6]["old"] is True
     assert said[-1]["line"] == "FEASIBLE: this trip works."
     assert said[-1]["old"] is False
 
@@ -1030,9 +1123,9 @@ def test_the_page_keeps_no_report_from_another_view() -> None:
         {"kind": "refused", "problems": ["not readable as JSON"], "revision": 1},
     ]
     (said,) = page_says([[*first, {"kind": "lost"}, *other]])
-    assert said[4]["report"] == (STORY / "works.expected.txt").read_text()
-    assert said[4]["calendar"] == {"trip": first[-1]["trip"], "report": first[-1]["json"]}
-    for after_it in said[5:]:
+    assert said[5]["report"] == (STORY / "works.expected.txt").read_text()
+    assert said[5]["calendar"] == {"trip": first[-1]["trip"], "report": first[-1]["json"]}
+    for after_it in said[6:]:
         assert after_it["name"] == "other.json"
         assert after_it["report"] is None
         assert after_it["calendar"] is None

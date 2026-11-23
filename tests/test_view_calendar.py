@@ -69,6 +69,11 @@ ONLY_LOCKS = (
     "The report shows no ITINERARY. The calendar holds only the OPTIONs that a LOCK names, at"
     " the times the FILE states."
 )
+# Before the COMPILER has reported on the FILE.
+NO_REPORT = (
+    "The COMPILER has not reported on this FILE yet. The calendar holds only the OPTIONs that a"
+    " LOCK names, at the times the FILE states."
+)
 
 type Trip = dict[str, Any]
 type Calendar = dict[str, Any]
@@ -247,6 +252,21 @@ def test_the_calendar_of_the_flight_home() -> None:
     )
     assert flight["where"] == "O'Hare to home"
     assert laid["days"][0]["bounds"] == []
+
+
+def test_a_trip_with_no_report_has_a_calendar_of_what_is_locked_and_says_so() -> None:
+    """Before the COMPILER has reported, the calendar holds what the FILE alone gives it."""
+    file = read(STORY / "works.json")
+    sent = shown(file)
+    assert sent is not None
+    laid = calendar(cast("Trip", sent))
+    assert laid["says"] == NO_REPORT + CHICAGO
+    assert laid["itinerary"] is None
+    assert (laid["clash"], laid["warned"], laid["asked"]) == (False, False, False)
+    # The same steps, at the same places, as for a report that shows no ITINERARY.
+    with_none = calendar(sent_for(file, Report(Answer.INFEASIBLE)))
+    assert with_none["says"] == ONLY_LOCKS + CHICAGO
+    assert laid["days"] == with_none["days"]
 
 
 def test_a_trip_with_no_itinerary_has_a_calendar_of_what_is_locked() -> None:
@@ -1186,6 +1206,14 @@ def test_a_calendar_with_nothing_on_it_says_why() -> None:
         "The report shows no ITINERARY, and the FILE gives no time to the OPTIONs that a LOCK"
         " names. So the calendar is empty."
     )
+    # Before the COMPILER has reported, each says that instead.
+    early = calendars([cast("Trip", shown(nothing_locked)), cast("Trip", shown(no_time))])
+    assert [each["says"] for each in early] == [
+        "The COMPILER has not reported on this FILE yet, and no LOCK names an OPTION. So the"
+        " calendar is empty.",
+        "The COMPILER has not reported on this FILE yet, and the FILE gives no time to the"
+        " OPTIONs that a LOCK names. So the calendar is empty.",
+    ]
     assert untimed["untimed"] == [
         {
             "name": "fireworks",

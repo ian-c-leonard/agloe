@@ -25,6 +25,7 @@ import pytest
 from playwright.sync_api import Browser, Page, Route, sync_playwright
 from playwright.sync_api import Error as BrowserError
 
+from agloe.view.check import checked
 from tests.stories import (
     EXAMPLES,
     budget,
@@ -37,7 +38,7 @@ from tests.stories import (
     takes,
     way_between,
 )
-from tests.test_view import serving
+from tests.test_view import serving, stand_in
 
 CHICAGO = "[America/Chicago]"
 # The page shows the report on the FILE, and has said what its calendar holds.
@@ -198,15 +199,19 @@ def opened(
     without: tuple[str, ...] = (),
     held: tuple[str, list[Route]] | None = None,
     faulty: tuple[str, str, list[str]] | None = None,
+    python: str = sys.executable,
+    once: str = ANSWERED,
 ) -> Generator[Page]:
     """The page of the view of one FILE, once it shows the report on it.
 
     ``without`` names files of the page that the browser cannot load. ``held`` names one that
     the browser gets only when the test lets it: the test finds its request in the list.
     ``faulty`` names one that the browser gets with other code in it, and the list that takes
-    the faults of the page, which are then no failure of the test.
+    the faults of the page, which are then no failure of the test. ``python`` is the program
+    that checks the FILE, where a test stands another one in, and ``once`` says what the page
+    shows when such a test wants it.
     """
-    with serving(path) as view:
+    with serving(path, python=python) as view:
         context = chromium.new_context(viewport={"width": wide, "height": tall})
         try:
             page = context.new_page()
@@ -228,7 +233,7 @@ def opened(
                 requests = held[1]
                 page.route(f"**/{held[0]}", lambda route: requests.append(route))
             page.goto(view.address)
-            page.wait_for_function(ANSWERED, timeout=60_000)
+            page.wait_for_function(once, timeout=60_000)
             yield page
             assert faulty is not None or problems == []
         finally:
@@ -265,6 +270,87 @@ def starts(person: str, place: str) -> Document:
 def ids_of(rows: list[str]) -> list[str]:
     """The ids that these lines of a report start with."""
     return [row.strip().split(":")[0] for row in rows]
+
+
+def test_the_page_draws_the_file_before_the_report_comes(chromium: Browser, tmp_path: Path) -> None:
+    """A report can take minutes. What the FILE holds is on the page once the view has read it."""
+    path = tmp_path / "trip.json"
+    path.write_bytes((EXAMPLES / "ending-in-denver" / "works.json").read_bytes())
+    first, answer, report = (json.dumps(event) for event in checked(path.read_bytes()))
+    # In the place of the check: it says what it read and the answer at once, and gives the
+    # report when the test lets it.
+    (tmp_path / "python.first").write_text(f"{first}\n{answer}\n")
+    (tmp_path / "python.report").write_text(f"{report}\n")
+    go = tmp_path / "python.go"
+    waits = 'cat "$0.first"\nwhile [ ! -e "$0.go" ]; do sleep 0.05; done\ncat "$0.report"'
+    # The page shows the answer, and has said what its calendar holds.
+    answered = """() => {
+      const said = (id) => document.getElementById(id).textContent;
+      return said("line").startsWith("FEASIBLE") && said("calendar-says") !== "";
+    }"""
+    with opened(chromium, path, python=stand_in(tmp_path, waits), once=answered) as page:
+        # The answer is on the page, and the report is not.
+        assert (page.text_content("#line") or "").endswith("The report is on its way.")
+        assert page.locator("#report-part").is_hidden()
+        # The page draws the FILE all the same.
+        page.locator("#persons .item").first.wait_for()
+        page.locator("#options .item").first.wait_for()
+        assert page.locator("#persons .item-name").all_text_contents() == ["Alex", "Sam"]
+        assert page.locator("#places .card-name").all_text_contents() == [
+            "the hotel",
+            "the Art Institute",
+            "O'Hare",
+            "Denver",
+        ]
+        assert page.locator("#options .item").count() == 3
+        assert page.locator("#wants .card").count() == 1
+        assert page.locator("#ways .item").count() == 1
+        # The calendar holds what a LOCK names, and says that there is no report yet. Nothing
+        # on the page speaks of a plan, and nothing is marked.
+        page.locator("#calendar .mark").first.wait_for()
+        assert (page.text_content("#calendar-says") or "").startswith(
+            "The COMPILER has not reported on this FILE yet."
+        )
+        assert page.locator("#calendar .mark").count() == 1
+        assert "In the plan" not in (page.text_content("#drawings") or "")
+        marked = "#drawings :is(.clash, .asked, .warned):not(.key-box)"
+        assert page.locator(marked).count() == 0
+        assert page.locator(".old").count() == 0
+        # Pointing ties the drawings of one step, with no line of a report to tie them to.
+        page.locator("#options .item", has_text="Museum visit").hover()
+        found = lit(page, options=["Museum visit"], marks=["Museum visit"])
+        assert found["rows"] == []
+        # The report comes: the page draws the plan, and ties the report to it.
+        go.write_text("")
+        page.locator("#report .row").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#calendar .mark').length > 1")
+        assert (page.text_content("#calendar-says") or "").startswith(
+            "The ITINERARY of the report."
+        )
+        assert "In the plan: Alex and Sam take part." in (page.text_content("#options") or "")
+        assert page.locator(".old").count() == 0
+        # The FILE changes. As soon as the view has read it, the page draws the FILE as it is
+        # now, with no report. The report in words is still on the FILE as it was: it is
+        # marked so, the page says which is which, and its lines are tied to nothing.
+        go.unlink()
+        changed = json.loads(path.read_text())
+        changed["persons"][0]["name"] = "Alexandra"
+        (tmp_path / "python.first").write_text(
+            "".join(
+                f"{json.dumps(event)}\n"
+                for event in list(checked(json.dumps(changed).encode()))[:2]
+            )
+        )
+        path.write_text(json.dumps(changed))
+        page.locator("#persons .item-name", has_text="Alexandra").wait_for()
+        assert (page.text_content("#note") or "").endswith(
+            "The report below is on the FILE as it was before."
+        )
+        assert page.locator("#report-part.old").count() == 1
+        assert page.locator("#drawings .old").count() == 0
+        assert page.locator("#report .row").count() == 0
+        assert "Alex and Sam" in (page.text_content("#report") or "")
+        assert "In the plan" not in (page.text_content("#drawings") or "")
 
 
 def test_the_report_on_the_page_is_the_report_in_words(chromium: Browser) -> None:
