@@ -189,15 +189,17 @@ export function lines(text, report, trip) {
   }
   // Under a step of the plan, after what the report warns of there, a line says who takes
   // an OBJECT at that step: one line for each OBJECT that the report as JSON has somebody take
-  // at that OPTION, in the FILE's order of OBJECTs. Each is about the step and about the
-  // OBJECT. A line under a step is set in by four spaces, whatever the name it starts with.
+  // at that OPTION, in the FILE's order of OBJECTs. After those comes one line for each
+  // OBJECT that is carried in that OPTION, in the same order. Each is about the step and about
+  // the OBJECT. A line under a step is set in by four spaces, whatever the name it starts with.
   const planned = trip !== null && trip.itinerary;
   const stepOf = (option) => (planned ? trip.steps.findIndex((each) => each.option === option) : -1);
   const placeOf = new Map((trip === null ? [] : trip.objects).map((each, n) => [each.id, n]));
-  for (const { option, objects } of takenIn(report)) {
+  for (const { option, objects, carried } of takenIn(report)) {
     const at = found.findIndex((line) => line.step !== null && line.step === stepOf(option) && !line.warns && line.meets === null);
-    if (at < 0 || !objects.every((id) => placeOf.has(id))) continue;
-    const inOrder = [...objects].sort((one, other) => placeOf.get(one) - placeOf.get(other));
+    if (at < 0 || ![...objects, ...carried].every((id) => placeOf.has(id))) continue;
+    const byPlace = (ids) => [...ids].sort((one, other) => placeOf.get(one) - placeOf.get(other));
+    const inOrder = [...byPlace(objects), ...byPlace(carried)];
     let next = at + 1;
     while (next < found.length && found[next].warns) next += 1;
     const said = [];

@@ -1,0 +1,12 @@
+INFEASIBLE: this trip cannot work.
+
+These FACTs and DECISIONs rule out every plan by themselves. Take any one away and they no longer do. A FACT that is taken away leaves what it said unknown. Times are in America/Chicago.
+  flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
+  flight-length: Flight home takes 2 h 30 min
+  collection-time: Jo collects the bags starts at 7:00 pm on Saturday 15 May 2027
+  where-the-bags-start: Alex has the bags when the TRIP starts
+  bag-drop-keeps-the-bags: Bag drop keeps the bags
+  collection-needs-the-bags: Jo collects the bags requires the bags
+  everything-that-moves-the-bags: the FILE states every OPTION that hands over, keeps or carries the bags: Bag drop and Flight home
+  lock-flight: Alex and Sam take part in Flight home
+  lock-collection: Jo takes part in Jo collects the bags

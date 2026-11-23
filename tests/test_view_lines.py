@@ -172,11 +172,13 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
         else:
             assert pots == [], name
         # Each OBJECT of a plan has its line, each OPTION that requires it or refuses it has
-        # one under it, and each OBJECT that somebody takes at a step has a line under that step.
+        # one under it, and each OBJECT that somebody takes at a step has a line under that
+        # step. So has each OBJECT that is carried in a step.
         about = [thing for line in found for thing in line["about"] if thing.startswith("object:")]
         expected: list[str] = []
         for step in said.get("itinerary", []):
             expected += [f"object:{thing}" for thing in step.get("hands_over", {})]
+            expected += [f"object:{thing}" for thing in step.get("carries", [])]
         for thing in said.get("objects", []):
             checks = len(thing["required_by"]) + len(thing["refused_by"])
             expected += [f"object:{thing['object']}"] * (1 + checks)

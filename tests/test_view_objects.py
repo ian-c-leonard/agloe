@@ -24,16 +24,16 @@ FILES = sorted(
 )
 SAYS = (
     "The OBJECTs of the FILE, each with where it is when the TRIP starts, the OPTIONs that the"
-    " FILE says require it or refuse it, and those that it says hand it over or keep it."
+    " FILE says require it or refuse it, and those that it says hand it over, keep it or carry it."
 )
 # Where a card gives a time of the plan.
 CLOCKS = " Times are on the clocks of America/Chicago."
 RED = " A red edge marks what the report names among what rules out every plan."
 YELLOW = " A yellow edge marks what the report names in what the FILE does not say."
 ALL_REQUIRE = "The FILE states every one of its OPTIONs that requires it or refuses it."
-ALL_MOVE = "The FILE states every OPTION that hands it over or keeps it."
+ALL_MOVE = "The FILE states every OPTION that hands it over, keeps it or carries it."
 NONE = ", and it names none."
-MAY_MOVE = "Another OPTION may hand it over or keep it: the FILE does not say that these are all."
+MAY_MOVE = "Another OPTION may hand it over, keep it or carry it: the FILE does not say that these are all."
 UNSAID = "The FILE does not say where it is when the TRIP starts."
 
 type Trip = dict[str, Any]
@@ -696,7 +696,7 @@ def test_an_object_says_whether_its_options_are_all_there_are() -> None:
     ) == [
         "The FILE states every one of its OPTIONs that requires it or refuses it, and it names"
         " none.",
-        "The FILE states every OPTION that hands it over or keeps it, and it names none.",
+        ALL_MOVE[:-1] + NONE,
     ]
     # An OPTION that refuses the OBJECT is one that the FILE names.
     assert whole(requires=[], refuses=[bars]) == [ALL_REQUIRE, ALL_MOVE]
@@ -810,13 +810,16 @@ def test_every_example_shows_its_objects_in_the_words_of_the_report() -> None:
                     said = option["says"].replace(" it", f" {called}", 1)
                     assert f"  {record}: {option['name']} {said}" in words, name
             for option in thing["transfers"]:
-                (record,) = option["records"]
+                # An OPTION that also refuses the OBJECT is tied to that FACT too, and says
+                # after a comma what the two come to.
+                record = option["records"][0]
                 if f"  {record}: " in words:
                     moves += 1
-                    if option["says"] == "it can be handed over here":
+                    does = option["says"].split(", but ")[0]
+                    if does == "it can be handed over here":
                         said = f"{called} can be handed over in {option['name']}"
                     else:
-                        said = f"{option['name']} {option['says'].replace(' it', f' {called}', 1)}"
+                        said = f"{option['name']} {does.replace(' it', f' {called}', 1)}"
                     assert f"  {record}: {said}" in words, name
     assert min(starts, needs, moves, placed) > 3
     assert bars > 1

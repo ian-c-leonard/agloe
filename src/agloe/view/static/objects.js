@@ -4,8 +4,8 @@
 // The view sends the OBJECTs with each report: where each is when the TRIP starts, each OPTION
 // of which a FACT says whether it requires the OBJECT, each OPTION of which a FACT says
 // whether it refuses the OBJECT, each OPTION of which a FACT says that it hands the OBJECT
-// over, keeps it or leaves it alone, and the FACTs that the FILE states every OPTION of each
-// kind. This puts them in words, as the report words them. Beside each
+// over, keeps it, carries it or leaves it alone, and the FACTs that the FILE states every
+// OPTION of each kind. This puts them in words, as the report words them. Beside each
 // of those OPTIONs it says who takes part in it, as the other parts of the page do. It marks
 // what the report names: the records that rule out every plan, and the cases in which a trip
 // that depends on something works.
@@ -19,7 +19,8 @@
 // One thing the card says of two FACTs together, because each alone would mislead. Where one
 // FACT says that an OPTION hands an OBJECT over or keeps it, and another that the OPTION
 // refuses it, the rules have the OPTION refuse it first. So nobody can take the OBJECT there,
-// and nobody who has it can take part. That is what the two FACTs mean in every TRIP.
+// and nobody who has it can take part. That is what the two FACTs mean in every TRIP. An
+// OPTION that carries the OBJECT and refuses it still carries it, from no PERSON.
 
 import { atHandFor, carriedIn, either, listed, marksBy } from "./named.js";
 import { clock, clocksOf } from "./times.js";
@@ -30,28 +31,32 @@ const ABOUT_REQUIRING = new Set(["does not require"]);
 /** What a case of a report can need that is about whether an OPTION refuses an OBJECT. */
 const ABOUT_REFUSING = new Set(["does not refuse"]);
 /** What a case of a report can need that is about what an OPTION does with an OBJECT. */
-const ABOUT_MOVING = new Set(["hands over", "keeps", "does not keep"]);
+const ABOUT_MOVING = new Set(["hands over", "keeps", "does not keep", "carries"]);
 
 /**
  * How an OBJECT came to be where it is from the start of an OPTION, as the report words it:
- * give it the name of the OPTION and the name of the OBJECT.
+ * give it the name of the OPTION, the name of the OBJECT, and whether the plan says when the
+ * OPTION ends.
  */
 const HOW = new Map([
   ["handed over", (option) => `handed over in ${option}`],
   ["kept", (option) => `kept by ${option}`],
   ["kept if held", (option, thing) => `kept by ${option} if anybody there has ${thing}`],
   ["might be kept", (option, thing) => `the FILE does not say what ${option} does with ${thing}`],
+  ["carried", (option, thing, ends) => (ends ? "carried" : `carried, and nobody knows when ${option} ends`)],
 ]);
 
 /** What an OPTION does with an OBJECT, as the report words it. */
-const DOES = { hands_over: "it can be handed over here", keeps: "keeps it", nothing: "leaves it alone" };
+const DOES = { hands_over: "it can be handed over here", keeps: "keeps it", carries: "can carry it", nothing: "leaves it alone" };
 /**
  * What that comes to where another FACT says that the OPTION refuses the OBJECT. No PERSON has
- * the OBJECT while they take part in such an OPTION, so it moves the OBJECT for nobody.
+ * the OBJECT while they take part in such an OPTION. So it hands the OBJECT over to nobody and
+ * keeps it from nobody, and it carries the OBJECT only where it lies where the OPTION starts.
  */
 const REFUSED = {
   hands_over: `${DOES.hands_over}, but nobody can take it: this refuses it`,
   keeps: `${DOES.keeps}, but nobody who has it can take part: this refuses it`,
+  carries: `${DOES.carries}, but from no PERSON: this refuses it`,
 };
 
 /**
@@ -79,13 +84,14 @@ function checkedBy(thing, silent) {
 }
 
 /**
- * Whether the OPTIONs under an OBJECT are all that hand it over or keep it, as far as the FILE
- * says. Without a FACT that they are, another OPTION may, in the FILE or outside it.
+ * Whether the OPTIONs under an OBJECT are all that hand it over, keep it or carry it, as far as
+ * the FILE says. Without a FACT that they are, another OPTION may, in the FILE or outside it.
  */
 function movedBy(thing) {
   const some = thing.transfers.some((each) => each.does !== "nothing");
-  if (thing.transfers_complete === null) return "Another OPTION may hand it over or keep it: the FILE does not say that these are all.";
-  return some ? "The FILE states every OPTION that hands it over or keeps it." : "The FILE states every OPTION that hands it over or keeps it, and it names none.";
+  if (thing.transfers_complete === null) return "Another OPTION may hand it over, keep it or carry it: the FILE does not say that these are all.";
+  const all = "The FILE states every OPTION that hands it over, keeps it or carries it";
+  return some ? `${all}.` : `${all}, and it names none.`;
 }
 
 /**
@@ -127,14 +133,18 @@ export function objects(trip, report = null, stated = null) {
   // When each OPTION of the plan starts, and the first step of the plan: a time has its date
   // where it is not on the day that the plan starts.
   const startOf = new Map(trip.itinerary ? trip.steps.flatMap((step) => (step.option === null ? [] : [[step.option, step.start]])) : []);
+  // When each OPTION of the plan ends, and null where nobody knows.
+  const endOf = new Map(trip.itinerary ? trip.steps.flatMap((step) => (step.option === null ? [] : [[step.option, step.end]])) : []);
   const first = trip.itinerary && trip.steps.length ? trip.steps[0].start : null;
-  // Where an OBJECT is, or each place it might be: with Alex or at the Art Institute. Each
-  // name is as "or" joins it, as in the report. A place with no name is somewhere the FILE
-  // does not name, and an OBJECT that might be with any PERSON, at any PLACE or somewhere the
-  // FILE does not name is nobody knows where. Null where the TRIP has no such PERSON or PLACE.
+  // Where an OBJECT is, or each place it might be: with Alex, at the Art Institute or in the
+  // flight home. Each name is as "or" joins it, as in the report. A place with no name is
+  // somewhere the FILE does not name, and an OBJECT that might be with any PERSON, at any
+  // PLACE or somewhere the FILE does not name is nobody knows where. Null where the TRIP has
+  // no such PERSON, PLACE or OPTION.
   const whereIs = (where) => {
     const one = (each) => {
       if (typeof each.person === "string") return people.has(each.person) ? `with ${either(people.get(each.person))}` : null;
+      if (typeof each.option === "string") return named.has(each.option) ? `in ${either(named.get(each.option))}` : null;
       if (each.place === null) return "somewhere the FILE does not name";
       return places.has(each.place) ? `at ${either(places.get(each.place))}` : null;
     };
@@ -154,9 +164,13 @@ export function objects(trip, report = null, stated = null) {
     const stays = (said === null ? [] : said.stays).map((stay) => {
       const where = whereIs(stay.where);
       if (where === null || stay.since === null) return where === null ? null : `${where} when the TRIP starts`;
+      if (!startOf.has(stay.since) || !named.has(stay.since)) return null;
+      const ends = endOf.get(stay.since) ?? null;
+      // An OBJECT that was carried lies where the OPTION ends, from the time it ends.
+      if (stay.how === "arrived") return ends === null ? null : `${where} from ${clock(ends, first)} (where ${named.get(stay.since)} ends)`;
       const how = HOW.get(stay.how);
-      if (how === undefined || !startOf.has(stay.since) || !named.has(stay.since)) return null;
-      return `${where} from ${clock(startOf.get(stay.since), first)} (${how(named.get(stay.since), thing.name)})`;
+      if (how === undefined) return null;
+      return `${where} from ${clock(startOf.get(stay.since), first)} (${how(named.get(stay.since), thing.name, ends !== null)})`;
     });
     const usesOf = (list, check) => list.map((use) => ({ option: use.option, check, stated: use.stated, where: startOf.has(use.option) ? whereIs(use.where) : null }));
     const all = said === null ? [] : [...usesOf(said.uses, "requires"), ...usesOf(said.refusals, "refuses")];
@@ -189,12 +203,14 @@ export function objects(trip, report = null, stated = null) {
     };
     // What an OPTION does with the OBJECT. Where another FACT says that the OPTION refuses
     // the OBJECT, it hands it over to nobody and keeps it from nobody. The entry then says
-    // so, is drawn as one that does nothing with the OBJECT, and is tied to both FACTs.
+    // so, is drawn as one that does nothing with the OBJECT, and is tied to both FACTs. An
+    // OPTION that carries the OBJECT and refuses it still carries it: the entry says from
+    // whom it does not, and is tied to both FACTs too.
     const refusal = new Map(thing.refuses.flatMap((each) => (each.refused ? [[each.option, each.record]] : [])));
     const moved = (each) => {
       const barred = each.does !== "nothing" && refusal.has(each.option);
       if (!barred) return under(each, each.does !== "nothing", DOES[each.does], ABOUT_MOVING, null);
-      return under(each, false, REFUSED[each.does], ABOUT_MOVING, null, [each.record, refusal.get(each.option)]);
+      return under(each, each.does === "carries", REFUSED[each.does], ABOUT_MOVING, null, [each.record, refusal.get(each.option)]);
     };
     const asked = { requires: new Set(thing.requires.map((each) => each.option)), refuses: new Set(thing.refuses.map((each) => each.option)) };
     // An OPTION of the plan of which the report says that the FILE does not say whether it
@@ -241,7 +257,7 @@ export function objects(trip, report = null, stated = null) {
   const clash = all.some((each) => each.clash.length > 0);
   const asked = all.some((each) => each.cases.length > 0);
   const says =
-    "The OBJECTs of the FILE, each with where it is when the TRIP starts, the OPTIONs that the FILE says require it or refuse it, and those that it says hand it over or keep it." +
+    "The OBJECTs of the FILE, each with where it is when the TRIP starts, the OPTIONs that the FILE says require it or refuse it, and those that it says hand it over, keep it or carry it." +
     (timed ? clocksOf(trip.zone) : "") +
     (clash ? " A red edge marks what the report names among what rules out every plan." : "") +
     (asked ? " A yellow edge marks what the report names in what the FILE does not say." : "");

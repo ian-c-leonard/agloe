@@ -1,0 +1,164 @@
+{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "bag-drop",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T16:55:00-05:00[America/Chicago]",
+      "end": "2027-05-15T17:00:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "flight",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T17:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T19:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "flight-tickets",
+        "sam": "flight-tickets"
+      },
+      "carries": [
+        "bags"
+      ]
+    },
+    {
+      "option": "baggage-claim",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T19:30:00-05:00[America/Chicago]",
+      "end": "2027-05-15T19:40:00-05:00[America/Chicago]",
+      "hands_over": {
+        "bags": "alex"
+      }
+    },
+    {
+      "way": "cab-home",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T19:40:00-05:00[America/Chicago]",
+      "end": "2027-05-15T20:20:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "unpacking",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T20:20:00-05:00[America/Chicago]",
+      "end": "2027-05-15T20:50:00-05:00[America/Chicago]"
+    }
+  ],
+  "relies_on": [
+    "alex-start",
+    "sam-start",
+    "bag-drop-time",
+    "bag-drop-length",
+    "bag-drop-arrival",
+    "bag-drop-is-walk-up",
+    "flight-time",
+    "flight-length",
+    "boarding",
+    "flight-needs-a-ticket",
+    "flight-tickets",
+    "claim-time",
+    "claim-length",
+    "claim-arrival",
+    "claim-is-walk-up",
+    "unpacking-time",
+    "unpacking-length",
+    "unpacking-arrival",
+    "unpacking-is-free",
+    "cab-home-length",
+    "where-the-bags-start",
+    "bag-drop-keeps-the-bags",
+    "cabin-refuses-the-bags",
+    "hold-carries-the-bags",
+    "claim-returns-the-bags",
+    "unpacking-needs-the-bags",
+    "every-use-of-the-bags",
+    "everything-that-moves-the-bags",
+    "trip-start",
+    "lock-flight",
+    "lock-unpacking"
+  ],
+  "robust": true,
+  "objects": [
+    {
+      "object": "bags",
+      "path": [
+        {
+          "where": [
+            {
+              "person": "alex"
+            }
+          ],
+          "since": null,
+          "how": null
+        },
+        {
+          "where": [
+            {
+              "place": "ohare"
+            }
+          ],
+          "since": "bag-drop",
+          "how": "kept"
+        },
+        {
+          "where": [
+            {
+              "option": "flight"
+            }
+          ],
+          "since": "flight",
+          "how": "carried"
+        },
+        {
+          "where": [
+            {
+              "place": "denver"
+            }
+          ],
+          "since": "flight",
+          "how": "arrived"
+        },
+        {
+          "where": [
+            {
+              "person": "alex"
+            }
+          ],
+          "since": "baggage-claim",
+          "how": "handed over"
+        }
+      ],
+      "required_by": [
+        {
+          "option": "unpacking",
+          "stated": true,
+          "where": [
+            {
+              "person": "alex"
+            }
+          ]
+        }
+      ],
+      "refused_by": [
+        {
+          "option": "flight",
+          "stated": true,
+          "where": [
+            {
+              "place": "ohare"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

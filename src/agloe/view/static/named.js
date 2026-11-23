@@ -159,14 +159,20 @@ export function optionsOf(need) {
 }
 
 /**
- * The OBJECTs that somebody takes at each OPTION of a plan, as a report states it: for each
- * such OPTION its id and the ids of those OBJECTs, in the report's order. Only a report that
- * shows a plan holds any.
+ * The OBJECTs that somebody takes at each OPTION of a plan, and those that are carried in it,
+ * as a report states it: for each such OPTION its id, the ids of the OBJECTs that somebody
+ * takes there (`objects`) and the ids of those that are carried in it (`carried`), each in
+ * the report's order. Only a report that shows a plan holds any.
  */
 export function takenIn(report) {
   const steps = report !== null && typeof report === "object" && report.answer === "FEASIBLE" && Array.isArray(report.itinerary) ? report.itinerary : [];
   const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
-  return steps.flatMap((step) => (isRecord(step) && typeof step.option === "string" && isRecord(step.hands_over) ? [{ option: step.option, objects: Object.keys(step.hands_over) }] : []));
+  return steps.flatMap((step) => {
+    if (!isRecord(step) || typeof step.option !== "string") return [];
+    const objects = isRecord(step.hands_over) ? Object.keys(step.hands_over) : [];
+    const carried = Array.isArray(step.carries) && step.carries.every((id) => typeof id === "string") ? step.carries : [];
+    return objects.length || carried.length ? [{ option: step.option, objects, carried }] : [];
+  });
 }
 
 /**
@@ -197,9 +203,10 @@ export function objectsIn(report) {
  * its `stays` from the start of the TRIP on, and its `uses`, the OPTIONs of the plan that
  * require it or might. `refusals` holds the OPTIONs of the plan that refuse it or might, each
  * as a use is. A stay has `where` the OBJECT is, or each place it might be: each with
- * a `person` or at a `place`, and a `place` of null is somewhere the FILE does not name.
- * `since` is the OPTION from whose start it is there, and `how`
- * says what that OPTION did, and both are null from the start of the TRIP. A use has its
+ * a `person`, at a `place` or in an `option`, and a `place` of null is somewhere the FILE
+ * does not name. `since` is the OPTION from whose start it is there, and `how`
+ * says what that OPTION did, and both are null from the start of the TRIP. Where `how` is
+ * "arrived", the OBJECT was carried in that OPTION and is there from its end. A use has its
  * `option`, whether a FACT says that the OPTION requires the OBJECT (`stated`), and `where`
  * the OBJECT is just before the OPTION starts. Only a report that shows a plan holds any, and
  * a list that is not of that shape is none.
@@ -207,7 +214,8 @@ export function objectsIn(report) {
 export function carriedIn(report) {
   const stated = report !== null && typeof report === "object" && report.answer === "FEASIBLE" ? report.objects : null;
   const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
-  const isWhere = (list) => Array.isArray(list) && list.length > 0 && list.every((each) => isRecord(each) && (typeof each.person === "string") !== (typeof each.place === "string" || each.place === null));
+  const kinds = (each) => [typeof each.person === "string", typeof each.place === "string" || each.place === null, typeof each.option === "string"];
+  const isWhere = (list) => Array.isArray(list) && list.length > 0 && list.every((each) => isRecord(each) && kinds(each).filter(Boolean).length === 1);
   const isStay = (each) => isRecord(each) && isWhere(each.where) && (typeof each.since === "string" ? typeof each.how === "string" : each.since === null && each.how === null);
   const isUse = (each) => isRecord(each) && typeof each.option === "string" && typeof each.stated === "boolean" && isWhere(each.where);
   const areUses = (list) => Array.isArray(list) && list.every(isUse);

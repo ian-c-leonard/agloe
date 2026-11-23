@@ -1,0 +1,42 @@
+FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold.
+
+Saturday 15 May 2027 (times in America/Chicago)
+  4:55 pm to 5:00 pm: Bag drop, Alex
+  5:00 pm to 7:30 pm: Flight home, Alex and Sam
+    This carries the bags.
+  7:45 pm to 7:55 pm: Jo collects the bags, Jo
+    ! the bags would not be at hand when this starts.
+
+WARNING: no plan is sure to hold if the uncertain parts take their longest. Each line marked "!" says what would go wrong at the step above it.
+
+The plan relies on these FACTs and DECISIONs:
+  alex-start: Alex starts from O'Hare
+  sam-start: Sam starts from O'Hare
+  bag-drop-time: Bag drop can start at any time
+  bag-drop-length: Bag drop takes 5 min
+  bag-drop-arrival: nobody has to be at O'Hare before Bag drop starts
+  bag-drop-is-walk-up: nobody needs a right to take part in Bag drop
+  flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
+  flight-length: Flight home takes between 2 h 30 min and 3 h 15 min
+  boarding: people must be at O'Hare 45 min before Flight home starts
+  flight-needs-a-ticket: people need a right to take part in Flight home
+  flight-tickets: a BOOKING for Flight home covers Alex and Sam
+  jo-start: Jo starts from Denver
+  collection-time: Jo collects the bags starts at 7:45 pm on Saturday 15 May 2027
+  collection-length: Jo collects the bags takes 10 min
+  collection-arrival: nobody has to be at Denver before Jo collects the bags starts
+  collection-is-walk-up: nobody needs a right to take part in Jo collects the bags
+  where-the-bags-start: Alex has the bags when the TRIP starts
+  bag-drop-keeps-the-bags: Bag drop keeps the bags
+  cabin-refuses-the-bags: Flight home refuses the bags
+  hold-carries-the-bags: Flight home can carry the bags
+  collection-needs-the-bags: Jo collects the bags requires the bags
+  every-use-of-the-bags: of the OPTIONs in this FILE, only Jo collects the bags requires the bags, and only Flight home refuses the bags
+  trip-start: the TRIP starts at 3:30 pm on Saturday 15 May 2027
+  lock-flight: Alex and Sam take part in Flight home
+  lock-collection: Jo takes part in Jo collects the bags
+
+Where each OBJECT is:
+  the bags: with Alex when the TRIP starts; at O'Hare from 4:55 pm (kept by Bag drop); in Flight home from 5:00 pm (carried); at Denver from 7:30 pm (where Flight home ends)
+    Flight home refuses the bags. Just before it starts: at O'Hare.
+    Jo collects the bags requires the bags. Just before it starts: at Denver.

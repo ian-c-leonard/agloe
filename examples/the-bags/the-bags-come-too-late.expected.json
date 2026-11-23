@@ -1,0 +1,14 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "flight-time",
+    "flight-length",
+    "collection-time",
+    "where-the-bags-start",
+    "bag-drop-keeps-the-bags",
+    "collection-needs-the-bags",
+    "everything-that-moves-the-bags",
+    "lock-flight",
+    "lock-collection"
+  ]
+}

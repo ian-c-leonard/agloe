@@ -217,7 +217,7 @@ def test_a_fact_states_whether_an_option_refuses_an_object() -> None:
     assert load(a_document()).object_refusal("check-in", "passport") is None
 
 
-@pytest.mark.parametrize("does", ["hands_over", "keeps", "nothing"])
+@pytest.mark.parametrize("does", ["hands_over", "keeps", "carries", "nothing"])
 def test_a_fact_states_what_an_option_does_with_an_object(does: str) -> None:
     file = load(a_document(does_with("check-in", "passport", does)))
     assert file.does_with("check-in", "passport") == does
@@ -251,7 +251,7 @@ def test_a_complete_set_leaves_a_stated_requirement_and_a_stated_refusal_as_they
     assert file.refuses_object("check-in", "passport") is True
 
 
-def test_what_an_option_does_is_one_of_three_things_and_a_requirement_is_yes_or_no() -> None:
+def test_what_an_option_does_is_one_of_four_things_and_a_requirement_is_yes_or_no() -> None:
     assert "fits no known shape" in problems(a_document(does_with("check-in", "passport", "eats")))
     wrong = requires_object("check-in", "passport")
     wrong["requires"]["needed"] = "yes"
@@ -279,6 +279,7 @@ def test_a_requirement_with_a_part_missing_is_named_for_what_it_is_about() -> No
         requires_object("check-in", "keys"),
         refuses_object("check-in", "keys"),
         keeps("check-in", "keys"),
+        carries("check-in", "keys"),
         every_use("keys"),
         every_transfer("keys"),
     ],
@@ -311,6 +312,7 @@ def test_a_file_states_each_fact_about_an_object_once() -> None:
             {**refuses_object("check-in", "passport", False), "id": "again"},
         ],
         [keeps("check-in", "passport"), {**hands_over("check-in", "passport"), "id": "again"}],
+        [carries("check-in", "passport"), {**keeps("check-in", "passport"), "id": "again"}],
         [every_use("passport"), {**every_use("passport"), "id": "again"}],
         [every_transfer("passport"), {**every_transfer("passport"), "id": "again"}],
     ]
@@ -1013,15 +1015,21 @@ def two_appointments(*more: Document) -> File:
 def test_a_report_can_ask_that_an_option_keeps_an_object() -> None:
     """If the first appointment keeps the passport, Sam finds it on the desk. If it leaves it
     with Alex, Sam does not. One FACT about a listed OPTION is enough, and the report asks
-    for it before it asks for another transfer."""
+    for it before it asks for another transfer. A carry in the first appointment is enough
+    too: it takes the passport from Alex, and leaves it on the desk when it is over."""
     file = two_appointments()
     found = checked(file)
     assert found.answer is Answer.UNDETERMINED
-    assert asked(found) == [(Unknown("keeps", "nine", about="passport"),)]
-    assert report.as_json(file, found)["missing"] == [
-        [{"what": "keeps", "option": "nine", "object": "passport"}]
+    assert asked(found) == [
+        (Unknown("keeps", "nine", about="passport"),),
+        (Unknown("carries", "nine", about="passport"),),
     ]
-    assert "The trip works if nine keeps passport." in report.as_text(file, found)
+    assert report.as_json(file, found)["missing"] == [
+        [{"what": "keeps", "option": "nine", "object": "passport"}],
+        [{"what": "carries", "option": "nine", "object": "passport"}],
+    ]
+    words = report.as_text(file, found)
+    assert "  1. nine keeps passport.\n  2. nine can carry passport.\n" in words
     kept = replace(file, facts=(*file.facts, WithObject("kept", "nine", "passport", "keeps")))
     assert checked(kept).answer is Answer.FEASIBLE
 
@@ -1521,7 +1529,7 @@ def test_an_object_that_starts_in_the_wrong_place_makes_the_trip_infeasible() ->
     words = report.as_text(file, found)
     assert "  bags-start: the TRIP starts with bags at hotel" in words
     assert "  lunch-requires-bags: lunch requires bags" in words
-    whole = "the FILE states every OPTION that hands over or keeps bags: there is none"
+    whole = "the FILE states every OPTION that hands over, keeps or carries bags: there is none"
     assert f"  every-transfer-of-bags: {whole}" in words
 
 
@@ -1865,6 +1873,19 @@ def test_the_report_puts_each_fact_about_an_object_in_words() -> None:
     words = report.as_text(carried, checked(carried))
     assert "  passport-start: alex has passport when the TRIP starts" in words
     assert "  first-with-passport: first leaves passport alone" in words
+    loaded = locked_desk(
+        has_object("alex", "passport"),
+        carries("first", "passport"),
+        refuses_object("second", "passport"),
+        every_use("passport"),
+        every_transfer("passport"),
+        into=("first", "second"),
+    )
+    words = report.as_text(loaded, checked(loaded))
+    assert "  first-with-passport: first can carry passport" in words
+    assert "    This carries passport." in words
+    path = "with alex when the TRIP starts; in first from 9:00 am (carried); at desk from 9:30 am"
+    assert f"  passport: {path} (where first ends)" in words
     whole = locked_desk(
         has_object("alex", "passport"),
         keeps("first", "passport"),
@@ -1876,7 +1897,7 @@ def test_the_report_puts_each_fact_about_an_object_in_words() -> None:
     kept = replace(whole, facts=tuple(f for f in whole.facts if f.id != "second-with-passport"))
     words = report.as_text(kept, checked(kept))
     assert "INFEASIBLE" in words
-    said = "the FILE states every OPTION that hands over or keeps passport: first"
+    said = "the FILE states every OPTION that hands over, keeps or carries passport: first"
     assert f"  every-transfer-of-passport: {said}" in words
 
 
@@ -2445,10 +2466,11 @@ def test_two_options_for_one_want_are_explained_at_once(monkeypatch: pytest.Monk
 def test_a_cloakroom_and_a_gallery_are_explained_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
     """Alex brings four things and is LOCKed into the gallery at 10:00 am. A stop at the
     cloakroom at 9:00 am does not refuse them. Nobody said what the cloakroom does with
-    them, or whether the gallery refuses them. For each thing, either the cloakroom keeps
-    it or the gallery does not refuse it: sixteen cases. The search finds those four groups,
-    each with the three FACTs about what the cloakroom does and the one about the gallery,
-    and tries a few hundred sets where the sets of four FACTs are tens of thousands."""
+    them, or whether the gallery refuses them. For each thing, the cloakroom keeps it, or
+    the cloakroom can carry it, or the gallery does not refuse it: eighty-one cases. The
+    search finds those four groups, each with the four FACTs about what the cloakroom does
+    and the one about the gallery, and tries a few hundred sets where the sets of four
+    FACTs are tens of thousands."""
     things = ["daypack", "camera", "stroller", "umbrella"]
     facts = [*at("cloakroom", 9), *at("gallery", 10), *carried_by_alex(things)]
     for thing in things:
@@ -2459,15 +2481,16 @@ def test_a_cloakroom_and_a_gallery_are_explained_at_once(monkeypatch: pytest.Mon
     either = [
         (
             Unknown("keeps", "cloakroom", about=thing),
+            Unknown("carries", "cloakroom", about=thing),
             Unknown("does not refuse", "gallery", about=thing),
         )
         for thing in things
     ]
-    assert len(asked(found)) == 16
+    assert len(asked(found)) == 81
     assert {frozenset(named) for named in asked(found)} == {
         frozenset(chosen) for chosen in product(*either)
     }
-    assert tried <= 256
+    assert tried <= 625
 
 
 def test_each_choice_of_new_things_has_its_own_facts_that_no_set_can_do_without(
