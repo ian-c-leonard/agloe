@@ -15,6 +15,11 @@
 // the COMPILER to say: the report says it, the page ties
 // those lines to the OBJECT, and the card of the OBJECT says the same, worded as the report
 // words it, from what the report as JSON holds.
+//
+// One thing the card says of two FACTs together, because each alone would mislead. Where one
+// FACT says that an OPTION hands an OBJECT over or keeps it, and another that the OPTION
+// refuses it, the rules have the OPTION refuse it first. So nobody can take the OBJECT there,
+// and nobody who has it can take part. That is what the two FACTs mean in every TRIP.
 
 import { atHandFor, carriedIn, either, listed, marksBy } from "./named.js";
 import { clock, clocksOf } from "./times.js";
@@ -40,6 +45,14 @@ const HOW = new Map([
 
 /** What an OPTION does with an OBJECT, as the report words it. */
 const DOES = { hands_over: "it can be handed over here", keeps: "keeps it", nothing: "leaves it alone" };
+/**
+ * What that comes to where another FACT says that the OPTION refuses the OBJECT. No PERSON has
+ * the OBJECT while they take part in such an OPTION, so it moves the OBJECT for nobody.
+ */
+const REFUSED = {
+  hands_over: `${DOES.hands_over}, but nobody can take it: this refuses it`,
+  keeps: `${DOES.keeps}, but nobody who has it can take part: this refuses it`,
+};
 
 /**
  * Whether the OPTIONs under an OBJECT are all that require it, and all that refuse it, as far
@@ -85,7 +98,9 @@ function movedBy(thing) {
  * (`transfers`), and in `whole` whether each of those lists is all there is. Each
  * OPTION has its name, what the FILE says of it and the OBJECT (`says`), who takes part
  * (`takes`), and the `step` of the TRIP that it is, where the calendar holds it. `does` says
- * that the OPTION requires the OBJECT, refuses it, or hands it over or keeps it.
+ * that the OPTION requires the OBJECT, refuses it, or hands it over or keeps it. An OPTION
+ * that refuses the OBJECT hands it over to nobody and keeps it from nobody, whatever another
+ * FACT says, and its entry says so.
  *
  * Where the report shows a plan and says where each OBJECT is in it, the page says the same,
  * worded as the report words it, with each name as the page shows it. `plan` on an OBJECT
@@ -158,7 +173,7 @@ export function objects(trip, report = null, stated = null) {
     // OBJECT, whether it refuses it, or what it does with it. A case marks it where the case
     // is about that. An OPTION that requires the OBJECT is also marked where a case has the
     // OBJECT at hand for it, and one that refuses it where a case keeps the OBJECT out of it.
-    const under = (each, does, says, kinds, check) => {
+    const under = (each, does, says, kinds, check, records = [each.record]) => {
       const { step, takes } = who(each.option);
       const about = (need) => need.object === thing.id && ((need.option === each.option && kinds.has(need.what)) || (check !== null && atHandFor(need, check).includes(each.option)));
       return {
@@ -169,8 +184,17 @@ export function objects(trip, report = null, stated = null) {
         takes,
         step,
         plan: check !== null && does ? before(each.option, check) : null,
-        ...marked([each.record], about, "The report names this OPTION and this OBJECT in what the FILE does not say."),
+        ...marked(records, about, "The report names this OPTION and this OBJECT in what the FILE does not say."),
       };
+    };
+    // What an OPTION does with the OBJECT. Where another FACT says that the OPTION refuses
+    // the OBJECT, it hands it over to nobody and keeps it from nobody. The entry then says
+    // so, is drawn as one that does nothing with the OBJECT, and is tied to both FACTs.
+    const refusal = new Map(thing.refuses.flatMap((each) => (each.refused ? [[each.option, each.record]] : [])));
+    const moved = (each) => {
+      const barred = each.does !== "nothing" && refusal.has(each.option);
+      if (!barred) return under(each, each.does !== "nothing", DOES[each.does], ABOUT_MOVING, null);
+      return under(each, false, REFUSED[each.does], ABOUT_MOVING, null, [each.record, refusal.get(each.option)]);
     };
     const asked = { requires: new Set(thing.requires.map((each) => each.option)), refuses: new Set(thing.refuses.map((each) => each.option)) };
     // An OPTION of the plan of which the report says that the FILE does not say whether it
@@ -195,7 +219,7 @@ export function objects(trip, report = null, stated = null) {
       requires: thing.requires.map((each) => under(each, each.needed, each.needed ? "requires it" : "does not require it", ABOUT_REQUIRING, "requires")),
       refuses: thing.refuses.map((each) => under(each, each.refused, each.refused ? "refuses it" : "does not refuse it", ABOUT_REFUSING, "refuses")),
       might,
-      transfers: thing.transfers.map((each) => under(each, each.does !== "nothing", DOES[each.does], ABOUT_MOVING, null)),
+      transfers: thing.transfers.map(moved),
       whole: [
         ...checkedBy(thing, {
           requires: trip.options.some((option) => !asked.requires.has(option.id)),
