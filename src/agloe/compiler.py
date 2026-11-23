@@ -716,7 +716,8 @@ class _Search:
         carriers = [
             index
             for index in matter
-            if world.does.get((options[index].id, thing)) in ("carries", "any")
+            if world.does.get((options[index].id, thing))
+            in ("carries", "any", "might_take", "might_carry")
         ]
         picked = thing in world.starts_anywhere and thing not in world.starts
         if not picked and not carriers and not (moves and self.holders[thing]):
@@ -1179,15 +1180,24 @@ class _Search:
             aboard = spots.index(Where(option=option.id))
             for n in range(len(spots)):
                 _when(model.add(after[n] == (n == aboard)), loads)
+            if action == "carries" and (option.id, thing) in world.needs:
+                # An OPTION that requires the OBJECT and carries it takes it along whenever
+                # it happens: that carry is no choice.
+                model.add_implication(used, loads)
+        # An OPTION that requires the OBJECT, and of which nobody knows what it does with
+        # it, might take it along. Then the OBJECT might be in the OPTION afterwards.
+        might_take = action in ("might_take", "might_carry")
+        in_it = spots.index(Where(option=option.id)) if might_take else -1
         if refused:
             # Nobody who takes part has the OBJECT just before, or might. So the OPTION
             # takes it from no PERSON: it keeps the OBJECT from nobody, and nobody takes
-            # it there. It can carry the OBJECT from the PLACE where it starts.
+            # it there. It can carry the OBJECT from the PLACE where it starts, and it
+            # might take along what lies there.
             for n in persons:
                 model.add_bool_or([before[n].negated(), takes[n].negated()])
             left: list[cp_model.LiteralT] = [used] if loads is None else [used, loads.negated()]
             for n in range(len(spots)):
-                _when(model.add(after[n] == before[n]), *left)
+                _when(model.add(after[n] == before[here if n == in_it else n]), *left)
             return None, loads
         # What is left to choose: which PERSON has the OBJECT handed over, where the OPTION
         # hands it over, whether it is carried, where the OPTION carries it, and whether
@@ -1242,8 +1252,14 @@ class _Search:
                     same(n, *keeping)
                 if action == "any":
                     same(n, *leaving)
-            elif action == "might_keep" and n == here:
+            elif action in ("might_keep", "might_take") and n == here:
                 joined(n, *quiet)
+            elif n == in_it:
+                # It might be in the OPTION where it was at hand: it lay where the OPTION
+                # starts, or somebody who takes part had it.
+                _when(model.add_bool_or([after[n], before[here].negated()]), *quiet)
+                _when(model.add_bool_or([after[n], any_held.negated()]), *quiet)
+                _when(model.add(after[n] <= before[here] + any_held), *quiet)
             else:
                 same(n, *quiet)
         return given, loads

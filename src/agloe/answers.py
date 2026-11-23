@@ -1005,7 +1005,8 @@ def _asked_of_objects(
     """
     bound = no_better_than(file, some)
     kinds = {"does not require": "requires", "does not refuse": "refuses"}
-    kinds.update(dict.fromkeys(("keeps", "does not keep", "hands over", "carries"), "does"))
+    about_doing = ("keeps", "does not keep", "does not keep or carry", "hands over", "carries")
+    kinds.update(dict.fromkeys(about_doing, "does"))
     # Each thing that is unknown, with its unknown FACTs: an OPTION, an OBJECT and a kind.
     facts: dict[tuple[str, str, str], list[Unknown]] = {}
     for unknown in unknowns(file):
@@ -1017,12 +1018,15 @@ def _asked_of_objects(
         """Whether nothing works in the bound with each of these things at its worst."""
         needs = {(option, about) for option, about, kind in group if kind == "requires"}
         refuses = {(option, about) for option, about, kind in group if kind == "refuses"}
-        might_keep = {(option, about) for option, about, kind in group if kind == "does"}
+        open_to_do = {(option, about) for option, about, kind in group if kind == "does"}
+        required = bound.needs | needs
+        # At its worst, an OPTION that requires the OBJECT might keep it or take it along.
+        worst = {pair: "might_take" if pair in required else "might_keep" for pair in open_to_do}
         harder = replace(
             bound,
-            needs=bound.needs | needs,
+            needs=required,
             refuses=bound.refuses | refuses,
-            does={**bound.does, **dict.fromkeys(might_keep, "might_keep")},
+            does={**bound.does, **worst},
         )
         return not works(file, harder)
 
@@ -1075,7 +1079,7 @@ def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
     """
     no_length = ("start", "satisfies", "does not satisfy", "another option")
     no_length += ("requirement", "has", "does not require", "does not refuse", "keeps")
-    no_length += ("does not keep", "carries")
+    no_length += ("does not keep", "does not keep or carry", "carries")
     no_length += ("hands over", "starts with", "starts at", "another transfer")
     about_rights = ("needs no right", "another right", "price", "funding", "charged")
     if unknown.what in (*no_length, *about_rights):
