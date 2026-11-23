@@ -1,0 +1,10 @@
+INFEASIBLE: this trip cannot work.
+
+These FACTs and DECISIONs rule out every plan by themselves. Take any one away and they no longer do. A FACT that is taken away leaves what it said unknown. Times are in America/Chicago.
+  service-time: Luggage service starts at 4:00 pm on Saturday 15 May 2027
+  service-length: Luggage service takes 1 h 30 min
+  flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
+  where-the-bags-start: the TRIP starts with the bags at the hotel
+  flight-needs-the-bags: Flight home requires the bags
+  everything-that-moves-the-bags: the FILE states every OPTION that hands over, keeps or carries the bags: Luggage service
+  lock-flight: Alex and Sam take part in Flight home

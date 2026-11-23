@@ -40,7 +40,9 @@ export function whoIsIn(trip) {
     const takers = step < 0 ? [] : names(trip.steps[step].persons);
     // One LOCK can name several PERSONs, and several LOCKs one each: the words fit both.
     const lock = locked.length ? `${listed(locked)} ${locked.length === 1 ? "is" : "are each"} named by a LOCK.` : "No LOCK names it.";
-    const taking = takers.length ? `In the plan: ${listed(takers)} ${takers.length === 1 ? "takes" : "take"} part.` : "Not in the plan.";
+    // An OPTION of the plan can have nobody in it: a luggage service carries the bags.
+    const empty = step < 0 ? "Not in the plan." : "In the plan, with nobody of the TRIP in it.";
+    const taking = takers.length ? `In the plan: ${listed(takers)} ${takers.length === 1 ? "takes" : "take"} part.` : empty;
     const plan = trip.itinerary ? taking : null;
     return { step: step < 0 ? null : step, lock, plan, takes: plan ?? lock };
   };

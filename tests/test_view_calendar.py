@@ -47,7 +47,7 @@ FILES = sorted(
 )
 # In the report in words: the line that names a day, and a line that shows one step of the plan.
 DAY = re.compile(r"^(\w+ \d+ \w+ \d+) \(times in (.+)\)$")
-LINE = re.compile(r"^  \d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+, .+$")
+LINE = re.compile(r"^  \d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+$")
 DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 MONTHS = [
     "January",
@@ -196,6 +196,13 @@ def test_the_calendar_says_what_the_report_says() -> None:
     for path, calendar_of in zip(feasible, laid, strict=True):
         name = f"{path.parent.name}/{path.stem}"
         in_report: list[tuple[str, str]] = []
+        # A step with nobody of the TRIP in it has no column: the calendar names it in words.
+        plan = json.loads(beside(path, ".expected.json").read_text())["itinerary"]
+        options = {
+            option["id"]: option["name"] for option in json.loads(path.read_text())["options"]
+        }
+        nobody = [options[step["option"]] for step in plan if not step["persons"]]
+        alone: list[str] = []
         day = ""
         for line in beside(path, ".expected.txt").read_text().split("\n"):
             header = DAY.match(line)
@@ -203,7 +210,12 @@ def test_the_calendar_says_what_the_report_says() -> None:
                 day = header[1]
                 assert calendar_of["zone"] == header[2], name
             elif LINE.match(line):
-                in_report.append((day, line))
+                when, what = line.strip().split(": ", 1)
+                if what in nobody:
+                    alone.append(f"{what}, {when}")
+                else:
+                    in_report.append((day, line))
+        assert len(alone) == len(nobody), name
         in_calendar: list[tuple[str, str]] = []
         for each in calendar_of["days"]:
             seen: set[int] = set()
@@ -217,7 +229,11 @@ def test_the_calendar_says_what_the_report_says() -> None:
         assert calendar_of["untimed"] == [], name
         assert calendar_of["itinerary"] is True, name
         if in_report:
-            assert calendar_of["says"] == f"The ITINERARY of the report.{CHICAGO}", name
+            unseen = (
+                f" Nobody of the TRIP is in {alone[0]}, so no column shows it." if alone else ""
+            )
+            assert len(alone) < 2, name
+            assert calendar_of["says"] == f"The ITINERARY of the report.{CHICAGO}{unseen}", name
         for each in calendar_of["days"]:
             # In a plan nobody is in two places at once, so every mark has its column to itself.
             assert all((mark["lane"], mark["lanes"]) == (0, 1) for mark in each["marks"]), name

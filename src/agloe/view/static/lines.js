@@ -15,8 +15,11 @@
 
 import { boughtIn, cappedIn, casesIn, listed, notAtHandIn, objectsIn, requirementsIn, takenIn, toBuyIn } from "./named.js";
 
-/** A line that shows one step of a plan: "  2:00 pm to 3:00 pm: Museum visit, Alex and Sam". */
-const STEP = /^ {2}\d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+, .+$/;
+/**
+ * A line that shows one step of a plan: "  2:00 pm to 3:00 pm: Museum visit, Alex and Sam". A
+ * step with nobody of the TRIP in it names nobody: "  2:00 pm to 3:30 pm: Luggage service".
+ */
+const STEP = /^ {2}\d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+$/;
 /** A line under a step that says what the report warns of there. */
 const WARNING = /^ {4}! /;
 
