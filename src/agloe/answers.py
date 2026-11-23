@@ -1074,10 +1074,13 @@ def _asked_of_objects(
 
     Three things can be unknown about an OPTION and an OBJECT: whether the OPTION requires
     the OBJECT, whether it refuses it, and what it does with it. Each has its unknown FACTs:
-    that the OPTION does not require the OBJECT, that it does not refuse it, and the four
+    that the OPTION does not require the OBJECT, that it does not refuse it, and the six
     about what it does. A set that holds none of them leaves the thing at its worst: the
-    OPTION requires the OBJECT, or refuses it, or hands nothing over, carries nothing and
-    might keep it.
+    OPTION requires the OBJECT, or refuses it, or hands nothing over, carries nothing by
+    choice and might keep the OBJECT. Where it requires the OBJECT, it might take it along
+    as well. Where only what it does is at its worst here, and the bound has it not require
+    the OBJECT, it might keep it and no more. That asks less of a plan than any set that
+    leaves both unknown, so nothing that such a set allows is lost.
 
     Some of those things are tested together in the upper bound of ``no_better_than``,
     where every unknown FACT helps whoever needs it: there each of them is put at its
@@ -1113,11 +1116,12 @@ def _asked_of_objects(
         open_to_do = {(option, about) for option, about, kind in group if kind == "does"}
         required = bound.needs | needs
         # At its worst, an OPTION that requires the OBJECT might keep it or take it along.
+        # Whether anything works does not turn on how sure the requirement is: a plan can
+        # choose the carry that a sure requirement would make.
         worst = {pair: "might_take" if pair in required else "might_keep" for pair in open_to_do}
         harder = replace(
             bound,
             needs=required,
-            open_needs=bound.open_needs | needs,
             refuses=bound.refuses | refuses,
             does={**bound.does, **worst},
         )

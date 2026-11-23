@@ -3523,6 +3523,29 @@ def test_a_set_that_says_more_is_enough_where_the_set_that_says_less_is() -> Non
     assert len(kinds) > 3
 
 
+def test_how_sure_a_requirement_is_does_not_change_whether_anything_works() -> None:
+    """An OPTION carries an OBJECT and requires it. Where the requirement is sure, the OBJECT
+    goes along. Where nobody is sure of it, a plan can choose the carry, and a plan that
+    chooses none holds with the OBJECT gone, so it works where the requirement is sure. So
+    something works in the one world where something works in the other. Only the plan
+    shown differs: it lists the carry that the travelers choose."""
+    rng = Random(91)
+    compared = worked = listed = 0
+    for _ in range(700):
+        file = a_trip_with_objects(rng, leave_out=0.1, with_ways=0.5)
+        sure = a_world_with_objects(rng, file)
+        carried = {pair for pair in sure.needs if sure.does.get(pair) == "carries"}
+        if not carried:
+            continue
+        unsure = replace(sure, open_needs=frozenset(carried))
+        plans, others = itineraries(file, sure), itineraries(file, unsure)
+        assert bool(plans) == bool(others)
+        compared += 1
+        worked += bool(plans)
+        listed += any(carried_in(plan) != carried_in(other) for plan in plans for other in others)
+    assert compared > 60 and worked > 20 and listed > 5
+
+
 def chosen_in(plan: Itinerary, option: str, thing: str) -> Itinerary:
     """The plan with the OBJECT carried in the OPTION by choice, where the OPTION is in it."""
     for index, step in enumerate(plan):
@@ -7767,7 +7790,7 @@ def test_the_report_shows_an_object_that_goes_along_with_no_choice() -> None:
         " 9:00 am (where drive ends); in back from 11:00 am (carried); at hotel from 12:00 pm"
         " (where back ends)\n"
     ) in words
-    steps = report.as_json(file, found)["itinerary"]
+    steps = json.loads(json.dumps(report.as_json(file, found)))["itinerary"]
     assert [(each["option"], each["carries"]) for each in steps] == [
         ("drive", ["car"]),
         ("back", ["car"]),
@@ -7902,13 +7925,13 @@ def test_the_report_names_each_place_where_an_object_that_might_go_along_might_b
         " not say whether drive requires car); at hotel or at dunes from 9:00 am (where drive"
         " ends)\n"
     ) in words
-    path = report.as_json(file, found)["objects"][0]["path"]
-    assert path[1] == {
+    said = json.loads(json.dumps(report.as_json(file, found)))
+    assert said["objects"][0]["path"][1] == {
         "where": [{"place": "hotel"}, {"option": "drive"}],
         "since": "drive",
         "how": "might go along",
     }
-    assert all("carries" not in each for each in report.as_json(file, found)["itinerary"])
+    assert all("carries" not in each for each in said["itinerary"])
 
 
 def test_the_report_says_where_an_object_lies_when_an_option_of_unknown_length_ends() -> None:

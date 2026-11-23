@@ -1239,10 +1239,11 @@ class _Search:
             _when(model.add(after[n] == before[n]), *when)
 
         def joined(n: int, *when: cp_model.LiteralT) -> None:
-            """It is here afterwards where it was here, or somebody who takes part had it."""
-            _when(model.add_bool_or([after[n], before[n].negated()]), *when)
+            """It is in this spot afterwards where it was at hand, and nowhere else: it lay
+            where the OPTION starts, or somebody who takes part had it."""
+            _when(model.add_bool_or([after[n], before[here].negated()]), *when)
             _when(model.add_bool_or([after[n], any_held.negated()]), *when)
-            _when(model.add(after[n] <= before[n] + any_held), *when)
+            _when(model.add(after[n] <= before[here] + any_held), *when)
 
         for n, spot in enumerate(spots):
             if action in ("keeps", "any"):
@@ -1257,11 +1258,8 @@ class _Search:
             elif action in ("might_keep", "might_take") and n == here:
                 joined(n, *quiet)
             elif n == in_it:
-                # It might be in the OPTION where it was at hand: it lay where the OPTION
-                # starts, or somebody who takes part had it.
-                _when(model.add_bool_or([after[n], before[here].negated()]), *quiet)
-                _when(model.add_bool_or([after[n], any_held.negated()]), *quiet)
-                _when(model.add(after[n] <= before[here] + any_held), *quiet)
+                # It might be in the OPTION where it was at hand.
+                joined(n, *quiet)
             else:
                 same(n, *quiet)
         return given, loads
