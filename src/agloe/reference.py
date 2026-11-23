@@ -2119,16 +2119,17 @@ def _chain_in_order(
     ``in_order`` holds the OPTIONs that happen, by position in the FILE. ``orders`` holds
     what each PERSON does, in their own order. Each OBJECT that some OPTION of the plan
     requires or refuses takes the order of its own OPTIONs from ``in_order``, with the
-    hand-overs that the rules put first in that order. The result is None where
-    ``in_order`` does not keep each PERSON's own order, where an OBJECT has no choice of
-    hand-overs that works in that order, and where no OPTION of the plan requires or
-    refuses an OBJECT.
+    hand-overs that the rules put first in that order. The result is None where an OBJECT
+    has no choice of hand-overs that works in that order, and where no OPTION of the plan
+    requires or refuses an OBJECT.
+
+    ``in_order`` need not keep each PERSON's own order. Where it puts two OPTIONs of one
+    OBJECT the other way round than a PERSON does them, the result goes round in a circle
+    with what the PERSON does, and whoever asks for it leaves it out.
     """
     happening, asked = _asked_about(file, world, who)
     place = {index: number for number, index in enumerate(in_order)}
     if not asked or any(index not in place for index in happening):
-        return None
-    if any(place[before] > place[after] for order in orders for before, after in pairwise(order)):
         return None
     options = file.options
     people = {person.id: number for number, person in enumerate(file.persons)}
@@ -3416,9 +3417,11 @@ def _to_try_first(
 ) -> list[_Chain]:
     """What ``_chains`` would give for each of these orders of all the OPTIONs of a plan.
 
-    They are tried before any other, and every one of them is among the others too: an
-    order that does not keep each PERSON's own gives nothing. So they change how soon the
-    search is over, and not what it finds.
+    They are tried before any other, and every one of them that the search can time is
+    among the others too. One that goes round in a circle with what the PERSONs do is left
+    out there, as any order is. Any other keeps each PERSON's order of the OPTIONs that
+    matter to each OBJECT, and so does some order of all the OPTIONs, which gives the same.
+    So they change how soon the search is over, and not what it finds.
     """
     tried = (
         _chain_in_order(file, world, who, orders, each) for each in in_orders if each is not None

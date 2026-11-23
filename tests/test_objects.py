@@ -2143,35 +2143,57 @@ def test_what_the_file_lists_covers_a_check_only_whichever_way_an_open_refusal_t
     flight. Where it does not refuse it, it keeps it, and the flight is without it. Where
     nobody said, the report counts on neither: another transfer has to put the bag at hand
     for the flight."""
-    options = [moves("shuttle", "hotel", "airport"), moves("flight", "airport", "away")]
+    options = [
+        moves("shuttle", "hotel", "airport"),
+        stays("desk", "hotel"),
+        moves("flight", "airport", "away"),
+    ]
 
     def said(*refusal: Document) -> tuple[tuple[tuple[str, str, bool, bool], ...], str]:
         facts = [
             *at("shuttle", 9),
+            *at("desk", 9, 30),
             *at("flight", 10),
+            starts_from("sam", "hotel"),
             has_object("alex", "bag"),
             keeps("shuttle", "bag"),
             requires_object("shuttle", "bag", False),
+            requires_object("desk", "bag"),
             requires_object("flight", "bag"),
-            *lets_in("bag", "flight"),
+            *lets_in("bag", "desk", "flight"),
+            does_with("desk", "bag", "nothing"),
+            does_with("flight", "bag", "nothing"),
+            complete(None, None),
             *refusal,
         ]
-        locks = [lock("shuttle", "alex"), lock("flight", "alex")]
+        locks = [lock("shuttle", "alex"), lock("desk", "sam"), lock("flight", "alex")]
         places = ["hotel", "airport", "away"]
-        return might_work_if(trip(["alex"], places, options, facts, locks, objects=["bag"]), "bag")
+        file = trip(["alex", "sam"], places, options, facts, locks, objects=["bag"])
+        return might_work_if(file, "bag")
 
+    # Sam is at a desk in the hotel at 9:30 am that requires the bag too. It is at hand
+    # there only where the shuttle is sure to have kept it.
     assert said() == (
-        (("shuttle", "refuses", False, False), ("flight", "requires", True, False)),
-        "another transfer puts bag at hand for flight, and keeps bag out of shuttle if it"
-        " refuses bag.",
+        (
+            ("shuttle", "refuses", False, False),
+            ("desk", "requires", True, False),
+            ("flight", "requires", True, False),
+        ),
+        "another transfer puts bag at hand for desk and flight, and keeps bag out of shuttle"
+        " if it refuses bag.",
     )
     assert said(refuses_object("shuttle", "bag")) == (
-        (("shuttle", "refuses", True, False), ("flight", "requires", True, True)),
-        "another transfer leaves bag at hand for flight, and keeps bag out of shuttle.",
+        (
+            ("shuttle", "refuses", True, False),
+            ("desk", "requires", True, False),
+            ("flight", "requires", True, True),
+        ),
+        "another transfer puts bag at hand for desk, and leaves bag at hand for flight, and"
+        " keeps bag out of shuttle.",
     )
     assert said(refuses_object("shuttle", "bag", False)) == (
-        (("flight", "requires", True, False),),
-        "another transfer puts bag at hand for flight.",
+        (("desk", "requires", True, True), ("flight", "requires", True, False)),
+        "another transfer puts bag at hand for flight, and leaves bag at hand for desk.",
     )
 
 
@@ -2466,6 +2488,13 @@ def test_an_option_that_hands_an_object_over_and_refuses_it_gives_it_to_nobody()
         ("security", seconds(9)),
         ("deposit", seconds(10)),
     ]
+    # Where Alex needs the bag afterwards, nothing works: security is the only OPTION that
+    # hands it over, and Alex is in it, but nobody takes the bag there.
+    needed = a_desk_with(9, *at("deposit", 10), requires_object("deposit", "bag"))
+    needed = replace(needed, places=(*needed.places, replace(needed.places[0], id="gate")))
+    moved = replace(needed.options[2], origin="gate", destination="gate")
+    needed = replace(needed, options=(*needed.options[:2], moved))
+    assert checked(needed).answer is Answer.INFEASIBLE
 
 
 # Checked on FILEs made at random.
