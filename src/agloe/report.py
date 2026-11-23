@@ -426,6 +426,8 @@ def _broken_as_json(file: File, report: Report, found: Broken) -> dict[str, obje
     out["late"] = None if found.late is None else length_written(found.late)
     if found.object is not None:
         out["object"] = found.object
+    if found.sooner is not None:
+        out["sooner"] = length_written(found.sooner)
     if found.might:
         out["might"] = True
     return out
@@ -944,8 +946,9 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
     stops here. An OBJECT that would not be at hand has one mark at its step, whatever needs
     it there: the OPTION requires it, or it is handed over or carried there. The mark says
     how long after the start of the step the OBJECT would arrive, where a finding knows.
-    It says "might arrive" where the OBJECT might also be at hand: nobody knows whether an
-    OPTION took it along.
+    It says "might" where the OBJECT might also be at hand: nobody knows whether an OPTION
+    took it along. Where the OBJECT might be in one of several OPTIONs, it says between
+    which two times the OBJECT would arrive, or up to which time it might.
     """
     lines = _lines(report.itinerary)
     line_of = {
@@ -955,14 +958,14 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
         step.option: number for number, (step, _) in enumerate(lines) if step.option is not None
     }
     together: dict[tuple[int, Constraint, int | None], list[str]] = {}
-    # At each line, each OBJECT that would not be at hand, with how late it would arrive,
-    # and whether it only might.
-    not_at_hand: dict[int, dict[str, tuple[int | None, bool]]] = {}
+    # At each line, each OBJECT that would not be at hand: the finding says how late it
+    # would arrive, and whether it might be at hand after all.
+    not_at_hand: dict[int, dict[str, Broken]] = {}
     for found in report.at_worst:
         number = line_of[found.step] if found.step is not None else line_of_option[found.option]
         if found.constraint is Constraint.AT_HAND and found.object is not None:
             # Each finding about this OBJECT at this step has the same delay.
-            not_at_hand.setdefault(number, {})[found.object] = (found.late, found.might)
+            not_at_hand.setdefault(number, {})[found.object] = found
             continue
         together.setdefault((number, found.constraint, found.late), []).extend(found.persons)
     marks: dict[int, list[str]] = {}
@@ -996,13 +999,17 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
         for thing in file.objects:
             if thing.id not in missing:
                 continue
-            late, might = missing[thing.id]
+            late, sooner = missing[thing.id].late, missing[thing.id].sooner
+            would = "might" if missing[thing.id].might else "would"
             if late is None:
-                mark = f"{things[thing.id]} would not be at hand when this starts."
-            elif might:
-                mark = f"{things[thing.id]} might arrive {_span(late)} after this starts."
+                mark = f"{things[thing.id]} {would} not be at hand when this starts."
+            elif sooner is None:
+                mark = f"{things[thing.id]} {would} arrive {_span(late)} after this starts."
+            elif missing[thing.id].might:
+                mark = f"{things[thing.id]} might arrive up to {_span(late)} after this starts."
             else:
-                mark = f"{things[thing.id]} would arrive {_span(late)} after this starts."
+                between = f"between {_span(sooner)} and {_span(late)}"
+                mark = f"{things[thing.id]} would arrive {between} after this starts."
             marks.setdefault(number, []).append(mark)
     return marks
 

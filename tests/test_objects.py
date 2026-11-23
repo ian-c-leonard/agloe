@@ -382,8 +382,10 @@ def walk(person: str, origin: str, destination: str, hour: int, minute: int) -> 
     return Step(None, origin, destination, (person,), start, start + 900, "walk")
 
 
-def not_at_hand(option: str, *persons: str) -> Broken:
-    return Broken(Constraint.AT_HAND, option, persons, object="passport")
+def not_at_hand(option: str, *persons: str, might: bool = False) -> Broken:
+    """The passport is not at hand for an OPTION. With ``might`` it is at hand in one of
+    the places where it might be, and out of reach in another."""
+    return Broken(Constraint.AT_HAND, option, persons, object="passport", might=might)
 
 
 def test_an_object_is_at_hand_with_a_person_who_takes_part() -> None:
@@ -797,13 +799,14 @@ def test_the_worst_case_follows_every_place_an_object_might_be() -> None:
         Where(place="desk"),
     }
     without_alex = (step("first", "desk", 9, "alex"), step("second", "desk", 10, "sam"))
-    assert broken(file, world, without_alex) == [not_at_hand("second", "sam")]
+    # The passport might be on the desk, where Sam finds it, or still with Alex.
+    assert broken(file, world, without_alex) == [not_at_hand("second", "sam", might=True)]
     away = (
         step("first", "desk", 9, "alex"),
         walk("alex", "desk", "office", 10, 0),
         step("third", "office", 11, "alex"),
     )
-    assert broken(file, world, away) == [not_at_hand("third", "alex")]
+    assert broken(file, world, away) == [not_at_hand("third", "alex", might=True)]
 
 
 def test_an_object_that_might_be_with_a_person_is_refused() -> None:
@@ -863,9 +866,11 @@ def test_where_nobody_knows_where_an_object_starts_the_worst_case_follows_every_
         hands_over("second", "passport"),
     )
     everybody = (step("first", "desk", 9, "alex", "sam"),)
-    assert broken(needed, worst_case(needed), everybody) == [not_at_hand("first", "alex", "sam")]
+    # It might be with one of them, or on the desk. It might be somewhere else too.
+    might_be_there = not_at_hand("first", "alex", "sam", might=True)
+    assert broken(needed, worst_case(needed), everybody) == [might_be_there]
     taken = (step("second", "desk", 10, "alex", "sam", handed=(("passport", "sam"),)),)
-    assert broken(needed, worst_case(needed), taken) == [not_at_hand("second", "sam")]
+    assert broken(needed, worst_case(needed), taken) == [not_at_hand("second", "sam", might=True)]
 
 
 def test_at_best_another_transfer_takes_an_object_away_before_an_option_refuses_it() -> None:
@@ -5212,10 +5217,11 @@ def every_way(
     then one in which it keeps it, then one in which it hands it over, where the plan has a
     hand-over there, and then one in which it carries it, where the plan has a carry there.
 
-    A hand-over of the plan that does not happen is broken: the OPTION does not hand the
-    OBJECT over, or the OBJECT is not at hand, or the OPTION refuses it. A carry of the
-    plan that does not happen is broken where the OPTION does not carry the OBJECT, or the
-    OBJECT is not at hand. An OPTION that refuses the OBJECT takes it from nobody: it keeps
+    A hand-over of the plan that is not sure to happen is broken: the OPTION does not hand
+    the OBJECT over, or the OBJECT is not at hand, or the OPTION refuses it. A carry of the
+    plan that is not sure to happen is broken where the OPTION does not carry the OBJECT,
+    or the OBJECT is not at hand. Each still happens from each place where the OBJECT is at
+    hand. An OPTION that refuses the OBJECT takes it from nobody: it keeps
     nothing, and it carries the OBJECT only where no PERSON who takes part has it. An
     OPTION that requires the OBJECT and carries it takes it along, whether or not the plan
     has a carry there, from each place where it is at hand. Where nobody is sure that it
@@ -5269,28 +5275,29 @@ def every_way(
                 after = left_by(does, places, persons, origin, option, refused)
             reach = all(each.person in persons or each.place == origin for each in after)
             if taker is not None:
-                if kind == "hand" and reach and not refused:
-                    after = frozenset({Where(person=taker)})
-                else:
-                    if refused:
-                        found = (*found, (position, Constraint.REFUSED, taker))
-                    if kind != "hand" or not reach:
-                        found = (*found, (position, Constraint.AT_HAND, taker))
-            if loaded and kind == "carry" and reach and not (refused and held):
-                after = frozenset({Where(option=option)})
-            else:
-                if loaded and (kind != "carry" or not reach):
-                    found = (*found, (position, Constraint.AT_HAND, THE_CARRY))
-                if action == "carries" and (option, thing) in world.open_needs:
-                    after = left_by("might_carry", after, persons, origin, option, refused)
-                elif action == "carries" and (option, thing) in world.needs:
-                    # It goes along with no choice from each place where it is at hand. An
-                    # OPTION that refuses it takes it from no PERSON.
-                    lying = {each for each in after if each.place == origin}
-                    with_them = {each for each in after if each.person in persons}
-                    taken = lying if refused else lying | with_them
-                    if taken:
-                        after = (after - taken) | {Where(option=option)}
+                if refused:
+                    found = (*found, (position, Constraint.REFUSED, taker))
+                if kind != "hand" or not reach:
+                    found = (*found, (position, Constraint.AT_HAND, taker))
+                if kind == "hand" and not refused:
+                    here = {each for each in after if each.place == origin}
+                    theirs = {each for each in after if each.person in persons}
+                    if here | theirs:
+                        after = (after - here - theirs) | {Where(person=taker)}
+            # A hand-over and a carry take the OBJECT from each place where it is at hand.
+            # An OPTION that refuses it takes it from no PERSON.
+            lying = {each for each in after if each.place == origin}
+            with_them = {each for each in after if each.person in persons}
+            taken = lying if refused else lying | with_them
+            sure = (option, thing) in world.needs and (option, thing) not in world.open_needs
+            if loaded and (kind != "carry" or not reach):
+                found = (*found, (position, Constraint.AT_HAND, THE_CARRY))
+            if kind == "carry" and (loaded or (action == "carries" and sure)):
+                # It is carried by choice, or it goes along with no choice.
+                if taken:
+                    after = (after - taken) | {Where(option=option)}
+            elif action == "carries" and (option, thing) in world.open_needs:
+                after = left_by("might_carry", after, persons, origin, option, refused)
             yield from go(position + 1, after, found, (*trail, after), seen)
 
     for start in begins:
@@ -6856,10 +6863,13 @@ def sail(*persons: str, carried: tuple[str, ...] = (), lands: int | None = 10) -
     return Step("ferry", "quay", "island", persons, seconds(9), end, carried=carried)
 
 
-def bag_not_at_hand(option: str, *persons: str, late: int | None = None) -> Broken:
+def bag_not_at_hand(
+    option: str, *persons: str, late: int | None = None, might: bool = False
+) -> Broken:
     """The bag is not at hand for an OPTION. ``late`` is how many seconds after its start
-    the bag would be, where the bag is in an OPTION that ends at the same PLACE."""
-    return Broken(Constraint.AT_HAND, option, persons, late, object="bag")
+    the bag would be, where the bag is in an OPTION that ends at the same PLACE. With
+    ``might`` the bag is at hand in one of the places where it might be."""
+    return Broken(Constraint.AT_HAND, option, persons, late, object="bag", might=might)
 
 
 AT_THE_QUAY = frozenset({Where(place="quay")})
@@ -7116,7 +7126,8 @@ def test_a_carry_needs_an_object_at_hand_wherever_it_might_be() -> None:
         sail("alex"),
         step("office", "island", 10, "alex", carried=("bag",)),
     )
-    assert broken(file, world, from_the_island) == [bag_not_at_hand("office", "alex")]
+    might_have_it = bag_not_at_hand("office", "alex", might=True)
+    assert broken(file, world, from_the_island) == [might_have_it]
 
 
 def test_an_option_with_no_fact_about_an_object_carries_nothing_at_worst() -> None:
@@ -7653,7 +7664,7 @@ def test_an_option_that_requires_an_object_might_take_it_along_where_nobody_says
     )
     plan = (sail("alex"), step("kiosk", "quay", 9, "sam", minute=30))
     worst = worst_case(file)
-    assert broken(file, worst, plan) == [bag_not_at_hand("kiosk", "sam")]
+    assert broken(file, worst, plan) == [bag_not_at_hand("kiosk", "sam", might=True)]
     assert whereabouts(file, worst, plan)["bag"][1] == AT_THE_QUAY | IN_THE_FERRY
     enough = {"does not carry", "does not keep or carry", "keeps", "hands over"}
     for what in (
@@ -7688,7 +7699,7 @@ def test_does_not_keep_is_enough_where_the_object_may_go_along() -> None:
     )
     plan = (sail("alex"), step("hut", "island", 11, "alex"))
     worst = worst_case(file)
-    assert broken(file, worst, plan) == [bag_not_at_hand("hut", "alex")]
+    assert broken(file, worst, plan) == [bag_not_at_hand("hut", "alex", might=True)]
     assert whereabouts(file, worst, plan)["bag"][1] == WITH_ALEX | AT_THE_QUAY | IN_THE_FERRY
     said = with_these_at_best(file, [Unknown("does not keep", "ferry", about="bag")])
     assert broken(file, said, plan) == []
@@ -7712,8 +7723,10 @@ def test_an_object_might_go_along_where_nobody_says_whether_the_option_requires_
     assert ("ferry", "bag") in worst.open_needs
     kiosk = step("kiosk", "quay", 9, "sam", minute=30)
     office = step("office", "island", 10, "sam")
-    assert broken(file, worst, (sail("alex"), kiosk)) == [bag_not_at_hand("kiosk", "sam")]
-    assert broken(file, worst, (sail("alex"), office)) == [bag_not_at_hand("office", "sam")]
+    might_be_there = bag_not_at_hand("kiosk", "sam", might=True)
+    assert broken(file, worst, (sail("alex"), kiosk)) == [might_be_there]
+    might_be_there = bag_not_at_hand("office", "sam", might=True)
+    assert broken(file, worst, (sail("alex"), office)) == [might_be_there]
     assert broken(file, worst, (sail("alex", carried=("bag",)), office)) == []
     # With the FACT that the ferry does not require the bag, the choice is the travelers'.
     said = with_these_at_best(file, [Unknown("does not require", "ferry", about="bag")])
@@ -8183,6 +8196,168 @@ def test_a_warning_says_that_an_object_only_might_arrive_late() -> None:
             assert said["at_worst"][0].get("might", False) is bool(more == [])
 
 
+def test_the_report_says_where_an_object_lies_once_the_option_it_was_in_is_over() -> None:
+    """A drive takes the bag along from 8:00 am to 9:00 am. Jo's errand at 8:30 am refuses
+    the bag, and finds it in the drive. A picnic at 10:00 am requires the bag where the
+    drive ends. The report says once that the bag lies there from 9:00 am, and not while the
+    bag is still in the drive."""
+    rows = [("drive", "alex", "hotel", "dunes", 8, 0, "PT1H")]
+    rows += [("errand", "jo", "hotel", "hotel", 8, 30, "PT30M")]
+    rows += [("picnic", "alex", "dunes", "dunes", 10, 0, "PT30M")]
+    stated = [lies_at("bag", "hotel"), requires_object("drive", "bag"), carries("drive", "bag")]
+    stated += [refuses_object("errand", "bag"), requires_object("picnic", "bag")]
+    stated += [every_use("bag"), every_transfer("bag")]
+    file = a_day_of_checks(rows, stated)
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    in_the_drive = (Where(option="drive"),)
+    assert found.objects == (
+        Carried(
+            "bag",
+            (
+                Stay((Where(place="hotel"),)),
+                Stay(in_the_drive, "drive", "carried"),
+                Stay((Where(place="dunes"),), "drive", "arrived"),
+            ),
+            (
+                Use("drive", True, (Where(place="hotel"),)),
+                Use("errand", True, in_the_drive, "refuses"),
+                Use("picnic", True, (Where(place="dunes"),)),
+            ),
+        ),
+    )
+
+
+def about_the_bag(found: Iterable[Broken], option: str) -> list[Broken]:
+    """The findings about the bag at one OPTION."""
+    return [each for each in found if each.object == "bag" and each.option == option]
+
+
+def at_the_longest(file: File, plan: Itinerary, option: str) -> list[Broken]:
+    """What a plan breaks about the bag at one OPTION where everything takes its longest."""
+    world = longest_case(file)
+    return about_the_bag(broken(file, world, in_world(world, plan)), option)
+
+
+SCAN = ("scan", "alex", "depot", "depot", 9, 0, ("PT1M", "PT20M"))
+
+
+def test_a_warning_follows_a_chosen_carry_from_each_place_where_the_object_might_be() -> None:
+    """Alex has the bag at a scan that requires it, and nobody says what the scan does with
+    it. The plan then carries the bag in a stow, so that security, which requires the bag
+    and refuses it, finds it on the floor. If both run long, the bag is not there in time.
+    If the scan took it along, it is back 10 minutes late. If not, the stow has it, and it
+    is back 25 minutes late. Nobody has it at security either way. The WARNING says that,
+    and each case with a stated action gives one of the two delays for the same plan."""
+    rows = [SCAN, ("stow", "alex", "depot", "depot", 9, 5, ("PT1M", "PT30M"))]
+    rows += [("security", "alex", "depot", "depot", 9, 10, "PT1M")]
+    stated = [has_object("alex", "bag"), requires_object("scan", "bag"), carries("stow", "bag")]
+    stated += [requires_object("security", "bag"), refuses_object("security", "bag")]
+    stated += [does_with("security", "bag", "nothing"), every_use("bag")]
+    file = a_day_of_checks(rows, stated)
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert carried_in(found.itinerary) == [("stow", ("bag",))]
+    late = Broken(Constraint.AT_HAND, "security", ("alex",), 1500, object="bag", sooner=600)
+    assert about_the_bag(found.at_worst, "security") == [late]
+    # The stow would miss the bag only if the scan took it along.
+    assert about_the_bag(found.at_worst, "stow") == [
+        Broken(Constraint.AT_HAND, "stow", ("alex",), 900, object="bag", might=True)
+    ]
+    words = report.as_text(file, found)
+    assert "    ! bag might arrive 15 min after this starts.\n" in words
+    assert "    ! bag would arrive between 10 min and 25 min after this starts.\n" in words
+    said = json.loads(json.dumps(report.as_json(file, found)))
+    (at_security,) = [each for each in said["at_worst"] if each["option"] == "security"][-1:]
+    assert (at_security["late"], at_security["sooner"]) == ("PT25M", "PT10M")
+    delays: set[int | None] = set()
+    for does in ("carries", "keeps", "nothing", "hands_over"):
+        one_case = a_day_of_checks(rows, [*stated, does_with("scan", "bag", does)])
+        (missed,) = at_the_longest(one_case, found.itinerary, "security")
+        assert missed.constraint is Constraint.AT_HAND and not missed.might
+        delays.add(missed.late)
+    assert delays == {600, 1500}
+
+
+def test_a_warning_follows_a_hand_over_from_each_place_where_the_object_might_be() -> None:
+    """Jo has the bag at an inspection that requires it and takes between 5 and 15 minutes,
+    and nobody says what the inspection does with the bag. At 9:10 am the bag is handed
+    over to Alex, who needs it there at 10:00 am. If the inspection runs long and took the
+    bag along, the hand-over comes 5 minutes too early. Alex's claim holds in every case:
+    Alex has the bag, or it lies at the lab by then."""
+    rows = [("inspection", "jo", "lab", "lab", 9, 0, ("PT5M", "PT15M"))]
+    rows += [("handoff", "jo", "lab", "lab", 9, 10, "PT5M")]
+    rows += [("claim", "alex", "lab", "lab", 10, 0, "PT30M")]
+    stated = [has_object("jo", "bag"), requires_object("inspection", "bag")]
+    stated += [hands_over("handoff", "bag"), requires_object("claim", "bag")]
+    stated += [does_with("claim", "bag", "nothing"), every_use("bag")]
+    # Jo and Alex both take part in the hand-over.
+    both = answers.Lock("alex-too", "handoff", ("alex",))
+    file = a_day_of_checks(rows, stated)
+    file = replace(file, decisions=(*file.decisions, both))
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [each.handed for each in found.itinerary if each.handed] == [(("bag", "alex"),)]
+    assert about_the_bag(found.at_worst, "handoff") == [
+        Broken(Constraint.AT_HAND, "handoff", ("alex",), 300, object="bag", might=True)
+    ]
+    assert about_the_bag(found.at_worst, "claim") == []
+    assert "    ! bag might arrive 5 min after this starts.\n" in report.as_text(file, found)
+    for does in ("carries", "keeps", "nothing"):
+        one_case = a_day_of_checks(rows, [*stated, does_with("inspection", "bag", does)])
+        one_case = replace(one_case, decisions=file.decisions)
+        assert at_the_longest(one_case, found.itinerary, "claim") == []
+
+
+def test_a_warning_tells_a_sure_delay_from_one_that_might_happen() -> None:
+    """A bag lies on the floor of the depot. A scan, a sort and a pickup each require it,
+    each with its own PERSON. Nobody says what the scan does with the bag, the sort carries
+    it, and the pickup leaves it alone. If the scan and the sort run long, the bag is in one
+    of them when the pickup starts: it is back 10 minutes late or 25 minutes late. Where
+    the sort is a ride to town and the pickup is there, the bag is in town in time unless
+    the scan took it along: then it never comes."""
+    stated = [lies_at("bag", "depot"), requires_object("scan", "bag")]
+    stated += [requires_object("sort", "bag"), carries("sort", "bag")]
+    stated += [requires_object("pickup", "bag"), does_with("pickup", "bag", "nothing")]
+    stated += [every_use("bag")]
+    at_the_depot = [SCAN, ("sort", "sam", "depot", "depot", 9, 5, ("PT1M", "PT30M"))]
+    at_the_depot += [("pickup", "jo", "depot", "depot", 9, 10, "PT1M")]
+    in_town = [SCAN, ("sort", "sam", "depot", "town", 9, 5, "PT1M")]
+    in_town += [("pickup", "jo", "town", "town", 9, 10, "PT1M")]
+    missed = Broken(Constraint.AT_HAND, "pickup", ("jo",), object="bag")
+    for rows, at_worst, words, cases in (
+        (
+            at_the_depot,
+            replace(missed, late=1500, sooner=600),
+            "bag would arrive between 10 min and 25 min after this starts.",
+            {"carries": [replace(missed, late=600)], "nothing": [replace(missed, late=1500)]},
+        ),
+        (
+            in_town,
+            replace(missed, might=True),
+            "bag might not be at hand when this starts.",
+            {"carries": [missed], "nothing": []},
+        ),
+    ):
+        file = a_day_of_checks(rows, stated)
+        found = checked(file)
+        assert found.answer is Answer.FEASIBLE and not found.robust
+        assert about_the_bag(found.at_worst, "pickup") == [at_worst]
+        assert f"    ! {words}\n" in report.as_text(file, found)
+        for does, expected in cases.items():
+            one_case = a_day_of_checks(rows, [*stated, does_with("scan", "bag", does)])
+            assert at_the_longest(one_case, found.itinerary, "pickup") == expected
+    said = json.loads(json.dumps(report.as_json(file, found)))
+    assert said["at_worst"][-1] == {
+        "constraint": Constraint.AT_HAND.value,
+        "option": "pickup",
+        "persons": ["jo"],
+        "late": None,
+        "object": "bag",
+        "might": True,
+    }
+
+
 def test_the_reason_for_where_an_object_might_be_names_what_the_file_does_not_say() -> None:
     """A boat requires a bag that lies on the quay and refuses it, and nobody says what the
     boat does with it. Nobody has the bag, so the boat keeps nothing: the bag might go
@@ -8212,36 +8387,50 @@ def where_it_is_in_one_case(
     requires: AbstractSet[str],
     refuses: AbstractSet[str],
     ends_at: Mapping[str, str],
-) -> tuple[list[Where], list[Where], list[tuple[int, Constraint]]]:
+    handed: Mapping[str, str],
+    carried: AbstractSet[str],
+) -> tuple[list[Where], list[Where], list[tuple[int, Constraint, str | None]]]:
     """One OBJECT through the OPTIONs of a plan, where nothing is left open.
 
-    The OBJECT starts in one place. Each OPTION leaves it alone, keeps it or carries it, and
-    requires it or does not. The plan has no hand-over and no carry that the travelers
-    choose. An OPTION keeps the OBJECT from a PERSON who takes part. One that requires it
-    and carries it takes it along where it is at hand. One that refuses it takes it from no
-    PERSON. The result says where the OBJECT is just before each OPTION, where it is after
-    each, and each check that fails."""
+    The OBJECT starts in one place. Each OPTION leaves it alone, keeps it, hands it over or
+    carries it, and requires it or does not. ``handed`` names the PERSON who is to have the
+    OBJECT in each OPTION where the plan hands it over, and ``carried`` holds each OPTION
+    where the travelers choose to carry it.
+
+    An OPTION keeps the OBJECT from a PERSON who takes part. It hands the OBJECT over where
+    the plan says so and the OBJECT is at hand. It carries the OBJECT where it is at hand
+    and the plan says so, or the OPTION requires the OBJECT. One that refuses the OBJECT
+    takes it from no PERSON, and hands nothing over. The result says where the OBJECT is
+    just before each OPTION, where it is after each, and each check that fails: a
+    requirement or a refusal, with None, a hand-over, with the PERSON who was to have the
+    OBJECT, and a chosen carry, with ``THE_CARRY``."""
     where = start
     seen: list[Where] = []
     trail: list[Where] = []
-    broke: list[tuple[int, Constraint]] = []
+    broke: list[tuple[int, Constraint, str | None]] = []
     for position, (option, persons, origin, over) in enumerate(visits):
         if where.option in over:
             where = Where(place=ends_at[where.option or ""])
         seen.append(where)
         with_them = where.person in persons
-        if option in requires and not (with_them or where.place == origin):
-            broke.append((position, Constraint.AT_HAND))
+        at_hand = with_them or where.place == origin
+        if option in requires and not at_hand:
+            broke.append((position, Constraint.AT_HAND, None))
         if option in refuses and with_them:
-            broke.append((position, Constraint.REFUSED))
-        taken_from_them = with_them and option not in refuses
-        if does[option] == "keeps" and taken_from_them:
+            broke.append((position, Constraint.REFUSED, None))
+        can_take = where.place == origin or (with_them and option not in refuses)
+        if does[option] == "keeps" and with_them and option not in refuses:
             where = Where(place=origin)
-        elif (
-            does[option] == "carries"
-            and option in requires
-            and (taken_from_them or where.place == origin)
-        ):
+        if option in handed:
+            if option in refuses:
+                broke.append((position, Constraint.REFUSED, handed[option]))
+            if does[option] != "hands_over" or not at_hand:
+                broke.append((position, Constraint.AT_HAND, handed[option]))
+            if does[option] == "hands_over" and option not in refuses and at_hand:
+                where = Where(person=handed[option])
+        if option in carried and (does[option] != "carries" or not at_hand):
+            broke.append((position, Constraint.AT_HAND, THE_CARRY))
+        if does[option] == "carries" and (option in carried or option in requires) and can_take:
             where = Where(option=option)
         trail.append(where)
     return seen, trail, broke
@@ -8251,20 +8440,20 @@ def test_the_walk_says_each_place_where_an_object_is_in_some_case() -> None:
     """The worst case follows every place where an OBJECT might be at once. Each of those
     places is where the OBJECT is in some case that the world leaves open, and each such
     case is among them: a start, what each OPTION does, and whether it requires the OBJECT.
-    That holds also after a check that fails. A check fails in the worst case where it
-    fails in some case. The plans have no hand-over and no carry that the travelers choose,
-    like the plan that a report reads for another transfer."""
+    That holds also after a check that fails, and after a hand-over or a carry of the plan
+    that is not sure to happen. A check fails in the worst case where it fails in some
+    case. A WARNING and what a report reads for another transfer both rest on that."""
     rng = Random(404)
     cases_of = {
         "nothing": ["nothing"],
-        "hands_over": ["nothing"],
+        "hands_over": ["hands_over"],
         "keeps": ["keeps"],
         "carries": ["carries"],
         "might_keep": ["nothing", "keeps"],
         "might_take": ["nothing", "keeps", "carries"],
         "might_carry": ["nothing", "carries"],
     }
-    compared = several = went_along = after_a_break = 0
+    compared = several = went_along = after_a_break = chosen = unsure_of_one = 0
     for _ in range(1200):
         file = a_trip_with_objects(rng, most=1, leave_out=0.5, with_ways=0.5)
         listed = [unknown for unknown in unknowns(file) if unknown.what not in NEW]
@@ -8273,8 +8462,17 @@ def test_the_walk_says_each_place_where_an_object_is_in_some_case() -> None:
             continue
         world = with_these_at_best(file, said)
         thing = file.objects[0].id
-        chosen = any_plan(rng, file, possible_world(rng, file))
-        plan = tuple(replace(each, handed=(), carried=()) for each in chosen)
+        steps = any_plan(rng, file, possible_world(rng, file))
+        plan: list[Step] = []
+        for each in steps:
+            # Some plans hand the OBJECT over or carry it by choice, where a FACT says the
+            # OPTION can. The others choose nothing, like a plan that another transfer serves.
+            can = world.does.get((each.option or "", thing))
+            handed = ((thing, rng.choice(each.persons)),) if can == "hands_over" else ()
+            carried = (thing,) if can == "carries" else ()
+            if rng.random() < 0.5:
+                handed, carried = (), ()
+            plan.append(replace(each, handed=handed, carried=carried))
         runs = list(reference._as_planned(file, world, plan))  # pyright: ignore[reportPrivateUsage]
         begins = reference._begins(file, world, thing)  # pyright: ignore[reportPrivateUsage]
         if not runs or len(begins) != 1 or not plan:
@@ -8285,11 +8483,13 @@ def test_the_walk_says_each_place_where_an_object_is_in_some_case() -> None:
         needed = {name for name in names if (name, thing) in world.needs}
         unsure = {name for name in names if (name, thing) in world.open_needs}
         refuses = {name for name in names if (name, thing) in world.refuses}
+        takers = {each.option or "": dict(each.handed)[thing] for each in plan if each.handed}
+        loaded = {each.option or "" for each in plan if each.carried}
         open_to_do = [cases_of[world.does.get((name, thing), "nothing")] for name in names]
         open_to_need = [[True, False] if name in unsure else [name in needed] for name in names]
         somewhere: list[set[Where]] = [set() for _ in names]
         afterwards: list[set[Where]] = [set() for _ in names]
-        failing: set[tuple[int, Constraint]] = set()
+        failing: set[tuple[int, Constraint, str | None]] = set()
         for start in begins[0]:
             for does in product(*open_to_do):
                 for needs in product(*open_to_need):
@@ -8303,6 +8503,8 @@ def test_the_walk_says_each_place_where_an_object_is_in_some_case() -> None:
                         requires,
                         refuses,
                         ends_at,
+                        takers,
+                        loaded,
                     )
                     failing.update(broke)
                     for position in range(len(names)):
@@ -8310,13 +8512,16 @@ def test_the_walk_says_each_place_where_an_object_is_in_some_case() -> None:
                         afterwards[position].add(after[position])
         assert [set(each) for each in seen] == somewhere
         assert [set(each) for each in trail[1:]] == afterwards
-        assert {(position, constraint) for position, constraint, _ in broken_there} == failing
+        assert set(broken_there) == failing
         compared += 1
         several += any(len(each) > 1 for each in somewhere)
         went_along += any(each.option is not None for places in afterwards for each in places)
-        first = min((position for position, _ in failing), default=len(names))
+        first = min((position for position, _, _ in failing), default=len(names))
         after_a_break += any(len(places) > 1 for places in afterwards[first:])
+        chosen += bool(takers or loaded)
+        unsure_of_one += any(who is not None for _, _, who in failing)
     assert compared > 150 and several > 80 and went_along > 40 and after_a_break > 40
+    assert chosen > 40 and unsure_of_one > 20
 
 
 def test_five_checks_at_one_instant_are_given_up_after_twenty_five_steps(

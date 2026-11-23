@@ -61,7 +61,7 @@ class Step:
     start of the OPTION. ``carried`` holds each OBJECT that the travelers choose to carry in
     an OPTION: it is in the OPTION from its start, and lies at the PLACE where the OPTION ends
     from its end. An OBJECT that the OPTION requires and carries goes along with no choice,
-    and is not among them.
+    and needs no entry here.
     """
 
     option: str | None
@@ -115,8 +115,10 @@ class Broken:
     requires it, ``persons`` holds everybody who takes part, and so it does where the OBJECT
     cannot be carried there. Where it cannot be handed over there, ``persons`` holds the
     PERSON who was to have it. ``late`` says how long after the OPTION starts the OBJECT
-    would be at hand, where it is in an OPTION that ends at the PLACE where this one starts.
-    ``might`` says that it only might be: it might also be at hand when the OPTION starts.
+    would be at hand at the latest, where it is in an OPTION that ends at the PLACE where
+    this one starts. Where it might be in several such OPTIONs, ``sooner`` says how long
+    after the start the first of them ends. ``might`` says that the OBJECT might also be at
+    hand when the OPTION starts.
 
     An OBJECT in an OPTION that refuses it names the OPTION and the ``object``. ``persons``
     holds each PERSON who takes part and has the OBJECT just before the OPTION starts, or
@@ -134,6 +136,7 @@ class Broken:
     capability: str | None = None
     object: str | None = None
     might: bool = False
+    sooner: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1834,20 +1837,21 @@ def _left(
     return after
 
 
-def _taken_along(
-    places: frozenset[Where], persons: Sequence[str], origin: str, option: str, refused: bool
+def _moved(
+    places: frozenset[Where], persons: Sequence[str], origin: str, refused: bool, to: Where
 ) -> frozenset[Where]:
-    """Where an OBJECT might be once an OPTION that takes it along with no choice has started.
+    """Where an OBJECT might be once an OPTION has moved it from each place where it was at hand.
 
-    The OPTION takes it from each place where it is at hand: it lies at the PLACE where the
-    OPTION starts, or a PERSON who takes part has it. An OPTION that refuses the OBJECT
-    takes it from no PERSON. Where the OBJECT might be somewhere else, it is still there in
-    that case. So afterwards it is in the OPTION, or in a place where it was out of reach.
+    That is a hand-over, a carry that the travelers choose, and a carry that is no choice.
+    The OBJECT is at hand where it lies at the PLACE where the OPTION starts, or a PERSON who
+    takes part has it. An OPTION that refuses the OBJECT takes it from no PERSON. Where the
+    OBJECT might be somewhere else, it is still there in that case. So afterwards it is
+    where the OPTION put it, or in a place where it was out of reach.
     """
     reached = {
         each for each in places if each.place == origin or (each.person in persons and not refused)
     }
-    return (places - reached) | {Where(option=option)} if reached else places
+    return (places - reached) | {to} if reached else places
 
 
 def _least_broken(
@@ -1883,10 +1887,11 @@ def _least_broken(
     than that end. Then it checks what it requires and what it refuses, then keeps what it
     keeps, and then the OBJECT is handed over or carried in it. An OPTION that refuses the
     OBJECT takes it from no PERSON: it keeps the OBJECT from nobody, and nobody takes the
-    OBJECT there. It carries the OBJECT only where no PERSON who takes part has it. An
-    OPTION that requires the OBJECT and carries it takes it along from each place where it
-    is at hand, also in a plan that breaks the requirement: where the OBJECT might be out
-    of reach, it is still there in that case, and the OPTION has it in the other. In a
+    OBJECT there. It carries the OBJECT only where no PERSON who takes part has it. A
+    hand-over and a carry move the OBJECT from each place where it is at hand, also in a
+    plan that they break: where the OBJECT might be out of reach, it is still there in
+    that case, and it is moved in the other. An OPTION that requires the OBJECT and carries
+    it takes it along in the same way, whether or not the requirement is met. In a
     world that leaves nothing to pick there is one way to go. An OPTION that does whichever
     thing suits the plan gives a way for each: it leaves the OBJECT alone, it keeps it, it
     hands it over as the plan says, or it carries it as the plan says. Where it does not
@@ -1940,27 +1945,20 @@ def _least_broken(
                 found = broken
                 at_hand = within_reach(after, persons, origin)
                 if taker is not None:
-                    if does == "hands_over" and at_hand and not refused:
-                        after = frozenset({Where(person=taker)})
-                    else:
-                        # Not handed over: it stays, or is kept.
-                        if refused:
-                            found = (*found, (position, Constraint.REFUSED, taker))
-                        if does != "hands_over" or not at_hand:
-                            found = (*found, (position, Constraint.AT_HAND, taker))
-                can_go = does == "carries" and at_hand and not (refused and held)
-                if loaded and can_go:
-                    after = frozenset({Where(option=option)})
-                else:
-                    if loaded and (does != "carries" or not at_hand):
-                        # Not carried by choice: it stays, or is kept.
-                        found = (*found, (position, Constraint.AT_HAND, _CARRY))
-                    if along == "sure":
-                        # It goes along with no choice, from each place where it is at
-                        # hand. The plan has no entry for that.
-                        after = _taken_along(after, persons, origin, option, refused)
-                    elif along == "might":
-                        after = _left("might_carry", after, persons, origin, option, refused)
+                    if refused:
+                        found = (*found, (position, Constraint.REFUSED, taker))
+                    if does != "hands_over" or not at_hand:
+                        found = (*found, (position, Constraint.AT_HAND, taker))
+                    if does == "hands_over" and not refused:
+                        after = _moved(after, persons, origin, False, Where(person=taker))
+                if loaded and (does != "carries" or not at_hand):
+                    found = (*found, (position, Constraint.AT_HAND, _CARRY))
+                if does == "carries" and (loaded or along == "sure"):
+                    # It is carried by choice, or it goes along with no choice, and the
+                    # plan has no entry for that.
+                    after = _moved(after, persons, origin, refused, Where(option=option))
+                elif along == "might":
+                    after = _left("might_carry", after, persons, origin, option, refused)
                 known = following.get(after)
                 if known is None or (len(found), (*picks, pick)) < (len(known[1]), known[0]):
                     following[after] = ((*picks, pick), found, (*trail, after), (*seen, places))
@@ -2182,10 +2180,12 @@ def _objects(file: File, world: World, order: list[_Placed]) -> list[Broken]:
 
     An OBJECT that is not at hand can be on its way: it is in an OPTION that ends at the
     PLACE where this one starts. Then the Broken says how long after the start of this
-    OPTION that one ends. Where the OBJECT might be in several such OPTIONs, that is the
-    last of them to end. Where it might also be at hand, the Broken says that the delay only
-    might happen. One OPTION can ask for an OBJECT twice: it requires it and carries it.
-    Both findings are the same then, and one is given.
+    OPTION that one ends. Where the OBJECT might be in several such OPTIONs, it says when
+    the last of them ends, and when the first does. It has no delay where the OBJECT might
+    be somewhere that it does not come from. Whether the OBJECT might be at hand after all
+    is said apart from that: it is so where one of the places it might be is at hand. One
+    OPTION can ask for an OBJECT twice: it requires it and carries it. Both findings are
+    the same then, and one is given.
     """
     steps = {step.option: step for _, step in order if step.option is not None}
     out: list[Broken] = []
@@ -2193,7 +2193,7 @@ def _objects(file: File, world: World, order: list[_Placed]) -> list[Broken]:
         for position, constraint, taker in broken:
             option, persons, origin, _ = visits[position]
             late: int | None = None
-            might = False
+            sooner: int | None = None
             if taker is not None and taker != _CARRY:
                 who: tuple[str, ...] = (taker,)
             elif constraint is Constraint.REFUSED:
@@ -2205,10 +2205,12 @@ def _objects(file: File, world: World, order: list[_Placed]) -> list[Broken]:
             carriers = [steps[each.option] for each in away if each.option is not None]
             ends = [carrier.end for carrier in carriers if carrier.destination == origin]
             known = [end for end in ends if end is not None]
-            if constraint is Constraint.AT_HAND and away and len(known) == len(away):
+            unmet = constraint is Constraint.AT_HAND and bool(away)
+            if unmet and len(known) == len(away):
                 late = max(known) - steps[option].start
-                might = len(away) < len(seen[position])
-            found = Broken(constraint, option, who, late, object=thing, might=might)
+                sooner = min(known) - steps[option].start if min(known) < max(known) else None
+            might = unmet and len(away) < len(seen[position])
+            found = Broken(constraint, option, who, late, object=thing, might=might, sooner=sooner)
             if found not in out:
                 out.append(found)
     return out

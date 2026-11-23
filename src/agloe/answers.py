@@ -7,7 +7,7 @@ search is the reference checker's, which tries everything. The COMPILER passes i
 search instead, and the answers and the evidence are worked out here in either case.
 """
 
-from collections.abc import Callable, Iterator, Sequence, Set
+from collections.abc import Callable, Container, Iterator, Sequence, Set
 from dataclasses import dataclass, replace
 from enum import Enum
 from itertools import chain, combinations
@@ -516,17 +516,18 @@ def _carried(
     found_at = just_before(file, world, itinerary)
 
     def arrivals(left: frozenset[Where], found: frozenset[Where] | None) -> list[Stay]:
-        """Where an OBJECT lies once each OPTION that it was in, or might be in, is over.
+        """Where an OBJECT lies once the OPTION that it was in, or might be in, is over.
 
         ``left`` is where the last OPTION left it, and ``found`` where the next one finds
-        it, or None after the last OPTION of the plan. The OPTIONs that end earlier come
-        first, and one with no known end comes last.
+        it, or None after the last OPTION of the plan. A plan that works has the OBJECT in
+        one OPTION at most. An OPTION that takes it along requires it, or might, and an
+        OBJECT that might be in another OPTION is at hand for nothing.
         """
         there, said = left, list[Stay]()
         over = [each.option for each in left if each.option is not None]
         if found is not None:
             over = [name for name in over if Where(option=name) not in found]
-        for name in sorted(over, key=lambda name: (ends[name] is None, ends[name] or 0)):
+        for name in over:
             there = arrived(there, {name}, ends_at)
             said.append(Stay(in_order(there), name, "arrived"))
         return said
@@ -695,9 +696,10 @@ def _missing(file: File, works: Works, shown: Shown) -> tuple[tuple[Missing, ...
     turns out, so where the set that says more is not enough, the other is not either. The
     sets are made one at a time, and each comes after every set that says more than it in
     one place: ``_with_enough_of_each`` keeps to the order of the FACTs it is given, and
-    the FACTs that say most are given first. A set is left out once such a set was not
-    enough. This only saves work: a FILE that says little about its OBJECTs has six unknown
-    FACTs about each thing that an OPTION does.
+    the FACTs that say most are given first. So a set is tried only where each of those
+    sets was enough, and only the sets that were enough are kept to tell. This only saves
+    work: a FILE that says little about its OBJECTs has six unknown FACTs about each thing
+    that an OPTION does.
     """
     every = unknowns(file)
     new = ("another option", "another transfer")
@@ -740,16 +742,16 @@ def _missing(file: File, works: Works, shown: Shown) -> tuple[tuple[Missing, ...
                         (unknown for unknown in facts if unknown not in in_every_set),
                         key=lambda unknown: len(_more_than(unknown.what)),
                     )
-                    not_enough: set[frozenset[Unknown]] = set()
+                    enough_here: set[frozenset[Unknown]] = set()
                     for more in _with_enough_of_each(others, at_least, size - len(in_every_set)):
                         stated = sorted((*in_every_set, *more), key=place.__getitem__)
                         if not one_way_each(stated):
                             continue
-                        if any(
-                            stronger in not_enough for stronger in _saying_more(stated)
+                        if not all(
+                            stronger in enough_here for stronger in _saying_more(stated, place)
                         ) or not works(file, with_these_at_best(file, (*stated, *some))):
-                            not_enough.add(frozenset(stated))
                             continue
+                        enough_here.add(frozenset(stated))
                         listed = [place[fact] for fact in stated]
                         found.append((listed, number, (*stated, *some)))
                 enough = [each for _, _, each in sorted(found, key=lambda one: one[:2])]
@@ -815,11 +817,18 @@ def _more_than(what: str) -> list[str]:
     return [more for more, less in _SAYS_MORE_THAN.items() if what in less]
 
 
-def _saying_more(some: Sequence[Unknown]) -> Iterator[frozenset[Unknown]]:
-    """The same set with a FACT that says more in the place of one of its FACTs, each way."""
+def _saying_more(
+    some: Sequence[Unknown], listed: Container[Unknown]
+) -> Iterator[frozenset[Unknown]]:
+    """The same set with a FACT that says more in the place of one of its FACTs, each way.
+
+    Only an unknown FACT of the FILE takes the place: ``listed`` holds those.
+    """
     for asked in some:
         for what in _more_than(asked.what):
-            yield frozenset(replace(u, what=what) if u == asked else u for u in some)
+            more = replace(asked, what=what)
+            if more in listed:
+                yield frozenset(more if u == asked else u for u in some)
 
 
 def _to_bring(
