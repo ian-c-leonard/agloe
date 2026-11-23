@@ -8782,6 +8782,27 @@ def test_an_option_can_happen_with_nobody_in_it() -> None:
     assert checked(a_service(start=(16, 0))).answer is Answer.INFEASIBLE
 
 
+def test_an_object_that_another_transfer_brings_gives_no_option_a_reason_to_run_alone() -> None:
+    """The FILE does not say that it states every transfer of the bags. In the best case
+    another transfer brings them to the flight, so the service has nothing to do: it is
+    not tried with nobody in it, and the one plan has no service. In the worst case
+    nothing else brings the bags, and the service runs alone."""
+    stated = a_service()
+    file = replace(
+        stated, facts=tuple(fact for fact in stated.facts if fact.id != "every-transfer-of-bags")
+    )
+    best, worst = best_case(file), worst_case(file)
+    assert best.brought == {"bags"} and not worst.brought
+    assert reference.could_run_alone(file, best) == []
+    assert 1 in reference.could_run_alone(file, worst)
+    assert [
+        [each.option for each in plan if not each.persons] for plan in itineraries(file, best)
+    ] == [[]]
+    assert [
+        [each.option for each in plan if not each.persons] for plan in itineraries(file, worst)
+    ] == [["service"]]
+
+
 def test_a_plan_written_by_hand_can_have_an_option_with_nobody_and_no_way_with_nobody() -> None:
     file = a_service()
     world = worst_case(file)
