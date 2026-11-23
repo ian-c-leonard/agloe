@@ -3078,8 +3078,9 @@ def for_arrivals(
     carried in it. The first OPTION after a carry that uses the OBJECT starts no earlier
     than the carrying OPTION ends. Where nobody knows when that ends, there is no gap to
     add: the check of the ITINERARY then finds that the OBJECT never arrives. An OPTION
-    that might take the OBJECT along is the same: the OBJECT might be in it, so whatever
-    uses the OBJECT next waits for it to be over.
+    in which the OBJECT goes along with no choice is the same, and so is one that might
+    take it along: the OBJECT is in it or might be, so whatever uses the OBJECT next waits
+    for it to be over.
     """
     options = file.options
     moved = {index for index, name, _ in given if name == thing}
@@ -3093,8 +3094,9 @@ def for_arrivals(
                 if terms.longest is not None:
                     gaps.append((carrier, index, terms.shortest))
             carriers = []
-        might = world.does.get((options[index].id, thing)) in ("might_take", "might_carry")
-        if index in loaded or might:
+        does = world.does.get((options[index].id, thing))
+        along = does == "carries" and (options[index].id, thing) in world.needs
+        if index in loaded or along or does in ("might_take", "might_carry"):
             carriers.append(index)
     return gaps
 
@@ -3166,8 +3168,13 @@ def every_chain(
                     for (index, thing, _), (kind, person) in zip(slots, chosen, strict=True)
                     if kind != "leave"
                 ]
+                # An OBJECT that another transfer brings waits for no arrival: the two
+                # CONSTRAINTs ask nothing of it.
                 arrive = [
-                    gap for thing in mine for gap in for_arrivals(file, world, order, thing, given)
+                    gap
+                    for thing in mine
+                    if thing not in world.brought
+                    for gap in for_arrivals(file, world, order, thing, given)
                 ]
                 ways.append(([*gaps, *arrive], given))
         for_each.append(ways)
@@ -3263,7 +3270,7 @@ def test_the_search_shows_the_plan_that_a_search_that_skips_nothing_shows(
     them by itself, and keeps one choice of hand-overs for each order. Here every order and
     every choice of hand-overs is timed and checked, and the rule picks among all of them.
     The ITINERARIES are the same, in the same order."""
-    rng = Random(2024)
+    rng = Random(2025)
     search = EveryOrder(monkeypatch)
     compared = with_hand_overs = with_two = with_carries = with_both = 0
     for _ in range(150):
@@ -5051,8 +5058,9 @@ def every_way(
     plan that does not happen is broken where the OPTION does not carry the OBJECT, or the
     OBJECT is not at hand. An OPTION that refuses the OBJECT takes it from nobody: it keeps
     nothing, and it carries the OBJECT only where no PERSON who takes part has it. An
-    OPTION that requires the OBJECT and carries it takes it along: a plan that has no carry
-    there is broken.
+    OPTION that requires the OBJECT and carries it takes it along, whether or not the plan
+    has a carry there. Where nobody is sure that it requires the OBJECT, and the plan has
+    no carry there, the OBJECT might go along or stay.
 
     Each way says what it breaks, where the OBJECT might be when the TRIP starts and after
     each OPTION, and where it might be just before each OPTION.
@@ -5114,8 +5122,11 @@ def every_way(
                     after = frozenset({Where(option=option)})
                 elif kind != "carry" or not reach:
                     found = (*found, (position, Constraint.AT_HAND, THE_CARRY))
-            elif action == "carries" and (option, thing) in world.needs:
-                found = (*found, (position, Constraint.AT_HAND, THE_CARRY))
+            elif action == "carries" and (option, thing) in world.open_needs:
+                after = left_by("might_carry", after, persons, origin, option, refused)
+            elif action == "carries" and (option, thing) in world.needs and reach:
+                # It goes along with no choice, unless a PERSON who may not have it has it.
+                after = after if refused and held else frozenset({Where(option=option)})
             yield from go(position + 1, after, found, (*trail, after), seen)
 
     for start in begins:
@@ -5227,11 +5238,12 @@ def test_the_way_an_object_goes_is_found_without_trying_every_way() -> None:
             (option, "key"): rng.choice(kinds) for option, _, _ in stays_there if rng.random() < 0.8
         }
         needs = frozenset((option, "key") for option, _, _ in stays_there if rng.random() < 0.4)
+        unsure = frozenset(pair for pair in needs if rng.random() < 0.4)
         refuses = frozenset((option, "key") for option, _, _ in stays_there if rng.random() < 0.3)
         handed = {option: rng.choice(people) for option, _, _ in stays_there if rng.random() < 0.25}
         carried = {option for option, _, _ in stays_there if rng.random() < 0.3}
         begins = rng.choice(starts)
-        world = replace(base, needs=needs, refuses=refuses, does=does)
+        world = replace(base, needs=needs, open_needs=unsure, refuses=refuses, does=does)
         ways = list(every_way(world, "key", visits, begins, handed, carried, ends_at))
         first = min(ways, key=lambda way: len(way[0]))
         found = least_broken(world, "key", visits, begins, handed, carried, ends_at)
