@@ -3050,7 +3050,7 @@ def any_plan(rng: Random, file: File, world: World) -> Itinerary:
         carried: list[str] = []
         for thing in file.objects:
             can = each.option is not None and world.does.get((each.option, thing.id))
-            if can == "hands_over" and rng.random() < 0.6:
+            if can == "hands_over" and each.persons and rng.random() < 0.6:
                 handed.append((thing.id, rng.choice(each.persons)))
             if can == "carries" and rng.random() < 0.6:
                 carried.append(thing.id)
@@ -3061,9 +3061,9 @@ def any_plan(rng: Random, file: File, world: World) -> Itinerary:
 def test_the_best_and_worst_cases_settle_the_answer_with_objects() -> None:
     """What works in the worst case works in every possible world. Where something works in
     a possible world, the search finds something there, and the TRIP is not INFEASIBLE."""
-    rng = Random(1414)
+    rng = Random(1417)
     seen: set[Answer] = set()
-    found_by_chance = with_hand_overs = 0
+    found_by_chance = with_hand_overs = carried_alone = 0
     for number in range(220):
         with_ways = 0.8 if number % 2 else 0
         file = a_trip_with_objects(rng, leave_out=0.15, with_complete=0.3, with_ways=with_ways)
@@ -3081,6 +3081,9 @@ def test_the_best_and_worst_cases_settle_the_answer_with_objects() -> None:
                 each for each in by_chance if not broken(file, world, in_world(world, each))
             ]
             found_by_chance += len(by_chance)
+            carried_alone += sum(
+                any(step.carried and not step.persons for step in each) for each in by_chance
+            )
             searched = itineraries(file, world)
             if by_chance:
                 assert searched
@@ -3089,6 +3092,8 @@ def test_the_best_and_worst_cases_settle_the_answer_with_objects() -> None:
     assert seen == set(Answer)
     assert found_by_chance > 200
     assert with_hand_overs > 5
+    # Some of the plans by chance have an OPTION with nobody in it that carries an OBJECT.
+    assert carried_alone > 10
 
 
 def ordered_by(
@@ -8706,6 +8711,7 @@ def a_service(
     more: Sequence[Document] = (),
     others: Sequence[str] = (),
     ways: Sequence[Document] = (),
+    wants: Sequence[Document] = (),
 ) -> File:
     """Alex and Sam are LOCKed into a visit at the museum from 1:00 pm to 2:30 pm and into a
     flight at O'Hare at 5:00 pm. The Blue Line takes an hour from the museum to O'Hare. The
@@ -8713,7 +8719,7 @@ def a_service(
     carries them. It takes an hour and a half, from 2:00 pm unless the story says otherwise.
     Unless it takes ``passengers``, it needs a right and nobody has one. ``more`` holds
     further OPTIONs, and the story says everything about them. ``others`` are further
-    PERSONs, and ``ways`` further WAYs."""
+    PERSONs, ``ways`` further WAYs and ``wants`` the WANTs."""
     options = [stays("visit", "museum"), moves("service", "hotel", "ohare")]
     options += [stays("flight", "ohare"), *more]
     stated = [
@@ -8744,6 +8750,7 @@ def a_service(
         stated,
         locks,
         line,
+        wants,
         rights=True,
         capabilities=capabilities,
         objects=["bags"],
@@ -8800,8 +8807,10 @@ def test_a_plan_written_by_hand_can_have_an_option_with_nobody_and_no_way_with_n
 
 def test_what_can_be_taken_out_of_a_plan_with_an_option_that_runs_alone() -> None:
     """Nothing can be taken out of the plan in which the service runs alone. A second OPTION
-    with nobody in it that moves nothing can be taken out by itself. And a PERSON who rides
-    along for nothing can be taken out while the service stays."""
+    with nobody in it that moves nothing can be taken out by itself. A PERSON who rides
+    along for nothing can be taken out while the service stays: the answer names the
+    PERSON and not the service. Where the OPTION goes with its last PERSON, the answer
+    names the OPTION too. A plan with more than twelve things that could go is too large."""
     open_to_all = {"id": "spare-open", "option": "spare", "needs_right": False}
     file = a_service(*whenever("spare"), open_to_all, more=[stays("spare", "hotel")])
     world = worst_case(file)
@@ -8823,6 +8832,32 @@ def test_what_can_be_taken_out_of_a_plan_with_an_option_that_runs_alone() -> Non
     plan = (visit, ridden, *ride, flight)
     assert broken_as_listed(riders, worst_case(riders), plan) == []
     assert reference.needless(riders, worst_case(riders), plan) == [("service", "jo")]
+    # Jo waits in the spare OPTION at the hotel, which moves nothing: both can go.
+    waiting = a_service(
+        starts_from("jo", "hotel"),
+        *whenever("spare"),
+        open_to_all,
+        others=["jo"],
+        more=[stays("spare", "hotel")],
+    )
+    plan = (visit, replace(idle, persons=("jo",)), service, *ride, flight)
+    assert broken_as_listed(waiting, worst_case(waiting), plan) == []
+    assert reference.needless(waiting, worst_case(waiting), plan) == [
+        ("spare", "jo"),
+        ("spare", None),
+    ]
+    # Each OPTION with nobody in it is a thing that could go, like each PERSON in an OPTION.
+    spares = [f"spare-{number}" for number in range(10)]
+    facts = [fact for spare in spares for fact in whenever(spare)]
+    facts += [{"id": f"{spare}-open", "option": spare, "needs_right": False} for spare in spares]
+    many = a_service(*facts, more=[stays(spare, "hotel") for spare in spares])
+    idle_ones = [Step(spare, "hotel", "hotel", (), seconds(13), seconds(13, 5)) for spare in spares]
+    world = worst_case(many)
+    # Ten of them, the service and the two rides on the Blue Line are thirteen.
+    with pytest.raises(ValueError, match="too large for the reference checker"):
+        reference.needless(many, world, (visit, *idle_ones, service, *ride, flight))
+    nine = (visit, *idle_ones[:9], service, *ride, flight)
+    assert reference.needless(many, world, nine) == [(spare, None) for spare in spares[:9]]
 
 
 def test_an_option_that_requires_a_capability_needs_a_person() -> None:
@@ -8886,31 +8921,316 @@ def test_a_person_rides_along_where_that_takes_them_there_with_fewer_ways() -> N
     assert reference.needless(there, worst_case(there), found.itinerary) == []
 
 
-def test_ten_services_that_can_each_carry_the_bags_are_not_tried_in_every_combination(
+def test_a_plan_relies_on_no_fact_about_the_persons_in_an_option_with_nobody_in_it() -> None:
+    """A ride in the service is a WANT, and Sam must not have it. With Jo at the museum the
+    service runs alone. Its access cutoff, whether it needs a right and what it SATISFIES
+    are about the PERSONs who take part, so the plan relies on none of them. It relies on
+    when the service starts, how long it takes and what it does with the bags. With Jo at
+    the hotel, Jo rides, and the plan relies on all of them."""
+    about_persons = {"service-cutoff", "service-open", "service-gives-a-ride"}
+    about_the_service = {"service-time", "service-length", "service-with-bags"}
+
+    def relied_on(jo_starts_at: str) -> tuple[bool, set[str]]:
+        file = a_service(
+            starts_from("jo", jo_starts_at),
+            satisfies("service", "a-ride"),
+            satisfies("visit", "a-ride", 0),
+            satisfies("flight", "a-ride", 0),
+            takes("walk", "PT15M"),
+            passengers=True,
+            others=["jo"],
+            ways=[way_between("walk", "hotel", "museum")],
+            wants=[must_not("a-ride", "sam")],
+        )
+        jo_flies = answers.Lock("jo-flies", "flight", ("jo",))
+        found = checked(replace(file, decisions=(*file.decisions, jo_flies)))
+        rides = ("service", ("jo",)) in [(each.option, each.persons) for each in found.itinerary]
+        assert compiler.check(replace(file, decisions=(*file.decisions, jo_flies))) == found
+        return rides, set(found.relies_on) & (about_persons | about_the_service)
+
+    assert relied_on("museum") == (False, about_the_service)
+    assert relied_on("hotel") == (True, about_persons | about_the_service)
+
+
+def test_the_solver_carries_an_object_only_in_an_option_that_happens() -> None:
+    """A bag lies at the one PLACE, and a van there requires it and can carry it. Nobody has
+    to take the van. The solver's model has no answer in which the van does not happen
+    and the bag is carried in it."""
+    options = [stays("van", "a"), stays("desk", "a")]
+    facts = [*whenever("van"), *whenever("desk"), starts_from("jo", "a"), lies_at("bag", "a")]
+    facts += [requires_object("van", "bag"), carries("van", "bag"), every_use("bag")]
+    file = trip(["jo"], ["a"], options, facts, [lock("desk", "jo")], objects=["bag"])
+
+    def answer(happens: bool) -> bool:
+        search = compiler._Search(file, worst_case(file), plain=True)  # pyright: ignore[reportPrivateUsage]
+        model: Any = search.model
+        names = [str(each.name) for each in model.proto.variables]
+        loads = model.get_bool_var_from_proto_index(names.index("bag carried in van"))
+        model.add(loads == 1)
+        model.add(search.used[0] == happens)
+        return answered_at_once(search)[0]
+
+    assert answer(happens=True)
+    assert not answer(happens=False)
+
+
+def some_vans(count: int, *facts: Document) -> File:
+    """The afternoon of ``a_service`` with this many vans beside the service. Each leaves the
+    hotel for O'Hare when the service does and can carry the bags, and nobody can ride."""
+    vans = [f"van-{number}" for number in range(count)]
+    stated: list[Document] = []
+    for van in vans:
+        stated += [*at(van, 14, 0, "PT1H30M"), carries(van, "bags")]
+        stated += [needs_right(van), every_right(van)]
+    return a_service(*stated, *facts, more=[moves(van, "hotel", "ohare") for van in vans])
+
+
+def test_many_services_that_can_each_carry_the_bags_are_not_tried_in_every_combination(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Ten vans leave the hotel for O'Hare with the service, and each can carry the bags.
-    Any one of them is enough, so a thousand sets of them tie where PERSONs take part the
-    fewest times. The first alone is the plan. A set that holds one that works is never
-    tried, so the search times a plan a few times."""
-    vans = [f"van-{number}" for number in range(10)]
-    facts: list[Document] = []
-    for van in vans:
-        facts += [*at(van, 14, 0, "PT1H30M"), carries(van, "bags")]
-        facts += [needs_right(van), every_right(van)]
-    file = a_service(*facts, more=[moves(van, "hotel", "ohare") for van in vans])
-    tried = 0
-    its_own = reference.scheduled
+    Any one of them is enough, so a thousand sets of them work. The first alone is the
+    plan. Each one alone is timed, and then no larger set is made: a plan with one takes
+    as few WAYs as the travelers can. With the bags at O'Hare from the start, the plan
+    with none is timed and no other set is tried, though twenty vans have a million."""
+    tried = made = 0
+    its_own, sets = reference.scheduled, reference._sets  # pyright: ignore[reportPrivateUsage]
 
     def counted(*given: Any, **named: Any) -> Any:
         nonlocal tried
         tried += 1
         return its_own(*given, **named)
 
+    def counted_sets(things: Sequence[int]) -> Iterator[frozenset[int]]:
+        nonlocal made
+        for each in sets(things):
+            made += 1
+            yield each
+
     monkeypatch.setattr(reference, "scheduled", counted)
+    monkeypatch.setattr(reference, "_sets", counted_sets)
+    file = some_vans(10)
     plan = first_shown(file, worst_case(file))
     assert carried_in(plan) == [("service", ("bags",))]
     assert [each.option for each in plan or () if each.option and not each.persons] == ["service"]
-    assert tried < 20
+    assert (tried, made) == (12, 13)  # no van, each of the eleven, and one set of two
+
+    twenty = some_vans(20)
+    at_ohare = lies_at_fact("bags", "ohare")
+    there = replace(
+        twenty,
+        facts=tuple(at_ohare if fact.id == at_ohare.id else fact for fact in twenty.facts),
+    )
+    tried = made = 0
+    plan = first_shown(there, worst_case(there))
+    assert plan is not None and all(each.persons for each in plan)
+    assert (tried, made) == (1, 2)
     monkeypatch.setattr(reference, "scheduled", its_own)
-    assert checked(file).itinerary == plan
+    monkeypatch.setattr(reference, "_sets", sets)
+    assert checked(file).itinerary == first_shown(file, worst_case(file))
+
+
+def with_everything_tried(file: File, world: World) -> list[Itinerary]:
+    """Every plan that works for some choice, in the order of "Which ITINERARY is shown".
+
+    Each OPTION is left out, happens with nobody in it, or happens with a group of PERSONs,
+    and every combination is given to ``scheduled``. No OPTION is ruled out for running
+    alone, and no set of them is left out for another. The plans in which PERSONs take part
+    the fewest times come first, and a WAY that a PERSON takes counts as one time."""
+    known = reference.Routes(file, world)
+    ranked: list[tuple[tuple[int, Any], Itinerary]] = []
+    for who in reference._who_takes_part(file, world):  # pyright: ignore[reportPrivateUsage]
+        spare = [index for index, persons in enumerate(who) if not persons]
+        mine = [
+            [index for index, persons in enumerate(who) if person.id in persons]
+            for person in file.persons
+        ]
+        in_turn = [
+            list(reference._orders(file, world, indexes, known))  # pyright: ignore[reportPrivateUsage]
+            for indexes in mine
+        ]
+        for size in range(len(spare) + 1):
+            for empty in combinations(spare, size):
+                for orders in product(*in_turn):
+                    found = reference.scheduled(
+                        file, world, who, orders, known=known, empty=frozenset(empty)
+                    )
+                    if found is not None:
+                        rank = reference._in_file_order(file, found, orders)  # pyright: ignore[reportPrivateUsage]
+                        ranked.append(((times_taking_part(found), rank), found))
+    every: list[Itinerary] = []
+    for _, found in sorted(ranked, key=lambda each: each[0]):
+        if found not in every:
+            every.append(found)
+    return every
+
+
+def times_taking_part(plan: Itinerary) -> int:
+    """How many times PERSONs take part in a plan: once for each OPTION and for each WAY."""
+    return sum(len(each.persons) for each in plan)
+
+
+def a_crossing_both_ways(permit: bool = False) -> File:
+    """Jo starts at B and is LOCKed into a ferry from A to B and a return from B to A. The
+    return requires the bag, which lies at A. The ferry can carry it, and so can a van from
+    A to B that Jo need not ride. A walk takes Jo from B to A. With ``permit``, the van
+    and the return require a permit too. It lies at C, and no OPTION does anything with it."""
+    options = [moves("ferry", "a", "b"), moves("return", "b", "a"), moves("van", "a", "b")]
+    facts = [
+        starts_from("jo", "b"),
+        lies_at("bag", "a"),
+        *whenever("ferry"),
+        *whenever("return"),
+        any_time("van"),
+        lasts("van", "PT5M"),
+        carries("ferry", "bag"),
+        carries("van", "bag"),
+        requires_object("return", "bag"),
+        every_use("bag"),
+        takes("walk", "PT5M"),
+    ]
+    if permit:
+        facts += [
+            lies_at("permit", "c"),
+            requires_object("return", "permit"),
+            requires_object("van", "permit"),
+            every_use("permit"),
+            *(does_with(option["id"], "permit", "nothing") for option in options),
+        ]
+    locks = [lock("ferry", "jo"), lock("return", "jo")]
+    things = ["bag", "permit"] if permit else ["bag"]
+    places = ["a", "b", "c"] if permit else ["a", "b"]
+    return trip(["jo"], places, options, facts, locks, [way("walk", "b", "a")], objects=things)
+
+
+def test_an_option_with_nobody_in_it_can_save_a_person_a_way() -> None:
+    """With the ferry alone, Jo has to walk to A first so that the ferry can carry the bag to
+    B. With the van, the bag comes to B by itself: Jo takes the return, and then the ferry.
+    That is one WAY fewer, so it is the plan, though it has one OPTION more. With the
+    permit, the report asks for another transfer for the OPTIONs of that plan: the van and
+    the return."""
+    file = a_crossing_both_ways()
+    found = checked(file)
+    assert [(each.option or each.way, each.persons, each.carried) for each in found.itinerary] == [
+        ("van", (), ("bag",)),
+        ("return", ("jo",), ()),
+        ("ferry", ("jo",), ()),
+    ]
+    assert with_everything_tried(file, worst_case(file))[0] == found.itinerary
+    assert compiler.check(file) == found
+
+    file = a_crossing_both_ways(permit=True)
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    told = report.as_text(file, found)
+    assert "might work if another transfer puts permit at hand for van and return." in told
+    assert compiler.check(file) == found
+
+
+def test_both_checkers_agree_on_trips_with_options_that_nobody_has_to_be_in() -> None:
+    """On random trips with vans that nobody has to ride, the solver's search gives the report
+    that the reference checker gives, and so does the COMPILER."""
+    rng = Random(2026)
+    seen: dict[Answer, int] = {}
+    alone = 0
+    for _ in range(150):
+        file = a_trip_with_services(rng)
+        found = checked(file)
+        assert compiler.check(file) == found
+        seen[found.answer] = seen.get(found.answer, 0) + 1
+        alone += any(each.option and not each.persons for each in found.itinerary or ())
+    assert seen[Answer.FEASIBLE] > 60 and alone > 20
+    assert seen[Answer.INFEASIBLE] > 10 and seen[Answer.UNDETERMINED] > 10
+
+
+def a_trip_with_services(rng: Random) -> File:
+    """A FILE in which an OPTION often has to happen with nobody in it, or can.
+
+    One or two PERSONs start at A or at B. A bag lies at A or at B, and in some FILEs a
+    permit lies at one of them too. A ferry goes from A to B and a return from B to A, and
+    some FILEs have a use at one PLACE. A PERSON is LOCKed into most of them, and each one
+    requires the bag in some FILEs. One or two vans go from A to B or from B to A. A van
+    carries the bag or the permit, some vans require the permit, and nobody can ride in
+    most. The ferry and the return carry the bag in some FILEs. A walk goes one way or
+    both ways. A FILE has five OPTIONs at the most, and four with two PERSONs: the search
+    that skips nothing takes seconds beyond that."""
+    persons = rng.choice([["jo"], ["jo"], ["jo", "lee"]])
+    things = ["bag", "permit"] if rng.random() < 0.35 else ["bag"]
+    options = [moves("ferry", "a", "b"), moves("return", "b", "a")]
+    vans = ["van", "truck"] if rng.random() < 0.45 else ["van"]
+    options += [moves(van, *rng.choice([("a", "b"), ("a", "b"), ("b", "a")])) for van in vans]
+    if len(options) + len(persons) < 6 and rng.random() < 0.5:
+        options.append(stays("use", rng.choice("ab")))
+    rng.shuffle(options)
+    facts: list[Document] = []
+    locks: list[Document] = []
+    for option in options:
+        name = option["id"]
+        if rng.random() < 0.6:
+            facts += whenever(name, rng.choice(["PT5M", "PT10M"]))
+        else:
+            hour, minute = rng.choice([(9, 0), (9, 10), (9, 20), (9, 30)])
+            facts += at(name, hour, minute, rng.choice(["PT5M", "PT10M"]))
+        if name in vans:
+            facts.append(carries(name, rng.choice(things)))
+            if "permit" in things and rng.random() < 0.4:
+                facts.append(requires_object(name, "permit"))
+            if rng.random() < 0.7:
+                facts += [needs_right(name), every_right(name)]
+            else:
+                facts.append(needs_no_right(name))
+            continue
+        facts.append(needs_no_right(name))
+        if rng.random() < 0.7:
+            locks.append(lock(name, *rng.sample(persons, rng.randint(1, len(persons)))))
+        if rng.random() < 0.6:
+            facts.append(requires_object(name, "bag"))
+        if name != "use" and rng.random() < 0.4:
+            facts.append(carries(name, "bag"))
+    for person in persons:
+        facts.append(starts_from(person, rng.choice("ab")))
+    for thing in things:
+        facts += [lies_at(thing, rng.choice("ab")), every_use(thing), every_transfer(thing)]
+    walks = rng.choice([[way("walk", "b", "a")], [way_between("walk", "a", "b")], []])
+    facts += [takes("walk", "PT5M")] if walks else []
+    return trip(persons, ["a", "b"], options, facts, locks, walks, rights=True, objects=things)
+
+
+def test_the_search_for_options_with_nobody_shows_what_trying_everything_shows() -> None:
+    """On random trips with vans that nobody has to ride: the plan that the search puts first
+    is the plan that a search with nothing skipped puts first. The plans of ``itineraries``
+    are all of those in which PERSONs take part the fewest times, but for the ones with an
+    OPTION that changes nothing where nobody is in it. Nothing can be taken out of the
+    first plan, and only an OPTION with nobody in it out of another."""
+    rng = Random(7)
+    works = alone = saves = spare = 0
+    for _ in range(TRIPS_WITH_SERVICES):
+        file = a_trip_with_services(rng)
+        for world in (worst_case(file), best_case(file)):
+            every = with_everything_tried(file, world)
+            assert first_shown(file, world) == (every[0] if every else None)
+            able = {file.options[index].id for index in reference.could_run_alone(file, world)}
+            fewest = [
+                plan
+                for plan in every
+                if times_taking_part(plan) == times_taking_part(every[0])
+                and all(each.persons or each.option in able for each in plan)
+            ]
+            assert itineraries(file, world) == fewest
+            if not every:
+                continue
+            works += 1
+            alone += any(not each.persons for each in every[0])
+            # A plan works with a PERSON in every OPTION, and they take part more times in it.
+            saves += any(not each.persons for each in every[0]) and any(
+                all(each.persons for each in plan) for plan in every
+            )
+            assert reference.needless(file, world, every[0]) == []
+            for plan in fewest[1:]:
+                out = reference.needless(file, world, plan)
+                assert all(person is None for _, person in out)
+                spare += bool(out)
+    assert works > 100 and alone > 30 and saves > 15 and spare > 5
+
+
+TRIPS_WITH_SERVICES = 70

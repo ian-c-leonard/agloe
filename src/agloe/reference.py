@@ -22,7 +22,7 @@ from enum import Enum
 from heapq import heapify, heappop, heappush
 from itertools import chain, combinations, groupby, pairwise, permutations, product
 from math import inf
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from agloe.file import Booking, Complete, File, Offer, Satisfies, StartsFrom, Want, WithObject
 
@@ -2730,13 +2730,14 @@ def _orders_together(
 
 
 def needless(file: File, world: World, itinerary: Itinerary) -> list[tuple[str | None, str | None]]:
-    """What could be taken out of an ITINERARY that works: each an OPTION and a PERSON in it.
+    """What could be taken out of an ITINERARY that works.
 
-    It tries every combination of PERSONs in OPTIONs that no LOCK requires, with all the times
-    left as they are. An OPTION whose last PERSON is taken out can go with them, or stay
-    with nobody in it: both are tried. An OPTION that has nobody in it can be taken out by
-    itself, and then it is named with None for the PERSON. An empty list means the
-    ITINERARY works without none of them.
+    Each thing taken out is a PERSON out of an OPTION or a WAY, named with the OPTION, or a
+    whole OPTION, named with None for the PERSON. It tries every combination of PERSONs in
+    OPTIONs that no LOCK requires, with all the times left as they are. An OPTION whose last
+    PERSON is taken out can go with them, or stay with nobody in it: both are tried, and
+    the OPTION is named with None where it goes. An OPTION that has nobody in it can be
+    taken out by itself. An empty list means the ITINERARY works without none of them.
     """
     locked = {(lock.option, person) for lock in file.locks for person in lock.persons}
     free = [
@@ -2745,7 +2746,8 @@ def needless(file: File, world: World, itinerary: Itinerary) -> list[tuple[str |
         for person in step.persons
         if (step.option, person) not in locked
     ]
-    if len(free) > _MOST_TO_TAKE_OUT:
+    with_nobody = sum(step.option is not None and not step.persons for step in itinerary)
+    if len(free) + with_nobody > _MOST_TO_TAKE_OUT:
         raise ValueError("this ITINERARY is too large for the reference checker")
     for size in range(len(free) + 1):
         for out in combinations(free, size):
@@ -2761,8 +2763,7 @@ def needless(file: File, world: World, itinerary: Itinerary) -> list[tuple[str |
             ]
             for count in range(len(nobody), -1, -1):
                 for gone in combinations(nobody, count):
-                    alone = [index for index in gone if not itinerary[index].persons]
-                    if not out and not alone:
+                    if not out and not gone:
                         continue  # nothing is taken out
                     smaller: list[Step] = []
                     for index, step in enumerate(itinerary):
@@ -2773,7 +2774,7 @@ def needless(file: File, world: World, itinerary: Itinerary) -> list[tuple[str |
                         smaller.append(replace(step, persons=staying[index], handed=handed))
                     if not broken(file, world, tuple(smaller)):
                         taken = [(itinerary[index].option, person) for index, person in out]
-                        return [*taken, *((itinerary[index].option, None) for index in alone)]
+                        return [*taken, *((itinerary[index].option, None) for index in gone)]
     return []
 
 
@@ -2786,27 +2787,41 @@ def itineraries(file: File, world: World, known: Routes | None = None) -> list[I
     span of time, taking it before the span and after it are tried too. A choice works when the
     orders it names work: no other order is tried in their place.
 
-    Nothing can be taken out of an ITINERARY in which PERSONs take part the fewest times, so
-    ``needless`` finds nothing in any ITINERARY returned. They come in the order of "Which
+    An OPTION can happen with nobody in it, and that adds nothing to the times PERSONs take
+    part. So an ITINERARY returned can have one that it does not need, where
+    ``could_run_alone`` names the OPTION, and ``needless`` then names it with no PERSON.
+    Nothing else can be taken out of an ITINERARY in which PERSONs take part the fewest
+    times, and nothing at all out of the first one returned. They come in the order of "Which
     ITINERARY is shown". That rule covers the plans a report shows, which take no unlisted WAY.
     In a world with unlisted WAYs the order and the times are still the same every time, and no
     more is promised.
 
     ``known`` can hold the routes of this world that are already worked out.
     """
-    return _that_work(file, world, known, one_is_enough=False)
+    return _that_work(file, world, known, "all")
 
 
 def _that_work(
-    file: File, world: World, known: Routes | None, one_is_enough: bool
+    file: File, world: World, known: Routes | None, which: Literal["any", "first", "all"]
 ) -> list[Itinerary]:
-    """The ITINERARIES of ``itineraries``, or with ``one_is_enough`` the first one that is found.
+    """The ITINERARIES of ``itineraries``, or one of them, or the first one that is found.
 
-    The first one found works, like every one that ``scheduled`` returns. It need not be one in
-    which PERSONs take part the fewest times, nor the one a report shows.
+    With "all", they are the ITINERARIES of ``itineraries``. With "any", the list holds the
+    first one that is found. It works, like every one that ``scheduled`` returns. It need not
+    be one in which PERSONs take part the fewest times, nor the one a report shows.
 
-    An OPTION can happen with nobody in it. For each choice of PERSONs, each set of such
-    OPTIONs that ``could_run_alone`` gives is tried, the smallest first.
+    With "first", the list starts with the ITINERARY that ``itineraries`` returns first, and
+    the rest of it is not complete. An OPTION can happen with nobody in it. For each choice
+    of PERSONs, every set of the OPTIONs that ``could_run_alone`` gives is tried, the
+    smallest first. For one order of the PERSONs, the search stops at the size of the first
+    set that works with the fewest WAYs that this order can have. A larger set with this
+    order gives a plan with as many WAYs or more, and with more OPTIONs. So PERSONs take
+    part in it as many times or more, and where it is as many, the plan with fewer OPTIONs
+    comes first. A set of the same size is still tried: it can hold an OPTION that is
+    listed earlier. A plan that takes more WAYs than the fewest stops nothing: a larger set
+    can bring an OBJECT to a PERSON who then travels less.
+
+    Where no set works for an order, every set is tried for it.
     """
     best: list[tuple[_Shown, Itinerary]] = []
     fewest: int | None = None
@@ -2824,36 +2839,47 @@ def _that_work(
             [i for i, persons in enumerate(who) if person.id in persons] for person in file.persons
         ]
         in_turn = [list(_orders(file, world, indexes, known)) for indexes in mine]
-        # The OPTIONs that happen with nobody in them: no set first, then the smallest. A
-        # set that holds one that works has an OPTION more and the same PERSONs, so it never
-        # comes first, and something could be taken out of it. It is left out.
-        alone = could_run_alone(file, world, who)
-        enough: list[frozenset[int]] = []
-        for size in range(len(alone) + 1):
-            for chosen in combinations(alone, size):
-                empty = frozenset(chosen)
-                if any(empty.issuperset(fewer) for fewer in enough):
+        # For an order of the PERSONs: the fewest WAYs it can have, and the size of the first
+        # set of OPTIONs with nobody in them that worked with so few.
+        least: dict[tuple[tuple[int, ...], ...], int | None] = {}
+        settled: dict[tuple[tuple[int, ...], ...], int] = {}
+        for empty in _sets(could_run_alone(file, world, who)):
+            tried = False
+            for orders in product(*in_turn):
+                if orders not in least:
+                    least[orders] = _fewest_ways(file, world, orders, known)
+                if least[orders] is None or settled.get(orders, len(empty)) < len(empty):
+                    continue  # a PERSON has no route, or a smaller set comes first
+                tried = True
+                found = scheduled(
+                    file, world, who, orders, None, known, None, which == "any", None, empty
+                )
+                if found is None:
                     continue
-                for orders in product(*in_turn):
-                    found = scheduled(
-                        file, world, who, orders, None, known, None, one_is_enough, None, empty
-                    )
-                    if found is None:
-                        continue
-                    if one_is_enough:
-                        return [found]
-                    if empty not in enough:
-                        enough.append(empty)
-                    taking_part = sum(len(step.persons) for step in found)
-                    if fewest is None or taking_part < fewest:
-                        best, fewest = [], taking_part
-                    if taking_part == fewest:
-                        best.append((_in_file_order(file, found, orders), found))
+                if which == "any":
+                    return [found]
+                ways = sum(len(step.persons) for step in found if step.option is None)
+                if which == "first" and ways == least[orders]:
+                    settled.setdefault(orders, len(empty))
+                taking_part = sum(len(step.persons) for step in found)
+                if fewest is None or taking_part < fewest:
+                    best, fewest = [], taking_part
+                if taking_part == fewest:
+                    best.append((_in_file_order(file, found, orders), found))
+            if not tried:
+                break  # no order is left for this set, so none is left for a larger one
     shown: list[Itinerary] = []
     for _, found in sorted(best, key=lambda each: each[0]):
         if found not in shown:
             shown.append(found)
     return shown
+
+
+def _sets(things: Sequence[int]) -> Iterator[frozenset[int]]:
+    """Every set of some things, the smallest first. Each is made when it is asked for."""
+    for size in range(len(things) + 1):
+        for chosen in combinations(things, size):
+            yield frozenset(chosen)
 
 
 def could_run_alone(
@@ -3359,6 +3385,60 @@ def _legs_in_file_order(file: File, route: Route) -> list[tuple[int, int, int]]:
     ]
 
 
+def _travel(
+    file: File, world: World, orders: tuple[tuple[int, ...], ...], known: Routes
+) -> list[tuple[int, int, list[Route]]] | None:
+    """Where the PERSONs have to travel with these orders, and the routes that can take them.
+
+    Each is a PERSON, by position in the FILE, the position in their order of the OPTION
+    that they travel after, and the routes. The position is -1 before their first OPTION.
+    None where a PERSON has to travel and no route takes them.
+    """
+    needed: list[tuple[int, int, list[Route]]] = []
+    for number, order in enumerate(orders):
+        person = file.persons[number].id
+        start, asked = file.starts_from(person), has_to_end_at(file, person)
+        end = asked[0].ends_at if asked else None  # where this PERSON's path has to end
+        stops = [(file.options[index].origin, file.options[index].destination) for index in order]
+        # After which OPTION, from where, to where, and whether the PERSON does nothing after it.
+        hops = [
+            (spot, here, there, False)
+            for spot, ((_, here), (there, _)) in enumerate(pairwise(stops))
+        ]
+        first = stops[0][0] if stops else end
+        if start is not None and first is not None:
+            hops.insert(0, (-1, start.place, first, not stops))
+        if stops and end is not None:
+            hops.append((len(stops) - 1, stops[-1][1], end, True))
+        for spot, here, there, last in hops:
+            if here != there:
+                if 0 <= spot < len(order) - 1:
+                    possible = known.after(order[spot], order[spot + 1])
+                else:
+                    before = order[spot] if spot >= 0 else None
+                    after = None if last else order[spot + 1]
+                    possible = known.at_an_end(here, there, before, after)
+                if not possible:
+                    return None
+                needed.append((number, spot, possible))
+    return needed
+
+
+def _fewest_ways(
+    file: File, world: World, orders: tuple[tuple[int, ...], ...], known: Routes
+) -> int | None:
+    """The fewest WAYs that the PERSONs take with these orders, each PERSON's WAYs counted.
+
+    It is what the shortest route for each stretch adds up to. ``_schedules`` takes its
+    routes from the same lists, so no ITINERARY with these orders has fewer. None where a
+    PERSON has no route.
+    """
+    needed = _travel(file, world, orders, known)
+    if needed is None:
+        return None
+    return sum(min(len(route) for route in routes) for _, _, routes in needed)
+
+
 def _schedules(
     file: File,
     world: World,
@@ -3387,34 +3467,9 @@ def _schedules(
     found = _chains(file, world, who, orders, empty=empty)
     if found is not None and next(iter(found), None) is None:
         return  # an OBJECT is not at hand where it has to be, whatever the WAYs and the times
-    # Which PERSON, after which of their OPTIONs, the routes. Before their first OPTION is -1.
-    needed: list[tuple[int, int, list[Route]]] = []
-    for number, order in enumerate(orders):
-        person = file.persons[number].id
-        start, asked = file.starts_from(person), has_to_end_at(file, person)
-        end = asked[0].ends_at if asked else None  # where this PERSON's path has to end
-        stops = [(file.options[index].origin, file.options[index].destination) for index in order]
-        # After which OPTION, from where, to where, and whether the PERSON does nothing after it.
-        hops = [
-            (spot, here, there, False)
-            for spot, ((_, here), (there, _)) in enumerate(pairwise(stops))
-        ]
-        first = stops[0][0] if stops else end
-        if start is not None and first is not None:
-            hops.insert(0, (-1, start.place, first, not stops))
-        if stops and end is not None:
-            hops.append((len(stops) - 1, stops[-1][1], end, True))
-        for spot, here, there, last in hops:
-            if here != there:
-                if 0 <= spot < len(order) - 1:
-                    possible = known.after(order[spot], order[spot + 1])
-                else:
-                    before = order[spot] if spot >= 0 else None
-                    after = None if last else order[spot + 1]
-                    possible = known.at_an_end(here, there, before, after)
-                if not possible:
-                    return
-                needed.append((number, spot, possible))
+    needed = _travel(file, world, orders, known)
+    if needed is None:
+        return
 
     # The routes at each point in the order of the WAYs they take. No route is the beginning of
     # another one between the same two PLACEs. So going through the points in turn puts the
@@ -4189,10 +4244,10 @@ def _in_file_order(file: File, itinerary: Itinerary, orders: tuple[tuple[int, ..
 
 def first_shown(file: File, world: World) -> Itinerary | None:
     """The ITINERARY that "Which ITINERARY is shown" puts first in this world, if any works."""
-    found = itineraries(file, world)
+    found = _that_work(file, world, None, "first")
     return found[0] if found else None
 
 
 def any_works(file: File, world: World) -> bool:
     """Whether any ITINERARY works in this world. The search stops at the first that does."""
-    return bool(_that_work(file, world, None, one_is_enough=True))
+    return bool(_that_work(file, world, None, "any"))

@@ -437,7 +437,8 @@ def test_what_nobody_needs_can_be_taken_out() -> None:
     coffee = step(file, "coffee", seconds(13), seconds(13, 10), "alex")
     with_coffee = (coffee, visit(), train(), flight())
     assert broken(file, world, with_coffee) == []
-    assert needless(file, world, with_coffee) == [("coffee", "alex")]
+    # Alex is taken out of the coffee, and the coffee goes with Alex.
+    assert needless(file, world, with_coffee) == [("coffee", "alex"), ("coffee", None)]
     assert needless(file, world, (visit(), train(), flight())) == []
 
 

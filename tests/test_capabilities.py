@@ -277,6 +277,19 @@ def test_a_requirement_of_each_person_names_those_who_lack_it() -> None:
     assert broken(file, world, (replace(TOUR, persons=("alex",)),)) == []
 
 
+def test_a_locked_group_fails_a_requirement_of_each_where_one_of_them_lacks_it() -> None:
+    """Alex and Jo are LOCKed into the tour. Alex can swim, and a FACT says that Jo cannot.
+    A tour that requires swimming of each PERSON cannot happen, though Alex can take part
+    and meets it. A tour that requires it of one PERSON can."""
+    people = [can("alex", "swimming"), cannot("jo", "swimming"), can("sam", "swimming")]
+    of_each = a_tour(requires("tour", "swimming", "each"), *people, locked=("alex", "jo"))
+    assert checked(of_each).answer is Answer.INFEASIBLE
+    of_one = a_tour(requires("tour", "swimming", "one"), *people, locked=("alex", "jo"))
+    found = checked(of_one)
+    assert found.answer is Answer.FEASIBLE
+    assert found.itinerary == (replace(TOUR, persons=("alex", "jo")),)
+
+
 def test_an_option_that_requires_nothing_asks_nothing() -> None:
     file = a_tour(requires("tour", "swimming", "none"), cannot("alex", "swimming"))
     assert broken(file, worst_case(file), (TOUR,)) == []

@@ -1049,10 +1049,11 @@ class _Search:
     def _across(self, origin: str, destination: str, since: int | None = None) -> int | None:
         """The least time anything needs from one PLACE to another, or None where none gets there.
 
-        A PERSON changes PLACE by a WAY or by an OPTION that moves, and an OBJECT only with
-        a PERSON. Each takes at least its shortest time. A WAY or an OPTION with no limit to
-        how long it takes is left out: nothing follows it, so nothing it carries is at hand
-        anywhere afterwards.
+        A PERSON changes PLACE by a WAY or by an OPTION that moves. An OBJECT changes PLACE
+        with a PERSON, or in an OPTION that moves and carries it, with a PERSON in it or
+        with nobody. Each takes at least its shortest time. A WAY or an OPTION with no limit
+        to how long it takes is left out: nothing follows it, so nothing it carries is at
+        hand anywhere afterwards.
 
         ``since`` is when the crossing sets out, where that is known. Then an unlisted WAY
         leaves only outside the spans in which COMPLETE FACTs rule it out, and an OPTION
@@ -1182,9 +1183,10 @@ class _Search:
         action = world.does.get((option.id, thing), "nothing")
         loads: cp_model.IntVar | None = None
         if action in ("carries", "any"):
-            # The choice that the OBJECT is carried: it is at hand, and then it is in the
-            # OPTION and nowhere else.
+            # The choice that the OBJECT is carried: the OPTION happens, the OBJECT is at
+            # hand, and then it is in the OPTION and nowhere else.
             loads = model.new_bool_var(f"{thing} carried in {option.id}")
+            model.add_implication(loads, used)
             at_hand(loads)
             aboard = spots.index(Where(option=option.id))
             for n in range(len(spots)):
