@@ -520,8 +520,8 @@ def _carried(
 
         ``left`` is where the last OPTION left it, and ``found`` where the next one finds
         it, or None after the last OPTION of the plan. A plan that works has the OBJECT in
-        one OPTION at most. An OPTION that takes it along requires it, or might, and an
-        OBJECT that might be in another OPTION is at hand for nothing.
+        one OPTION at most. It is carried only where it is at hand, by choice or with
+        none, and an OBJECT that might be in another OPTION is at hand for nothing.
         """
         there, said = left, list[Stay]()
         over = [each.option for each in left if each.option is not None]
@@ -697,9 +697,9 @@ def _missing(file: File, works: Works, shown: Shown) -> tuple[tuple[Missing, ...
     sets are made one at a time, and each comes after every set that says more than it in
     one place: ``_with_enough_of_each`` keeps to the order of the FACTs it is given, and
     the FACTs that say most are given first. So a set is tried only where each of those
-    sets was enough, and only the sets that were enough are kept to tell. This only saves
-    work: a FILE that says little about its OBJECTs has six unknown FACTs about each thing
-    that an OPTION does.
+    sets was enough. The sets that were enough are kept once, as they were before there
+    was this short cut, and nothing else is kept. This only saves work: a FILE that says
+    little about its OBJECTs has six unknown FACTs about each thing that an OPTION does.
     """
     every = unknowns(file)
     new = ("another option", "another transfer")
@@ -730,7 +730,11 @@ def _missing(file: File, works: Works, shown: Shown) -> tuple[tuple[Missing, ...
                 # The sets of this size that are enough, each with where a report lists it:
                 # in the order of its FACTs, as if every set had been tried, and then in
                 # the order of the new things.
-                found: list[tuple[list[int], int, tuple[Unknown, ...]]] = []
+                # They are kept by the new things and the FACTs, so that the same collection
+                # tells whether a set that says more was enough.
+                found: dict[
+                    tuple[int, frozenset[Unknown]], tuple[list[int], tuple[Unknown, ...]]
+                ] = {}
                 for number, (some, (in_every_set, at_least)) in enumerate(
                     zip(those, asked, strict=True)
                 ):
@@ -742,19 +746,18 @@ def _missing(file: File, works: Works, shown: Shown) -> tuple[tuple[Missing, ...
                         (unknown for unknown in facts if unknown not in in_every_set),
                         key=lambda unknown: len(_more_than(unknown.what)),
                     )
-                    enough_here: set[frozenset[Unknown]] = set()
                     for more in _with_enough_of_each(others, at_least, size - len(in_every_set)):
                         stated = sorted((*in_every_set, *more), key=place.__getitem__)
                         if not one_way_each(stated):
                             continue
                         if not all(
-                            stronger in enough_here for stronger in _saying_more(stated, place)
+                            (number, stronger) in found for stronger in _saying_more(stated, place)
                         ) or not works(file, with_these_at_best(file, (*stated, *some))):
                             continue
-                        enough_here.add(frozenset(stated))
                         listed = [place[fact] for fact in stated]
-                        found.append((listed, number, (*stated, *some)))
-                enough = [each for _, _, each in sorted(found, key=lambda one: one[:2])]
+                        found[number, frozenset(stated)] = (listed, (*stated, *some))
+                in_order = sorted(found.items(), key=lambda each: (each[1][0], each[0][0]))
+                enough = [named for _, (_, named) in in_order]
                 if enough:
                     alone = count + size == 1
                     return tuple(
