@@ -903,7 +903,9 @@ def test_the_command_needs_a_port_that_it_can_serve_on(
 
 
 # What the page says while it no longer hears the view.
-START = "Start agloe view again, and open the address that it prints."
+START = "If agloe view has stopped, start it again and open the address that it prints."
+SAID = "When the page last heard the view, it said:"
+OLD = "What the page shows below is on the FILE as it was before."
 LAST = (
     "What the page shows below is the last that the view sent. The FILE may have changed since"
     " then."
@@ -1172,8 +1174,10 @@ def test_the_page_says_when_it_no_longer_hears_the_view() -> None:
     assert (lost["ahead"], lost["past"], lost["old"]) == (True, True, False)
     # The answer was proved, and the page has no report that shows it: the page still says it.
     assert lost["line"] == "The view is not answering."
+    # The page still says what it said last: the answer that was proved, and that the report
+    # was on its way.
     assert lost["note"] == (
-        f"{START} {LAST} The last answer that the view sent on this FILE was FEASIBLE."
+        f"{START} {SAID} FEASIBLE. The report is on its way. {answered['note']} {LAST}"
     )
     # The view speaks again: the check goes on, and the answer that was proved stands.
     assert found == answered
@@ -1194,32 +1198,53 @@ def test_a_page_that_no_longer_hears_the_view_says_what_is_the_last_it_was_sent(
     lost = {"kind": "lost"}
     start, last = START, LAST
     earlier = "The report is on an earlier state of the FILE than what the page draws."
+    checking = f"{SAID} The COMPILER is checking this FILE."
     # Lost after the view had read the newer state and proved its answer. The only answer in
     # a report on the page is the one on the FILE as it was, so the page says the newer one.
     (said,) = page_says([[*first, file, read_it, answer, lost]])
     assert said[-1]["report"].startswith("INFEASIBLE")
     assert (said[-1]["old"], said[-1]["ahead"], said[-1]["past"]) == (True, True, True)
-    assert said[-1]["note"] == (
-        f"{start} {last} {earlier} The last answer that the view sent on this FILE was FEASIBLE."
-    )
+    assert said[-1]["line"] == "The view is not answering."
+    on_its_way = f"{SAID} FEASIBLE. The report is on its way. The answer came after"
+    assert said[-1]["note"].startswith(f"{start} {on_its_way} ")
+    assert said[-1]["note"].endswith(f" s. {last} {earlier}")
     # Lost before that answer: the page names none.
     (said,) = page_says([[*first, file, read_it, lost]])
-    assert said[-1]["note"] == f"{start} {last} {earlier}"
-    # Lost before the view had read the newer state: the report and what the page draws are
-    # of one state.
+    assert said[-1]["note"] == f"{start} {checking} {last} {earlier}"
+    # Lost after the view had said that there is a newer state, and before it had read it.
+    # The page knows that the FILE changed, and says so of what it shows.
     (said,) = page_says([[*first, file, lost]])
-    assert said[-1]["note"] == f"{start} {last}"
+    assert said[-1]["note"] == f"{start} {checking} {OLD}"
     # Lost with nothing on the page.
     (said,) = page_says([[file, lost]])
-    assert said[-1]["note"] == start
+    assert said[-1]["note"] == f"{start} {checking}"
+    # Lost with the report on the page: its first line is there to read, so the page does not
+    # say it twice.
+    (said,) = page_says([[*first, lost]])
+    assert said[-1]["note"] == f"{start} {last}"
+    # Lost after a check that stopped, and after a FILE that could not be read: the page
+    # still says why it has no report.
+    stopped = {"kind": "stopped", "revision": 2}
+    (said,) = page_says([[file, read_it, answer, stopped, lost]])
+    assert said[-1]["note"] == (
+        f"{start} {SAID} FEASIBLE. The check stopped before its report came."
+        f" It runs again when the FILE changes. {last}"
+    )
+    away: Events = [
+        {**file, "revision": 3},
+        {"kind": "unreadable", "problem": "No such file or directory", "revision": 3},
+    ]
+    (said,) = page_says([[file, read_it, answer, *away, lost]])
+    assert said[-1]["note"] == (
+        f"{start} {SAID} The FILE cannot be read, so it has no report."
+        f" No such file or directory. {OLD}"
+    )
     # The view is there, a still newer state is announced, and the page has not been sent its
     # TRIP: the report and what the page draws are of two earlier states.
     newest = {**file, "revision": 3}
     (said,) = page_says([[*first, file, read_it, answer, newest]])
     assert (said[-1]["old"], said[-1]["ahead"], said[-1]["past"]) == (True, True, True)
-    assert (
-        said[-1]["note"] == f"What the page shows below is on the FILE as it was before. {earlier}"
-    )
+    assert said[-1]["note"] == f"{OLD} {earlier}"
     # A FILE that the format refused, and then the view was lost: the problems are those of
     # the last check, and the page says so above them.
     refused: Events = [

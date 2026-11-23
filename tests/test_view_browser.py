@@ -365,11 +365,10 @@ def test_the_page_draws_the_file_before_the_report_comes(chromium: Browser, tmp_
         page.locator("#calendar-part.old").wait_for()
         assert page.text_content("#line") == "The view is not answering."
         assert page.locator("#persons-part.old").count() == 1
-        # The page says that this is the last it was sent, and which answer was proved.
-        assert (page.text_content("#note") or "").endswith(
-            "The FILE may have changed since then."
-            " The last answer that the view sent on this FILE was FEASIBLE."
-        )
+        # The page says what it said last, and that what it shows is the last it was sent.
+        note = page.text_content("#note") or ""
+        assert "When the page last heard the view, it said: FEASIBLE. The report is on" in note
+        assert note.endswith("The FILE may have changed since then.")
         page.wait_for_function(waiting_again, timeout=20_000)
         # The report comes: the page draws the plan, and ties the report to it.
         go.write_text("")

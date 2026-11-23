@@ -19,10 +19,11 @@
 
 const OLD = "What the page shows below is on the FILE as it was before.";
 const OLD_REPORT = "The report below is on the FILE as it was before.";
-// What the page says while it no longer hears the view. It knows of no change to the FILE,
-// so it says of none.
+// What the page says while it no longer hears the view. Where it knows of no change to the
+// FILE, it says of none.
 const LAST = "What the page shows below is the last that the view sent. The FILE may have changed since then.";
 const EARLIER = "The report is on an earlier state of the FILE than what the page draws.";
+const SAID = "When the page last heard the view, it said:";
 const seconds = (length) => `${length.toFixed(2)} s`;
 const none = { checking: false, answer: null, answered: null, problems: null, unreadable: null, unwritable: false, stopped: false, lost: false };
 
@@ -39,8 +40,7 @@ export function after(state, event) {
     // that the page was told of that state stands, and the check goes on where it has no end
     // yet.
     if (state.view !== null && event.view === state.view && event.revision === state.revision) {
-      const ended = reportedOn(state) || state.problems !== null || state.unreadable !== null || state.unwritable || state.stopped;
-      return { ...state, lost: false, checking: !ended, old: state.report !== null && !reportedOn(state) };
+      return { ...state, lost: false, checking: !ended(state), old: state.report !== null && !reportedOn(state) };
     }
     // Each view has a name of its own. Where another view now serves this address, what is
     // on the page is of a FILE that this view knows nothing of, so the page lets it go.
@@ -78,6 +78,36 @@ function reportedOn(state) {
   return state.report !== null && state.report.revision === state.revision;
 }
 
+/** Whether the check of the state that the page was last told of has come to an end. */
+function ended(state) {
+  return reportedOn(state) || state.problems !== null || state.unreadable !== null || state.unwritable || state.stopped;
+}
+
+/**
+ * What the page says of the check of the state that it was last told of, while it hears the
+ * view: how it is marked, a line, and under it `why`, what a reader needs beside the line.
+ * `checking` says whether that check is running.
+ */
+function saidOf(state, checking) {
+  if (state.problems) return { mark: "refused", line: "This FILE does not follow the format, so it has no report.", why: "" };
+  if (state.unreadable !== null) return { mark: "unreadable", line: "The FILE cannot be read, so it has no report.", why: `${state.unreadable}.` };
+  if (state.unwritable) {
+    const line = state.answer ? `${state.answer}. The report cannot be written.` : "The report cannot be written.";
+    return { mark: state.answer ? state.answer.toLowerCase() : "stopped", line, why: "It holds a time outside the years 0001 to 9999." };
+  }
+  if (state.stopped) {
+    const line = state.answer ? `${state.answer}. The check stopped before its report came.` : "The check stopped before it gave an answer.";
+    return { mark: "stopped", line, why: "It runs again when the FILE changes." };
+  }
+  if (checking && state.answer) return { mark: state.answer.toLowerCase(), line: `${state.answer}. The report is on its way.`, why: `The answer came after ${seconds(state.answered)}.` };
+  if (checking) return { mark: "checking", line: "The COMPILER is checking this FILE.", why: "" };
+  if (state.report) {
+    const why = `The COMPILER gave the answer after ${seconds(state.answered)} and the report after ${seconds(state.reported)}.`;
+    return { mark: markOf(state.report.json), line: state.report.text.split("\n")[0], why };
+  }
+  return { mark: "waiting", line: "Waiting for the FILE.", why: "" };
+}
+
 /** How a report is marked: by its answer, or as a warning where its plan comes with one. */
 function markOf(json) {
   if (json.answer !== "FEASIBLE") return json.answer.toLowerCase();
@@ -105,35 +135,20 @@ export function says(state) {
   // A report on the page and a drawing of a later state of the FILE: the page says which is which.
   const earlier = state.report !== null && ahead ? [EARLIER] : [];
   const with_old = (note) => [note, ...(past ? [OLD, ...earlier] : state.old ? [OLD_REPORT] : [])].join(" ").trim();
-  if (state.lost) {
-    // The problems of a FILE that the format refused are above the note, so the line says
-    // whose they are. An answer that was proved, and that no report on the page shows, is
-    // still said.
-    const line = state.problems ? "The view is not answering. The problems below are from the last check that it sent." : "The view is not answering.";
-    const last = calendar !== null || state.report !== null ? [LAST, ...earlier] : [];
-    const answered = state.answer !== null && !reportedOn(state) ? [`The last answer that the view sent on this FILE was ${state.answer}.`] : [];
-    return { ...shown, mark: "lost", line, note: ["Start agloe view again, and open the address that it prints.", ...last, ...answered].join(" ") };
+  if (!state.lost) {
+    const { mark, line, why } = saidOf(state, state.checking);
+    return { ...shown, mark, line, note: with_old(why) };
   }
-  if (state.problems) {
-    return { ...shown, mark: "refused", line: "This FILE does not follow the format, so it has no report.", note: with_old("") };
-  }
-  if (state.unreadable !== null) {
-    return { ...shown, mark: "unreadable", line: "The FILE cannot be read, so it has no report.", note: with_old(`${state.unreadable}.`) };
-  }
-  if (state.unwritable) {
-    const line = state.answer ? `${state.answer}. The report cannot be written.` : "The report cannot be written.";
-    return { ...shown, mark: state.answer ? state.answer.toLowerCase() : "stopped", line, note: with_old("It holds a time outside the years 0001 to 9999.") };
-  }
-  if (state.stopped) {
-    const line = state.answer ? `${state.answer}. The check stopped before its report came.` : "The check stopped before it gave an answer.";
-    return { ...shown, mark: "stopped", line, note: with_old("It runs again when the FILE changes.") };
-  }
-  if (state.checking && state.answer) {
-    return { ...shown, mark: state.answer.toLowerCase(), line: `${state.answer}. The report is on its way.`, note: with_old(`The answer came after ${seconds(state.answered)}.`) };
-  }
-  if (state.checking) return { ...shown, mark: "checking", line: "The COMPILER is checking this FILE.", note: with_old("") };
-  if (state.report) {
-    return { ...shown, mark: markOf(state.report.json), line: shown.report.split("\n")[0], note: `The COMPILER gave the answer after ${seconds(state.answered)} and the report after ${seconds(state.reported)}.` };
-  }
-  return { ...shown, mark: "waiting", line: "Waiting for the FILE.", note: "" };
+  // The page no longer hears the view. It repeats what it said last, as the last that it
+  // said: the check was running unless it had come to an end. A report on that state of the
+  // FILE is there to read, and so are the problems of a FILE that the format refused: the
+  // line above them says whose they are.
+  const last = saidOf(state, state.revision !== null && !ended(state));
+  const line = state.problems ? "The view is not answering. The problems below are from the last check that it sent." : "The view is not answering.";
+  const said = state.problems || reportedOn(state) || last.mark === "waiting" ? [] : [SAID, last.line, ...(last.why ? [last.why] : [])];
+  // What the page shows is the last that it was sent. Where the view had said that there is
+  // a newer state of the FILE, the page knows that the FILE changed.
+  const behind = calendar !== null && (ahead ? state.read.revision : state.report.revision) !== state.revision;
+  const below = calendar !== null ? [behind ? OLD : LAST, ...earlier] : [];
+  return { ...shown, mark: "lost", line, note: ["If agloe view has stopped, start it again and open the address that it prints.", ...said, ...below].join(" ") };
 }
