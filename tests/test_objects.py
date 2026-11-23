@@ -2282,18 +2282,16 @@ def test_five_visitors_are_shown_at_once_whoever_might_have_the_bag(
             assert not any(each.handed for each in found.itinerary)
 
 
-def test_a_visit_with_five_things_is_explained_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Alex is LOCKed into one visit and brings five things. Nothing says whether the visit
-    refuses them, what it does with them, or whether the FILE states every transfer. The
-    trip works if the visit refuses none of the five. The FILE has more than twenty unknown
-    FACTs, and the sets of five of them are tens of thousands. The search first asks which
-    FACTs no set can do without, and then tries very few sets."""
-    things = ["camera", "daypack", "stroller", "water", "umbrella"]
-    facts = [*at("visit", 10)]
-    facts += [{**has_object("alex", thing), "id": f"{thing}-start"} for thing in things]
-    options, locks = [stays("visit", "museum")], [lock("visit", "alex")]
-    file = trip(["alex"], ["museum"], options, facts, locks, objects=things)
-    assert len(unknowns(file)) > 20
+def carried_by_alex(things: Sequence[str]) -> list[Document]:
+    """A FACT for each of these OBJECTs: Alex has it when the TRIP starts."""
+    return [{**has_object("alex", thing), "id": f"{thing}-start"} for thing in things]
+
+
+def sets_tried_for(monkeypatch: pytest.MonkeyPatch, file: File) -> tuple[Report, int]:
+    """The COMPILER's report on a FILE, and how many sets of unknown FACTs it tried for it.
+
+    The reference checker's own search gives the same report.
+    """
     tried = 0
     its_own = answers.with_these_at_best
 
@@ -2304,12 +2302,88 @@ def test_a_visit_with_five_things_is_explained_at_once(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(answers, "with_these_at_best", counted)
     found = compiler.check(file)
+    monkeypatch.setattr(answers, "with_these_at_best", its_own)
+    assert answers.check(file) == found
+    return found, tried
+
+
+def test_a_visit_with_five_things_is_explained_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Alex is LOCKed into one visit and brings five things. Nothing says whether the visit
+    refuses them, what it does with them, or whether the FILE states every transfer. The
+    trip works if the visit refuses none of the five. The FILE has more than twenty unknown
+    FACTs, and the sets of five of them are tens of thousands. The search first asks which
+    FACTs no set can do without, and then tries very few sets."""
+    things = ["camera", "daypack", "stroller", "water", "umbrella"]
+    facts = [*at("visit", 10), *carried_by_alex(things)]
+    options, locks = [stays("visit", "museum")], [lock("visit", "alex")]
+    file = trip(["alex"], ["museum"], options, facts, locks, objects=things)
+    assert len(unknowns(file)) > 20
+    found, tried = sets_tried_for(monkeypatch, file)
     assert asked(found) == [
         tuple(Unknown("does not refuse", "visit", about=thing) for thing in things)
     ]
     assert tried < 10
-    monkeypatch.setattr(answers, "with_these_at_best", its_own)
-    assert answers.check(file) == found
+
+
+def test_two_options_for_one_want_are_explained_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A show is a must for Alex, and the matinee and the evening performance both deliver
+    it. Alex brings four things, and nobody said whether either performance refuses them.
+    No single FACT is in every set: Alex can go to the other performance. But for each
+    thing, one of the two performances has to let it in. The search finds those four groups
+    and tries sixteen sets. Two are enough: one performance lets all four in."""
+    things = ["daypack", "camera", "bottle", "umbrella"]
+    facts = [
+        *at("matinee", 13),
+        *at("evening", 20),
+        satisfies("matinee", "show"),
+        satisfies("evening", "show"),
+        every("show"),
+        *carried_by_alex(things),
+    ]
+    options = [stays("matinee", "hall"), stays("evening", "hall")]
+    wants = [must("show", "alex")]
+    file = trip(["alex"], ["hall"], options, facts, [], wants=wants, objects=things)
+    found, tried = sets_tried_for(monkeypatch, file)
+    assert asked(found) == [
+        tuple(Unknown("does not refuse", show, about=thing) for thing in things)
+        for show in ("matinee", "evening")
+    ]
+    assert tried <= 16
+
+
+def test_each_choice_of_new_things_has_its_own_facts_that_no_set_can_do_without(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Music is a must for Alex and Jo, and the recital has one place left. Alex brings five
+    things. Where Alex takes the place, the recital has to refuse none of them, and Jo
+    needs another OPTION. Where Jo takes it, the recital has to require none of them, and
+    Alex needs another OPTION. Each choice has its own five FACTs, and the search tries one
+    set for each."""
+    things = ["camera", "recorder", "stroller", "bag", "umbrella"]
+    facts = [
+        *at("recital", 19),
+        satisfies("recital", "music"),
+        needs_right("recital"),
+        offer("recital", 1, price="0.00 USD"),
+        every_right("recital", "recital-offer"),
+        *carried_by_alex(things),
+    ]
+    options, wants = [stays("recital", "hall")], [must("music", "alex", "jo")]
+    file = trip(
+        ["alex", "jo"], ["hall"], options, facts, [], wants=wants, rights=True, objects=things
+    )
+    found, tried = sets_tried_for(monkeypatch, file)
+    assert asked(found) == [
+        (
+            *(Unknown("does not require", "recital", about=thing) for thing in things),
+            Unknown("another option", want="music", person="alex"),
+        ),
+        (
+            *(Unknown("does not refuse", "recital", about=thing) for thing in things),
+            Unknown("another option", want="music", person="jo"),
+        ),
+    ]
+    assert tried < 10
 
 
 def test_a_hand_over_that_comes_later_puts_no_earlier_refusal_in_the_order() -> None:
@@ -2940,10 +3014,10 @@ def test_the_sets_named_for_objects_are_all_the_smallest_that_are_enough(
 
     def counted(*given: object) -> object:
         nonlocal held, pairs
-        every, one_of_two = its_own(*given)  # type: ignore[arg-type]
-        held += bool(every)
-        pairs += bool(one_of_two)
-        return every, one_of_two
+        groups = its_own(*given)  # type: ignore[arg-type]
+        held += any(len(group) == 1 for group in groups)
+        pairs += any(len(group) > 1 for group in groups)
+        return groups
 
     monkeypatch.setattr(answers, "_asked_of_objects", counted)
     for _ in range(260):
@@ -2976,7 +3050,7 @@ def test_the_sets_named_for_objects_are_all_the_smallest_that_are_enough(
     assert several > 10
     assert unsettled > 5
     # The search asked first which FACTs about the OBJECTs no set can do without. It found
-    # single FACTs, and pairs of which every set holds one.
+    # single FACTs, and groups of which every set holds one.
     assert held > 20 and pairs > 3
 
 

@@ -7,7 +7,7 @@ search is the reference checker's, which tries everything. The COMPILER passes i
 search instead, and the answers and the evidence are worked out here in either case.
 """
 
-from collections.abc import Callable, Iterable, Iterator, Sequence, Set
+from collections.abc import Callable, Iterator, Sequence, Set
 from dataclasses import dataclass, replace
 from enum import Enum
 from itertools import combinations
@@ -642,29 +642,34 @@ def _missing(file: File, works: Works, shown: Shown) -> tuple[tuple[Missing, ...
         # transfer. A set that is not settled is listed only where none of them is enough.
         settled = [some for some in hopeful if all(u.what != "another transfer" for u in some)]
         for those in (settled, [some for some in hopeful if some not in settled]):
-            in_every_set, at_least = by_a_lock, at_least_by_a_lock
-            if len(those) == 1:
-                # What the OBJECTs ask of every set that comes with these new things.
-                held, one_of_two = _asked_of_objects(file, works, those[0])
-                in_every_set, at_least = by_a_lock | held, [*at_least_by_a_lock, *one_of_two]
-            others = [unknown for unknown in facts if unknown not in in_every_set]
-            fewest = len(in_every_set) + sum(number for _, number in at_least)
-            for size in range(fewest, len(facts) + 1 if those else 0):
-                picked = _with_enough_of_each(others, at_least, size - len(in_every_set))
-                sets: Iterable[list[Unknown]] = (
-                    sorted((*in_every_set, *more), key=place.__getitem__) for more in picked
-                )
-                if at_least:
-                    # They were picked group by group. A report lists them in the order of
-                    # their FACTs, as if every set had been tried.
-                    sets = sorted(sets, key=lambda stated: [place[fact] for fact in stated])
-                enough = [
-                    (*stated, *some)
-                    for stated in sets
-                    for some in those
-                    if one_way_each(stated)
-                    and works(file, with_these_at_best(file, (*stated, *some)))
-                ]
+            # What every set has to hold, for each choice of new things: what the LOCKs ask,
+            # and what the OBJECTs ask of the sets that come with those new things.
+            asked: list[tuple[frozenset[Unknown], list[tuple[frozenset[Unknown], int]]]] = []
+            for some in those:
+                groups = _asked_of_objects(file, works, some)
+                alone_in_one = (unknown for group in groups if len(group) == 1 for unknown in group)
+                several = [(group, 1) for group in groups if len(group) > 1]
+                asked.append((by_a_lock.union(alone_in_one), [*at_least_by_a_lock, *several]))
+            fewest = [len(held) + sum(number for _, number in groups) for held, groups in asked]
+            for size in range(min(fewest, default=0), len(facts) + 1 if those else 0):
+                # The sets of this size that are enough, each with where a report lists it:
+                # in the order of its FACTs, as if every set had been tried, and then in
+                # the order of the new things.
+                found: list[tuple[list[int], int, tuple[Unknown, ...]]] = []
+                for number, (some, (in_every_set, at_least)) in enumerate(
+                    zip(those, asked, strict=True)
+                ):
+                    if size < fewest[number]:
+                        continue
+                    others = [unknown for unknown in facts if unknown not in in_every_set]
+                    for more in _with_enough_of_each(others, at_least, size - len(in_every_set)):
+                        stated = sorted((*in_every_set, *more), key=place.__getitem__)
+                        if one_way_each(stated) and works(
+                            file, with_these_at_best(file, (*stated, *some))
+                        ):
+                            listed = [place[fact] for fact in stated]
+                            found.append((listed, number, (*stated, *some)))
+                enough = [each for _, _, each in sorted(found, key=lambda one: one[:2])]
                 if enough:
                     alone = count + size == 1
                     return tuple(
@@ -946,45 +951,57 @@ def _asked_by_a_lock(file: File) -> tuple[frozenset[Unknown], list[tuple[frozens
 
 def _asked_of_objects(
     file: File, works: Works, some: Sequence[Unknown]
-) -> tuple[frozenset[Unknown], list[tuple[frozenset[Unknown], int]]]:
+) -> list[frozenset[Unknown]]:
     """What the OBJECTs ask of every set of unknown FACTs that is enough with these new things.
 
     ``some`` holds conditions for another OPTION and other transfers. The sets meant are
-    those that hold them and no other new thing.
+    those that hold them and no other new thing. The result is groups of unknown FACTs:
+    every such set holds one FACT at least of each group, and no two groups share a FACT.
 
-    An OPTION with no FACT about it might require an OBJECT, and it might refuse it. Each
-    of the two is tested by itself in the upper bound of ``no_better_than``, where every
-    unknown FACT helps whoever needs it: there the OPTION is made to require the OBJECT, or
-    to refuse it. Where nothing works then, no set without that FACT is enough. Such a set
-    leaves the FACT at its worst, and everything else in it turns out no better than in
-    the bound. So every set that is enough holds the FACT: those are the first result.
+    An OPTION with no FACT about it might require an OBJECT, and it might refuse it. A
+    group of those FACTs is tested in the upper bound of ``no_better_than``, where every
+    unknown FACT helps whoever needs it: there each OPTION of the group is made to require
+    its OBJECT, or to refuse it. Where nothing works then, no set without a FACT of the
+    group is enough. Such a set leaves the whole group at its worst, and everything else in
+    it turns out no better than in the bound. So every set that is enough holds one of them.
 
-    Where something works with each of the two by itself, the two are tested together.
-    Where nothing works then, every set that is enough holds one of the two at least:
-    those pairs are the second result, each with the number one.
+    The groups are found one after another. All the FACTs that are left are tested
+    together. Where nothing works, FACTs are taken out of the group one at a time, in the
+    FILE's order, as long as nothing works without them. What stays is a group that no FACT
+    can leave, and the search goes on with the FACTs outside it. A group of one FACT is a
+    FACT that every set holds.
 
     This only saves work. A FILE that says little about its OBJECTs has many unknown FACTs
     about them, and the sets of a size are too many to try one by one.
     """
     bound = no_better_than(file, some)
-    held: set[Unknown] = set()
-    one_of_two: list[tuple[frozenset[Unknown], int]] = []
+    worse: dict[Unknown, tuple[bool, tuple[str, str]]] = {}
     for option in file.options:
         for thing in file.objects_asked_for():
             pair = (option.id, thing.id)
-            required = replace(bound, needs=bound.needs | {pair})
-            refused = replace(bound, refuses=bound.refuses | {pair})
-            worse: dict[Unknown, World] = {}
             if file.requires_object(*pair) is None:
-                worse[Unknown("does not require", option.id, about=thing.id)] = required
+                worse[Unknown("does not require", option.id, about=thing.id)] = (True, pair)
             if file.refuses_object(*pair) is None:
-                worse[Unknown("does not refuse", option.id, about=thing.id)] = refused
-            needed = [unknown for unknown, world in worse.items() if not works(file, world)]
-            held.update(needed)
-            both = replace(required, refuses=refused.refuses)
-            if len(worse) == 2 and not needed and not works(file, both):
-                one_of_two.append((frozenset(worse), 1))
-    return frozenset(held), one_of_two
+                worse[Unknown("does not refuse", option.id, about=thing.id)] = (False, pair)
+
+    def nothing_works(group: Sequence[Unknown]) -> bool:
+        """Whether nothing works in the bound with each FACT of the group at its worst."""
+        needs = {pair for required, pair in map(worse.__getitem__, group) if required}
+        refuses = {pair for required, pair in map(worse.__getitem__, group) if not required}
+        harder = replace(bound, needs=bound.needs | needs, refuses=bound.refuses | refuses)
+        return not works(file, harder)
+
+    groups: list[frozenset[Unknown]] = []
+    left = list(worse)
+    while left and nothing_works(left):
+        group = left
+        for unknown in left:
+            fewer = [each for each in group if each != unknown]
+            if nothing_works(fewer):
+                group = fewer
+        groups.append(frozenset(group))
+        left = [each for each in left if each not in group]
+    return groups
 
 
 def _beyond(file: File) -> int:
