@@ -5267,12 +5267,10 @@ def test_a_conference_with_a_badge_is_reported_at_once(monkeypatch: pytest.Monke
     gone = 0
     its_own = reference._left  # pyright: ignore[reportPrivateUsage]
 
-    def counted(
-        does: str, places: frozenset[Where], persons: Sequence[str], origin: str
-    ) -> frozenset[Where]:
+    def counted(*given: object) -> frozenset[Where]:
         nonlocal gone
         gone += 1
-        return its_own(does, places, persons, origin)
+        return its_own(*given)  # type: ignore[arg-type]
 
     monkeypatch.setattr(reference, "_left", counted)
     found = compiler.check(file)
