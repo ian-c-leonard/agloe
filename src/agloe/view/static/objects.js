@@ -41,8 +41,8 @@ const HOW = new Map([
   ["handed over", (option) => `handed over in ${option}`],
   ["kept", (option) => `kept by ${option}`],
   ["kept if held", (option, thing) => `kept by ${option} if anybody there has ${thing}`],
-  ["might be kept", (option, thing) => `the FILE does not say what ${option} does with ${thing}`],
-  ["might go along", (option, thing) => `the FILE does not say whether ${option} requires ${thing}`],
+  ["unknown action", (option, thing) => `the FILE does not say what ${option} does with ${thing}`],
+  ["unknown requirement", (option, thing) => `the FILE does not say whether ${option} requires ${thing}`],
   ["carried", () => "carried"],
 ]);
 

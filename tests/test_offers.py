@@ -490,6 +490,29 @@ def test_only_the_sets_with_enough_of_each_group_are_made() -> None:
     assert list(answers._with_enough_of_each(facts, [], 2)) == list(combinations(facts, 2))  # pyright: ignore[reportPrivateUsage]
 
 
+def test_a_pick_comes_after_each_pick_with_an_earlier_fact_in_its_place() -> None:
+    """The picks keep to the order of the FACTs. Take a pick, and put a FACT that comes
+    earlier in the place of one of its FACTs, from the same group or, like it, from no group.
+    That pick was made before. The search for the sets of unknown FACTs counts on it: it
+    gives the FACTs that say most first, and tries a set only after each set that says more."""
+    facts = [right("tour", f"person-{number}") for number in range(6)]
+    facts += [Unknown("start", "tour"), Unknown("cutoff", "tour")]
+    groups = [(frozenset({facts[4], facts[0], facts[2]}), 1), (frozenset({facts[5], facts[1]}), 1)]
+    part = {fact: number for number, (group, _) in enumerate(groups) for fact in group}
+    compared = 0
+    for size in range(8):
+        made = [frozenset(pick) for pick in answers._with_enough_of_each(facts, groups, size)]  # pyright: ignore[reportPrivateUsage]
+        place = {pick: number for number, pick in enumerate(made)}
+        assert len(place) == len(made)
+        for pick in made:
+            for later in pick:
+                for earlier in facts[: facts.index(later)]:
+                    if earlier not in pick and part.get(earlier) == part.get(later):
+                        assert place[pick - {later} | {earlier}] < place[pick]
+                        compared += 1
+    assert compared > 300
+
+
 def test_a_thousand_groups_are_picked_from_without_going_deeper_each_time() -> None:
     """A thousand LOCKed visits that each need one more right give one pick of a thousand FACTs."""
     rights = [right(f"visit-{number}", "alex") for number in range(1200)]
