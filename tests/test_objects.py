@@ -9202,7 +9202,8 @@ def test_many_services_that_can_each_carry_the_bags_are_not_tried_in_every_combi
     twenty vans have a million. A second route to O'Hare, a
     walk and a cab, changes nothing: the fewest WAYs are those of the shortest route.
     Where the Blue Line is the only WAY and Jo starts at the hotel, Jo has no route to the
-    flight, and nothing is timed."""
+    flight, and nothing is timed. An OPTION with a PERSON in it is not tried with nobody
+    in it as well."""
     tried = made = 0
     its_own, sets = reference.scheduled, reference._sets  # pyright: ignore[reportPrivateUsage]
 
@@ -9245,6 +9246,24 @@ def test_many_services_that_can_each_carry_the_bags_are_not_tried_in_every_combi
     assert first_shown(stranded, worst_case(stranded)) is None
     assert not reference.any_works(stranded, worst_case(stranded))
     assert tried == 0
+
+    # Jo starts at the hotel and can ride the service. A choice with Jo in the service has
+    # no OPTION left that could run alone, so it has one set: the one with none.
+    walk = way_between("walk", "hotel", "museum")
+    riding = a_service(
+        starts_from("jo", "hotel"),
+        takes("walk", "PT15M"),
+        passengers=True,
+        others=["jo"],
+        ways=[walk],
+    )
+    riding = replace(
+        riding, decisions=(*riding.decisions, answers.Lock("jo-flies", "flight", ("jo",)))
+    )
+    tried = made = 0
+    plan = first_shown(riding, worst_case(riding))
+    assert ("service", ("jo",)) in [(each.option, each.persons) for each in plan or ()]
+    assert (tried, made) == (5, 17)
     monkeypatch.setattr(reference, "scheduled", its_own)
     monkeypatch.setattr(reference, "_sets", sets)
     assert checked(file).itinerary == first_shown(file, worst_case(file))
