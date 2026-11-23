@@ -631,9 +631,7 @@ def _missing(file: File, works: Works, shown: Shown) -> tuple[tuple[Missing, ...
     facts = [unknown for unknown in every if unknown.what not in new]
     to_find = [unknown for unknown in every if unknown.what in new]
     place = {unknown: number for number, unknown in enumerate(facts)}
-    in_every_set, at_least = _asked_by_a_lock(file)
-    others = [unknown for unknown in facts if unknown not in in_every_set]
-    fewest = len(in_every_set) + sum(number for _, number in at_least)
+    by_a_lock, at_least_by_a_lock = _asked_by_a_lock(file)
     for count in range(len(to_find) + 1):
         # Asking for these can be enough only if it is in the upper bound, where every FACT
         # helps whoever needs it. The bound only saves work: nothing is reported from it.
@@ -644,6 +642,13 @@ def _missing(file: File, works: Works, shown: Shown) -> tuple[tuple[Missing, ...
         # transfer. A set that is not settled is listed only where none of them is enough.
         settled = [some for some in hopeful if all(u.what != "another transfer" for u in some)]
         for those in (settled, [some for some in hopeful if some not in settled]):
+            in_every_set, at_least = by_a_lock, at_least_by_a_lock
+            if len(those) == 1:
+                # What the OBJECTs ask of every set that comes with these new things.
+                held, one_of_two = _asked_of_objects(file, works, those[0])
+                in_every_set, at_least = by_a_lock | held, [*at_least_by_a_lock, *one_of_two]
+            others = [unknown for unknown in facts if unknown not in in_every_set]
+            fewest = len(in_every_set) + sum(number for _, number in at_least)
             for size in range(fewest, len(facts) + 1 if those else 0):
                 picked = _with_enough_of_each(others, at_least, size - len(in_every_set))
                 sets: Iterable[list[Unknown]] = (
@@ -937,6 +942,49 @@ def _asked_by_a_lock(file: File) -> tuple[frozenset[Unknown], list[tuple[frozens
             rights = (Unknown("another right", option, person=person) for person in without)
             at_least.append((frozenset(rights), short))
     return frozenset(asked), at_least
+
+
+def _asked_of_objects(
+    file: File, works: Works, some: Sequence[Unknown]
+) -> tuple[frozenset[Unknown], list[tuple[frozenset[Unknown], int]]]:
+    """What the OBJECTs ask of every set of unknown FACTs that is enough with these new things.
+
+    ``some`` holds conditions for another OPTION and other transfers. The sets meant are
+    those that hold them and no other new thing.
+
+    An OPTION with no FACT about it might require an OBJECT, and it might refuse it. Each
+    of the two is tested by itself in the upper bound of ``no_better_than``, where every
+    unknown FACT helps whoever needs it: there the OPTION is made to require the OBJECT, or
+    to refuse it. Where nothing works then, no set without that FACT is enough. Such a set
+    leaves the FACT at its worst, and everything else in it turns out no better than in
+    the bound. So every set that is enough holds the FACT: those are the first result.
+
+    Where something works with each of the two by itself, the two are tested together.
+    Where nothing works then, every set that is enough holds one of the two at least:
+    those pairs are the second result, each with the number one.
+
+    This only saves work. A FILE that says little about its OBJECTs has many unknown FACTs
+    about them, and the sets of a size are too many to try one by one.
+    """
+    bound = no_better_than(file, some)
+    held: set[Unknown] = set()
+    one_of_two: list[tuple[frozenset[Unknown], int]] = []
+    for option in file.options:
+        for thing in file.objects_asked_for():
+            pair = (option.id, thing.id)
+            required = replace(bound, needs=bound.needs | {pair})
+            refused = replace(bound, refuses=bound.refuses | {pair})
+            worse: dict[Unknown, World] = {}
+            if file.requires_object(*pair) is None:
+                worse[Unknown("does not require", option.id, about=thing.id)] = required
+            if file.refuses_object(*pair) is None:
+                worse[Unknown("does not refuse", option.id, about=thing.id)] = refused
+            needed = [unknown for unknown, world in worse.items() if not works(file, world)]
+            held.update(needed)
+            both = replace(required, refuses=refused.refuses)
+            if len(worse) == 2 and not needed and not works(file, both):
+                one_of_two.append((frozenset(worse), 1))
+    return frozenset(held), one_of_two
 
 
 def _beyond(file: File) -> int:

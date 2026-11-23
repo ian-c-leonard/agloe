@@ -431,6 +431,9 @@ class _Search:
         # the choice that takes the route, the route and the place of the WAY in it.
         self.moments: dict[tuple[int, reference.Route, int], cp_model.IntVar] = {}
         self.known = reference.Routes(file, world)
+        # For each OBJECT and each OPTION that can hand it over, the choice for each PERSON
+        # that they take it there.
+        self.given_to: dict[tuple[str, int], list[cp_model.IntVar]] = {}
         # The earliest anything is at each PLACE, setting out from a PLACE at a time or at
         # any time.
         self._crossing: dict[tuple[str, int | None], dict[str, int]] = {}
@@ -770,44 +773,79 @@ class _Search:
                 handed[index] = given
         model.add_circuit(arcs)
         self._leave_time_to_cross(thing, matter, handed)
-        if not picked:
-            self._clear_before_a_refusal(thing, matter)
+        self._clear_before_a_refusal(thing, matter, handed, picked)
 
-    def _clear_before_a_refusal(self, thing: str, matter: Sequence[int]) -> None:
-        """Whoever might have an OBJECT when the TRIP starts gets rid of it before a refusal.
+    def _clear_before_a_refusal(
+        self,
+        thing: str,
+        matter: Sequence[int],
+        handed: Mapping[int, cp_model.IntVar],
+        picked: bool,
+    ) -> None:
+        """Whoever has an OBJECT is rid of it before they take part in an OPTION that refuses it.
 
         The path of the OBJECT already says this. Said outright, the solver need not find it
         out by trying every order.
 
-        A PERSON who has the OBJECT when the TRIP starts, or might, still might have it
+        A PERSON has the OBJECT, or might, from the start of the TRIP where they have it
+        then or might, and from an OPTION in which they take it. They still might have it
         until they take part in an OPTION that takes it from them: one that keeps it, or one
-        in which it is handed over. A hand-over needs every place the OBJECT might be in at
-        hand, so whoever might have it takes part there. Where nobody knows where the OBJECT
-        starts, it is at hand for nothing, and only an OPTION that keeps it takes it from
-        them. An OPTION that only might keep the OBJECT takes it from nobody for sure, and
-        one that refuses it moves nothing. So such a PERSON takes part in an OPTION that
-        refuses the OBJECT only where they take part in one of the others first. A PERSON's
-        own OPTIONs have turns in the order they do them.
+        in which it is handed to somebody else. A hand-over needs every place the OBJECT
+        might be in at hand, so whoever might have it takes part there. An OPTION that only
+        might keep the OBJECT takes it from nobody for sure, and one that refuses it moves
+        nothing. So such a PERSON takes part in an OPTION that refuses the OBJECT only where
+        one of those others comes in between, with them in it. A PERSON's own OPTIONs have
+        turns in the order they do them.
+
+        ``handed`` holds, for each OPTION that can hand the OBJECT over, the choice that it
+        does. ``picked`` says that the world leaves the start to pick: then nobody is known
+        to have the OBJECT when the TRIP starts.
         """
         model, world, options = self.model, self.world, self.file.options
-        takes_it = ("keeps", "hands_over", "any") if thing in world.starts else ("keeps", "any")
         refusing = [index for index in matter if (options[index].id, thing) in world.refuses]
-        clears = [
+        keeping = [
             index
             for index in matter
-            if index not in refusing and world.does.get((options[index].id, thing)) in takes_it
+            if index not in refusing
+            and world.does.get((options[index].id, thing)) in ("keeps", "any")
         ]
-        for number in self._might_start_with(thing):
+        after = {
+            (first, then): model.new_bool_var(f"{options[then].id} after {options[first].id}")
+            for first in handed
+            for then in refusing
+        }
+        for (first, then), later in after.items():
+            _when(model.add(self.turn[first] >= self.turn[then] + 1), later.negated())
+
+        def rid_of_it(number: int, since: int | None, until: int) -> list[cp_model.IntVar]:
+            """Each way this PERSON can be rid of the OBJECT before one OPTION, after another."""
             row = self.takes[number]
-            for index in refusing:
-                earlier: list[cp_model.IntVar] = []
-                for other in clears:
-                    name = f"{number} is rid of {thing} in {options[other].id}"
-                    first = model.new_bool_var(f"{name} before {options[index].id}")
-                    model.add_implication(first, row[other])
-                    _when(model.add(self.turn[index] >= self.turn[other] + 1), first)
-                    earlier.append(first)
-                model.add_bool_or([row[index].negated(), *earlier])
+            ways: list[cp_model.IntVar] = []
+            for other in dict.fromkeys((*keeping, *handed)):
+                if other in (since, until):
+                    continue
+                name = f"{number} is rid of {thing} in {options[other].id}"
+                way = model.new_bool_var(f"{name} before {options[until].id}")
+                model.add_implication(way, row[other])
+                _when(model.add(self.turn[until] >= self.turn[other] + 1), way)
+                if since is not None:
+                    _when(model.add(self.turn[other] >= self.turn[since] + 1), way)
+                if other in handed and other not in keeping:
+                    # It is handed over there, and to somebody else.
+                    model.add_implication(way, handed[other])
+                    model.add_implication(way, self.given_to[thing, other][number].negated())
+                ways.append(way)
+            return ways
+
+        for then in refusing:
+            for number in [] if picked else self._might_start_with(thing):
+                ways = rid_of_it(number, None, then)
+                model.add_bool_or([self.takes[number][then].negated(), *ways])
+            for first in handed:
+                for number, takes_it in enumerate(self.given_to[thing, first]):
+                    ways = rid_of_it(number, first, then)
+                    unless = [takes_it.negated(), self.takes[number][then].negated()]
+                    model.add_bool_or([*unless, after[first, then].negated(), *ways])
 
     def _leave_time_to_cross(
         self, thing: str, matter: Sequence[int], handed: Mapping[int, cp_model.IntVar]
@@ -1046,6 +1084,7 @@ class _Search:
         quiet: list[cp_model.LiteralT] = [used]  # the OPTION happens, with no hand-over in it
         if action in ("hands_over", "any"):
             gives = [model.new_bool_var(f"{thing} to {n} in {option.id}") for n in persons]
+            self.given_to[thing, index] = gives
             given = model.new_bool_var(f"{thing} handed over in {option.id}")
             model.add_max_equality(given, [0, *gives])
             for n in persons:

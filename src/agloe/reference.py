@@ -2108,27 +2108,31 @@ def _as_chain(
 
 
 def _chain_in_order(
-    file: File, world: World, who: tuple[tuple[str, ...], ...], in_order: Sequence[int]
+    file: File,
+    world: World,
+    who: tuple[tuple[str, ...], ...],
+    orders: tuple[tuple[int, ...], ...],
+    in_order: Sequence[int],
 ) -> _Chain | None:
     """What ``_chains`` gives for one order of all the OPTIONs of a plan, or None.
 
-    ``in_order`` holds the OPTIONs that happen, by position in the FILE, in an order that
-    keeps each PERSON's own. Each OBJECT that some OPTION of the plan requires or refuses
-    takes the order of its own OPTIONs from it, with the hand-overs that the rules put first
-    in that order. The result is None where an OBJECT has no choice of hand-overs that works
-    in that order, and where no OPTION of the plan requires or refuses an OBJECT.
+    ``in_order`` holds the OPTIONs that happen, by position in the FILE. ``orders`` holds
+    what each PERSON does, in their own order. Each OBJECT that some OPTION of the plan
+    requires or refuses takes the order of its own OPTIONs from ``in_order``, with the
+    hand-overs that the rules put first in that order. The result is None where
+    ``in_order`` does not keep each PERSON's own order, where an OBJECT has no choice of
+    hand-overs that works in that order, and where no OPTION of the plan requires or
+    refuses an OBJECT.
     """
     happening, asked = _asked_about(file, world, who)
     place = {index: number for number, index in enumerate(in_order)}
     if not asked or any(index not in place for index in happening):
         return None
+    if any(place[before] > place[after] for order in orders for before, after in pairwise(order)):
+        return None
     options = file.options
     people = {person.id: number for number, person in enumerate(file.persons)}
     place_of = {option.id: number for number, option in enumerate(options)}
-    # What each PERSON does, in the order given.
-    orders = tuple(
-        tuple(index for index in in_order if person.id in who[index]) for person in file.persons
-    )
 
     def by_position(option: str, person: str) -> tuple[int, int]:
         return (place_of[option], people[person])
@@ -3197,7 +3201,8 @@ def _timings(
         bound = sorted(lowest.values())
         as_they_fall = sorted((node for node in nodes if node < listed), key=lowest.__getitem__)
     if found is not None:
-        chains = chain(_to_try_first(file, world, who, [in_order, as_they_fall]), chains)
+        first_tries = _to_try_first(file, world, who, orders, [in_order, as_they_fall])
+        chains = chain(first_tries, chains)
     least: list[tuple[int, tuple[_Ranked, ...]] | None] = []
 
     def fewest() -> tuple[int, tuple[_Ranked, ...]] | None:
@@ -3406,15 +3411,19 @@ def _to_try_first(
     file: File,
     world: World,
     who: tuple[tuple[str, ...], ...],
+    orders: tuple[tuple[int, ...], ...],
     in_orders: Iterable[Sequence[int] | None],
 ) -> list[_Chain]:
     """What ``_chains`` would give for each of these orders of all the OPTIONs of a plan.
 
-    They are tried before any other, and every one of them is among the others too. So they
-    change how soon the search is over, and not what it finds.
+    They are tried before any other, and every one of them is among the others too: an
+    order that does not keep each PERSON's own gives nothing. So they change how soon the
+    search is over, and not what it finds.
     """
-    found = [_chain_in_order(file, world, who, each) for each in in_orders if each is not None]
-    return [each for each in found if each is not None]
+    tried = (
+        _chain_in_order(file, world, who, orders, each) for each in in_orders if each is not None
+    )
+    return [each for each in tried if each is not None]
 
 
 def spans_closed(file: File, origin: str, destination: str) -> list[tuple[int, int]]:

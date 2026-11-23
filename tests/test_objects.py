@@ -1,7 +1,7 @@
 """OBJECTs: where a thing is, which OPTIONs require it, and which hand it over or keep it."""
 
 import json
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import replace
 from itertools import combinations, pairwise, permutations, product
 from random import Random
@@ -2175,13 +2175,15 @@ def test_what_the_file_lists_covers_a_check_only_whichever_way_an_open_refusal_t
     )
 
 
-def five_museum_visitors(*more: Document, collection: bool = False) -> File:
+def five_museum_visitors(*more: Document, collection: bool = False, meeting: bool = False) -> File:
     """Five visitors, each LOCKed into two visits of their own at the museum.
 
     Every visit takes half an hour, can start at any time and refuses the bag. A stop at the
     cloakroom at 9:00 am keeps the bag. The TRIP starts at 8:00 am, and both sets of the bag
     are COMPLETE. With ``collection``, all five are LOCKed into a collection at noon that
-    takes five minutes and hands the bag over, and the TRIP ends when it is over."""
+    takes five minutes and hands the bag over, and the TRIP ends when it is over. With
+    ``meeting``, all five are LOCKed into a meeting at 8:00 am that takes five minutes and
+    hands the bag over."""
     people = [f"person-{number}" for number in range(5)]
     visits = [f"visit-{number}" for number in range(10)]
     options = [stays("cloakroom", "museum"), *(stays(name, "museum") for name in visits)]
@@ -2196,6 +2198,10 @@ def five_museum_visitors(*more: Document, collection: bool = False) -> File:
         options.append(stays("collection", "museum"))
         facts += [*at("collection", 12, length="PT5M"), hands_over("collection", "bag")]
         locks += [lock("collection", *people), trip_ends(12, 5)]
+    if meeting:
+        options.append(stays("meeting", "museum"))
+        facts += [*at("meeting", 8, length="PT5M"), hands_over("meeting", "bag")]
+        locks += [lock("meeting", *people)]
     return trip(people, ["museum"], options, facts, locks, objects=["bag"])
 
 
@@ -2259,20 +2265,51 @@ def test_five_visitors_are_shown_at_once_whoever_might_have_the_bag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One visitor has the bag, or nobody knows who has it. With a collection at noon that
-    hands the bag over, each visitor can come to have it, but only from noon on. In all four
-    FILEs the report comes at once: the solver's model says outright that whoever might have
-    the bag stops at the cloakroom first, and the search times a few plans."""
+    hands the bag over, each visitor can come to have it, but only from noon on. With a
+    meeting at 8:00 am that hands it over, each can have it all day, and nobody takes it. In
+    all six FILEs the report comes at once: the solver's model says outright that whoever has
+    the bag is rid of it before a visit, and the search times a few plans."""
     the_solver_gives_up_after(monkeypatch, 2000)
     everybody = tuple(f"person-{number}" for number in range(5))
     for holder in ([has_object("person-0", "bag")], []):
-        for collection in (False, True):
-            file = five_museum_visitors(*holder, collection=collection)
+        for collection, meeting in ((False, False), (True, False), (False, True)):
+            file = five_museum_visitors(*holder, collection=collection, meeting=meeting)
             found, timed = timings_for_the_report(monkeypatch, file)
             assert found.answer is Answer.FEASIBLE
             assert timed < 10
             stops = [each.persons for each in found.itinerary if each.option == "cloakroom"]
             assert stops == [("person-0",) if holder else everybody]
             assert not any(each.handed for each in found.itinerary)
+
+
+def test_a_visit_with_five_things_is_explained_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Alex is LOCKed into one visit and brings five things. Nothing says whether the visit
+    refuses them, what it does with them, or whether the FILE states every transfer. The
+    trip works if the visit refuses none of the five. The FILE has more than twenty unknown
+    FACTs, and the sets of five of them are tens of thousands. The search first asks which
+    FACTs no set can do without, and then tries very few sets."""
+    things = ["camera", "daypack", "stroller", "water", "umbrella"]
+    facts = [*at("visit", 10)]
+    facts += [{**has_object("alex", thing), "id": f"{thing}-start"} for thing in things]
+    options, locks = [stays("visit", "museum")], [lock("visit", "alex")]
+    file = trip(["alex"], ["museum"], options, facts, locks, objects=things)
+    assert len(unknowns(file)) > 20
+    tried = 0
+    its_own = answers.with_these_at_best
+
+    def counted(given: File, unknown: Iterable[Unknown]) -> World:
+        nonlocal tried
+        tried += 1
+        return its_own(given, unknown)
+
+    monkeypatch.setattr(answers, "with_these_at_best", counted)
+    found = compiler.check(file)
+    assert asked(found) == [
+        tuple(Unknown("does not refuse", "visit", about=thing) for thing in things)
+    ]
+    assert tried < 10
+    monkeypatch.setattr(answers, "with_these_at_best", its_own)
+    assert answers.check(file) == found
 
 
 def test_a_hand_over_that_comes_later_puts_no_earlier_refusal_in_the_order() -> None:
@@ -2892,11 +2929,23 @@ def smallest_sets(file: File) -> list[tuple[Unknown, ...]]:
     return []
 
 
-def test_the_sets_named_for_objects_are_all_the_smallest_that_are_enough() -> None:
+def test_the_sets_named_for_objects_are_all_the_smallest_that_are_enough(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Checked by trying every set of that size and of each smaller one."""
     rng = Random(3141)
     kinds: set[str] = set()
-    compared = several = unsettled = 0
+    compared = several = unsettled = held = pairs = 0
+    its_own = answers._asked_of_objects  # pyright: ignore[reportPrivateUsage]
+
+    def counted(*given: object) -> object:
+        nonlocal held, pairs
+        every, one_of_two = its_own(*given)  # type: ignore[arg-type]
+        held += bool(every)
+        pairs += bool(one_of_two)
+        return every, one_of_two
+
+    monkeypatch.setattr(answers, "_asked_of_objects", counted)
     for _ in range(260):
         file = a_trip_with_objects(rng, most=1, leave_out=0.08)
         found = answers.check(file)
@@ -2908,7 +2957,7 @@ def test_the_sets_named_for_objects_are_all_the_smallest_that_are_enough() -> No
                 fewer = [unknown for unknown in named if unknown != left_out]
                 assert not itineraries(file, with_these_at_best(file, fewer))
         plain = [unknown for unknown in unknowns(file) if unknown.what not in NEW]
-        if named_sets and len(named_sets[0]) <= 2 and len(plain) <= 11:
+        if named_sets and len(named_sets[0]) <= 3 and len(plain) <= 13:
             assert named_sets == smallest_sets(file)
             compared += 1
             several += len(named_sets) > 1
@@ -2921,17 +2970,21 @@ def test_the_sets_named_for_objects_are_all_the_smallest_that_are_enough() -> No
                     assert not needed.at_hand_for
     # That an OPTION keeps an OBJECT helps only where whoever has it cannot come along. The
     # story of the two appointments covers it.
-    wanted = {"does not require", "does not keep", "hands over", "starts with"}
+    wanted = {"does not require", "does not refuse", "does not keep", "hands over", "starts with"}
     assert wanted | {"starts at", "another transfer"} <= kinds
     assert compared > 40
     assert several > 10
     assert unsettled > 5
+    # The search asked first which FACTs about the OBJECTs no set can do without. It found
+    # single FACTs, and pairs of which every set holds one.
+    assert held > 20 and pairs > 3
 
 
 def test_fewer_requirements_are_never_harder_for_the_same_plan() -> None:
-    """A plan that works where an OPTION requires an OBJECT works where it does not."""
+    """A plan that works where an OPTION requires an OBJECT works where it does not, and one
+    that works where an OPTION refuses an OBJECT works where it does not."""
     rng = Random(55)
-    checked_plans = 0
+    checked_plans = refused = 0
     for _ in range(120):
         file = a_trip_with_objects(rng, leave_out=0.1, with_ways=0.5)
         world = a_world_with_objects(rng, file)
@@ -2940,7 +2993,11 @@ def test_fewer_requirements_are_never_harder_for_the_same_plan() -> None:
                 easier = replace(world, needs=world.needs - {pair})
                 assert broken_as_listed(file, easier, plan) == []
                 checked_plans += 1
-    assert checked_plans > 60
+            for pair in world.refuses:
+                easier = replace(world, refuses=world.refuses - {pair})
+                assert broken_as_listed(file, easier, plan) == []
+                refused += 1
+    assert checked_plans > 60 and refused > 30
 
 
 def test_the_compiler_gives_the_reference_checkers_report_for_objects() -> None:
@@ -5065,8 +5122,8 @@ def a_trip_with_steps_at_one_time(rng: Random) -> File:
     """Two or three PERSONs, each LOCKed into stays of their own at a desk, and one key.
 
     Most stays start at 9:00 am or at 10:00 am, and some at any time. Each requires the key,
-    hands it over or keeps it, at random. So several OPTIONs that matter to the key start at
-    one instant, and the key has many orders to go through them in.
+    refuses it, hands it over or keeps it, at random. So several OPTIONs that matter to the
+    key start at one instant, and the key has many orders to go through them in.
     """
     people = ["alex", "sam", "jo"][: rng.choice([2, 3, 3])]
     names = [f"{person}-{number}" for person in people for number in range(rng.choice([1, 2, 2]))]
@@ -5079,6 +5136,8 @@ def a_trip_with_steps_at_one_time(rng: Random) -> File:
         facts += whenever(name, length) if hour is None else at(name, hour, 0, length)
         if rng.random() < 0.6:
             facts.append(requires_object(name, "key"))
+        elif rng.random() < 0.5:
+            facts.append(refuses_object(name, "key"))
         does = rng.choice(["hands_over", "hands_over", "keeps", None, None])
         if does is not None:
             facts.append(does_with(name, "key", does))
@@ -5103,6 +5162,97 @@ def a_trip_with_steps_at_one_time(rng: Random) -> File:
     locks += [trip_starts(8)] if rng.random() < 0.6 else []
     ways = [way_between("walk", "desk", "vault")]
     return trip(people, ["desk", "vault"], options, facts, locks, ways, objects=things)
+
+
+def a_trip_through_a_gate(rng: Random) -> File:
+    """Alex and Sam go through a gate from the foyer to the hall, and a bag lies in the foyer.
+
+    Mostly: the gate takes no time, can start at any time and hands the bag over. Alex has a
+    visit in the hall at any time that refuses the bag. Sam has an appointment at a desk in
+    the hall at 10:00 am that hands the bag over, with an hour to be there before. The FILE
+    lists the three in an order chosen at random, so the OPTION that comes first for a
+    PERSON is often listed last. Each part is now and then something else.
+    """
+
+    def mostly(usual: str, *others: str) -> str:
+        return usual if rng.random() < 0.8 else rng.choice(others)
+
+    names = ["gallery", "gate", "desk"]
+    rng.shuffle(names)
+    kinds = {"gallery": stays("gallery", "hall"), "desk": stays("desk", "hall")}
+    kinds["gate"] = moves("gate", "foyer", "hall")
+    facts: list[Document] = [
+        *(whenever("gallery", "PT30M") if rng.random() < 0.8 else at("gallery", 9)),
+        *(whenever("gate", "PT0S") if rng.random() < 0.8 else at("gate", 9, length="PT0S")),
+        starts_at("desk", 10),
+        lasts("desk", "PT5M"),
+        cutoff("desk", mostly("PT1H", "PT0S", "PT30M")),
+        starts_from("alex", "foyer"),
+        starts_from("sam", "foyer"),
+        rng.choice([lies_at("bag", "foyer")] * 3 + [has_object("alex", "bag")]),
+        every_use("bag"),
+        every_transfer("bag"),
+    ]
+    about_the_gallery = mostly("refuses", "requires", "keeps")
+    if about_the_gallery == "refuses":
+        facts.append(refuses_object("gallery", "bag"))
+    elif about_the_gallery == "requires":
+        facts.append(requires_object("gallery", "bag"))
+    else:
+        facts += [keeps("gallery", "bag"), requires_object("desk", "bag")]
+    for name in ("gate", "desk"):
+        does = mostly("hands_over", "keeps", "nothing")
+        facts.append(does_with(name, "bag", does))
+    locks = [lock("gallery", "alex"), lock("gate", "alex", "sam"), lock("desk", "sam")]
+    locks += [trip_starts(8)] if rng.random() < 0.9 else []
+    options = [kinds[name] for name in names]
+    return trip(["alex", "sam"], ["foyer", "hall"], options, facts, locks, objects=["bag"])
+
+
+def test_who_can_have_an_object_goes_by_each_persons_own_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The TRIP starts at 8:00 am, and the bag lies in the foyer. The FILE lists Alex's visit
+    to the gallery first: half an hour in the hall at any time, and it refuses the bag. Then
+    comes the gate from the foyer to the hall, which Alex and Sam go through, and then Sam's
+    appointment at the desk in the hall at 10:00 am, with an hour to be there before. The
+    gate and the desk hand the bag over.
+
+    Sam has to be in the hall by 9:00 am, so the gate is at 9:00 am. Alex goes through the
+    gate before the gallery, and can have the bag by then. So the bag puts the gallery in
+    an order with the desk, and either way the gallery is at 10:00 am. The FILE's order of
+    the three says nothing about what Alex does first."""
+    options = [stays("gallery", "hall"), moves("gate", "foyer", "hall"), stays("desk", "hall")]
+    facts = [
+        *whenever("gallery", "PT30M"),
+        *whenever("gate", "PT0S"),
+        starts_at("desk", 10),
+        lasts("desk", "PT5M"),
+        cutoff("desk", "PT1H"),
+        starts_from("alex", "foyer"),
+        starts_from("sam", "foyer"),
+        lies_at("bag", "foyer"),
+        refuses_object("gallery", "bag"),
+        hands_over("gate", "bag"),
+        hands_over("desk", "bag"),
+        every_use("bag"),
+        every_transfer("bag"),
+    ]
+    locks = [
+        trip_starts(8),
+        lock("gallery", "alex"),
+        lock("gate", "alex", "sam"),
+        lock("desk", "sam"),
+    ]
+    file = trip(["alex", "sam"], ["foyer", "hall"], options, facts, locks, objects=["bag"])
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    starts = {each.option: each.start for each in found.itinerary}
+    assert starts == {"gate": seconds(9), "gallery": seconds(10), "desk": seconds(10)}
+    # Ranking every order shows the same plan.
+    search = EveryOrder(monkeypatch)
+    search.skipping_nothing(those_that_matter)
+    assert itineraries(file, worst_case(file))[0] == found.itinerary
 
 
 def a_trip_with_two_things_at_one_desk(rng: Random) -> File:
@@ -5179,6 +5329,7 @@ def test_the_short_cuts_show_the_plan_that_ranking_every_order_shows(
 
     trips = [a_trip_with_steps_at_one_time(rng) for _ in range(300)]
     trips += [a_trip_with_two_things_at_one_desk(rng) for _ in range(300)]
+    trips += [a_trip_through_a_gate(rng) for _ in range(200)]
     for file in trips:
         for world in (worst_case(file), best_case(file), no_better_than(file, ())):
             search.as_built()
