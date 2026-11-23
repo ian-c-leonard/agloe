@@ -643,8 +643,14 @@ def test_the_keyboard_lights_up_what_the_pointer_does(chromium: Browser, tmp_pat
         page.keyboard.press("Tab")
         assert page.evaluate(on) == ["rights-part", "Museum visit"]
         lit(page, rights=["Museum visit"], options=[])
+        page.keyboard.press("ArrowDown")
+        page.keyboard.press("ArrowDown")
+        assert page.evaluate(on) == ["rights-part", "Flight home"]
         page.keyboard.press("Shift+Tab")
         assert page.evaluate(on) == ["options-part", "Blue Line to O'Hare"]
+        # The pointer is on something that is no drawing: what the keyboard is on stays lit.
+        page.locator("#options-part h2").hover()
+        lit(page, options=["Blue Line to O'Hare"], marks=["Blue Line to O'Hare"])
         # The pointer lights up what it is on. When it leaves, what the keyboard is on is
         # lit again.
         page.locator("#persons .item").first.hover()
@@ -660,6 +666,11 @@ def test_the_keyboard_lights_up_what_the_pointer_does(chromium: Browser, tmp_pat
         page.locator("#report .row", has_text="Alexandra").first.wait_for()
         assert page.evaluate(on) == ["options-part", "Blue Line to O'Hare"]
         lit(page, options=["Blue Line to O'Hare"], marks=["Blue Line to O'Hare"])
+        # Each part still stops Tab at the drawing that the keyboard was on there last.
+        page.keyboard.press("Tab")
+        assert page.evaluate(on) == ["rights-part", "Flight home"]
+        page.keyboard.press("Shift+Tab")
+        assert page.evaluate(on) == ["options-part", "Blue Line to O'Hare"]
         # In the report, one line takes the keyboard, and the arrow keys go from line to line
         # of those that are about something on the page.
         page.locator("#report").focus()
@@ -682,6 +693,36 @@ def test_the_keyboard_lights_up_what_the_pointer_does(chromium: Browser, tmp_pat
         # With the keyboard on something that is no drawing, nothing is lit.
         page.locator("#contents .to").first.focus()
         lit(page, marks=[], options=[], rows=[], persons=[])
+        # The keyboard is on the line of the report about the train. The FILE changes so that
+        # the plan has one step less before it. The keyboard stays on the line about the
+        # train: a step goes by its name, and not by its number.
+        train = page.locator("#report .row", has_text=": Blue Line to O'Hare, ").first
+        train.focus()
+        lit(page, marks=["Blue Line to O'Hare"])
+        fewer = json.loads(path.read_text())
+        fewer["decisions"] = [each for each in fewer["decisions"] if each["id"] != "lock-visit"]
+        put(path, json.dumps(fewer).encode())
+        page.wait_for_function(
+            "() => !document.getElementById('report').textContent.includes('lock-visit')"
+        )
+        page.locator("#calendar .mark").first.wait_for()
+        assert ": Blue Line to O'Hare, " in page.evaluate(on)[1]
+        lit(page, marks=["Blue Line to O'Hare"])
+        # The keyboard is on the WANT, and the FILE changes so that the WANT is gone. The
+        # keyboard is then on nothing, and the page does not take it back to the WANT when
+        # the WANT is there again.
+        page.locator("#wants .card").focus()
+        lit(page, wants=["ending the trip in Denver"])
+        gone: Document = {**fewer, "wants": []}
+        put(path, json.dumps(gone).encode())
+        page.locator("#wants-part").wait_for(state="hidden")
+        assert page.evaluate("() => document.activeElement === document.body")
+        page.locator("header").click()
+        put(path, json.dumps(fewer).encode())
+        page.locator("#wants .card").wait_for()
+        page.locator("#report .row[data-record='ending-in-denver']").wait_for()
+        assert page.evaluate("() => document.activeElement === document.body")
+        lit(page, wants=[])
         # Each part has one drawing that Tab stops at, however many it holds.
         stops = page.evaluate(
             """() => [...document.querySelectorAll("#calendar-part, #drawings > .part")]
@@ -691,6 +732,82 @@ def test_the_keyboard_lights_up_what_the_pointer_does(chromium: Browser, tmp_pat
         )
         # The calendar, the PERSONs, the PLACEs, the WANTs, the OPTIONs, the rights and the WAYs.
         assert stops == [1] * 7
+    # The keyboard is on a drawing before the report comes. Its line of the report is brought
+    # into view when the report is there, and the keyboard stays on the drawing.
+    first, answer, report = (json.dumps(event) for event in checked(path.read_bytes()))
+    (tmp_path / "python.first").write_text(f"{first}\n{answer}\n")
+    (tmp_path / "python.report").write_text(f"{report}\n")
+    go = tmp_path / "python.go"
+    waits = 'cat "$0.first"\nwhile [ ! -e "$0.go" ]; do sleep 0.05; done\ncat "$0.report"'
+    drawn = "() => document.querySelectorAll('#options .item').length > 0"
+    held = stand_in(tmp_path, waits)
+    with opened(chromium, path, wide=1500, tall=700, python=held, once=drawn) as page:
+        train = page.locator("#options .item", has_text="Flight home")
+        train.focus()
+        lit(page, options=["Flight home"])
+        go.write_text("")
+        page.locator("#report .row").first.wait_for()
+        assert page.evaluate(on) == ["options-part", "Flight home"]
+        lit(page, options=["Flight home"], marks=["Flight home"])
+        page.wait_for_function(f"() => ({PLACED})().shown >= 1")
+    # A TRIP of two days has a strip above its calendar. The strip is a part for the keyboard,
+    # and so is the calendar, after its own box: Tab goes from one to the next.
+    with opened(chromium, EXAMPLES / "several-days" / "works-but-risky.json") as page:
+        page.locator("#strip .bar").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        page.locator("#persons .item").first.wait_for()
+        where = """() => {
+          const at = document.activeElement;
+          const part = at.closest("#strip, #calendar, #drawings > .part");
+          return [part === null ? null : part.id, at.matches("[data-of], [data-record]")];
+        }"""
+        page.locator("#drawings").focus()
+        seen: list[list[Any]] = []
+        for _ in range(4):
+            page.keyboard.press("Tab")
+            seen.append(page.evaluate(where))
+        assert seen == [
+            ["strip", True],
+            ["calendar", False],
+            ["calendar", True],
+            ["persons-part", True],
+        ]
+    # A step of a minute is a tick on the strip. The ring of the keyboard goes around the tick.
+    with opened(chromium, written(tmp_path, crowded())) as page:
+        page.locator("#strip .bar").first.wait_for()
+        page.locator("#drawings").focus()
+        page.keyboard.press("Tab")
+        ringed = None
+        for _ in range(40):
+            ringed = page.evaluate(
+                """() => {
+                  const tick = document.activeElement.querySelector(".bar-tick, .bar-several");
+                  if (tick === null) return null;
+                  const style = getComputedStyle(tick);
+                  return [style.outlineStyle, parseFloat(style.outlineWidth)];
+                }"""
+            )
+            if ringed is not None:
+                break
+            page.keyboard.press("ArrowRight")
+        assert ringed == ["solid", 3]
+    # The row of links stays at the top of a window of one column. A line of the report that
+    # the keyboard goes up to comes to rest under the row, and not behind it.
+    with opened(chromium, EXAMPLES / "several-days" / "works-but-risky.json", 700, 600) as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#report").focus()
+        page.keyboard.press("Tab")
+        page.keyboard.press("End")
+        for _ in range(40):
+            page.keyboard.press("ArrowUp")
+            covered = page.evaluate(
+                """() => {
+                  const row = document.getElementById("contents").getBoundingClientRect();
+                  const line = document.activeElement.getBoundingClientRect();
+                  return line.top < row.bottom - 1;
+                }"""
+            )
+            assert not covered
 
 
 def test_the_report_on_the_page_is_the_report_in_words(chromium: Browser) -> None:

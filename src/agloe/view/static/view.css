@@ -58,12 +58,13 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .contents .to.clash { border-color: var(--stop); box-shadow: 0 0 0 1px var(--stop); }
 /* A link is pale where its part is: what the part shows is not of the FILE as it is now. */
 .contents .to.old { opacity: 0.45; }
-/* A part comes to rest under the row, however many lines the row takes. */
-.calendar-part, .part, .report-part { scroll-margin-top: calc(var(--row-of-links, 36px) + 12px); }
+/* What the page brings into view comes to rest under the row, however many lines the row
+   takes: a part that a link leads to, and a drawing that the keyboard goes to. */
+html { scroll-padding-top: calc(var(--row-of-links, 0px) + 12px); }
 /* On a wide window the row is above the two panes, and goes with the page where that scrolls. */
 @media (min-width: 1400px) {
   .contents { position: static; padding: 0; border-bottom: 0; }
-  .calendar-part, .part, .report-part { scroll-margin-top: 0; }
+  html { scroll-padding-top: 0; }
 }
 .report-part, .calendar-part, .part { display: grid; gap: 8px; }
 .report-part h2, .calendar-part h2, .part h2 { font: 600 13px var(--text); color: var(--ink2); }
@@ -221,6 +222,8 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .card.lit, .entry.lit, .item.lit, .has.lit, .in-full.lit, .person.lit, .strip-people .lit { background: var(--lit); }
 /* The drawing that the keyboard is on. */
 [data-of]:focus-visible, [data-record]:focus-visible, [data-records]:focus-visible { outline: 2.5px solid var(--ink); outline-offset: 2px; border-radius: 3px; }
+/* A mark of the strip that is a tick has no width of its own: the ring goes around the tick. */
+.bar:focus-visible .bar-tick, .bar:focus-visible .bar-several { outline: 3px solid var(--ink); outline-offset: 3px; }
 
 .key { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 12px; }
 .key span { display: inline-flex; align-items: center; gap: 6px; }
