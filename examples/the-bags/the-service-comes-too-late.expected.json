@@ -1,0 +1,12 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "service-time",
+    "service-length",
+    "flight-time",
+    "where-the-bags-start",
+    "flight-needs-the-bags",
+    "everything-that-moves-the-bags",
+    "lock-flight"
+  ]
+}

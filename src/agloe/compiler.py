@@ -51,7 +51,8 @@ type _By = dict[tuple[int, int], reference.Route]  # the WAYs a PERSON takes aft
 type _Falls = dict[tuple[int, int, int], int]
 # The OPTIONs that happen, in the order the solver has them happen: by start, then by turn.
 type _InOrder = tuple[int, ...]
-type _Choice = tuple[_Who, _Orders, _By | None, _Falls | None, _InOrder | None]
+type _Empty = frozenset[int]  # the OPTIONs that happen with nobody in them
+type _Choice = tuple[_Who, _Orders, _By | None, _Falls | None, _InOrder | None, _Empty]
 # What the solver answered for each model it was asked about, by the digest of the model.
 type _Asked = dict[bytes, tuple[cp_model.CpSolver, object]]
 type _Amount = cp_model.LinearExpr | int  # seconds: a plain number, or one the solver works out
@@ -315,9 +316,9 @@ def _checked(
     first, and works out the hand-overs for that order itself. The solver's times keep that
     order, so the reference checker need not look for another.
     """
-    who, orders, by, falls, in_order = choice
+    who, orders, by, falls, in_order, empty = choice
     itinerary = reference.scheduled(
-        file, world, who, orders, by, known, falls, any_will_do, in_order
+        file, world, who, orders, by, known, falls, any_will_do, in_order, empty
     )
     if itinerary is None:
         raise AssertionError("the solver chose PERSONs and orders that the rules refuse")
@@ -523,8 +524,16 @@ class _Search:
         meets = self._hold_to_the_wants()
         carries = self._could_carry()
         supplies = self._could_supply(meets, carries)
+        # An OPTION can happen with nobody in it. The model leaves that open only where it
+        # can serve a purpose, as ``could_run_alone`` says: any other OPTION happens just
+        # where a PERSON takes part.
+        alone = set(reference.could_run_alone(file, self.world))
         for index, option in enumerate(file.options):
-            model.add_max_equality(self.used[index], [0, *(row[index] for row in self.takes)])
+            if index in alone:
+                for row in self.takes:
+                    model.add_implication(row[index], self.used[index])
+            else:
+                model.add_max_equality(self.used[index], [0, *(row[index] for row in self.takes)])
             for number, person in enumerate(file.persons):
                 takes = self.takes[number][index]
                 asked = any(
@@ -1040,10 +1049,11 @@ class _Search:
     def _across(self, origin: str, destination: str, since: int | None = None) -> int | None:
         """The least time anything needs from one PLACE to another, or None where none gets there.
 
-        A PERSON changes PLACE by a WAY or by an OPTION that moves, and an OBJECT only with
-        a PERSON. Each takes at least its shortest time. A WAY or an OPTION with no limit to
-        how long it takes is left out: nothing follows it, so nothing it carries is at hand
-        anywhere afterwards.
+        A PERSON changes PLACE by a WAY or by an OPTION that moves. An OBJECT changes PLACE
+        with a PERSON, or in an OPTION that moves and carries it, with a PERSON in it or
+        with nobody. Each takes at least its shortest time. A WAY or an OPTION with no limit
+        to how long it takes is left out: nothing follows it, so nothing it carries is at
+        hand anywhere afterwards.
 
         ``since`` is when the crossing sets out, where that is known. Then an unlisted WAY
         leaves only outside the spans in which COMPLETE FACTs rule it out, and an OPTION
@@ -1173,9 +1183,10 @@ class _Search:
         action = world.does.get((option.id, thing), "nothing")
         loads: cp_model.IntVar | None = None
         if action in ("carries", "any"):
-            # The choice that the OBJECT is carried: it is at hand, and then it is in the
-            # OPTION and nowhere else.
+            # The choice that the OBJECT is carried: the OPTION happens, the OBJECT is at
+            # hand, and then it is in the OPTION and nowhere else.
             loads = model.new_bool_var(f"{thing} carried in {option.id}")
+            model.add_implication(loads, used)
             at_hand(loads)
             aboard = spots.index(Where(option=option.id))
             for n in range(len(spots)):
@@ -1827,13 +1838,18 @@ class _Search:
             # The route after the last OPTION.
             takes(number, len(order) - 1, self.routes[number].get((here, count), []))
             orders.append(tuple(order))
-        happening = {index for order in orders for index in order}
+        attended = {index for order in orders for index in order}
+        empty = frozenset(
+            index
+            for index in range(count)
+            if index not in attended and solver.boolean_value(self.used[index])
+        )
 
         def comes(index: int) -> tuple[int, int]:
             return (solver.value(self.start[index]), solver.value(self.turn[index]))
 
-        in_order = tuple(sorted(happening, key=comes))
-        return self._who(orders), tuple(orders), by, falls, in_order
+        in_order = tuple(sorted(attended | empty, key=comes))
+        return self._who(orders), tuple(orders), by, falls, in_order, empty
 
     def first_in_file_order(self) -> _Choice | None:
         """The choice of PERSONs and orders that "Which ITINERARY is shown" puts first."""
@@ -1847,7 +1863,11 @@ class _Search:
         model.add(taking_part * (count + 1) + sum(self.used) == fewest)
         # An OPTION that somebody has to take part in happens: that is not left to choose.
         happens = {index for theirs in self.have_to.values() for index in theirs}
-        self._settle([used for index, used in enumerate(self.used) if index not in happens])
+        open_to_choice = [index for index in range(count) if index not in happens]
+        settled = self._settle([self.used[index] for index in open_to_choice])
+        chosen = happens | {
+            index for index, yes in zip(open_to_choice, settled, strict=True) if yes
+        }
 
         # Each PERSON in turn: the OPTION listed first that can come next, or nothing more.
         ends = count  # the two ends of a path, as one point of its circuit
@@ -1877,7 +1897,8 @@ class _Search:
                 order.append(found)
                 here = found
             orders.append(tuple(order))
-        return self._who(orders), tuple(orders), None, None, None
+        attended = {index for order in orders for index in order}
+        return self._who(orders), tuple(orders), None, None, None, frozenset(chosen - attended)
 
     def _only_order(self, number: int) -> tuple[int, ...] | None:
         """The OPTIONs this PERSON does, where they have nothing to choose, or None.
@@ -1918,8 +1939,12 @@ class _Search:
             _when(model.add(moment <= fact.earliest - 1 - self.zero), when, sooner)
             _when(model.add(moment >= fact.latest + 1 - self.zero), when, sooner.negated())
 
-    def _settle(self, choices: Sequence[cp_model.IntVar]) -> None:
-        """Fix these yes-or-no choices: "yes" wherever it can be, the earlier choices first."""
+    def _settle(self, choices: Sequence[cp_model.IntVar]) -> list[bool]:
+        """Fix these yes-or-no choices: "yes" wherever it can be, the earlier choices first.
+
+        The result says how each was fixed, in the order given.
+        """
+        fixed: list[bool] = []
         for begin in range(0, len(choices), _MOST_AT_ONCE):
             some = choices[begin : begin + _MOST_AT_ONCE]
             weighed = sum(each * 2 ** (len(some) - 1 - place) for place, each in enumerate(some))
@@ -1927,7 +1952,10 @@ class _Search:
             if most is None:
                 raise AssertionError("a model that had an answer has none now")
             for place, each in enumerate(some):
-                self.model.add(each == (-most >> (len(some) - 1 - place)) & 1)
+                yes = (-most >> (len(some) - 1 - place)) & 1
+                self.model.add(each == yes)
+                fixed.append(bool(yes))
+        return fixed
 
     def _least(self, amount: cp_model.LinearExprT) -> int | None:
         """The least value this amount can take, or None when the model has no answer."""

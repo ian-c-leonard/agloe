@@ -541,7 +541,8 @@ def any_choice(rng: Random, file: File, world: World) -> Itinerary:
 
     Nothing here comes from the checker's search. LOCKed PERSONs always take part, and a PERSON
     usually takes a WAY where two of their OPTIONs are in different PLACEs, so that the choice
-    has a fair chance of working.
+    has a fair chance of working. An OPTION that no PERSON is chosen for is left out most
+    times, and happens with nobody in it the other times.
     """
     people = [person.id for person in file.persons]
     steps: list[Step] = []
@@ -552,7 +553,7 @@ def any_choice(rng: Random, file: File, world: World) -> Itinerary:
         persons = tuple(person for person in people if person in must or rng.random() < 0.25)
         fixed = world.terms[option.id].fixed_start
         start = seconds(9) + QUARTER * rng.randrange(-4, 8) if fixed is None else fixed
-        if persons:
+        if persons or rng.random() < 0.2:
             steps.append(Step(option.id, option.origin, option.destination, persons, start, None))
     every = [(a, b) for a in PLACES for b in PLACES if a != b]
     legs: list[tuple[str | None, str, str]] = [

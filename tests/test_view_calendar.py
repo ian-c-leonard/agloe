@@ -30,11 +30,22 @@ from tests.stories import (
     EXAMPLES,
     any_time,
     at,
+    carries,
+    cutoff,
+    every_right,
+    every_transfer,
+    every_use,
     lasts,
     lasts_between,
+    lies_at,
     lock,
+    moves,
+    needs_no_right,
+    needs_right,
+    requires_object,
     seconds,
     starts_at,
+    starts_from,
     stays,
     takes,
     trip,
@@ -47,7 +58,7 @@ FILES = sorted(
 )
 # In the report in words: the line that names a day, and a line that shows one step of the plan.
 DAY = re.compile(r"^(\w+ \d+ \w+ \d+) \(times in (.+)\)$")
-LINE = re.compile(r"^  \d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+, .+$")
+LINE = re.compile(r"^  \d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+$")
 DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 MONTHS = [
     "January",
@@ -192,10 +203,16 @@ def test_the_calendar_says_what_the_report_says() -> None:
         if json.loads(beside(path, ".expected.json").read_text())["answer"] == "FEASIBLE"
     ]
     assert len(feasible) > 10
-    laid = calendars([drawn(path) for path in feasible])
+    with_nobody = ending_late = 0
+    sent_of = {path: drawn(path) for path in feasible}
+    laid = calendars([sent_of[path] for path in feasible])
     for path, calendar_of in zip(feasible, laid, strict=True):
         name = f"{path.parent.name}/{path.stem}"
         in_report: list[tuple[str, str]] = []
+        # A step with nobody of the TRIP in it has no column: the calendar names it in words.
+        sent = sent_of[path]
+        nobody = [step["name"] for step in sent["steps"] if not step["persons"]]
+        alone: list[str] = []
         day = ""
         for line in beside(path, ".expected.txt").read_text().split("\n"):
             header = DAY.match(line)
@@ -203,7 +220,12 @@ def test_the_calendar_says_what_the_report_says() -> None:
                 day = header[1]
                 assert calendar_of["zone"] == header[2], name
             elif LINE.match(line):
-                in_report.append((day, line))
+                when, what = line.strip().split(": ", 1)
+                if what in nobody:
+                    alone.append(f"{day}, {when}")
+                else:
+                    in_report.append((day, line))
+        assert len(alone) == len(nobody), name
         in_calendar: list[tuple[str, str]] = []
         for each in calendar_of["days"]:
             seen: set[int] = set()
@@ -217,12 +239,177 @@ def test_the_calendar_says_what_the_report_says() -> None:
         assert calendar_of["untimed"] == [], name
         assert calendar_of["itinerary"] is True, name
         if in_report:
-            assert calendar_of["says"] == f"The ITINERARY of the report.{CHICAGO}", name
+            # The report shows when a step ends at the earliest. The calendar adds how late
+            # it can end, where the FILE gives a range.
+            unseen = "".join(
+                nobody_in(sent, step, when)
+                for step, when in zip(
+                    (step for step in sent["steps"] if not step["persons"]), alone, strict=True
+                )
+            )
+            assert calendar_of["says"] == f"The ITINERARY of the report.{CHICAGO}{unseen}", name
+            with_nobody += bool(alone)
+            ending_late += any(
+                step["latest"] is not None for step in sent["steps"] if not step["persons"]
+            )
         for each in calendar_of["days"]:
             # In a plan nobody is in two places at once, so every mark has its column to itself.
             assert all((mark["lane"], mark["lanes"]) == (0, 1) for mark in each["marks"]), name
             # In the examples the clocks do not change, so every column shows all its hours.
             assert each["shut"] == [], name
+    assert with_nobody > 1 and ending_late > 0
+
+
+def clock_of(time: dict[str, Any], start: dict[str, Any]) -> str:
+    """A time as the calendar writes it after the start of its step: with its seconds where
+    it has some, its offset where the view sends one, and its date where that is another."""
+    year, month, day = (int(part) for part in time["at"][:10].split("-"))
+    hour, minute, second = (int(part) for part in time["at"][11:19].split(":"))
+    shown = f"{hour % 12 or 12}:{minute:02d}{f':{second:02d}' if second else ''}"
+    shown += " am" if hour < 12 else " pm"
+    shown += "" if time["offset"] is None else f" ({time['offset']})"
+    if time["at"][:10] == start["at"][:10]:
+        return shown
+    same_year = time["at"][:4] == start["at"][:4]
+    return f"{shown} on {day} {MONTHS[month - 1]}{'' if same_year else f' {year}'}"
+
+
+def test_the_calendar_says_how_late_a_step_with_nobody_in_it_can_end_on_the_next_day() -> None:
+    """A van leaves A at 11:00 pm with the bag and takes between half an hour and two hours
+    and one second. Jo collects the bag at B at 1:00 am the next day. Nobody rides the van.
+    The calendar says that it can end as late as 1:00:01 am, and on which day that is."""
+    late_night = starts_at("pickup", 1)
+    late_night["starts_at"] = late_night["starts_at"].replace("2027-05-15", "2027-05-16")
+    facts = [
+        starts_at("van", 23),
+        lasts_between("van", "PT30M", "PT2H1S"),
+        cutoff("van", "PT0S"),
+        needs_right("van"),
+        every_right("van"),
+        late_night,
+        lasts("pickup", "PT30M"),
+        cutoff("pickup", "PT0S"),
+        needs_no_right("pickup"),
+        starts_from("jo", "b"),
+        lies_at("bag", "a"),
+        carries("van", "bag"),
+        requires_object("pickup", "bag"),
+        every_use("bag"),
+        every_transfer("bag"),
+    ]
+    options = [moves("van", "a", "b"), stays("pickup", "b")]
+    file = trip(
+        ["jo"], ["a", "b"], options, facts, [lock("pickup", "jo")], rights=True, objects=["bag"]
+    )
+    found = compiler.check(file)
+    assert found.answer is Answer.FEASIBLE
+    sent, words = sent_for(file, found), report.as_text(file, found)
+    laid = calendar(sent, report.as_json(file, found), words)
+    assert warnings_are_those_of_the_report(sent, words, laid, "the van at night")
+    van = (
+        " Nobody of the TRIP is in van (a to b) on Saturday 15 May 2027, 11:00 pm to 11:30 pm,"
+        " or as late as 1:00:01 am on 16 May, so no column shows it."
+    )
+    assert van in laid["says"]
+    assert van == nobody_in(sent, sent["steps"][0], "Saturday 15 May 2027, 11:00 pm to 11:30 pm")
+    # The pickup is the one step with a mark, and the report warns there: the bag might be late.
+    assert laid["warned"] is True
+
+
+def test_a_time_after_midnight_is_written_with_its_date_and_its_seconds() -> None:
+    start = {"at": "2027-05-15T23:00:00", "offset": None}
+    assert clock_of({"at": "2027-05-16T01:00:01", "offset": None}, start) == "1:00:01 am on 16 May"
+    assert clock_of({"at": "2027-05-15T23:30:00", "offset": "UTC-5"}, start) == "11:30 pm (UTC-5)"
+    assert (
+        clock_of({"at": "2028-01-01T12:00:00", "offset": None}, start)
+        == "12:00 pm on 1 January 2028"
+    )
+
+
+def nobody_in(sent: Trip, step: dict[str, Any], day_and_time: str) -> str:
+    """What the calendar says of a step with nobody of the TRIP in it: the OPTION, where it
+    goes, its day and its time as the report writes them, and how late it can end where the
+    step says so."""
+    place = {each["id"]: each["name"] for each in sent["places"]}
+    where = place[step["from"]]
+    if step["to"] != step["from"]:
+        where = f"{where} to {place[step['to']]}"
+    late = ""
+    if step["latest"] is not None:
+        late = f", or as late as {clock_of(step['latest'], step['start'])}"
+    return (
+        f" Nobody of the TRIP is in {step['name']} ({where}) on {day_and_time}{late},"
+        " so no column shows it."
+    )
+
+
+def test_the_calendar_names_each_step_with_nobody_in_it_with_its_day_and_its_warning() -> None:
+    """Alex visits the hall on Saturday. A van runs that day with nobody of the TRIP in it,
+    and a second one on Sunday, when the report warns of something at it. Neither has a
+    column, so the calendar says of each what a mark would: the day, the time and the
+    WARNING. No mark has a WARNING, so the calendar speaks of no yellow edge."""
+    file = trip(
+        ["alex"],
+        ["hall", "port"],
+        [
+            stays("visit", "hall"),
+            moves("first-van", "hall", "port"),
+            moves("last-van", "hall", "port"),
+        ],
+        [starts_at("visit", 10)],
+        [],
+    )
+    day = 86400
+    plan = (
+        Step("visit", "hall", "hall", ("alex",), seconds(10), seconds(11)),
+        Step("first-van", "hall", "port", (), seconds(14), seconds(15, 30)),
+        Step("last-van", "hall", "port", (), seconds(14) + day, seconds(15, 30) + day),
+    )
+    sent = sent_for(file, Report(Answer.FEASIBLE, itinerary=plan))
+
+    def in_words(*under_the_visit: str) -> str:
+        return "\n".join(
+            [
+                "FEASIBLE, with a WARNING: this trip works, but it is at risk.",
+                "",
+                "Saturday 15 May 2027 (times in America/Chicago)",
+                "  10:00 am to 11:00 am: visit, alex",
+                *under_the_visit,
+                "  2:00 pm to 3:30 pm: first-van",
+                "",
+                "Sunday 16 May 2027 (times in America/Chicago)",
+                "  2:00 pm to 3:30 pm: last-van",
+                "    ! the permit would arrive 1 h after this starts.",
+                "",
+            ]
+        )
+
+    laid = calendar(sent, {"answer": "FEASIBLE"}, in_words())
+    first = (
+        " Nobody of the TRIP is in first-van (hall to port) on Saturday 15 May 2027,"
+        " 2:00 pm to 3:30 pm,"
+    )
+    last = (
+        " Nobody of the TRIP is in last-van (hall to port) on Sunday 16 May 2027,"
+        " 2:00 pm to 3:30 pm,"
+    )
+    no_column = " so no column shows it."
+    warning = " The report warns there: the permit would arrive 1 h after this starts."
+    assert laid["says"] == (
+        f"The ITINERARY of the report.{CHICAGO}{first}{no_column}{last}{no_column}{warning}"
+    )
+    assert laid["warned"] is False
+    assert [[mark["name"] for mark in each["marks"]] for each in laid["days"]] == [["visit"], []]
+    # A WARNING at the visit is on its mark, and then the calendar speaks of the yellow edge.
+    laid = calendar(sent, {"answer": "FEASIBLE"}, in_words("    ! alex would be 5 min too late."))
+    assert laid["warned"] is True
+    assert laid["says"] == (
+        f"The ITINERARY of the report.{CHICAGO}{WARNS}{first}{no_column}{last}{no_column}{warning}"
+    )
+    # Without the report in words, the calendar still names the two steps and their days.
+    assert calendar(sent)["says"] == (
+        f"The ITINERARY of the report.{CHICAGO}{first}{no_column}{last}{no_column}"
+    )
 
 
 def test_the_calendar_of_the_flight_home() -> None:
@@ -475,6 +662,14 @@ def test_the_calendar_says_what_the_report_warns_of_after_the_days_shown() -> No
     assert laid["says"].endswith(
         f"{WARNS} The report also warns of something at 1 step after the days shown."
     )
+    assert warnings_are_those_of_the_report(sent, words, laid, "two concerts")
+    # With the first concert bought, the only WARNING is at a step that has no mark.
+    still_to_buy = "\n    ! alex still has to buy a right to this."
+    bought = words.replace(f"first, alex{still_to_buy}", "first, alex", 1)
+    assert bought.count(still_to_buy) == 1
+    laid = calendar(sent, {"answer": "FEASIBLE"}, bought)
+    assert laid["warned"] is False
+    assert warnings_are_those_of_the_report(sent, bought, laid, "the last concert")
 
 
 def test_the_calendar_warns_only_of_what_the_report_warns_of() -> None:
@@ -488,24 +683,119 @@ def test_the_calendar_warns_only_of_what_the_report_warns_of() -> None:
     seen = 0
     for path, (sent, _, words), calendar_of in zip(FILES, asked, laid, strict=True):
         name = f"{path.parent.name}/{path.stem}"
-        # The lines of the report that start with "!", each under the line of its step.
-        under: dict[int, list[str]] = {}
-        step = -1
-        for line in words.split("\n"):
-            if LINE.match(line):
-                step += 1
-            elif line.startswith("    ! ") and step >= 0:
-                under.setdefault(step, []).append(line.removeprefix("    ! "))
-        for day in calendar_of["days"]:
-            for mark in day["marks"]:
-                assert mark["warns"] == under.get(mark["step"], []), name
-                assert mark["records"] == sent["steps"][mark["step"]]["records"], name
-            for bound in day["bounds"]:
-                assert bound["record"] in {"trip-start", "trip-end"}, name
-        assert calendar_of["warned"] is bool(under), name
-        assert (WARNS in calendar_of["says"]) is bool(under), name
-        seen += bool(under)
+        seen += warnings_are_those_of_the_report(sent, words, calendar_of, name)
     assert seen > 3
+
+
+def warnings_are_those_of_the_report(
+    sent: Trip, words: str, calendar_of: Calendar, name: str
+) -> bool:
+    """Checks that the calendar warns of what the report warns of, step by step, and says
+    whether the report warns of anything. A step that has a mark has its words on its marks,
+    and the calendar speaks of a yellow edge where a mark has some. A step with nobody in
+    it has no mark: the calendar says its words right after the sentence that names that
+    step. A step with PERSONs after the days shown is counted."""
+    # The lines of the report that start with "!", each under the line of its step, and
+    # the day and the time that the report gives each step.
+    under: dict[int, list[str]] = {}
+    said_at: dict[int, str] = {}
+    step, date = -1, ""
+    for line in words.split("\n"):
+        header = DAY.match(line)
+        if header:
+            date = header[1]
+        elif LINE.match(line):
+            step += 1
+            said_at[step] = f"{date}, {line.strip().split(': ', 1)[0]}"
+        elif line.startswith("    ! ") and step >= 0:
+            under.setdefault(step, []).append(line.removeprefix("    ! "))
+    marked: set[int] = set()
+    for day in calendar_of["days"]:
+        for mark in day["marks"]:
+            marked.add(mark["step"])
+            assert mark["warns"] == under.get(mark["step"], []), name
+            assert mark["records"] == sent["steps"][mark["step"]]["records"], name
+        for bound in day["bounds"]:
+            assert bound["record"] in {"trip-start", "trip-end"}, name
+    drawn_with_one = any(number in marked for number in under)
+    assert calendar_of["warned"] is drawn_with_one, name
+    assert (WARNS in calendar_of["says"]) is drawn_with_one, name
+    later = [n for n in under if n not in marked and sent["steps"][n]["persons"]]
+    count = "1 step" if len(later) == 1 else f"{len(later)} steps"
+    if later:
+        also = f" The report also warns of something at {count} after the days shown."
+        assert also in calendar_of["says"], name
+    else:
+        assert "The report also warns of something" not in calendar_of["says"], name
+    for number, lines in under.items():
+        if not sent["steps"][number]["persons"]:
+            there = nobody_in(sent, sent["steps"][number], said_at[number])
+            there += f" The report warns there: {' '.join(lines)}"
+            assert there in calendar_of["says"], name
+    return bool(under)
+
+
+def test_the_calendar_says_a_warning_at_a_step_with_nobody_in_it_for_a_real_report() -> None:
+    """A van takes a permit from C to A and takes between one hour and three. A second van
+    requires the permit at A at 11:00 am and carries the bag to B, where Jo collects it.
+    Nobody rides either van. The report warns at the second van that the permit would come
+    an hour late. The calendar has a mark for the pickup only, so it says the WARNING in
+    words and speaks of no yellow edge."""
+    options = [moves("permit-van", "c", "a"), moves("bag-van", "a", "b"), stays("pickup", "b")]
+    facts = [
+        starts_at("permit-van", 9),
+        lasts_between("permit-van", "PT1H", "PT3H"),
+        starts_at("bag-van", 11),
+        lasts("bag-van", "PT1H"),
+        starts_at("pickup", 13),
+        lasts("pickup", "PT30M"),
+        *(cutoff(each, "PT0S") for each in ("permit-van", "bag-van", "pickup")),
+        needs_no_right("pickup"),
+        *(
+            fact
+            for van in ("permit-van", "bag-van")
+            for fact in (needs_right(van), every_right(van))
+        ),
+        starts_from("jo", "b"),
+        lies_at("permit", "c"),
+        lies_at("bag", "a"),
+        carries("permit-van", "permit"),
+        carries("bag-van", "bag"),
+        requires_object("bag-van", "permit"),
+        requires_object("pickup", "bag"),
+        *(
+            fact
+            for thing in ("permit", "bag")
+            for fact in (every_use(thing), every_transfer(thing))
+        ),
+    ]
+    file = trip(
+        ["jo"],
+        ["a", "b", "c"],
+        options,
+        facts,
+        [lock("pickup", "jo")],
+        rights=True,
+        objects=["permit", "bag"],
+    )
+    found = compiler.check(file)
+    assert found.answer is Answer.FEASIBLE
+    sent, words = sent_for(file, found), report.as_text(file, found)
+    assert [step["persons"] for step in sent["steps"]] == [[], [], ["jo"]]
+    laid = calendar(sent, report.as_json(file, found), words)
+    assert warnings_are_those_of_the_report(sent, words, laid, "the permit comes late")
+    assert laid["warned"] is False
+    assert [len(day["marks"]) for day in laid["days"]] == [1]
+    first = (
+        " Nobody of the TRIP is in permit-van (c to a) on Saturday 15 May 2027,"
+        " 9:00 am to 10:00 am, or as late as 12:00 pm, so no column shows it."
+    )
+    second = (
+        " Nobody of the TRIP is in bag-van (a to b) on Saturday 15 May 2027,"
+        " 11:00 am to 12:00 pm, so no column shows it."
+        " The report warns there: permit would arrive 1 h after this starts."
+    )
+    assert laid["says"] == f"The ITINERARY of the report.{CHICAGO}{first}{second}"
 
 
 ASKS = " A yellow edge marks each step shown that the report names in what the FILE does not say."

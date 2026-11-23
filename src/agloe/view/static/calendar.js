@@ -122,6 +122,8 @@ function saysOf(trip, timed) {
  *
  * `warnings` holds, at the place of each step, what the report in words warns of there.
  * `warns` on a mark holds those words, and `warned` on the calendar says that a mark has some.
+ * An OPTION of the plan with nobody of the TRIP in it has no column, and so no mark: `says`
+ * names it with its PLACEs, its day and its time, and with what the report warns of there.
  * Each mark also holds the `records` that are about its step, and each bound its `record`.
  *
  * `stated` holds the words of the report for the cases in which it says the trip works: the
@@ -164,6 +166,7 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
       who: names(columns),
       where: step.from === step.to ? place.get(step.from) : `${place.get(step.from)} to ${place.get(step.to)}`,
       when: step.start === null ? null : `${clock(step.start)} to ${step.end === null ? "an unknown time" : clock(step.end, step.start)}`,
+      day: step.start === null ? null : dateName(step.start.at),
       late: step.latest === null ? null : `or as late as ${clock(step.latest, step.start)}`,
       stateOf: (at) => (step.option === null ? "way" : locked.has(at) ? "locked" : "planned"),
     };
@@ -173,16 +176,26 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
   // on its days, the steps with no time that it names beside them, and the times of the TRIP.
   const marked = new Set(steps.filter((step) => step.parts.length || step.when === null).flatMap((step) => step.clash));
   for (const bound of [trip.starts, trip.ends]) if (bound !== null && bound.day !== null && ruled.has(bound.record)) marked.add(bound.record);
+  // An OPTION of the plan with nobody of the TRIP in it has no column to be drawn in: a
+  // luggage service carries the bags while everybody is somewhere else. So no mark is made
+  // for it, and the calendar says in words what a mark would: the step with its PLACEs, its
+  // day and its time, and what the report warns of there and says of it.
+  const alone = (step) => step.kind === "option" && !step.columns.length && step.when !== null;
+  const nobody = steps.filter(alone).map((step) => {
+    const warns = step.warns.length ? ` The report warns there: ${step.warns.join(" ")}` : "";
+    const asks = step.asks.length ? ` ${step.asks.join(" ")}` : "";
+    return ` Nobody of the TRIP is in ${step.name} (${step.where}) on ${step.day}, ${step.late ? `${step.when}, ${step.late}` : step.when}, so no column shows it.${warns}${asks}`;
+  }).join("");
   // A step that the report warns about is marked where the calendar shows it. A step after
   // the days shown has no mark, and the calendar says how many of those the report warns about.
-  const warned = steps.some((step) => step.warns.length && step.parts.length);
-  const after = steps.filter((step) => step.warns.length && !step.parts.length).length;
+  const warned = steps.some((step) => step.warns.length && step.parts.length && !alone(step));
+  const after = steps.filter((step) => step.warns.length && !step.parts.length && !alone(step)).length;
   const warns = (warned ? " A yellow edge marks each step shown at which the report warns of something." : "") + (after ? ` The report also warns of something at ${after === 1 ? "1 step" : `${after} steps`} after the days shown.` : "");
   // A step that the report names in what the FILE does not say is marked where the calendar
   // shows it: on its days, or among the steps with no time.
-  const asked = steps.some((step) => step.cases.length && (step.parts.length || step.when === null));
+  const asked = steps.some((step) => step.cases.length && (step.parts.length || step.when === null) && !alone(step));
   const asks = !needed.length ? "" : asked ? " A yellow edge marks each step shown that the report names in what the FILE does not say." : " What the report says the FILE does not say is not about a step shown here.";
-  const says = saysOf(trip, steps.length - untimed.length) + rulesOut(ruled.size, marked.size) + warns + asks;
+  const says = saysOf(trip, steps.length - untimed.length) + rulesOut(ruled.size, marked.size) + warns + asks + nobody;
   if (!trip.days.length) return { ...none, says, zone: trip.zone, itinerary: trip.itinerary, clash: marked.size > 0, asked, persons: trip.persons, untimed };
 
   // ---- the hours that every day shows: from the earliest start of a step on any day to the

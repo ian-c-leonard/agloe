@@ -124,7 +124,12 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
             assert [line["step"] for line in shows] == list(range(len(trip["steps"]))), name
             for line in shows:
                 step = trip["steps"][line["step"]]
-                assert f": {step['name'] or 'another WAY'}, " in line["text"], name
+                what = step["name"] or "another WAY"
+                # A step with nobody of the TRIP in it names nobody after the OPTION.
+                if step["persons"]:
+                    assert f": {what}, " in line["text"], name
+                else:
+                    assert line["text"].endswith(f": {what}"), name
         else:
             assert shows == [], name
         # A warning is under the step that it is about.

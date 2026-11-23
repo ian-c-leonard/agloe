@@ -62,7 +62,7 @@ FILES = sorted(
 )
 # In the report in words: the line that names a day, and a line that shows one step of the plan.
 DAY = re.compile(r"^(\w+) (\d+) (\w+) (\d+) \(times in .+\)$")
-LINE = re.compile(r"^  \d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+, .+$")
+LINE = re.compile(r"^  \d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+$")
 MONTHS = [
     "January",
     "February",
@@ -317,7 +317,9 @@ def test_a_feasible_trip_is_sent_with_the_itinerary_of_its_report(path: Path) ->
     lines = [line for line in words if LINE.match(line)]
     assert len(sent["steps"]) == len(lines)
     for step, line in zip(sent["steps"], lines, strict=True):
-        assert f": {step['name'] or 'another WAY'}, " in line
+        name = step["name"] or "another WAY"
+        # A step with nobody of the TRIP in it names nobody after the OPTION.
+        assert f": {name}, " in line if step["persons"] else line.endswith(f": {name}")
     # Every day that the report names is a day that the page is sent.
     for line in words:
         named = DAY.match(line)

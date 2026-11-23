@@ -1513,14 +1513,16 @@ def _is_a_step(
 
     A step of an ITINERARY has a time. Where there is no ITINERARY, every step is an OPTION,
     and a LOCK names each PERSON who takes part. An OPTION and a WAY that the FILE lists have
-    a name, and a WAY that it does not list has none.
+    a name, and a WAY that it does not list has none. An OPTION of an ITINERARY can have
+    nobody in it: a luggage service carries the bags while everybody is somewhere else.
     """
     if not _fits(step, _STEP):
         return False
     said = cast("dict[str, object]", step)
     takers = _all_different(said["persons"])
     locked = _all_different(said["locked"])
-    if takers is None or locked is None or not takers or not takers <= persons:
+    alone = planned and said["option"] is not None
+    if takers is None or locked is None or not takers <= persons or not (takers or alone):
         return False
     if _all_different(said["records"]) is None:
         return False
