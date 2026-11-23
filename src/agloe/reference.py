@@ -2010,23 +2010,24 @@ def _can_move(
     part can have it. A PERSON can have it who has it when the TRIP starts, or might, or who
     takes part in an OPTION of the plan that hands it over. Nobody else ever has it, and an
     OPTION keeps nothing from them. An OPTION that only might hand it over or keep it counts
-    as well. An OPTION that refuses the OBJECT hands it over to nobody.
+    as well. An OPTION that refuses the OBJECT cannot move it: nobody who has it takes
+    part, and nobody takes it there.
     """
     options = file.options
-    does = {index: world.does.get((options[index].id, thing)) for index in happening}
-    hands_over = {
-        index
+    does = {
+        index: world.does.get((options[index].id, thing))
         for index in happening
-        if does[index] in ("hands_over", "any") and (options[index].id, thing) not in world.refuses
+        if (options[index].id, thing) not in world.refuses
     }
     holders = {each.person for start in _begins(file, world, thing) for each in start}
-    for index in hands_over:
-        holders.update(who[index])
+    for index, action in does.items():
+        if action in ("hands_over", "any"):
+            holders.update(who[index])
     return {
         index
-        for index in happening
-        if index in hands_over
-        or (does[index] in ("keeps", "might_keep", "any") and not holders.isdisjoint(who[index]))
+        for index, action in does.items()
+        if action in ("hands_over", "any")
+        or (action in ("keeps", "might_keep") and not holders.isdisjoint(who[index]))
     }
 
 

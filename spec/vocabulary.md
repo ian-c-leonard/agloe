@@ -62,7 +62,7 @@ Describes a set that a FACT states the FILE holds in full: a set of OPTIONs and 
 - Every OPTION that SATISFIES a stated WANT. Each one is in the FILE, with a FACT that it SATISFIES the WANT. Nothing else does.
 - Every right to a stated OPTION that anybody on the TRIP holds or can get. The BOOKINGs in the FILE secure those that are held. Nobody on the TRIP can get another, except by a place of an OFFER that the FACT names.
 - Every OPTION of the FILE that requires a stated CAPABILITY. Each one has a FACT that says so. An OPTION of the FILE with no such FACT does not require it.
-- Every OPTION of the FILE that requires a stated OBJECT. Each one has a FACT that says so. An OPTION of the FILE with no such FACT does not require it.
+- Every OPTION of the FILE that requires or refuses a stated OBJECT. Each one has a FACT that says so. An OPTION of the FILE with no such FACT does neither.
 - Every OPTION that hands a stated OBJECT over or keeps it. Each one is in the FILE, with a FACT that says so. Nothing else transfers the OBJECT.
 
 A COMPLETE set that is empty means "we looked, and there is nothing". A FACT that one set is COMPLETE says nothing about any other set. So a FACT about travel between two PLACEs says nothing about travel through a third PLACE as a whole: each leg of that travel is straight travel by itself, and only a FACT that covers the leg rules it out.
@@ -105,7 +105,7 @@ A means of getting from one PLACE to another that is there whenever a PERSON nee
 
 ### OBJECT
 
-A physical thing with a position that OPTIONs may require or move: a rental car, a bag, diving gear. In any ITINERARY, an OBJECT is at one PLACE, with one PERSON, or in one OPTION at every moment, and it changes position only through OPTIONs. While it is with a PERSON, it goes where that PERSON goes, on OPTIONs and on WAYs.
+A physical thing with a position that OPTIONs may require, refuse or move: a rental car, a bag, diving gear. In any ITINERARY, an OBJECT is at one PLACE, with one PERSON, or in one OPTION at every moment, and it changes position only through OPTIONs. While it is with a PERSON, it goes where that PERSON goes, on OPTIONs and on WAYs.
 
 *Uses:* PLACE, PERSON, → OPTION, → ITINERARY.
 *Notes:* holding an OBJECT is not being somewhere. Renting a car gives a PERSON the car; it does not keep the PERSON at the rental desk.
@@ -143,7 +143,7 @@ Something that happens at a time and that a TRIP may include: this ferry sailing
 - a time: a fixed time, an allowed time window, or left to be scheduled;
 - a duration: an exact value, a CONTROLLABLE range or a CONTINGENT range;
 - a PLACE, or a pair of PLACEs for a movement;
-- the PERSONs and OBJECTs it involves, and any CAPABILITIES and OBJECTs it requires;
+- the PERSONs and OBJECTs it involves, and any CAPABILITIES and OBJECTs it requires, and any OBJECTs it refuses;
 - anything it draws from a BUDGET for its own sake, such as energy or fuel, separately from any price.
 
 Every time carries a date and a time zone. An OPTION is never deleted from the FILE.
@@ -289,7 +289,7 @@ A TRIP or VARIANT is INFEASIBLE when no ITINERARY meets every CONSTRAINT, howeve
 
 ### UNDETERMINED
 
-A TRIP, VARIANT or individual check is UNDETERMINED when it is neither FEASIBLE nor INFEASIBLE: the answer depends on FACTs the FILE does not hold, or the search stopped at its stated limit. The report names the missing FACTs and the conditions under which it would be FEASIBLE.
+A TRIP, VARIANT or individual check is UNDETERMINED when it is neither FEASIBLE nor INFEASIBLE: the answer depends on FACTs the FILE does not hold, or the search stopped at its stated limit. The report names the missing FACTs and the conditions under which it would be FEASIBLE, or might be.
 
 *Uses:* TRIP, VARIANT, FEASIBLE, INFEASIBLE, FACT, FILE.
 *Notes:* an undecided choice never makes a TRIP UNDETERMINED. Choices are what the COMPILER searches over; only missing FACTs or a search limit do.

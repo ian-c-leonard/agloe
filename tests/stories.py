@@ -239,6 +239,17 @@ def requires_object(option: str, thing: str, needed: bool = True) -> Document:
     return {"id": f"{option}-requires-{thing}", "option": option, "requires": asked}
 
 
+def refuses_object(option: str, thing: str, refused: bool = True) -> Document:
+    """A FACT that an OPTION refuses an OBJECT, or with ``refused`` False that it does not."""
+    asked = {"object": thing, "refused": refused}
+    return {"id": f"{option}-refuses-{thing}", "option": option, "refuses": asked}
+
+
+def lets_in(thing: str, *options: str) -> list[Document]:
+    """A FACT for each of these OPTIONs that it does not refuse an OBJECT."""
+    return [refuses_object(option, thing, False) for option in options]
+
+
 def does_with(option: str, thing: str, does: str) -> Document:
     """A FACT about what an OPTION does with an OBJECT: "hands_over", "keeps" or "nothing"."""
     done = {"object": thing, "does": does}
@@ -254,7 +265,7 @@ def keeps(option: str, thing: str) -> Document:
 
 
 def every_use(thing: str) -> Document:
-    """A FACT that the FILE states every OPTION that requires this OBJECT."""
+    """A FACT that the FILE states every OPTION that requires this OBJECT or refuses it."""
     return {"id": f"every-use-of-{thing}", "complete": {"requires_object": thing}}
 
 

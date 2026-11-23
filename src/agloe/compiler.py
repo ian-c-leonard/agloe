@@ -549,14 +549,15 @@ class _Search:
         OBJECT at some time: so they can bring it, take it or leave it there. A PERSON can
         have it who has it when the TRIP starts, or might, or who can take part in an OPTION
         that hands it over. Nobody else ever has it, so whether they take part changes
-        nothing about where the OBJECT is. An OPTION that refuses the OBJECT hands it over
-        to nobody.
+        nothing about where the OBJECT is.
 
         An OPTION that only might keep the OBJECT gives nobody a reason. Where whoever has
         the OBJECT stays out of it, the OBJECT might be in fewer places afterwards. It is
         at hand wherever it was at hand with more, and no PERSON has it who did not have it
-        with more. An OPTION that refuses the OBJECT gives nobody a reason either: whoever
-        has to leave the OBJECT somewhere first has their reason for the stay that keeps it.
+        with more. An OPTION that refuses the OBJECT gives nobody a reason either. Nobody
+        who has the OBJECT takes part in it, and nobody takes the OBJECT there, so whoever
+        comes changes nothing about where the OBJECT is. Whoever has to leave the OBJECT
+        somewhere first has their reason for the stay that keeps it.
 
         ``self.holders`` keeps, for each OBJECT that matters, the PERSONs who can have it.
         """
@@ -570,10 +571,11 @@ class _Search:
             for index in matter:
                 option = file.options[index].id
                 does = world.does.get((option, thing), "nothing")
-                hands_over = does in ("hands_over", "any") and (option, thing) not in world.refuses
-                if hands_over:
+                if (option, thing) in world.refuses:
+                    continue
+                if does in ("hands_over", "any"):
                     holders |= {n for n in everybody if not self._shut_out(n, index)}
-                if (option, thing) in world.needs or hands_over or does in ("keeps", "any"):
+                if (option, thing) in world.needs or does in ("hands_over", "keeps", "any"):
                     gain.append(index)
             self.holders[thing] = holders
             carries.update((number, index) for number in holders for index in gain)
