@@ -1,10 +1,11 @@
 """What the page shows of the OBJECTs of a FILE.
 
 The view sends the OBJECTs with each report: where each is when the TRIP starts, the OPTIONs
-that a FACT says require it or do not, and those that a FACT says hand it over, keep it or
-leave it alone. ``src/agloe/view/static/objects.js`` puts them in words, as the report words
-them, says who takes part in each of those OPTIONs, and marks what the report names. It has no
-page in it, so Node runs it here, through ``view_part.mjs``.
+that a FACT says require it or do not, those that a FACT says refuse it or do not, and those
+that a FACT says hand it over, keep it or leave it alone. ``src/agloe/view/static/objects.js``
+puts them in words, as the report words them, says who takes part in each of those OPTIONs,
+and marks what the report names. It has no page in it, so Node runs it here, through
+``view_part.mjs``.
 
 Nothing in it judges a TRIP. Where an OBJECT is in a plan is for the COMPILER to say.
 """
@@ -539,6 +540,69 @@ def test_an_object_that_a_person_has_and_an_option_that_keeps_it() -> None:
     said = {each["name"]: each["says"] for each in bags["transfers"]}
     assert said["Museum visit"] == "keeps it"
     assert said["Pick up at the cloakroom"] == "it can be handed over here"
+
+
+def test_an_option_that_refuses_an_object_moves_it_for_nobody(tmp_path: Path) -> None:
+    """One FACT says that an OPTION hands the bags over or keeps them, and another that it
+    refuses them. The rules have it refuse them first, so the card says what that comes to."""
+
+    def bags_of(story: str, *facts: dict[str, Any]) -> Objects:
+        content = json.loads((STORY / f"{story}.json").read_text())
+        content["facts"] += facts
+        path = tmp_path / "trip.json"
+        path.write_text(json.dumps(content))
+        sent, found, words = in_words(path)
+        (shown,) = all_objects([sent], [found], [words])
+        (bags,) = shown["objects"]
+        return bags
+
+    def refusal(option: str, refused: bool = True) -> dict[str, Any]:
+        return {
+            "id": f"{option}-and-the-bags",
+            "option": option,
+            "refuses": {"object": "bags", "refused": refused},
+        }
+
+    # The hotel hands the bags over where they are collected, and collecting them refuses
+    # them: nobody can take them there. The entry is drawn as one that does nothing with the
+    # bags, and it is tied to both FACTs.
+    bags = bags_of("they-collect-them", refusal("collect-bags"))
+    (hands,) = bags["transfers"]
+    assert (hands["name"], hands["says"], hands["does"]) == (
+        "Collect the bags",
+        "it can be handed over here, but nobody can take it: this refuses it",
+        False,
+    )
+    assert hands["records"] == ["hotel-releases-the-bags", "collect-bags-and-the-bags"]
+    assert [(each["says"], each["records"]) for each in bags["refuses"]] == [
+        ("refuses it", ["collect-bags-and-the-bags"])
+    ]
+    # The report names the refusal among what rules out every plan, so both entries are marked.
+    assert hands["clash"] == ["collect-bags-and-the-bags"]
+    # The museum keeps the bags and refuses them: nobody who has them can take part.
+    bags = bags_of("the-museum-keeps-them", refusal("museum-visit"))
+    said = {each["name"]: (each["says"], each["does"]) for each in bags["transfers"]}
+    assert said == {
+        "Museum visit": ("keeps it, but nobody who has it can take part: this refuses it", False),
+        "Pick up at the cloakroom": ("it can be handed over here", True),
+    }
+    # A FACT that the OPTION does not refuse the bags changes nothing.
+    bags = bags_of("the-museum-keeps-them", refusal("museum-visit", refused=False))
+    (keeps, _) = bags["transfers"]
+    assert (keeps["says"], keeps["does"], keeps["records"]) == (
+        "keeps it",
+        True,
+        ["museum-checks-the-bags"],
+    )
+    # An OPTION that leaves the bags alone and refuses them leaves them alone.
+    alone = {
+        "id": "flight-leaves-the-bags",
+        "option": "flight",
+        "with_object": {"object": "bags", "does": "nothing"},
+    }
+    bags = bags_of("the-museum-keeps-them", refusal("flight"), alone)
+    said = {each["name"]: (each["says"], each["records"]) for each in bags["transfers"]}
+    assert said["Flight home"] == ("leaves it alone", ["flight-leaves-the-bags"])
 
 
 def test_the_objects_mark_what_the_report_says_the_file_does_not_say() -> None:
