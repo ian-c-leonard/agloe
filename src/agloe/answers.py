@@ -958,51 +958,62 @@ def _asked_of_objects(
     those that hold them and no other new thing. The result is groups of unknown FACTs:
     every such set holds one FACT at least of each group, and no two groups share a FACT.
 
-    An OPTION with no FACT about it might require an OBJECT, and it might refuse it. A
-    group of those FACTs is tested in the upper bound of ``no_better_than``, where every
-    unknown FACT helps whoever needs it: there each OPTION of the group is made to require
-    its OBJECT, or to refuse it. Where nothing works then, no set without a FACT of the
-    group is enough. Such a set leaves the whole group at its worst, and everything else in
-    it turns out no better than in the bound. So every set that is enough holds one of them.
+    Three things can be unknown about an OPTION and an OBJECT: whether the OPTION requires
+    the OBJECT, whether it refuses it, and what it does with it. Each has its unknown FACTs:
+    that the OPTION does not require the OBJECT, that it does not refuse it, and the three
+    about what it does. A set that holds none of them leaves the thing at its worst: the
+    OPTION requires the OBJECT, or refuses it, or hands nothing over and might keep it.
 
-    The groups are found one after another. All the FACTs that are left are tested
-    together. Where nothing works, FACTs are taken out of the group one at a time, in the
-    FILE's order, as long as nothing works without them. What stays is a group that no FACT
-    can leave, and the search goes on with the FACTs outside it. A group of one FACT is a
-    FACT that every set holds. Something works in the bound as it is: the search asks only
-    about new things that can be enough. So no group is empty.
+    Some of those things are tested together in the upper bound of ``no_better_than``,
+    where every unknown FACT helps whoever needs it: there each of them is put at its
+    worst. Where nothing works then, no set without a FACT of theirs is enough. Such a set
+    leaves them all at their worst, and everything else in it turns out no better than in
+    the bound. So every set that is enough holds one of their FACTs.
+
+    The groups are found one after another. All the things that are left are tested
+    together. Where nothing works, they are taken out one at a time, in the FILE's order,
+    as long as nothing works without them. What stays is a group that nothing can leave,
+    and the search goes on with the things outside it. A group of one FACT is a FACT that
+    every set holds. Something works in the bound as it is: the search asks only about
+    new things that can be enough. So no group is empty.
 
     This only saves work. A FILE that says little about its OBJECTs has many unknown FACTs
     about them, and the sets of a size are too many to try one by one.
     """
     bound = no_better_than(file, some)
-    worse: dict[Unknown, tuple[bool, tuple[str, str]]] = {}
-    for option in file.options:
-        for thing in file.objects_asked_for():
-            pair = (option.id, thing.id)
-            if file.requires_object(*pair) is None:
-                worse[Unknown("does not require", option.id, about=thing.id)] = (True, pair)
-            if file.refuses_object(*pair) is None:
-                worse[Unknown("does not refuse", option.id, about=thing.id)] = (False, pair)
+    kinds = {"does not require": "requires", "does not refuse": "refuses"}
+    kinds.update(dict.fromkeys(("keeps", "does not keep", "hands over"), "does"))
+    # Each thing that is unknown, with its unknown FACTs: an OPTION, an OBJECT and a kind.
+    facts: dict[tuple[str, str, str], list[Unknown]] = {}
+    for unknown in unknowns(file):
+        if unknown.what in kinds and unknown.option is not None and unknown.about is not None:
+            thing = (unknown.option, unknown.about, kinds[unknown.what])
+            facts.setdefault(thing, []).append(unknown)
 
-    def nothing_works(group: Sequence[Unknown]) -> bool:
-        """Whether nothing works in the bound with each FACT of the group at its worst."""
-        needs = {pair for required, pair in map(worse.__getitem__, group) if required}
-        refuses = {pair for required, pair in map(worse.__getitem__, group) if not required}
-        harder = replace(bound, needs=bound.needs | needs, refuses=bound.refuses | refuses)
+    def nothing_works(group: Sequence[tuple[str, str, str]]) -> bool:
+        """Whether nothing works in the bound with each of these things at its worst."""
+        needs = {(option, about) for option, about, kind in group if kind == "requires"}
+        refuses = {(option, about) for option, about, kind in group if kind == "refuses"}
+        might_keep = {(option, about) for option, about, kind in group if kind == "does"}
+        harder = replace(
+            bound,
+            needs=bound.needs | needs,
+            refuses=bound.refuses | refuses,
+            does={**bound.does, **dict.fromkeys(might_keep, "might_keep")},
+        )
         return not works(file, harder)
 
     groups: list[frozenset[Unknown]] = []
-    left = list(worse)
+    left = list(facts)
     while left and nothing_works(left):
         group = left
-        for unknown in left:
-            fewer = [each for each in group if each != unknown]
+        for thing in left:
+            fewer = [each for each in group if each != thing]
             if nothing_works(fewer):
                 group = fewer
         if not group:
             raise AssertionError("nothing works in the upper bound, so no set is enough")
-        groups.append(frozenset(group))
+        groups.append(frozenset(unknown for thing in group for unknown in facts[thing]))
         left = [each for each in left if each not in group]
     return groups
 

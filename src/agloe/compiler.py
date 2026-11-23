@@ -804,8 +804,18 @@ class _Search:
         ``handed`` holds, for each OPTION that can hand the OBJECT over, the choice that it
         does. ``picked`` says that the world leaves the start to pick: then nobody is known
         to have the OBJECT when the TRIP starts.
+
+        Two OPTIONs that a PERSON takes part in start in the order of their turns. So where
+        both start at fixed times, the one with the later start never comes first, and
+        nothing is said about that order.
         """
         model, world, options = self.model, self.world, self.file.options
+        fixed = [each.fixed_start for each in self.terms]
+
+        def can_come_before(first: int, then: int) -> bool:
+            early, late = fixed[first], fixed[then]
+            return early is None or late is None or early <= late
+
         refusing = [index for index in matter if (options[index].id, thing) in world.refuses]
         keeping = [
             index
@@ -817,6 +827,7 @@ class _Search:
             (first, then): model.new_bool_var(f"{options[then].id} after {options[first].id}")
             for first in handed
             for then in refusing
+            if can_come_before(first, then)
         }
         for (first, then), later in after.items():
             _when(model.add(self.turn[first] >= self.turn[then] + 1), later.negated())
@@ -829,7 +840,9 @@ class _Search:
             row = self.takes[number]
             ways: list[cp_model.IntVar] = []
             for other in dict.fromkeys((*keeping, *handed)):
-                if other in (since, until):
+                if other in (since, until) or not can_come_before(other, until):
+                    continue
+                if since is not None and not can_come_before(since, other):
                     continue
                 name = f"{number} is rid of {thing} in {options[other].id}"
                 way = model.new_bool_var(f"{name} before {options[until].id}")
@@ -845,6 +858,8 @@ class _Search:
                 ways = rid_of_it(number, None, then)
                 model.add_bool_or([self.takes[number][then].negated(), *ways])
             for first in handed:
+                if (first, then) not in after:
+                    continue  # the hand-over comes after the OPTION that refuses the OBJECT
                 for number, takes_it in enumerate(self.given_to[thing, first]):
                     ways = rid_of_it(number, first, then)
                     unless = [takes_it.negated(), self.takes[number][then].negated()]
