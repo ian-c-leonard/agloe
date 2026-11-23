@@ -958,6 +958,8 @@ def test_the_page_says_what_the_report_says() -> None:
         words = beside(path, ".expected.txt").read_text()
         # There is a FILE, and the COMPILER has not answered: the page shows no answer.
         assert on_file["mark"] == "checking", name
+        # The page says what it knows. The check may have ended before this page was opened.
+        assert on_file["line"] == "Waiting for the COMPILER's answer on this FILE.", name
         assert not any(answer in on_file["line"] for answer in ANSWERS), name
         assert on_file["report"] is None, name
         assert on_file["calendar"] is None, name
@@ -1198,7 +1200,7 @@ def test_a_page_that_no_longer_hears_the_view_says_what_is_the_last_it_was_sent(
     lost = {"kind": "lost"}
     start, last = START, LAST
     earlier = "The report is on an earlier state of the FILE than what the page draws."
-    checking = f"{SAID} The COMPILER is checking this FILE."
+    checking = f"{SAID} Waiting for the COMPILER's answer on this FILE."
     # Lost after the view had read the newer state and proved its answer. The only answer in
     # a report on the page is the one on the FILE as it was, so the page says the newer one.
     (said,) = page_says([[*first, file, read_it, answer, lost]])

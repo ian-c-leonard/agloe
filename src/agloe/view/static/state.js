@@ -100,7 +100,8 @@ function saidOf(state, checking) {
     return { mark: "stopped", line, why: "It runs again when the FILE changes." };
   }
   if (checking && state.answer) return { mark: state.answer.toLowerCase(), line: `${state.answer}. The report is on its way.`, why: `The answer came after ${seconds(state.answered)}.` };
-  if (checking) return { mark: "checking", line: "The COMPILER is checking this FILE.", why: "" };
+  // The page says what it knows: the check may have ended, and its answer be on its way here.
+  if (checking) return { mark: "checking", line: "Waiting for the COMPILER's answer on this FILE.", why: "" };
   if (state.report) {
     const why = `The COMPILER gave the answer after ${seconds(state.answered)} and the report after ${seconds(state.reported)}.`;
     return { mark: markOf(state.report.json), line: state.report.text.split("\n")[0], why };
