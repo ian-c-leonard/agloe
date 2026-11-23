@@ -29,7 +29,7 @@ The plan relies on these FACTs and DECISIONs:
   where-the-bags-start: Jo has the bags when the TRIP starts
   flight-needs-the-bags: Flight home requires the bags
   jo-can-pass-the-bags: the bags can be handed over in Coffee with Jo
-  every-use-of-the-bags: of the OPTIONs in this FILE, only Flight home requires the bags
+  every-use-of-the-bags: of the OPTIONs in this FILE, only Flight home requires the bags, and none refuses the bags
   everything-that-moves-the-bags: the FILE states every OPTION that hands over or keeps the bags: Coffee with Jo
   trip-start: the TRIP starts at 1:00 pm on Saturday 15 May 2027
   lock-visit: Alex and Sam take part in Museum visit
