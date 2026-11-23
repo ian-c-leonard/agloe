@@ -1,0 +1,123 @@
+{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "drive-out",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-07-17T08:00:00-05:00[America/Chicago]",
+      "end": "2027-07-17T09:00:00-05:00[America/Chicago]",
+      "carries": [
+        "car"
+      ]
+    },
+    {
+      "option": "drive-back",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-07-17T11:00:00-05:00[America/Chicago]",
+      "end": "2027-07-17T12:00:00-05:00[America/Chicago]",
+      "carries": [
+        "car"
+      ]
+    }
+  ],
+  "relies_on": [
+    "alex-start",
+    "sam-start",
+    "drive-out-time",
+    "drive-out-length",
+    "drive-out-arrival",
+    "drive-out-is-open",
+    "drive-back-time",
+    "drive-back-length",
+    "drive-back-arrival",
+    "drive-back-is-open",
+    "where-the-car-starts",
+    "drive-out-needs-the-car",
+    "drive-out-carries-the-car",
+    "drive-back-needs-the-car",
+    "drive-back-carries-the-car",
+    "every-use-of-the-car",
+    "lock-drive-out",
+    "lock-drive-back"
+  ],
+  "robust": true,
+  "objects": [
+    {
+      "object": "car",
+      "path": [
+        {
+          "where": [
+            {
+              "place": "hotel"
+            }
+          ],
+          "since": null,
+          "how": null
+        },
+        {
+          "where": [
+            {
+              "option": "drive-out"
+            }
+          ],
+          "since": "drive-out",
+          "how": "carried"
+        },
+        {
+          "where": [
+            {
+              "place": "dunes"
+            }
+          ],
+          "since": "drive-out",
+          "how": "arrived"
+        },
+        {
+          "where": [
+            {
+              "option": "drive-back"
+            }
+          ],
+          "since": "drive-back",
+          "how": "carried"
+        },
+        {
+          "where": [
+            {
+              "place": "hotel"
+            }
+          ],
+          "since": "drive-back",
+          "how": "arrived"
+        }
+      ],
+      "required_by": [
+        {
+          "option": "drive-out",
+          "stated": true,
+          "where": [
+            {
+              "place": "hotel"
+            }
+          ]
+        },
+        {
+          "option": "drive-back",
+          "stated": true,
+          "where": [
+            {
+              "place": "dunes"
+            }
+          ]
+        }
+      ],
+      "refused_by": []
+    }
+  ]
+}

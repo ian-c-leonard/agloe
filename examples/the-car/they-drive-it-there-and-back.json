@@ -1,0 +1,44 @@
+{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" },
+    { "id": "jo", "name": "Jo" }
+  ],
+  "places": [
+    { "id": "hotel", "name": "the hotel" },
+    { "id": "dunes", "name": "the Indiana Dunes" }
+  ],
+  "objects": [
+    { "id": "car", "name": "the car" }
+  ],
+  "options": [
+    { "id": "drive-out", "name": "Drive to the dunes", "from": "hotel", "to": "dunes" },
+    { "id": "drive-back", "name": "Drive back to the hotel", "from": "dunes", "to": "hotel" }
+  ],
+  "ways": [],
+  "wants": [],
+  "facts": [
+    { "id": "alex-start", "person": "alex", "starts_from": "hotel" },
+    { "id": "sam-start", "person": "sam", "starts_from": "hotel" },
+    { "id": "jo-start", "person": "jo", "starts_from": "hotel" },
+    { "id": "drive-out-time", "option": "drive-out", "starts_at": "2027-07-17T08:00:00-05:00[America/Chicago]" },
+    { "id": "drive-out-length", "option": "drive-out", "duration": "PT1H" },
+    { "id": "drive-out-arrival", "option": "drive-out", "arrive_before_start": "PT0S" },
+    { "id": "drive-out-is-open", "option": "drive-out", "needs_right": false },
+    { "id": "drive-back-time", "option": "drive-back", "starts_at": "2027-07-17T11:00:00-05:00[America/Chicago]" },
+    { "id": "drive-back-length", "option": "drive-back", "duration": "PT1H" },
+    { "id": "drive-back-arrival", "option": "drive-back", "arrive_before_start": "PT0S" },
+    { "id": "drive-back-is-open", "option": "drive-back", "needs_right": false },
+    { "id": "where-the-car-starts", "object": "car", "starts_at": "hotel" },
+    { "id": "drive-out-needs-the-car", "option": "drive-out", "requires": { "object": "car", "needed": true } },
+    { "id": "drive-out-carries-the-car", "option": "drive-out", "with_object": { "object": "car", "does": "carries" } },
+    { "id": "drive-back-needs-the-car", "option": "drive-back", "requires": { "object": "car", "needed": true } },
+    { "id": "drive-back-carries-the-car", "option": "drive-back", "with_object": { "object": "car", "does": "carries" } },
+    { "id": "every-use-of-the-car", "complete": { "requires_object": "car" } },
+    { "id": "everything-that-moves-the-car", "complete": { "transfers": "car" } }
+  ],
+  "decisions": [
+    { "id": "lock-drive-out", "lock": "drive-out", "persons": ["alex", "sam"] },
+    { "id": "lock-drive-back", "lock": "drive-back", "persons": ["alex", "sam"] }
+  ]
+}

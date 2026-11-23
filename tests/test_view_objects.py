@@ -409,7 +409,11 @@ def test_an_object_that_might_be_anywhere_says_that_nobody_knows_where_it_is(
 
 
 def test_an_object_that_might_be_in_one_of_several_places_says_each(tmp_path: Path) -> None:
-    """The FILE does not say what the museum does with the bags. The cloakroom returns them."""
+    """The FILE does not say what the museum does with the bags. The cloakroom returns them.
+
+    The flight requires the bags, and the FILE does not say what it does with them. So they
+    might also go along in it, and lie where it ends once it is over.
+    """
     content = json.loads((STORY / "the-museum-keeps-them.json").read_text())
     gone = ("museum-checks-the-bags", "everything-that-moves-the-bags")
     content["facts"] = [fact for fact in content["facts"] if fact["id"] not in gone]
@@ -422,8 +426,9 @@ def test_an_object_that_might_be_in_one_of_several_places_says_each(tmp_path: Pa
     assert bags["plan"] == (
         "In the plan: with Alex when the TRIP starts; with Alex or at the Art Institute from"
         " 1:00 pm (the FILE does not say what Museum visit does with the bags); with Alex from"
-        " 2:30 pm (handed over in Pick up at the cloakroom); with Alex or at O'Hare from 5:00 pm"
-        " (the FILE does not say what Flight home does with the bags)."
+        " 2:30 pm (handed over in Pick up at the cloakroom); with Alex, at O'Hare or in Flight"
+        " home from 5:00 pm (the FILE does not say what Flight home does with the bags); with"
+        " Alex, at O'Hare or at Denver from 7:30 pm (where Flight home ends)."
     )
     assert f"\n  the bags: {bags['plan'][len('In the plan: ') : -1]}\n" in words
     assert shown["says"] == SAYS + CLOCKS
@@ -652,11 +657,20 @@ def test_a_case_marks_the_option_under_an_object_that_shows_what_the_case_is_abo
     assert bags["cases"] == [0]
     assert [each["cases"] for each in bags["transfers"] if each["name"] == "Museum visit"] == [[]]
     # A case about what an OPTION does with the OBJECT marks that OPTION there.
-    keeps = {"what": "does not keep", "option": "museum-visit", "object": "bags"}
-    (shown,) = all_objects([sent], [{**found, "missing": [[keeps]]}])
-    (bags,) = shown["objects"]
-    assert [each["cases"] for each in bags["transfers"] if each["name"] == "Museum visit"] == [[0]]
-    assert all(each["cases"] == [] for each in bags["requires"])
+    for what in (
+        "hands over",
+        "keeps",
+        "does not keep",
+        "does not carry",
+        "does not keep or carry",
+        "carries",
+    ):
+        does = {"what": what, "option": "museum-visit", "object": "bags"}
+        (shown,) = all_objects([sent], [{**found, "missing": [[does]]}])
+        (bags,) = shown["objects"]
+        marked = [each["cases"] for each in bags["transfers"] if each["name"] == "Museum visit"]
+        assert marked == [[0]], what
+        assert all(each["cases"] == [] for each in bags["requires"])
 
 
 def test_the_objects_mark_what_the_report_names_as_ruling_out_every_plan() -> None:

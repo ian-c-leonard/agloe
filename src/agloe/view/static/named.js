@@ -224,7 +224,7 @@ export function objectsIn(report) {
  * a `person`, at a `place` or in an `option`, and a `place` of null is somewhere the FILE
  * does not name. `since` is the OPTION from whose start it is there, and `how`
  * says what that OPTION did, and both are null from the start of the TRIP. Where `how` is
- * "arrived", the OBJECT was carried in that OPTION and is there from its end. A use has its
+ * "arrived", the OBJECT was in that OPTION, or might have been, and is there from its end. A use has its
  * `option`, whether a FACT says that the OPTION requires the OBJECT (`stated`), and `where`
  * the OBJECT is just before the OPTION starts. Only a report that shows a plan holds any, and
  * a list that is not of that shape is none.

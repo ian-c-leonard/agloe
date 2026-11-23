@@ -31,7 +31,7 @@ const ABOUT_REQUIRING = new Set(["does not require"]);
 /** What a case of a report can need that is about whether an OPTION refuses an OBJECT. */
 const ABOUT_REFUSING = new Set(["does not refuse"]);
 /** What a case of a report can need that is about what an OPTION does with an OBJECT. */
-const ABOUT_MOVING = new Set(["hands over", "keeps", "does not keep", "carries"]);
+const ABOUT_MOVING = new Set(["hands over", "keeps", "does not keep", "does not carry", "does not keep or carry", "carries"]);
 
 /**
  * How an OBJECT came to be where it is from the start of an OPTION, as the report words it:
@@ -42,6 +42,7 @@ const HOW = new Map([
   ["kept", (option) => `kept by ${option}`],
   ["kept if held", (option, thing) => `kept by ${option} if anybody there has ${thing}`],
   ["might be kept", (option, thing) => `the FILE does not say what ${option} does with ${thing}`],
+  ["might go along", (option, thing) => `the FILE does not say whether ${option} requires ${thing}`],
   ["carried", () => "carried"],
 ]);
 
@@ -165,8 +166,9 @@ export function objects(trip, report = null, stated = null) {
       if (where === null || stay.since === null) return where === null ? null : `${where} when the TRIP starts`;
       if (!startOf.has(stay.since) || !named.has(stay.since)) return null;
       const ends = endOf.get(stay.since) ?? null;
-      // An OBJECT that was carried lies where the OPTION ends, from the time it ends.
-      if (stay.how === "arrived") return ends === null ? null : `${where} from ${clock(ends, first)} (where ${named.get(stay.since)} ends)`;
+      // An OBJECT that was in an OPTION, or might have been, lies where the OPTION ends, from
+      // the time it ends. Where nobody knows that time, it lies there when the OPTION ends.
+      if (stay.how === "arrived") return ends === null ? `${where} when ${named.get(stay.since)} ends` : `${where} from ${clock(ends, first)} (where ${named.get(stay.since)} ends)`;
       const how = HOW.get(stay.how);
       if (how === undefined) return null;
       return `${where} from ${clock(startOf.get(stay.since), first)} (${how(named.get(stay.since), thing.name)})`;

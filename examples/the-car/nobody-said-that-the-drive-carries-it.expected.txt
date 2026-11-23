@@ -1,0 +1,5 @@
+UNDETERMINED: the FILE does not say enough to tell.
+
+The trip works in any of these cases:
+  1. the car can be handed over in Drive to the dunes.
+  2. Drive to the dunes can carry the car.

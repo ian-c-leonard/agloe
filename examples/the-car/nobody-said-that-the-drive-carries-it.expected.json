@@ -1,0 +1,19 @@
+{
+  "answer": "UNDETERMINED",
+  "missing": [
+    [
+      {
+        "what": "hands over",
+        "option": "drive-out",
+        "object": "car"
+      }
+    ],
+    [
+      {
+        "what": "carries",
+        "option": "drive-out",
+        "object": "car"
+      }
+    ]
+  ]
+}
