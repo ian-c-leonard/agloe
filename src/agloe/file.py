@@ -413,7 +413,9 @@ class WithObject:
 
     ``does`` is "hands_over" where a PERSON who takes part can have the OBJECT from the start
     of the OPTION, if it is at hand. It is "keeps" where the OBJECT lies at the PLACE where the
-    OPTION starts from then on, if a PERSON who takes part has it. It is "nothing" where the
+    OPTION starts from then on, if a PERSON who takes part has it. It is "carries" where the
+    OBJECT can be carried in the OPTION, if it is at hand: then it is in the OPTION from its
+    start, and lies at the PLACE where the OPTION ends from its end. It is "nothing" where the
     OPTION leaves the OBJECT alone.
     """
 
@@ -437,7 +439,7 @@ class CompleteRequiresObject:
 
 @dataclass(frozen=True)
 class CompleteTransfers:
-    """A FACT: the FILE states every OPTION that hands this OBJECT over or keeps it.
+    """A FACT: the FILE states every OPTION that hands this OBJECT over, keeps it or carries it.
 
     Each is in the FILE, with a FACT that says so. So an OPTION of the FILE with no FACT about
     that leaves the OBJECT alone, and nothing outside the FILE transfers it.
@@ -795,10 +797,10 @@ class File:
     def does_with(self, option: str, object: str) -> str | None:
         """What this OPTION does with this OBJECT, as far as the FILE says.
 
-        "hands_over", "keeps" or "nothing", and None where the FILE does not say. A FACT about
-        the two settles it. Without one, a FACT that the set of the OBJECT's transfers is
-        COMPLETE settles it too: the OPTION leaves the OBJECT alone. That FACT says that
-        nothing else transfers the OBJECT, in the FILE or outside it.
+        "hands_over", "keeps", "carries" or "nothing", and None where the FILE does not say. A
+        FACT about the two settles it. Without one, a FACT that the set of the OBJECT's
+        transfers is COMPLETE settles it too: the OPTION leaves the OBJECT alone. That FACT
+        says that nothing else transfers the OBJECT, in the FILE or outside it.
         """
         stated = self._actions.get((option, object))
         if stated is not None:

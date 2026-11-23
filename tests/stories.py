@@ -251,7 +251,7 @@ def lets_in(thing: str, *options: str) -> list[Document]:
 
 
 def does_with(option: str, thing: str, does: str) -> Document:
-    """A FACT about what an OPTION does with an OBJECT: "hands_over", "keeps" or "nothing"."""
+    """What an OPTION does with an OBJECT: "hands_over", "keeps", "carries" or "nothing"."""
     done = {"object": thing, "does": does}
     return {"id": f"{option}-with-{thing}", "option": option, "with_object": done}
 
@@ -264,13 +264,17 @@ def keeps(option: str, thing: str) -> Document:
     return does_with(option, thing, "keeps")
 
 
+def carries(option: str, thing: str) -> Document:
+    return does_with(option, thing, "carries")
+
+
 def every_use(thing: str) -> Document:
     """A FACT that the FILE states every OPTION that requires this OBJECT or refuses it."""
     return {"id": f"every-use-of-{thing}", "complete": {"requires_object": thing}}
 
 
 def every_transfer(thing: str) -> Document:
-    """A FACT that the FILE states every OPTION that hands this OBJECT over or keeps it."""
+    """A FACT that the FILE states every OPTION that hands this OBJECT over, keeps or carries it."""
     return {"id": f"every-transfer-of-{thing}", "complete": {"transfers": thing}}
 
 

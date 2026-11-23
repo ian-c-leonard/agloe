@@ -306,7 +306,7 @@ class RefusesObject(TypedDict):
 
 class Action(TypedDict):
     object: Id
-    does: Literal["hands_over", "keeps", "nothing"]
+    does: Literal["hands_over", "keeps", "carries", "nothing"]
 
 
 class WithObject(TypedDict):

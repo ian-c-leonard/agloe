@@ -22,6 +22,7 @@ from enum import Enum
 from heapq import heapify, heappop, heappush
 from itertools import chain, combinations, groupby, pairwise, permutations, product
 from math import inf
+from typing import NamedTuple
 
 from agloe.file import Booking, Complete, File, Offer, Satisfies, StartsFrom, Want, WithObject
 
@@ -44,7 +45,7 @@ class Constraint(Enum):
     PAID = "Each place is paid for"
     CAP = "No cap is passed"
     REQUIRED = "Each requirement of an OPTION is met"
-    AT_HAND = "Each OBJECT is at hand where it is required or handed over"
+    AT_HAND = "Each OBJECT is at hand where it is required, handed over or carried"
     REFUSED = "No PERSON has an OBJECT in an OPTION that refuses it"
 
 
@@ -57,7 +58,8 @@ class Step:
     nobody knows how long the step takes.
 
     ``handed`` holds each hand-over in an OPTION: an OBJECT, and the PERSON who has it from the
-    start of the OPTION.
+    start of the OPTION. ``carried`` holds each OBJECT that is carried in an OPTION: it is in
+    the OPTION from its start, and lies at the PLACE where the OPTION ends from its end.
     """
 
     option: str | None
@@ -68,18 +70,20 @@ class Step:
     end: int | None
     way: str | None = None
     handed: tuple[tuple[str, str], ...] = ()
+    carried: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class Where:
-    """Where an OBJECT is: with a PERSON, or at a PLACE.
+    """Where an OBJECT is: with a PERSON, at a PLACE, or in an OPTION that carries it.
 
-    With neither, it is somewhere the FILE does not name. Then it is at hand for no OPTION,
-    and no PERSON has it.
+    With none of the three, it is somewhere the FILE does not name. There, and in an OPTION,
+    it is at hand for no OPTION, and no PERSON has it.
     """
 
     person: str | None = None
     place: str | None = None
+    option: str | None = None
 
 
 type Itinerary = tuple[Step, ...]
@@ -107,7 +111,8 @@ class Broken:
 
     An OBJECT that is not at hand names the OPTION and the ``object``. Where the OPTION
     requires it, ``persons`` holds everybody who takes part. Where it cannot be handed over
-    there, ``persons`` holds the PERSON who was to have it.
+    there, ``persons`` holds the PERSON who was to have it. Where it cannot be carried there,
+    ``persons`` is empty.
 
     An OBJECT in an OPTION that refuses it names the OPTION and the ``object``. ``persons``
     holds each PERSON who takes part and has the OBJECT just before the OPTION starts, or
@@ -179,10 +184,11 @@ class World:
 
     ``needs`` holds each OPTION and OBJECT where the OPTION requires the OBJECT, and
     ``refuses`` each one where the OPTION refuses it. ``does`` says
-    what an OPTION does with an OBJECT: "hands_over" or "keeps". A pair that is not in it leaves
-    the OBJECT alone. Two more values are no single possible world. "might_keep" is the worst
-    of the ways at once: the OPTION hands nothing over, and nobody knows whether it keeps the
-    OBJECT. "any" is the best of them: the OPTION does whichever of the three suits the plan.
+    what an OPTION does with an OBJECT: "hands_over", "keeps" or "carries". A pair that is not
+    in it leaves the OBJECT alone. Two more values are no single possible world. "might_keep"
+    is the worst of the ways at once: the OPTION hands nothing over and carries nothing, and
+    nobody knows whether it keeps the OBJECT. "any" is the best of them: the OPTION does
+    whichever of the four suits the plan.
     ``starts`` says where each OBJECT is when the TRIP starts. An OBJECT that is in
     ``starts_anywhere`` starts with whichever PERSON or at whichever PLACE suits the plan, or
     somewhere the FILE does not name, and each of those is one possible world. An OBJECT
@@ -237,10 +243,11 @@ class Unknown:
     PERSON and a CAPABILITY it is "has". ``about`` names the CAPABILITY.
 
     For an OPTION and an OBJECT it is "does not require", "does not refuse", or one of the
-    three ways that what the OPTION does with the OBJECT can help: "keeps", "does not keep"
-    and "hands over". For an OBJECT it is "starts with" a PERSON or "starts at" a PLACE, or
-    "another transfer": something outside the FILE that puts the OBJECT at hand where a plan
-    needs it, and takes it out of an OPTION that refuses it. ``about`` names the OBJECT.
+    four ways that what the OPTION does with the OBJECT can help: "keeps", "does not keep",
+    "hands over" and "carries". For an OBJECT it is "starts with" a PERSON or "starts at" a
+    PLACE, or "another transfer": something outside the FILE that puts the OBJECT at hand
+    where a plan needs it, and takes it out of an OPTION that refuses it. ``about`` names the
+    OBJECT.
     """
 
     what: str
@@ -349,7 +356,8 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
     return tuple(out)
 
 
-_ACTIONS = ("keeps", "does not keep", "hands over")  # how what an OPTION does with an OBJECT helps
+# How what an OPTION does with an OBJECT can help.
+_ACTIONS = ("keeps", "does not keep", "hands over", "carries")
 _STARTS = ("starts with", "starts at")  # where an OBJECT can turn out to start
 
 
@@ -408,7 +416,8 @@ class Remaining:
 
     What an OPTION does with an OBJECT is like a WANT's set. Where a FACT says that the set of
     the OBJECT's transfers is COMPLETE, an OPTION with no FACT about the OBJECT leaves it
-    alone. An OPTION whose FACT was taken out might hand it over, keep it or leave it alone.
+    alone. An OPTION whose FACT was taken out might hand it over, keep it, carry it or leave
+    it alone.
     ``undone`` holds each such OPTION and OBJECT.
     """
 
@@ -479,7 +488,7 @@ def best_case_left(remaining: Remaining) -> tuple[World, list[tuple[str, str]]]:
     the pairs come with it, each an OPTION and a WANT.
 
     An OPTION and an OBJECT that are reopened are in the world itself: the OPTION does
-    whichever of the three things suits the plan.
+    whichever of the four things suits the plan.
     """
     file = remaining.file
     best = best_case(file)
@@ -573,7 +582,7 @@ def no_better_than(file: File, found: Iterable[Unknown]) -> World:
     works anywhere counts on it.
 
     Another transfer is the same: it brings only the OBJECTs in ``found``. An OPTION with no
-    FACT about what it does with any other OBJECT does whichever of the three things suits
+    FACT about what it does with any other OBJECT does whichever of the four things suits
     the plan.
 
     Whatever works in a possible world with those other OPTIONs and those other transfers
@@ -798,18 +807,23 @@ def _world(
     # What each OPTION requires of each OBJECT, whether it refuses it and what it does with
     # it, and where each OBJECT starts. A FACT settles each, and a COMPLETE set settles what
     # an OPTION with no FACT requires, refuses or does: nothing. Otherwise the FILE does not
-    # say. At worst the OPTION requires the OBJECT and refuses it, hands nothing over and
-    # might keep it, and the OBJECT might be anywhere when the TRIP starts. At best the
-    # OPTION does not require it and does not refuse it. Where the set of an OBJECT's
-    # transfers is not COMPLETE, another transfer might bring it or take it away at best.
-    # Where it is COMPLETE, the best start is whichever suits the plan.
+    # say. At worst the OPTION requires the OBJECT and refuses it, hands nothing over,
+    # carries nothing and might keep it, and the OBJECT might be anywhere when the TRIP
+    # starts. At best the OPTION does not require it and does not refuse it. Where the set
+    # of an OBJECT's transfers is not COMPLETE, another transfer might bring it or take it
+    # away at best. Where it is COMPLETE, the best start is whichever suits the plan.
     needs: set[tuple[str, str]] = set()
     refuses: set[tuple[str, str]] = set()
     acts: dict[tuple[str, str], str] = {}
     begins: dict[str, Where] = {}
     begins_anywhere: set[str] = set()
     brought: set[str] = set()
-    turns_out = {"keeps": "keeps", "hands over": "hands_over", "does not keep": "nothing"}
+    turns_out = {
+        "keeps": "keeps",
+        "hands over": "hands_over",
+        "carries": "carries",
+        "does not keep": "nothing",
+    }
     favoured = {
         (each.what, each.option, each.about): each
         for each in kind or ()
@@ -1288,7 +1302,8 @@ def _well_formed(file: File, itinerary: Itinerary) -> None:
     """An ITINERARY names PERSONs, PLACEs, OPTIONs and WAYs from the FILE, each OPTION once.
 
     An OBJECT is handed over in an OPTION, to a PERSON who takes part in it, and at most once
-    in one OPTION. In a FILE that lists an OBJECT, the steps come in the order they happen,
+    in one OPTION. It is carried in an OPTION, at most once, and not where it is handed over
+    there. In a FILE that lists an OBJECT, the steps come in the order they happen,
     earlier starts first: where an OBJECT is turns on that order.
     """
     persons = {person.id for person in file.persons}
@@ -1329,6 +1344,10 @@ def _well_formed(file: File, itinerary: Itinerary) -> None:
             raise ValueError("only an OPTION hands over an OBJECT, and the FILE lists the OBJECT")
         if len(things) != len(set(things)) or not takers.issubset(step.persons):
             raise ValueError("an OPTION hands an OBJECT over once, to a PERSON who takes part")
+        if step.carried and (step.option is None or not objects.issuperset(step.carried)):
+            raise ValueError("only an OPTION carries an OBJECT, and the FILE lists the OBJECT")
+        if len(step.carried) != len(set(step.carried)) or set(step.carried) & set(things):
+            raise ValueError("an OBJECT is carried once in an OPTION, and not handed over there")
 
 
 type _Placed = tuple[int, Step]  # a step with its position in the ITINERARY
@@ -1639,14 +1658,33 @@ def _listed(file: File, world: World, path: list[_Placed]) -> _Found:
 
 # ------------------------------- Where each OBJECT is -------------------------------
 
-type _Visit = tuple[str, tuple[str, ...], str]  # an OPTION: its id, who takes part, where it starts
-type _Taken = tuple[tuple[str, str], ...]  # each hand-over in one OPTION: an OBJECT and a PERSON
+
+class _Visit(NamedTuple):
+    """An OPTION of a plan, as an OBJECT meets it.
+
+    Its id, who takes part, the PLACE where it starts, and ``over``: the OPTIONs that have
+    ended by the time it starts. Only a walk through a finished plan fills ``over`` in. A
+    search over orders leaves it empty, and says itself when a carried OBJECT has arrived.
+    """
+
+    option: str
+    persons: tuple[str, ...]
+    origin: str
+    over: frozenset[str] = frozenset()
+
+
+# Each hand-over and each carry in one OPTION: an OBJECT, and the PERSON who has it from then
+# on. A carry has no PERSON.
+type _Taken = tuple[tuple[str, str | None], ...]
 # What an OBJECT breaks at one OPTION of a plan: the position of the OPTION, the CONSTRAINT,
-# and the PERSON who was to have the OBJECT where the plan hands it over there.
+# and what the plan has there that cannot be: the PERSON who was to have the OBJECT where the
+# plan hands it over, or ``_CARRY`` where the plan carries it. None for a check of the OPTION.
 type _Miss = tuple[int, Constraint, str | None]
-# One way an OBJECT can go: what it breaks, and where it might be along the way.
-type _Run = tuple[tuple[_Miss, ...], tuple[frozenset[Where], ...]]
+# One way an OBJECT can go: what it breaks, where it might be when the TRIP starts and then
+# after each OPTION, and where it might be just before each OPTION starts.
+type _Run = tuple[tuple[_Miss, ...], tuple[frozenset[Where], ...], tuple[frozenset[Where], ...]]
 type _Way = tuple[tuple[int, ...], *_Run]  # the picks that led somewhere, and what came of them
+_CARRY = ""  # stands for a carry where a PERSON's id stands for a hand-over: no id is empty
 
 
 def _begins(file: File, world: World, thing: str) -> list[frozenset[Where]]:
@@ -1669,6 +1707,7 @@ def within_reach(places: Set[Where], persons: Sequence[str], origin: str) -> boo
     """Whether an OBJECT is at hand for an OPTION, wherever among these places it is.
 
     Each place is at hand: the PLACE where the OPTION starts, or a PERSON who takes part.
+    An OBJECT that is in an OPTION is at hand for nothing.
     """
     return all(each.person in persons or each.place == origin for each in places)
 
@@ -1679,6 +1718,22 @@ def brought_in(places: Set[Where], persons: Sequence[str]) -> bool:
     That is so where one of these places is such a PERSON.
     """
     return any(each.person in persons for each in places)
+
+
+def arrived(
+    places: frozenset[Where], over: Set[str], ends_at: Mapping[str, str]
+) -> frozenset[Where]:
+    """Where an OBJECT might be once these OPTIONs are over.
+
+    An OBJECT that was carried in one of them lies at the PLACE where that OPTION ends.
+    ``ends_at`` gives that PLACE for each OPTION.
+    """
+    there = {
+        each: Where(place=ends_at[each.option])
+        for each in places
+        if each.option is not None and each.option in over
+    }
+    return frozenset(there.get(each, each) for each in places) if there else places
 
 
 def _left(
@@ -1702,11 +1757,15 @@ def _least_broken(
     visits: Sequence[_Visit],
     begins: Sequence[frozenset[Where]],
     handed: Mapping[str, str],
+    carried: Set[str],
+    ends_at: Mapping[str, str],
 ) -> _Run:
     """How one OBJECT goes through the OPTIONs of a plan, in the order they happen.
 
-    ``visits`` holds those OPTIONs in that order. ``handed`` names, for each OPTION that hands
-    the OBJECT over in the plan, the PERSON who has it from then on.
+    ``visits`` holds those OPTIONs in that order, each with the OPTIONs that are over by the
+    time it starts. ``handed`` names, for each OPTION that hands the OBJECT over in the plan,
+    the PERSON who has it from then on. ``carried`` holds each OPTION in which the plan
+    carries the OBJECT, and ``ends_at`` gives the PLACE where each OPTION ends.
 
     The result says what the OBJECT breaks, each with the position of the OPTION in
     ``visits``. Where the OPTION requires the OBJECT and it is not at hand, that is the
@@ -1714,20 +1773,27 @@ def _least_broken(
     or might, that is the fifteenth. Where the plan hands the OBJECT over there and it
     cannot be, the PERSON who was to have it comes with it: the fifteenth CONSTRAINT where
     the OPTION refuses the OBJECT, and the fourteenth where the OBJECT is not at hand or
-    the OPTION does not hand it over. One hand-over can break both. And the result says
-    where the OBJECT might be: when the TRIP starts, and then after each OPTION.
+    the OPTION does not hand it over. One hand-over can break both. Where the plan carries
+    the OBJECT there and it cannot be, that is the fourteenth CONSTRAINT, and ``_CARRY``
+    comes with it: the OBJECT is not at hand, or the OPTION does not carry it. And the
+    result says where the OBJECT might be: when the TRIP starts and then after each OPTION,
+    and just before each OPTION starts.
 
-    Each OPTION first checks what it requires and what it refuses, then keeps what it keeps,
-    and then the OBJECT is handed over in it. An OPTION that refuses the OBJECT moves
-    nothing: it keeps the OBJECT from nobody, and nobody takes the OBJECT there. In a world
-    that leaves nothing to pick there is one way to go. An
-    OPTION that does whichever thing suits the plan gives a way for each: it leaves the
-    OBJECT alone, it keeps it, or it hands it over as the plan says. Where it does not hand
-    it over, a hand-over that the plan has there is broken. Each start the world can pick
-    gives a way too. Then the result is the way that breaks the least, and among those the
-    first: the start that ``begins`` gives first, and then, going through the OPTIONs in
-    order, the way in which the OPTION leaves the OBJECT alone, then the way in which it
-    keeps it, then the way in which it hands it over.
+    An OBJECT that was carried lies at the PLACE where the carrying OPTION ends once that
+    OPTION is over. So each OPTION first finds the OBJECT there, where it starts no earlier
+    than that end. Then it checks what it requires and what it refuses, then keeps what it
+    keeps, and then the OBJECT is handed over or carried in it. An OPTION that refuses the
+    OBJECT takes it from no PERSON: it keeps the OBJECT from nobody, and nobody takes the
+    OBJECT there. It carries the OBJECT only where no PERSON who takes part has it. In a
+    world that leaves nothing to pick there is one way to go. An OPTION that does whichever
+    thing suits the plan gives a way for each: it leaves the OBJECT alone, it keeps it, it
+    hands it over as the plan says, or it carries it as the plan says. Where it does not
+    hand it over, a hand-over that the plan has there is broken, and a carry is the same.
+    Each start the world can pick gives a way too. Then the result is the way that breaks
+    the least, and among those the first: the start that ``begins`` gives first, and then,
+    going through the OPTIONs in order, the way in which the OPTION leaves the OBJECT alone,
+    then the way in which it keeps it, then the way in which it hands it over, then the way
+    in which it carries it.
 
     Not every way is tried. All that matters about a way so far is where it leaves the
     OBJECT: what can follow turns on nothing else. Take two ways that leave it in the same
@@ -1739,39 +1805,67 @@ def _least_broken(
     """
     reached: dict[frozenset[Where], _Way] = {}
     for pick, start in enumerate(begins):
-        reached.setdefault(start, ((pick,), (), (start,)))
-    for position, (option, persons, origin) in enumerate(visits):
-        following: dict[frozenset[Where], _Way] = {}
+        reached.setdefault(start, ((pick,), (), (start,), ()))
+    for position, (option, persons, origin, over) in enumerate(visits):
         action = world.does.get((option, thing), "nothing")
         refused = (option, thing) in world.refuses
         taker = handed.get(option)
-        for places, (picks, broken, trail) in reached.items():
+        loaded = option in carried
+        # Whatever was carried in an OPTION that is over lies where that OPTION ends.
+        found_there: dict[frozenset[Where], _Way] = {}
+        for places, way in reached.items():
+            there = arrived(places, over, ends_at)
+            known = found_there.get(there)
+            if known is None or (len(way[1]), way[0]) < (len(known[1]), known[0]):
+                found_there[there] = way
+        following: dict[frozenset[Where], _Way] = {}
+        for places, (picks, broken, trail, seen) in found_there.items():
             if (option, thing) in world.needs and not within_reach(places, persons, origin):
                 broken = (*broken, (position, Constraint.AT_HAND, None))
-            if refused and brought_in(places, persons):
+            held = brought_in(places, persons)
+            if refused and held:
                 broken = (*broken, (position, Constraint.REFUSED, None))
-            choices = ("nothing", "keeps", "hands_over") if action == "any" else (action,)
+            choices = (action,)
+            if action == "any":
+                choices = ("nothing", "keeps", "hands_over", "carries")
             for pick, does in enumerate(choices):
+                if action == "any" and does == "hands_over" and taker is None:
+                    continue  # with no hand-over planned, that is "nothing"
+                if action == "any" and does == "carries" and not loaded:
+                    continue  # and so is a carry that is not planned
                 after = places if refused else _left(does, places, persons, origin)
                 found = broken
-                can_be = does == "hands_over" and within_reach(after, persons, origin)
-                if taker is None:
-                    if does == "hands_over" and action == "any":
-                        continue  # with no hand-over planned, that is "nothing"
-                elif can_be and not refused:
-                    after = frozenset({Where(person=taker)})
-                else:
-                    # Not handed over: it stays, or is kept.
-                    if refused:
-                        found = (*found, (position, Constraint.REFUSED, taker))
-                    if not can_be:
-                        found = (*found, (position, Constraint.AT_HAND, taker))
+                at_hand = within_reach(after, persons, origin)
+                if taker is not None:
+                    if does == "hands_over" and at_hand and not refused:
+                        after = frozenset({Where(person=taker)})
+                    else:
+                        # Not handed over: it stays, or is kept.
+                        if refused:
+                            found = (*found, (position, Constraint.REFUSED, taker))
+                        if does != "hands_over" or not at_hand:
+                            found = (*found, (position, Constraint.AT_HAND, taker))
+                if loaded:
+                    if does == "carries" and at_hand and not (refused and held):
+                        after = frozenset({Where(option=option)})
+                    elif does != "carries" or not at_hand:
+                        # Not carried: it stays, or is kept.
+                        found = (*found, (position, Constraint.AT_HAND, _CARRY))
                 known = following.get(after)
                 if known is None or (len(found), (*picks, pick)) < (len(known[1]), known[0]):
-                    following[after] = ((*picks, pick), found, (*trail, after))
+                    following[after] = ((*picks, pick), found, (*trail, after), (*seen, places))
         reached = following
-    _, broken, trail = min(reached.values(), key=lambda way: (len(way[1]), way[0]))
-    return broken, trail
+    _, broken, trail, seen = min(reached.values(), key=lambda way: (len(way[1]), way[0]))
+    return broken, trail, seen
+
+
+# Where an OBJECT might be, and the arrivals that got it there: each an OPTION that carried
+# it, and the OPTION that first used it afterwards. The second starts no earlier than the
+# first ends.
+type _Spot = tuple[frozenset[Where], tuple[tuple[str, str], ...]]
+# Each ``_Spot`` that a search has reached, with the first hand-overs and carries that lead
+# to it.
+type _Reached = dict[_Spot, _Ranked]
 
 
 def _first_hand_overs(
@@ -1779,27 +1873,39 @@ def _first_hand_overs(
     thing: str,
     visits: Sequence[_Visit],
     begins: Sequence[frozenset[Where]],
-    rank: Callable[[str, str], tuple[int, int]],
-) -> _Ranked | None:
-    """The hand-overs of one OBJECT that the rules put first, through these OPTIONs in order.
+    rank: Callable[[str, str | None], tuple[int, int]],
+    ends_at: Mapping[str, str],
+) -> _Reached:
+    """The hand-overs and carries of one OBJECT that work through these OPTIONs in order.
 
-    None where no choice of hand-overs keeps the fourteenth and the fifteenth CONSTRAINT.
-    The rules put first the fewest hand-overs, and among those the OPTION listed first and
-    then the PERSON listed first, going through the hand-overs in the order they happen.
-    ``rank`` gives the positions of an OPTION and a PERSON in the FILE.
+    The result is empty where no choice of them keeps the fourteenth and the fifteenth
+    CONSTRAINT. Otherwise it holds each place where a choice can leave the OBJECT, with the
+    arrivals that the choice counts on, and the choice that the rules put first among those
+    that end there: the fewest hand-overs and carries, and among those the OPTION listed
+    first and then the PERSON listed first, going through them in the order they happen.
+    ``rank`` gives the positions of an OPTION and a PERSON in the FILE, and a carry comes
+    with no PERSON.
 
-    Not every choice is tried. All that matters about the hand-overs so far is where they
-    leave the OBJECT: what can follow turns on nothing else. Take two choices that leave it
-    in the same places. The same hand-overs can follow both, and the one that the rules put
-    first stays first with them: it has no more hand-overs, and where it has as many, the
-    first difference is still the first difference. So after each OPTION, only the first
-    choice is kept for each set of places where the OBJECT might be. Those are few, where
-    all the choices are as many as the PERSONs of each OPTION multiplied together.
+    Not every choice is tried. All that matters about a choice so far is where it leaves the
+    OBJECT, and which arrivals it counts on: what can follow turns on the first, and which
+    start times can keep it turns on the second. Take two choices that leave the OBJECT in
+    the same places, where the first counts on no arrival that the second does not count on,
+    and the rules put the first no later. The same hand-overs and carries can follow both,
+    with the same arrivals. Start times that keep the second keep the first. And the first
+    stays first with whatever follows: it has no more hand-overs and carries, and where it
+    has as many, the first difference is still the first difference. So the second is never
+    the choice shown, and it is left out. Those kept are few, where all the choices are as
+    many as the PERSONs of each OPTION multiplied together.
+
+    Two choices that leave the OBJECT in the same place are both kept where each counts on
+    an arrival that the other does not. A slow ferry and a fast one both carry the bag to
+    the island, and only one of them may be there in time: the start times decide, and they
+    are not known here.
     """
-    reached: _Reached = dict.fromkeys(begins, ())
+    reached: _Reached = {(start, ()): () for start in begins}
     for visit in visits:
-        reached = _one_further(world, thing, reached, visit, rank)
-    return _first_of(reached)
+        reached = _one_further(world, thing, reached, visit, rank, ends_at)
+    return reached
 
 
 def _one_further(
@@ -1807,63 +1913,129 @@ def _one_further(
     thing: str,
     reached: _Reached,
     visit: _Visit,
-    rank: Callable[[str, str], tuple[int, int]],
+    rank: Callable[[str, str | None], tuple[int, int]],
+    ends_at: Mapping[str, str],
 ) -> _Reached:
     """The search of ``_first_hand_overs``, one OPTION further.
 
-    ``reached`` holds each set of places where the OBJECT might be before the OPTION, with
-    the first hand-overs that leave it there. The result holds the same for after the OPTION.
-    It is empty where the fourteenth or the fifteenth CONSTRAINT cannot be kept, whatever
-    was handed over.
+    ``reached`` holds each place where the OBJECT might be before the OPTION, with the
+    arrivals counted on so far, and the first hand-overs and carries that lead there. The
+    result holds the same for after the OPTION. It is empty where the fourteenth or the
+    fifteenth CONSTRAINT cannot be kept, whatever was handed over or carried.
+
+    An OPTION uses the OBJECT where it requires it, or where the OBJECT is handed over or
+    carried in it. An OBJECT that was carried is used again only once the OPTION that
+    carried it is over. So the first OPTION that uses it afterwards counts on that arrival:
+    it starts no earlier than the carrying OPTION ends. Where nobody knows when that OPTION
+    ends, nothing uses the OBJECT again. An OPTION that does not use the OBJECT counts on
+    nothing. It does the same with the OBJECT in the carrying OPTION and at the PLACE where
+    that ends: a refusal asks only who has the OBJECT, and an OPTION keeps it only from a
+    PERSON. So the search leaves the OBJECT in the carrying OPTION until something uses it.
     """
-    option, persons, origin = visit
+    option, persons, origin, _ = visit
     refused = (option, thing) in world.refuses
-    following: _Reached = {}
-
-    def keep(places: frozenset[Where], taken: _Ranked) -> None:
-        known = following.get(places)
-        if known is None or (len(taken), taken) < (len(known), known):
-            following[places] = taken
-
     action = world.does.get((option, thing), "nothing")
-    for places, taken in reached.items():
-        if (option, thing) in world.needs and not within_reach(places, persons, origin):
+    kept: dict[frozenset[Where], dict[tuple[tuple[str, str], ...], _Ranked]] = {}
+
+    def keep(
+        places: frozenset[Where], arrivals: tuple[tuple[str, str], ...], taken: _Ranked
+    ) -> None:
+        """Keep this choice, unless one that is kept counts on no more and comes no later."""
+        there = kept.setdefault(places, {})
+        counted, rank = set(arrivals), (len(taken), taken)
+        if any(
+            counted.issuperset(others) and (len(theirs), theirs) <= rank
+            for others, theirs in there.items()
+        ):
+            return
+        for others in [
+            others
+            for others, theirs in there.items()
+            if counted.issubset(others) and rank <= (len(theirs), theirs)
+        ]:
+            del there[others]
+        there[arrivals] = taken
+
+    for (places, arrivals), taken in reached.items():
+        # Where the OBJECT is for an OPTION that uses it, with the arrivals that takes. None
+        # where nobody knows when an OPTION that carried it ends.
+        in_use: _Spot | None = (places, arrivals)
+        carriers = sorted({each.option for each in places if each.option is not None})
+        if carriers:
+            in_use = None
+            if all(world.terms[carrier].longest is not None for carrier in carriers):
+                there = arrived(places, set(carriers), ends_at)
+                more = ((carrier, option) for carrier in carriers)
+                in_use = (there, tuple(sorted((*arrivals, *more))))
+        if (option, thing) in world.needs:
+            if in_use is None or not within_reach(in_use[0], persons, origin):
+                continue
+            places, arrivals = in_use
+        if refused and brought_in(places, persons):
             continue
-        if refused:
-            # It moves nothing: it keeps the OBJECT from nobody, and nobody takes it there.
-            if not brought_in(places, persons):
-                keep(places, taken)
-            continue
-        for does in ("nothing", "keeps", "hands_over") if action == "any" else (action,):
-            after = _left(does, places, persons, origin)
-            if does != "hands_over" or action != "any":  # with "any" that is "nothing"
-                keep(after, taken)
-            if does == "hands_over" and within_reach(after, persons, origin):
+        at_hand = in_use is not None and within_reach(in_use[0], persons, origin)
+        for does in ("nothing", "keeps", "hands_over", "carries") if action == "any" else (action,):
+            if does not in ("hands_over", "carries"):
+                # It takes the OBJECT from no PERSON where it refuses it.
+                keep(places if refused else _left(does, places, persons, origin), arrivals, taken)
+                continue
+            if action != "any":  # with "any" that is "nothing"
+                keep(places, arrivals, taken)
+            if in_use is None or not at_hand:
+                continue
+            if does == "carries":
+                keep(frozenset({Where(option=option)}), in_use[1], (*taken, rank(option, None)))
+            elif not refused:
                 for person in persons:
                     there = frozenset({Where(person=person)})
-                    if after != there:  # they have it already
-                        keep(there, (*taken, rank(option, person)))
-    return following
+                    if in_use[0] != there:  # they have it already
+                        keep(there, in_use[1], (*taken, rank(option, person)))
+    return {
+        (places, arrivals): taken
+        for places, there in kept.items()
+        for arrivals, taken in there.items()
+    }
 
 
-def _first_of(reached: _Reached) -> _Ranked | None:
-    """The hand-overs that the rules put first among those a search has reached, if any."""
-    if not reached:
-        return None
-    return min(reached.values(), key=lambda taken: (len(taken), taken))
+def _first_of(reached: _Reached) -> list[tuple[_Ranked, tuple[tuple[str, str], ...]]]:
+    """What a search has reached, as the choices that can still be the one shown.
+
+    Each is the hand-overs and carries of one OBJECT, with the arrivals they count on. Where
+    the OBJECT ends up no longer matters. So a choice is left out where another counts on
+    no arrival that it does not count on, and the rules put the other no later: start times
+    that keep the first keep the other. They come in the order of the rules, the first
+    choice first.
+    """
+    ranked = sorted(
+        ((len(taken), taken, arrivals) for (_, arrivals), taken in reached.items()),
+    )
+    found: list[tuple[_Ranked, tuple[tuple[str, str], ...]]] = []
+    for _, taken, arrivals in ranked:
+        if not any(set(arrivals).issuperset(others) for _, others in found):
+            found.append((taken, arrivals))
+    return found
 
 
 def _as_planned(
     file: File, world: World, steps: Iterable[Step]
 ) -> Iterator[tuple[str, list[_Visit], _Run]]:
-    """How each OBJECT goes through the OPTIONs among these steps, with the hand-overs they say.
+    """How each OBJECT goes through the OPTIONs among these steps, as the plan says.
 
     One result for each OBJECT that the fourteenth and the fifteenth CONSTRAINT ask about in
-    this world: the OBJECT, the OPTIONs in the order given, and the way the OBJECT goes.
-    Where the world leaves something to pick, that is the first way that breaks the least.
+    this world: the OBJECT, the OPTIONs in the order given, and the way the OBJECT goes with
+    the hand-overs and the carries of the plan. An OPTION is over for another where it ends
+    no later than the other starts. Where the world leaves something to pick, that is the
+    first way that breaks the least.
     """
     options = [step for step in steps if step.option is not None]
-    visits = [(step.option or "", step.persons, step.origin) for step in options]
+    ended: list[tuple[int, str]] = []  # each OPTION so far with a known end
+    visits: list[_Visit] = []
+    for step in options:
+        over = frozenset(option for end, option in ended if end <= step.start)
+        visits.append(_Visit(step.option or "", step.persons, step.origin, over))
+        if step.end is not None:
+            ended.append((step.end, step.option or ""))
+    ends_at = {option.id: option.destination for option in file.options}
     for thing in file.objects:
         if thing.id in world.brought:
             continue
@@ -1873,28 +2045,32 @@ def _as_planned(
             for name, person in step.handed
             if name == thing.id
         }
+        carried = {step.option or "" for step in options if thing.id in step.carried}
         begins = _begins(file, world, thing.id)
-        yield thing.id, visits, _least_broken(world, thing.id, visits, begins, handed)
+        run = _least_broken(world, thing.id, visits, begins, handed, carried, ends_at)
+        yield thing.id, visits, run
 
 
 def _objects(file: File, world: World, order: list[_Placed]) -> list[Broken]:
     """The fourteenth and the fifteenth CONSTRAINT, with the steps in one order.
 
-    Each OBJECT is at hand where it is required or handed over, and no PERSON has it in an
-    OPTION that refuses it. Where it is not at hand for an OPTION that requires it, the
-    Broken names everybody who takes part. Where a PERSON has it in an OPTION that refuses
-    it, the Broken names each PERSON who takes part and has it just before the OPTION
-    starts, or might. Where it cannot be handed over, the Broken names the PERSON who was
-    to have it.
+    Each OBJECT is at hand where it is required, handed over or carried, and no PERSON has
+    it in an OPTION that refuses it. Where it is not at hand for an OPTION that requires
+    it, the Broken names everybody who takes part. Where a PERSON has it in an OPTION that
+    refuses it, the Broken names each PERSON who takes part and has it just before the
+    OPTION starts, or might. Where it cannot be handed over, the Broken names the PERSON
+    who was to have it. Where it cannot be carried, the Broken names nobody.
     """
     out: list[Broken] = []
-    for thing, visits, (broken, trail) in _as_planned(file, world, (step for _, step in order)):
+    for thing, visits, (broken, _, seen) in _as_planned(file, world, (step for _, step in order)):
         for position, constraint, taker in broken:
-            option, persons, _ = visits[position]
-            if taker is not None:
-                who: tuple[str, ...] = (taker,)
+            option, persons, _, _ = visits[position]
+            if taker == _CARRY:
+                who: tuple[str, ...] = ()
+            elif taker is not None:
+                who = (taker,)
             elif constraint is Constraint.REFUSED:
-                have = [each for each in persons if Where(person=each) in trail[position]]
+                have = [each for each in persons if Where(person=each) in seen[position]]
                 who = _in_file_order_of_persons(file, have)
             else:
                 who = _in_file_order_of_persons(file, persons)
@@ -1910,18 +2086,37 @@ def whereabouts(
     For each OBJECT: when the TRIP starts, and then after each OPTION of the ITINERARY, in the
     order it lists them. An OBJECT that the fourteenth and the fifteenth CONSTRAINT ask
     nothing of in this world is left out. Where the world leaves something to pick, this is
-    the first way that breaks the least.
+    the first way that breaks the least. An OBJECT that was carried is in the OPTION here
+    until the next OPTION that starts no earlier than that one ends: ``just_before`` says
+    where that OPTION finds it.
     """
-    return {thing: trail for thing, _, (_, trail) in _as_planned(file, world, itinerary)}
+    return {thing: trail for thing, _, (_, trail, _) in _as_planned(file, world, itinerary)}
+
+
+def just_before(
+    file: File, world: World, itinerary: Itinerary
+) -> dict[str, tuple[frozenset[Where], ...]]:
+    """Where each OBJECT might be just before each OPTION of an ITINERARY starts, in this world.
+
+    The OPTIONs come in the order the ITINERARY lists them, and the OBJECTs are those of
+    ``whereabouts``. An OBJECT that was carried in an OPTION that is over by then lies at the
+    PLACE where that OPTION ends.
+    """
+    return {thing: seen for thing, _, (_, _, seen) in _as_planned(file, world, itinerary)}
 
 
 type _Chain = tuple[list[tuple[int, int, int]], dict[int, _Taken], tuple[int, tuple[_Ranked, ...]]]
-type _Ranked = tuple[tuple[int, int], ...]  # the hand-overs of one OBJECT, by position in the FILE
-# Each set of places where an OBJECT might be, with the first hand-overs that leave it there.
-type _Reached = dict[frozenset[Where], _Ranked]
+# The hand-overs and the carries of one OBJECT, in the order they happen: each the position
+# of the OPTION in the FILE, and the position of the PERSON who has the OBJECT from then on.
+# A carry has -1 for the PERSON.
+type _Ranked = tuple[tuple[int, int], ...]
 _NOTHING_TO_ORDER: list[_Chain] = [([], {}, (0, ()))]  # no OBJECT turns on the order of the steps
+# One order of an OBJECT's OPTIONs with one choice of hand-overs and carries: the order, the
+# choice, and the arrivals it counts on, each from an OPTION that carried the OBJECT to the
+# OPTION that first uses it afterwards.
+type _Choice = tuple[tuple[int, ...], _Ranked, tuple[tuple[int, int], ...]]
 type _Ordered = tuple[
-    Iterator[tuple[tuple[int, ...], _Ranked]],
+    Iterator[_Choice],
     dict[int, set[int]],
     list[tuple[int, int, int]],
     tuple[_Ranked, ...],
@@ -1963,19 +2158,25 @@ def _chains(
     OPTION of the plan requires or refuses and some OPTION can move has an order of its own,
     among its own OPTIONs.
 
-    For each such order, the OBJECT is taken through it with every choice of hand-overs. The
-    choice that works with the fewest hand-overs is kept, and among those the one with the
-    OPTION listed first, then the PERSON listed first, going through the hand-overs in the
-    order they happen. An order in which the OBJECT has no choice that works is left out.
-    Where another transfer brings the OBJECT, every order works, with no hand-over: which
-    OPTIONs the OBJECT is at hand for without that transfer still turns on the order, and
-    so does who has it in an OPTION that refuses it.
+    For each such order, the OBJECT is taken through it with every choice of hand-overs and
+    carries. A choice counts on arrivals: the first OPTION that uses the OBJECT after a
+    carry starts no earlier than the carrying OPTION ends, as ``_one_further`` says. For
+    each set of arrivals, the choice that works with the fewest hand-overs and carries is
+    kept, and among those the one with the OPTION listed first, then the PERSON listed
+    first, going through them in the order they happen. Choices with different arrivals
+    are all kept: which of them can be timed is not known here. An order in which the
+    OBJECT has no choice that works is left out. Where another transfer brings the OBJECT,
+    every order works, with no hand-over and no carry: which OPTIONs the OBJECT is at hand
+    for without that transfer still turns on the order, and so does who has it in an
+    OPTION that refuses it.
 
-    A result takes one order for each OBJECT. It holds the gaps that keep those orders, each
-    from one OPTION to the next with no time between their starts; the hand-overs in each
-    OPTION, by its position in the FILE; and how the hand-overs rank: how many they are, and
-    then, for each OBJECT in the FILE's order, its hand-overs by the positions of the OPTION
-    and the PERSON in the FILE.
+    A result takes one order and one choice for each OBJECT. It holds the gaps that keep
+    them: each from one OPTION of an order to the next with no time between their starts,
+    and each from an OPTION that carried the OBJECT to the OPTION that first uses it
+    afterwards, with the time the first takes. It holds the hand-overs and the carries in
+    each OPTION, by its position in the FILE. And it holds how they rank: how many they
+    are, and then, for each OBJECT in the FILE's order, its hand-overs and carries by the
+    positions of the OPTION and the PERSON in the FILE.
 
     The results are made one at a time, as they are asked for. The OBJECTs are taken in the
     FILE's order, and the order of each is made to go with those already taken: it keeps
@@ -1985,15 +2186,19 @@ def _chains(
     times keep it.
 
     Every ITINERARY that works lists its OPTIONs in one order, and that order gives each
-    OBJECT its own, so it is made. The start times it has keep these gaps, so the rule for
-    start times finds times too. Where no OPTION of the plan requires or refuses an OBJECT,
-    there is nothing to order, and the result is None.
+    OBJECT its own, so it is made, with the hand-overs and the carries of the ITINERARY or
+    with ones that the rules put before them for the same arrivals. The start times of the
+    ITINERARY keep these gaps: an OPTION that uses the OBJECT finds it at hand, so it
+    starts no earlier than the OPTION that carried it ends. So the rule for start times
+    finds times too. Where no OPTION of the plan requires or refuses an OBJECT, there is
+    nothing to order, and the result is None.
 
     With ``only_the_first_of_a_kind``, an order is left out where an order made before it
     starts with the same OPTIONs, in another order, and leaves the OBJECT in the same places
-    with the same hand-overs. Whatever follows the one can follow the other, with the same
-    hand-overs. ``_orders_differ_only_in_the_listing`` says when the earlier one then gives
-    the ITINERARY that comes first, so that the later one is never the one shown.
+    with the same hand-overs, carries and arrivals. Whatever follows the one can follow the
+    other, with the same hand-overs. ``_orders_differ_only_in_the_listing`` says when the
+    earlier one then gives the ITINERARY that comes first, so that the later one is never
+    the one shown.
 
     ``soonest`` holds the earliest that some OPTIONs can start, whatever the order. An
     OPTION that cannot start until after the fixed start of another never comes before it.
@@ -2014,7 +2219,8 @@ def _can_have(
     has it when the TRIP starts, or might, or who takes part before that in an OPTION of
     the plan that hands it over and does not refuse it. ``orders`` says what comes before
     what for each PERSON. An OPTION that only might hand it over counts as one that does.
-    Nobody else has the OBJECT just before the OPTION starts.
+    Nobody else has the OBJECT just before the OPTION starts: nobody comes to have it by a
+    carry.
     """
     options = file.options
     at_first = {each.person for start in _begins(file, world, thing) for each in start}
@@ -2039,25 +2245,26 @@ def _can_move(
 ) -> set[int]:
     """The OPTIONs of a plan that can move an OBJECT, by position in the FILE.
 
-    An OPTION can move it where it hands it over, or where it keeps it and a PERSON who takes
-    part can have it by then, as ``_can_have`` says: an OPTION keeps nothing from anybody
-    else. An OPTION that only might hand it over or keep it counts as well. An OPTION that
-    refuses the OBJECT cannot move it: nobody who has it takes part, and nobody takes it
-    there.
+    An OPTION can move it where it hands it over or carries it, or where it keeps it and a
+    PERSON who takes part can have it by then, as ``_can_have`` says: an OPTION keeps
+    nothing from anybody else. An OPTION that only might do one of these counts as well.
+    An OPTION that refuses the OBJECT can move it only by carrying it: nobody who has it
+    takes part, and nobody takes it there. An OPTION that carries it can move it also where
+    no PERSON can ever have it: then it lies at the PLACE where the OPTION starts.
     """
     options = file.options
     holders = _can_have(file, world, orders, thing)
-    does = {
-        index: world.does.get((options[index].id, thing))
-        for index in happening
-        if (options[index].id, thing) not in world.refuses
-    }
-    return {
-        index
-        for index, action in does.items()
-        if action in ("hands_over", "any")
-        or (action in ("keeps", "might_keep") and index in holders)
-    }
+    moving: set[int] = set()
+    for index in happening:
+        pair = (options[index].id, thing)
+        action = world.does.get(pair)
+        if action in ("carries", "any"):
+            moving.add(index)
+        elif pair in world.refuses:
+            continue
+        elif action == "hands_over" or (action in ("keeps", "might_keep") and index in holders):
+            moving.add(index)
+    return moving
 
 
 def _ordered_by(
@@ -2099,29 +2306,45 @@ def _as_chain(
     gaps: list[tuple[int, int, int]],
     ranked: tuple[_Ranked, ...],
 ) -> _Chain:
-    """One result of ``_chains``, from the gaps of the orders and the hand-overs of each OBJECT."""
+    """One result of ``_chains``, from its gaps and the hand-overs and carries of each OBJECT."""
     handed: dict[int, _Taken] = {}
     for each, theirs in zip(asked, ranked, strict=True):
         for index, person in theirs:
-            handed[index] = (*handed.get(index, ()), (each, file.persons[person].id))
+            taker = None if person < 0 else file.persons[person].id
+            handed[index] = (*handed.get(index, ()), (each, taker))
     return gaps, handed, (sum(map(len, ranked)), ranked)
 
 
-def _chain_in_order(
+def _for_arrivals(
+    file: File, world: World, arrivals: Iterable[tuple[int, int]]
+) -> list[tuple[int, int, int]]:
+    """The gaps that keep these arrivals, each from a carrying OPTION to one that uses the OBJECT.
+
+    The second starts no earlier than the first ends: the gap is the time the first takes
+    in this world. The OPTIONs are by position in the FILE.
+    """
+    return [
+        (carrier, user, world.terms[file.options[carrier].id].shortest)
+        for carrier, user in arrivals
+    ]
+
+
+def _chains_in_order(
     file: File,
     world: World,
     who: tuple[tuple[str, ...], ...],
     orders: tuple[tuple[int, ...], ...],
     in_order: Sequence[int],
-) -> _Chain | None:
-    """What ``_chains`` gives for one order of all the OPTIONs of a plan, or None.
+) -> list[_Chain]:
+    """What ``_chains`` gives for one order of all the OPTIONs of a plan.
 
     ``in_order`` holds the OPTIONs that happen, by position in the FILE. ``orders`` holds
     what each PERSON does, in their own order. Each OBJECT that some OPTION of the plan
-    requires or refuses takes the order of its own OPTIONs from ``in_order``, with the
-    hand-overs that the rules put first in that order. The result is None where an OBJECT
-    has no choice of hand-overs that works in that order, and where no OPTION of the plan
-    requires or refuses an OBJECT.
+    requires or refuses takes the order of its own OPTIONs from ``in_order``, with each
+    choice of hand-overs and carries that ``_first_of`` gives for that order. A result
+    takes one choice for each OBJECT, and the first has the first choice of each. There is
+    none where an OBJECT has no choice that works in that order, and where no OPTION of the
+    plan requires or refuses an OBJECT.
 
     ``in_order`` need not keep each PERSON's own order. Where it puts two OPTIONs of one
     OBJECT the other way round than a PERSON does them, the result goes round in a circle
@@ -2130,32 +2353,57 @@ def _chain_in_order(
     happening, asked = _asked_about(file, world, who)
     place = {index: number for number, index in enumerate(in_order)}
     if not asked or any(index not in place for index in happening):
-        return None
+        return []
     options = file.options
     people = {person.id: number for number, person in enumerate(file.persons)}
     place_of = {option.id: number for number, option in enumerate(options)}
+    ends_at = {option.id: option.destination for option in options}
 
-    def by_position(option: str, person: str) -> tuple[int, int]:
-        return (place_of[option], people[person])
+    def by_position(option: str, person: str | None) -> tuple[int, int]:
+        return (place_of[option], -1 if person is None else people[person])
 
-    gaps: list[tuple[int, int, int]] = []
-    ranked: list[_Ranked] = []
+    each: list[list[tuple[_Ranked, list[tuple[int, int, int]]]]] = []
     for thing in asked:
         checking, matters = _ordered_by(file, world, orders, happening, thing)
         order = sorted(matters, key=place.__getitem__)
-        gaps += [(before, after, 0) for before, after in pairwise(order)]
+        gaps = [(before, after, 0) for before, after in pairwise(order)]
         if thing in world.brought:
-            ranked.append(())
+            each.append([((), gaps)])
             continue
         visits = [
-            (options[index].id, who[index], options[index].origin)
+            _Visit(options[index].id, who[index], options[index].origin)
             for index in (order if matters else checking)
         ]
-        found = _first_hand_overs(world, thing, visits, _begins(file, world, thing), by_position)
-        if found is None:
-            return None
-        ranked.append(found)
-    return _as_chain(file, asked, gaps, tuple(ranked))
+        begins = _begins(file, world, thing)
+        reached = _first_hand_overs(world, thing, visits, begins, by_position, ends_at)
+        found = _first_of(reached)
+        if not found:
+            return []
+        each.append(
+            [
+                (
+                    taken,
+                    [
+                        *gaps,
+                        *_for_arrivals(
+                            file,
+                            world,
+                            ((place_of[one], place_of[other]) for one, other in arrivals),
+                        ),
+                    ],
+                )
+                for taken, arrivals in found
+            ]
+        )
+    return [
+        _as_chain(
+            file,
+            asked,
+            [gap for _, gaps in choice for gap in gaps],
+            tuple(taken for taken, _ in choice),
+        )
+        for choice in product(*each)
+    ]
 
 
 def _with_what_follows(later: dict[int, set[int]]) -> dict[int, set[int]]:
@@ -2201,38 +2449,42 @@ def _orders_together(
     fixed = {index: world.terms[options[index].id].fixed_start for index in happening}
     people = {person.id: number for number, person in enumerate(file.persons)}
     place_of = {option.id: number for number, option in enumerate(options)}
+    ends_at = {option.id: option.destination for option in options}
     each = [_ordered_by(file, world, orders, happening, thing) for thing in asked]
     checking = [theirs for theirs, _ in each]
     matters = [theirs for _, theirs in each]
     moved = [bool(theirs) for theirs in matters]
 
-    def by_position(option: str, person: str) -> tuple[int, int]:
-        return (place_of[option], people[person])
+    def by_position(option: str, person: str | None) -> tuple[int, int]:
+        return (place_of[option], -1 if person is None else people[person])
 
     def visit(index: int) -> _Visit:
-        return (options[index].id, who[index], options[index].origin)
+        return _Visit(options[index].id, who[index], options[index].origin)
 
-    unordered: dict[int, _Ranked | None] = {}
+    def choices(done: tuple[int, ...], reached: _Reached) -> Iterator[_Choice]:
+        """Each choice that a finished order leaves, with its arrivals by position in the FILE."""
+        for taken, arrivals in _first_of(reached):
+            yield done, taken, tuple((place_of[one], place_of[other]) for one, other in arrivals)
 
-    def in_each_order(
-        number: int, later: Mapping[int, Set[int]]
-    ) -> Iterator[tuple[tuple[int, ...], _Ranked]]:
-        """Each order of one OBJECT's OPTIONs that works, with the hand-overs the rules put first.
+    unordered: dict[int, list[_Choice]] = {}
+
+    def in_each_order(number: int, later: Mapping[int, Set[int]]) -> Iterator[_Choice]:
+        """Each order of one OBJECT's OPTIONs that works, with each choice ``_first_of`` gives.
 
         ``number`` is the place of the OBJECT among those asked about. An order keeps what
         comes after what and the fixed starts. The OBJECT is taken through the OPTIONs as
         the order is made. So an order is given up at the first OPTION where the OBJECT
-        cannot be at hand whatever was handed over, or where a PERSON has it in an OPTION
-        that refuses it, and with it every order that starts the same way. Where another
-        transfer brings the OBJECT, every order works, with no hand-over. An OBJECT that
-        nothing moves has no order, and is taken through the OPTIONs that check it as the
-        FILE lists them.
+        cannot be at hand whatever was handed over or carried, or where a PERSON has it in
+        an OPTION that refuses it, and with it every order that starts the same way. Where
+        another transfer brings the OBJECT, every order works, with no hand-over and no
+        carry. An OBJECT that nothing moves has no order, and is taken through the OPTIONs
+        that check it as the FILE lists them.
         """
         thing = asked[number]
         brought = thing in world.brought
-        begins: _Reached = dict.fromkeys(_begins(file, world, thing), ())
+        begins: _Reached = {(start, ()): () for start in _begins(file, world, thing)}
         # The OPTIONs done and where they leave the OBJECT, for each start of an order made.
-        made: set[tuple[frozenset[int], frozenset[tuple[frozenset[Where], _Ranked]]]] = set()
+        made: set[tuple[frozenset[int], frozenset[tuple[_Spot, _Ranked]]]] = set()
 
         def can_come_first(index: int, left: tuple[int, ...]) -> bool:
             mine = fixed[index] if fixed[index] is not None else soonest.get(index)
@@ -2245,15 +2497,20 @@ def _orders_together(
 
         def go(
             done: tuple[int, ...], left: tuple[int, ...], reached: _Reached
-        ) -> Iterator[tuple[tuple[int, ...], _Ranked]]:
+        ) -> Iterator[_Choice]:
             if not left:
-                yield done, (() if brought else _first_of(reached) or ())
+                if brought:
+                    yield done, (), ()
+                else:
+                    yield from choices(done, reached)
             for index in left:
                 if not can_come_first(index, left):
                     continue
                 further = reached
                 if not brought:
-                    further = _one_further(world, thing, reached, visit(index), by_position)
+                    further = _one_further(
+                        world, thing, reached, visit(index), by_position, ends_at
+                    )
                     if not further:
                         continue
                 if only_the_first_of_a_kind:
@@ -2267,17 +2524,17 @@ def _orders_together(
             yield from go((), matters[number], begins)
             return
         if number not in unordered:
-            visits = [visit(index) for index in checking[number]]
-            starts = _begins(file, world, thing)
-            found = _first_hand_overs(world, thing, visits, starts, by_position)
-            unordered[number] = () if brought else found
-        found = unordered[number]
-        if found is not None:
-            yield (), found
+            unordered[number] = [((), (), ())]
+            if not brought:
+                visits = [visit(index) for index in checking[number]]
+                starts = _begins(file, world, thing)
+                found = _first_hand_overs(world, thing, visits, starts, by_position, ends_at)
+                unordered[number] = list(choices((), found))
+        yield from unordered[number]
 
     own = _later_for_the_persons(orders, happening)
     # The OBJECTs taken so far: the orders still to try for the next one, what comes after
-    # what with the orders taken, their gaps, and their hand-overs.
+    # what with the orders taken, their gaps, and their hand-overs and carries.
     taken: list[_Ordered] = [(in_each_order(0, own), own, [], ())]
     while taken:
         ahead, later, gaps, chosen = taken[-1]
@@ -2285,8 +2542,12 @@ def _orders_together(
         if following is None:
             taken.pop()
             continue
-        order, found = following
-        longer = [*gaps, *((before, after, 0) for before, after in pairwise(order))]
+        order, found, arrivals = following
+        longer = [
+            *gaps,
+            *((before, after, 0) for before, after in pairwise(order)),
+            *_for_arrivals(file, world, arrivals),
+        ]
         ranked = (*chosen, found)
         if len(ranked) == len(asked):
             yield _as_chain(file, asked, longer, ranked)
@@ -3100,8 +3361,17 @@ def _timings(
         end = None if lasts is None else start + lasts
         if node < listed:
             option = file.options[node]
+            given = tuple((thing, taker) for thing, taker in handed if taker is not None)
+            loaded = tuple(thing for thing, taker in handed if taker is None)
             return Step(
-                option.id, option.origin, option.destination, who[node], start, end, handed=handed
+                option.id,
+                option.origin,
+                option.destination,
+                who[node],
+                start,
+                end,
+                handed=given,
+                carried=loaded,
             )
         person, (way, start_place, end_place) = legs[node - listed]
         return Step(None, start_place, end_place, (person,), start, end, way)
@@ -3423,10 +3693,12 @@ def _to_try_first(
     matter to each OBJECT, and so does some order of all the OPTIONs, which gives the same.
     So they change how soon the search is over, and not what it finds.
     """
-    tried = (
-        _chain_in_order(file, world, who, orders, each) for each in in_orders if each is not None
-    )
-    return [each for each in tried if each is not None]
+    return [
+        chain
+        for each in in_orders
+        if each is not None
+        for chain in _chains_in_order(file, world, who, orders, each)
+    ]
 
 
 def spans_closed(file: File, origin: str, destination: str) -> list[tuple[int, int]]:
