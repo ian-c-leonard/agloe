@@ -864,7 +864,9 @@ class _Search:
         there. An OPTION that only might keep the OBJECT takes it from nobody for sure, and
         one that refuses it takes it from no PERSON. So such a PERSON takes part in an
         OPTION that refuses the OBJECT only where they take part in one of those others
-        before it. A PERSON's own OPTIONs have turns in the order they do them.
+        before it. A PERSON's own OPTIONs have turns in the order they do them. A carry in
+        an OPTION that refuses the OBJECT is among the others here, and it helps nobody: the
+        path lets no PERSON who has the OBJECT take part there.
 
         This says less than the path does. An OPTION that takes the OBJECT from a PERSON
         before they take it does not help them, and neither does a hand-over to themselves:
@@ -887,8 +889,6 @@ class _Search:
             return early is None or late is None or early <= late
 
         refusing = [index for index in matter if (options[index].id, thing) in world.refuses]
-        # A carry in an OPTION that refuses the OBJECT takes it from no PERSON.
-        taking = {index: loads for index, loads in loaded.items() if index not in refusing}
         keeping = [
             index
             for index in matter
@@ -911,7 +911,7 @@ class _Search:
             """
             row = self.takes[number]
             ways: list[cp_model.IntVar] = []
-            for other in dict.fromkeys((*keeping, *handed, *taking)):
+            for other in dict.fromkeys((*keeping, *handed, *loaded)):
                 if other in (since, until) or not can_come_before(other, until):
                     continue
                 if since is not None and not can_come_before(since, other):
@@ -922,7 +922,7 @@ class _Search:
                 _when(model.add(self.turn[until] >= self.turn[other] + 1), way)
                 if other not in keeping:
                     # It is handed over there, or carried.
-                    done = [choice[other] for choice in (handed, taking) if other in choice]
+                    done = [choice[other] for choice in (handed, loaded) if other in choice]
                     model.add_bool_or([way.negated(), *done])
                 ways.append(way)
             return ways
@@ -1175,7 +1175,6 @@ class _Search:
             # The choice that the OBJECT is carried: it is at hand, and then it is in the
             # OPTION and nowhere else.
             loads = model.new_bool_var(f"{thing} carried in {option.id}")
-            model.add_implication(loads, used)
             at_hand(loads)
             aboard = spots.index(Where(option=option.id))
             for n in range(len(spots)):

@@ -7004,6 +7004,10 @@ def test_two_carries_that_end_at_one_place_are_told_apart_by_their_times() -> No
     assert carried_in(first_shown(later, worst_case(later))) == [("slow", ("bag",))]
     neither = two_ferries((9, 10))
     assert first_shown(neither, worst_case(neither)) is None
+    # The solver's search gives the same reports.
+    assert carried_in(checked(file).itinerary) == [("fast", ("bag",))]
+    assert carried_in(checked(later).itinerary) == [("slow", ("bag",))]
+    assert checked(neither).answer is Answer.INFEASIBLE
 
 
 def test_only_the_first_use_after_a_carry_waits_for_the_object() -> None:
@@ -7031,6 +7035,7 @@ def test_only_the_first_use_after_a_carry_waits_for_the_object() -> None:
     assert carried_in(shown) == [("flight", ("bag",))]
     assert [each.handed for each in shown or ()] == [(), (), ()]
     assert start_of(shown, "flight") == seconds(10, 5)
+    assert checked(file).itinerary == shown
 
 
 def test_an_object_is_carried_twice_one_option_after_the_other() -> None:
@@ -7063,9 +7068,11 @@ def test_an_object_is_carried_twice_one_option_after_the_other() -> None:
         frozenset({Where(place="island")}),
         frozenset({Where(place="village")}),
     )
+    assert checked(file).itinerary == shown
     # A bus that has to leave before the ferry lands cannot have the bag.
     missed = a_voyage(options, [*facts[:3], *at("bus", 9, 30, "PT20M"), *facts[6:]], locks)
     assert first_shown(missed, worst_case(missed)) is None
+    assert checked(missed).answer is Answer.INFEASIBLE
 
 
 def test_a_carried_object_is_handed_over_where_it_lands() -> None:
@@ -7094,6 +7101,7 @@ def test_a_carried_object_is_handed_over_where_it_lands() -> None:
         frozenset({Where(place="island")}),
         frozenset({Where(person="alex")}),
     )
+    assert checked(file).itinerary == shown
 
 
 def test_a_bag_that_the_cabin_refuses_is_dropped_and_carried_in_the_hold() -> None:
@@ -7119,8 +7127,10 @@ def test_a_bag_that_the_cabin_refuses_is_dropped_and_carried_in_the_hold() -> No
         ("ferry", ("alex",), ("bag",)),
         ("office", ("alex",), ()),
     ]
+    assert checked(file).itinerary == shown
     no_drop = a_voyage(options[1:], [fact for fact in facts if fact.get("option") != "drop"], locks)
     assert first_shown(no_drop, worst_case(no_drop)) is None
+    assert checked(no_drop).answer is Answer.INFEASIBLE
 
 
 def nine_bags(*boats: tuple[str, int, int, str]) -> File:
@@ -7297,3 +7307,58 @@ def test_the_choices_for_an_order_that_is_known_to_work_are_made_one_at_a_time(
     assert found.answer is Answer.UNDETERMINED
     assert asked(found) == [(Unknown("needs no right", "collection"),)]
     assert made < 500
+
+
+def test_nothing_uses_an_object_again_where_nobody_knows_when_its_carry_ends() -> None:
+    """A ferry of unknown length carries the key, and an office on the island requires it.
+    At worst the ferry never lands, so no choice of carries works. With an hour for the
+    crossing, the carry works, and it counts on the arrival."""
+    file = trip(["alex"], ["quay", "island"], [moves("ferry", "quay", "island")], [], [])
+    base = worst_case(file)
+    assert base.terms["ferry"].longest is None
+    world = replace(base, needs=frozenset({("office", "key")}), does={("ferry", "key"): "carries"})
+    visits = [("ferry", ("alex",), "quay"), ("office", ("alex",), "island")]
+    at_the_quay = [frozenset({Where(place="quay")})]
+
+    def by_position(option: str, person: str | None) -> tuple[int, int]:
+        return (["ferry", "office"].index(option), -1 if person is None else 0)
+
+    lands_at = {"ferry": "island", "office": "island"}
+    assert first_hand_overs(world, "key", visits, at_the_quay, by_position, lands_at) == []
+    an_hour = replace(base.terms["ferry"], shortest=3600, longest=3600)
+    timed = replace(world, terms={**world.terms, "ferry": an_hour})
+    assert first_hand_overs(timed, "key", visits, at_the_quay, by_position, lands_at) == [
+        (((0, -1),), (("ferry", "office"),))
+    ]
+
+
+def test_a_carried_object_is_no_sooner_there_than_its_carry_though_a_person_is() -> None:
+    """A ferry carries the bag across from 9:00 am to 10:00 am, and a walk across takes a
+    quarter of an hour. Jo's desk on the island requires the bag at 9:30 am. Jo can be
+    there, and the bag cannot: only the ferry moves it. Both searches say so. With the desk
+    at 10:00 am the trip works."""
+    options = [moves("ferry", "quay", "island"), stays("desk", "island")]
+    bridge = [way_between("bridge", "quay", "island")]
+
+    def with_the_desk_at(hour: int, minute: int) -> File:
+        facts = [
+            *at("ferry", 9, 0, "PT1H"),
+            *at("desk", hour, minute),
+            takes("bridge", "PT15M"),
+            lies_at("bag", "quay"),
+            carries("ferry", "bag"),
+            requires_object("desk", "bag"),
+            every_use("bag"),
+            every_transfer("bag"),
+            complete(None, None),
+        ]
+        locks = [lock("ferry", "alex"), lock("desk", "jo")]
+        places = ["quay", "island"]
+        return trip(["alex", "jo"], places, options, facts, locks, bridge, objects=["bag"])
+
+    early = checked(with_the_desk_at(9, 30))
+    assert early.answer is Answer.INFEASIBLE
+    assert {"ferry-time", "ferry-length", "desk-time"} <= set(early.conflict)
+    later = checked(with_the_desk_at(10, 0))
+    assert later.answer is Answer.FEASIBLE
+    assert carried_in(later.itinerary) == [("ferry", ("bag",))]
