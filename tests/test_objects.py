@@ -2488,13 +2488,43 @@ def test_an_option_that_hands_an_object_over_and_refuses_it_gives_it_to_nobody()
         ("security", seconds(9)),
         ("deposit", seconds(10)),
     ]
-    # Where Alex needs the bag afterwards, nothing works: security is the only OPTION that
-    # hands it over, and Alex is in it, but nobody takes the bag there.
-    needed = a_desk_with(9, *at("deposit", 10), requires_object("deposit", "bag"))
-    needed = replace(needed, places=(*needed.places, replace(needed.places[0], id="gate")))
-    moved = replace(needed.options[2], origin="gate", destination="gate")
-    needed = replace(needed, options=(*needed.options[:2], moved))
-    assert checked(needed).answer is Answer.INFEASIBLE
+
+
+def test_nobody_takes_an_object_in_an_option_that_refuses_it_though_a_lock_puts_them_there() -> (
+    None
+):
+    """Sam has the bag and leaves it at a drop at the desk at 8:00 am, which keeps it. Alex
+    is LOCKed into security at the desk at 9:00 am, which hands the bag over and refuses it,
+    and into a check at the gate at 10:00 am that requires it. The bag lies at the desk when
+    Alex is at security, and Alex does not have it, so the refusal is kept. But nobody takes
+    the bag there, and nothing else hands it over. So nothing works. Without the refusal,
+    Alex takes the bag at security."""
+    options = [stays("drop", "desk"), stays("security", "desk"), stays("check", "gate")]
+    facts = [
+        *at("drop", 8),
+        *at("security", 9),
+        *at("check", 10),
+        takes("walk", "PT10M"),
+        complete(None, None),
+        has_object("sam", "bag"),
+        keeps("drop", "bag"),
+        hands_over("security", "bag"),
+        refuses_object("security", "bag"),
+        requires_object("check", "bag"),
+        every_use("bag"),
+        every_transfer("bag"),
+    ]
+    locks = [lock("drop", "sam"), lock("security", "alex"), lock("check", "alex")]
+    ways = [way_between("walk", "desk", "gate")]
+    file = trip(["alex", "sam"], ["desk", "gate"], options, facts, locks, ways, objects=["bag"])
+    assert checked(file).answer is Answer.INFEASIBLE
+    refusal = "security-refuses-bag"
+    allowed = replace(file, facts=tuple(fact for fact in file.facts if fact.id != refusal))
+    found = checked(allowed)
+    assert found.answer is Answer.FEASIBLE
+    assert [each.handed for each in found.itinerary if each.option == "security"] == [
+        (("bag", "alex"),)
+    ]
 
 
 # Checked on FILEs made at random.
