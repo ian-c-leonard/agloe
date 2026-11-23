@@ -2729,15 +2729,16 @@ def _orders_together(
 # ------------------------------- Which ITINERARY is shown -------------------------------
 
 
-def needless(file: File, world: World, itinerary: Itinerary) -> list[tuple[str | None, str | None]]:
-    """What could be taken out of an ITINERARY that works.
+def needless(file: File, world: World, itinerary: Itinerary) -> list[tuple[int, str | None]]:
+    """What could be taken out of an ITINERARY that works, or an empty list where nothing can.
 
-    Each thing taken out is a PERSON out of an OPTION or a WAY, named with the OPTION, or a
-    whole OPTION, named with None for the PERSON. It tries every combination of PERSONs in
-    OPTIONs that no LOCK requires, with all the times left as they are. An OPTION whose last
-    PERSON is taken out can go with them, or stay with nobody in it: both are tried, and
-    the OPTION is named with None where it goes. An OPTION that has nobody in it can be
-    taken out by itself. An empty list means the ITINERARY works without none of them.
+    Each thing taken out is named with the position of its step in the ITINERARY: a PERSON
+    out of an OPTION or a WAY, or a whole OPTION, with None for the PERSON. It tries every
+    combination of PERSONs in OPTIONs that no LOCK requires, with all the times left as
+    they are. An OPTION that ``could_run_alone`` names can go with its last PERSON or stay
+    with nobody in it: both are tried. Any other OPTION goes with its last PERSON, because
+    with nobody in it, it changes nothing. An OPTION that has nobody in it can be taken out
+    by itself.
     """
     locked = {(lock.option, person) for lock in file.locks for person in lock.persons}
     free = [
@@ -2746,8 +2747,8 @@ def needless(file: File, world: World, itinerary: Itinerary) -> list[tuple[str |
         for person in step.persons
         if (step.option, person) not in locked
     ]
-    with_nobody = sum(step.option is not None and not step.persons for step in itinerary)
-    if len(free) + with_nobody > _MOST_TO_TAKE_OUT:
+    alone = {file.options[index].id for index in could_run_alone(file, world)}
+    if len(free) + sum(step.option in alone for step in itinerary) > _MOST_TO_TAKE_OUT:
         raise ValueError("this ITINERARY is too large for the reference checker")
     for size in range(len(free) + 1):
         for out in combinations(free, size):
@@ -2755,14 +2756,17 @@ def needless(file: File, world: World, itinerary: Itinerary) -> list[tuple[str |
                 tuple(person for person in step.persons if (index, person) not in out)
                 for index, step in enumerate(itinerary)
             ]
-            # The OPTIONs with nobody in them now: each goes or stays, the most gone first.
+            # The OPTIONs with nobody in them now. Each that can run alone goes or stays,
+            # the most gone first. The others go.
             nobody = [
                 index
                 for index, step in enumerate(itinerary)
                 if step.option is not None and not staying[index]
             ]
-            for count in range(len(nobody), -1, -1):
-                for gone in combinations(nobody, count):
+            can_stay = [index for index in nobody if itinerary[index].option in alone]
+            for count in range(len(can_stay), -1, -1):
+                for more in combinations(can_stay, count):
+                    gone = [index for index in nobody if index in more or index not in can_stay]
                     if not out and not gone:
                         continue  # nothing is taken out
                     smaller: list[Step] = []
@@ -2773,19 +2777,24 @@ def needless(file: File, world: World, itinerary: Itinerary) -> list[tuple[str |
                         handed = tuple(each for each in step.handed if each[1] in staying[index])
                         smaller.append(replace(step, persons=staying[index], handed=handed))
                     if not broken(file, world, tuple(smaller)):
-                        taken = [(itinerary[index].option, person) for index, person in out]
-                        return [*taken, *((itinerary[index].option, None) for index in gone)]
+                        return [*out, *((index, None) for index in gone)]
     return []
 
 
 def itineraries(file: File, world: World, known: Routes | None = None) -> list[Itinerary]:
-    """The ITINERARIES that work in this world with PERSONs taking part the fewest times.
+    """ITINERARIES that work in this world with PERSONs taking part the fewest times.
 
     It tries every choice of who takes part in which OPTION and in what order. Where a PERSON's
     next OPTION starts somewhere else, WAYs take them there, listed or not. The start times follow
     the rule of "Which ITINERARY is shown". Where a COMPLETE FACT rules out an unlisted WAY for a
     span of time, taking it before the span and after it are tried too. A choice works when the
     orders it names work: no other order is tried in their place.
+
+    There is one ITINERARY for each choice of who takes part, of the OPTIONs that happen
+    with nobody in them, and of the order in which each PERSON does their OPTIONs: the one
+    that ``scheduled`` gives. Another ITINERARY for the same choice, with other WAYs, other
+    hand-overs or other carries, is not returned, though PERSONs take part in it as few
+    times.
 
     An OPTION can happen with nobody in it, and that adds nothing to the times PERSONs take
     part. So an ITINERARY returned can have one that it does not need, where

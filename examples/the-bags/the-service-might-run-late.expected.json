@@ -63,6 +63,8 @@
     "museum-tickets",
     "service-time",
     "service-length",
+    "service-arrival",
+    "service-needs-a-ticket",
     "flight-time",
     "flight-length",
     "bag-drop",

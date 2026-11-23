@@ -17,6 +17,8 @@ The plan relies on these FACTs and DECISIONs:
   museum-tickets: a BOOKING for Museum visit covers Alex and Sam
   service-time: Luggage service starts at 2:00 pm on Saturday 15 May 2027
   service-length: Luggage service takes 1 h 30 min
+  service-arrival: nobody has to be at the hotel before Luggage service starts
+  service-needs-a-ticket: people need a right to take part in Luggage service
   flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
   flight-length: Flight home takes 2 h 30 min
   bag-drop: people must be at O'Hare 45 min before Flight home starts

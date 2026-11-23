@@ -123,7 +123,7 @@ function saysOf(trip, timed) {
  * `warnings` holds, at the place of each step, what the report in words warns of there.
  * `warns` on a mark holds those words, and `warned` on the calendar says that a mark has some.
  * An OPTION of the plan with nobody of the TRIP in it has no column, and so no mark: `says`
- * names it with its day and its time, and with what the report warns of there.
+ * names it with its PLACEs, its day and its time, and with what the report warns of there.
  * Each mark also holds the `records` that are about its step, and each bound its `record`.
  *
  * `stated` holds the words of the report for the cases in which it says the trip works: the
@@ -178,13 +178,13 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
   for (const bound of [trip.starts, trip.ends]) if (bound !== null && bound.day !== null && ruled.has(bound.record)) marked.add(bound.record);
   // An OPTION of the plan with nobody of the TRIP in it has no column to be drawn in: a
   // luggage service carries the bags while everybody is somewhere else. So no mark is made
-  // for it, and the calendar says in words what a mark would: the step with its day and its
-  // time, and what the report warns of there and says of it.
+  // for it, and the calendar says in words what a mark would: the step with its PLACEs, its
+  // day and its time, and what the report warns of there and says of it.
   const alone = (step) => step.kind === "option" && !step.columns.length && step.when !== null;
   const nobody = steps.filter(alone).map((step) => {
     const warns = step.warns.length ? ` The report warns there: ${step.warns.join(" ")}` : "";
     const asks = step.asks.length ? ` ${step.asks.join(" ")}` : "";
-    return ` Nobody of the TRIP is in ${step.name} on ${step.day}, ${step.late ? `${step.when}, ${step.late}` : step.when}, so no column shows it.${warns}${asks}`;
+    return ` Nobody of the TRIP is in ${step.name} (${step.where}) on ${step.day}, ${step.late ? `${step.when}, ${step.late}` : step.when}, so no column shows it.${warns}${asks}`;
   }).join("");
   // A step that the report warns about is marked where the calendar shows it. A step after
   // the days shown has no mark, and the calendar says how many of those the report warns about.

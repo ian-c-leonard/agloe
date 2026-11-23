@@ -21,19 +21,16 @@ from agloe.file import (
     CompleteRequiresObject,
     CompleteRights,
     CompleteTransfers,
-    Cutoff,
     Fact,
     File,
     Has,
     Lock,
     Money,
-    NeedsRight,
     ObjectStarts,
     Offer,
     RefusesObject,
     Requires,
     RequiresObject,
-    Satisfies,
     Start,
     StartsFrom,
     WithObject,
@@ -364,12 +361,12 @@ def reports(
 def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> bool:
     """Whether a plan relies on this FACT.
 
-    It relies on every FACT about an OPTION or a WAY it has in it. For an OPTION with nobody
-    in it, that leaves out the FACTs about the PERSONs who take part: its access cutoff,
-    whether it needs a right, and the WANTs it SATISFIES. It relies on no COMPLETE set
-    of travel: it takes no unlisted WAY. It relies on where a PERSON starts from where the
-    PERSON is in it, or has to end the TRIP at a PLACE: their path begins there, or they stay
-    there. It relies on the BOOKINGs and the OFFERs that give its PERSONs their rights:
+    It relies on every FACT about an OPTION or a WAY it has in it, also where nobody is in
+    the OPTION: a FACT about the PERSONs who take part can be why nobody does. It relies on
+    no COMPLETE set of travel: it takes no unlisted WAY. It relies on where a PERSON starts
+    from where the PERSON is in it, or has to end the TRIP at a PLACE: their path begins
+    there, or they stay there. It relies on the BOOKINGs and the OFFERs that give its
+    PERSONs their rights:
     ``used`` holds those. In a FILE with a cap it relies on every BOOKING: each says what it
     charged, and that is how each cap is known to hold. It relies on no FACT that the rights
     to an OPTION are COMPLETE. ``used`` also holds the FACTs about CAPABILITIES and about
@@ -394,9 +391,6 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> 
         return in_it or bool(has_to_end_at(file, fact.person))
     if isinstance(fact, Complete):
         return False
-    if isinstance(fact, Cutoff | NeedsRight | Satisfies):
-        # These are about the PERSONs who take part: with nobody in the OPTION they say nothing.
-        return any(step.option == fact.option and step.persons for step in itinerary)
     return fact.option in {step.option or step.way for step in itinerary}
 
 
