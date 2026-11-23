@@ -2812,16 +2812,17 @@ def _that_work(
 
     With "first", the list starts with the ITINERARY that ``itineraries`` returns first, and
     the rest of it is not complete. An OPTION can happen with nobody in it. For each choice
-    of PERSONs, every set of the OPTIONs that ``could_run_alone`` gives is tried, the
-    smallest first. For one order of the PERSONs, the search stops at the size of the first
-    set that works with the fewest WAYs that this order can have. A larger set with this
-    order gives a plan with as many WAYs or more, and with more OPTIONs. So PERSONs take
-    part in it as many times or more, and where it is as many, the plan with fewer OPTIONs
-    comes first. A set of the same size is still tried: it can hold an OPTION that is
-    listed earlier. A plan that takes more WAYs than the fewest stops nothing: a larger set
-    can bring an OBJECT to a PERSON who then travels less.
+    of PERSONs, every set of the OPTIONs that ``could_run_alone`` gives is tried, in the
+    order of ``_sets``. For one order of the PERSONs, the search stops at the first set
+    that works with the fewest WAYs that this order can have. A later set with this order
+    gives a plan with as many WAYs or more, so PERSONs take part in it as many times or
+    more. And it has more OPTIONs, or as many with the first one that differs listed
+    later in the FILE. So the plan of the earlier set comes first. A plan that takes more
+    WAYs than the fewest stops nothing: a later set can bring an OBJECT to a PERSON who
+    then travels less.
 
-    Where no set works for an order, every set is tried for it.
+    An order in which a PERSON has no route is never timed. Where no set works for
+    another order, every set is tried for it.
     """
     best: list[tuple[_Shown, Itinerary]] = []
     fewest: int | None = None
@@ -2839,17 +2840,17 @@ def _that_work(
             [i for i, persons in enumerate(who) if person.id in persons] for person in file.persons
         ]
         in_turn = [list(_orders(file, world, indexes, known)) for indexes in mine]
-        # For an order of the PERSONs: the fewest WAYs it can have, and the size of the first
-        # set of OPTIONs with nobody in them that worked with so few.
+        # For an order of the PERSONs: the fewest WAYs it can have, and whether a set of
+        # OPTIONs with nobody in them has worked with so few.
         least: dict[tuple[tuple[int, ...], ...], int | None] = {}
-        settled: dict[tuple[tuple[int, ...], ...], int] = {}
+        done: set[tuple[tuple[int, ...], ...]] = set()
         for empty in _sets(could_run_alone(file, world, who)):
             tried = False
             for orders in product(*in_turn):
                 if orders not in least:
                     least[orders] = _fewest_ways(file, world, orders, known)
-                if least[orders] is None or settled.get(orders, len(empty)) < len(empty):
-                    continue  # a PERSON has no route, or a smaller set comes first
+                if least[orders] is None or orders in done:
+                    continue  # a PERSON has no route, or an earlier set comes first
                 tried = True
                 found = scheduled(
                     file, world, who, orders, None, known, None, which == "any", None, empty
@@ -2860,14 +2861,14 @@ def _that_work(
                     return [found]
                 ways = sum(len(step.persons) for step in found if step.option is None)
                 if which == "first" and ways == least[orders]:
-                    settled.setdefault(orders, len(empty))
+                    done.add(orders)
                 taking_part = sum(len(step.persons) for step in found)
                 if fewest is None or taking_part < fewest:
                     best, fewest = [], taking_part
                 if taking_part == fewest:
                     best.append((_in_file_order(file, found, orders), found))
             if not tried:
-                break  # no order is left for this set, so none is left for a larger one
+                break  # no order is left for this set, so none is left for a later one
     shown: list[Itinerary] = []
     for _, found in sorted(best, key=lambda each: each[0]):
         if found not in shown:
@@ -2876,7 +2877,11 @@ def _that_work(
 
 
 def _sets(things: Sequence[int]) -> Iterator[frozenset[int]]:
-    """Every set of some things, the smallest first. Each is made when it is asked for."""
+    """Every set of some things, each made when it is asked for.
+
+    The smallest come first. Of two sets of one size, the one that comes first has the
+    earlier thing, of the things that only one of them has.
+    """
     for size in range(len(things) + 1):
         for chosen in combinations(things, size):
             yield frozenset(chosen)

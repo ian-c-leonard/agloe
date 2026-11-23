@@ -8974,7 +8974,9 @@ def test_the_solver_carries_an_object_only_in_an_option_that_happens() -> None:
     assert not answer(happens=False)
 
 
-def some_vans(count: int, *facts: Document) -> File:
+def some_vans(
+    count: int, *facts: Document, ways: Sequence[Document] = (), others: Sequence[str] = ()
+) -> File:
     """The afternoon of ``a_service`` with this many vans beside the service. Each leaves the
     hotel for O'Hare when the service does and can carry the bags, and nobody can ride."""
     vans = [f"van-{number}" for number in range(count)]
@@ -8982,17 +8984,22 @@ def some_vans(count: int, *facts: Document) -> File:
     for van in vans:
         stated += [*at(van, 14, 0, "PT1H30M"), carries(van, "bags")]
         stated += [needs_right(van), every_right(van)]
-    return a_service(*stated, *facts, more=[moves(van, "hotel", "ohare") for van in vans])
+    more = [moves(van, "hotel", "ohare") for van in vans]
+    return a_service(*stated, *facts, more=more, ways=ways, others=others)
 
 
 def test_many_services_that_can_each_carry_the_bags_are_not_tried_in_every_combination(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Ten vans leave the hotel for O'Hare with the service, and each can carry the bags.
-    Any one of them is enough, so a thousand sets of them work. The first alone is the
-    plan. Each one alone is timed, and then no larger set is made: a plan with one takes
-    as few WAYs as the travelers can. With the bags at O'Hare from the start, the plan
-    with none is timed and no other set is tried, though twenty vans have a million."""
+    Any one of them is enough, so a thousand sets of them work. The service alone is the
+    plan: it is listed first, and with it the travelers take as few WAYs as they can. So
+    the search times the plan with none and the plan with the service, and makes no set
+    after that. With the bags at O'Hare from the start, the plan with none is timed and no
+    other set is tried, though twenty vans have a million. A second route to O'Hare, a
+    walk and a cab, changes nothing: the fewest WAYs are those of the shortest route.
+    Where the Blue Line is the only WAY and Jo starts at the hotel, Jo has no route to the
+    flight, and nothing is timed."""
     tried = made = 0
     its_own, sets = reference.scheduled, reference._sets  # pyright: ignore[reportPrivateUsage]
 
@@ -9013,9 +9020,10 @@ def test_many_services_that_can_each_carry_the_bags_are_not_tried_in_every_combi
     plan = first_shown(file, worst_case(file))
     assert carried_in(plan) == [("service", ("bags",))]
     assert [each.option for each in plan or () if each.option and not each.persons] == ["service"]
-    assert (tried, made) == (12, 13)  # no van, each of the eleven, and one set of two
+    assert (tried, made) == (2, 3)  # none, the service, and one set more that is not tried
 
-    twenty = some_vans(20)
+    longer = [way_between("walk", "hotel", "museum"), way("cab", "hotel", "ohare")]
+    twenty = some_vans(20, takes("walk", "PT15M"), takes("cab", "PT30M"), ways=longer)
     at_ohare = lies_at_fact("bags", "ohare")
     there = replace(
         twenty,
@@ -9025,6 +9033,15 @@ def test_many_services_that_can_each_carry_the_bags_are_not_tried_in_every_combi
     plan = first_shown(there, worst_case(there))
     assert plan is not None and all(each.persons for each in plan)
     assert (tried, made) == (1, 2)
+
+    stranded = some_vans(2, starts_from("jo", "hotel"), others=["jo"])
+    stranded = replace(
+        stranded, decisions=(*stranded.decisions, answers.Lock("jo-flies", "flight", ("jo",)))
+    )
+    tried = made = 0
+    assert first_shown(stranded, worst_case(stranded)) is None
+    assert not reference.any_works(stranded, worst_case(stranded))
+    assert tried == 0
     monkeypatch.setattr(reference, "scheduled", its_own)
     monkeypatch.setattr(reference, "_sets", sets)
     assert checked(file).itinerary == first_shown(file, worst_case(file))
