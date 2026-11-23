@@ -5,6 +5,7 @@ from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import replace
 from itertools import combinations, pairwise, permutations, product
 from random import Random
+from typing import Any
 
 import pytest
 from ortools.sat.python import cp_model
@@ -2290,6 +2291,40 @@ def the_solver_gives_up_after(monkeypatch: pytest.MonkeyPatch, conflicts: int) -
         return solver
 
     monkeypatch.setattr(compiler, "_solver", capped)
+
+
+def test_the_model_says_nothing_about_an_order_that_fixed_starts_rule_out() -> None:
+    """The gallery at 10:00 am refuses the camera that Alex has. At coffee at 11:00 am Alex
+    could hand it to Jo, and a locker at 9:00 am keeps it. Coffee comes after the gallery,
+    so it is no way for Alex to be rid of the camera before the gallery, and the model has
+    no choice for that. The locker comes before, and the model has one."""
+    options = [stays("locker", "museum"), stays("gallery", "museum"), stays("coffee", "museum")]
+    facts = [
+        *at("locker", 9),
+        *at("gallery", 10),
+        *at("coffee", 11),
+        has_object("alex", "camera"),
+        keeps("locker", "camera"),
+        refuses_object("gallery", "camera"),
+        hands_over("coffee", "camera"),
+        every_use("camera"),
+        every_transfer("camera"),
+    ]
+    locks = [lock("gallery", "alex"), lock("coffee", "alex", "jo")]
+    file = trip(["alex", "jo"], ["museum"], options, facts, locks, objects=["camera"])
+    search = compiler._Search(file, worst_case(file), plain=True)  # pyright: ignore[reportPrivateUsage]
+    model: Any = search.model.proto
+    names = [str(each.name) for each in model.variables]
+    assert [name for name in names if " is rid of " in name] == [
+        "0 is rid of camera in locker before gallery"
+    ]
+    assert "gallery after coffee" not in names
+    found = checked(file)
+    assert [(each.option, each.persons) for each in found.itinerary] == [
+        ("locker", ("alex",)),
+        ("gallery", ("alex",)),
+        ("coffee", ("alex", "jo")),
+    ]
 
 
 def test_five_visitors_are_shown_at_once_whoever_might_have_the_bag(
