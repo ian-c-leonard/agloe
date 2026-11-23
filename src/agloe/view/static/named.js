@@ -141,17 +141,21 @@ function namedIn(list) {
   return Array.isArray(list) ? list.filter((each) => each !== null && typeof each === "object").map((each) => each.option).filter((id) => typeof id === "string") : [];
 }
 
-/** The OPTIONs that an OBJECT has to be at hand for, in one of those things. */
-export function atHandFor(need) {
-  return namedIn(need.at_hand_for);
+/**
+ * The OPTIONs that an OBJECT has to be at hand for, in one of those things, or those that it
+ * has to stay out of: give it "requires" for the first, and "refuses" for the second.
+ */
+export function atHandFor(need, check) {
+  const mine = Array.isArray(need.at_hand_for) ? need.at_hand_for.filter((each) => each !== null && typeof each === "object" && each.check === check) : [];
+  return namedIn(mine);
 }
 
 /**
  * The OPTIONs that one of those things names: its own, each that somebody has to buy a place
- * for, and each that an OBJECT has to be at hand for.
+ * for, each that an OBJECT has to be at hand for, and each that it has to stay out of.
  */
 export function optionsOf(need) {
-  return [...(typeof need.option === "string" ? [need.option] : []), ...namedIn(need.buys), ...atHandFor(need)];
+  return [...(typeof need.option === "string" ? [need.option] : []), ...namedIn(need.buys), ...namedIn(need.at_hand_for)];
 }
 
 /**
@@ -167,21 +171,34 @@ export function takenIn(report) {
 
 /**
  * Where each OBJECT is in a plan, as a report states it: for each OBJECT its id, and the
- * OPTIONs that the report says require it, in the report's order. Only a report that shows a
- * plan holds any, and a list that is not of that shape is none.
+ * OPTIONs that the report says require it or refuse it, one for each line that the report in
+ * words has under the OBJECT. Those lines go in the order of the steps of the plan, and an
+ * OPTION that requires the OBJECT and refuses it has the line about requiring first. Only a
+ * report that shows a plan holds any, and a list that is not of that shape is none. So is one
+ * that names an OPTION that the plan does not hold: its lines have no order.
  */
 export function objectsIn(report) {
   const stated = report !== null && typeof report === "object" && report.answer === "FEASIBLE" ? report.objects : null;
   const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
-  const isOne = (each) => isRecord(each) && typeof each.object === "string" && Array.isArray(each.required_by) && each.required_by.every((by) => isRecord(by) && typeof by.option === "string");
-  return Array.isArray(stated) && stated.every(isOne) ? stated.map((each) => ({ object: each.object, options: each.required_by.map((by) => by.option) })) : [];
+  const isBy = (list) => Array.isArray(list) && list.every((by) => isRecord(by) && typeof by.option === "string");
+  const isOne = (each) => isRecord(each) && typeof each.object === "string" && isBy(each.required_by) && isBy(each.refused_by);
+  if (!Array.isArray(stated) || !stated.every(isOne)) return [];
+  const steps = Array.isArray(report.itinerary) ? report.itinerary.map((step) => (isRecord(step) && typeof step.option === "string" ? step.option : null)) : [];
+  const things = stated.map((each) => {
+    const checks = [...each.required_by.map((by) => [steps.indexOf(by.option), 0, by.option]), ...each.refused_by.map((by) => [steps.indexOf(by.option), 1, by.option])];
+    checks.sort((one, other) => one[0] - other[0] || one[1] - other[1]);
+    return { object: each.object, options: checks.map(([, , option]) => option), placed: checks.every(([at]) => at >= 0) };
+  });
+  return things.every((each) => each.placed) ? things.map(({ object, options }) => ({ object, options })) : [];
 }
 
 /**
  * Where a report on a plan has each OBJECT, as the report as JSON holds it: for each `object`,
  * its `stays` from the start of the TRIP on, and its `uses`, the OPTIONs of the plan that
- * require it or might. A stay has `where` the OBJECT is, or each place it might be: each with
- * a `person` or at a `place`. `since` is the OPTION from whose start it is there, and `how`
+ * require it or might. `refusals` holds the OPTIONs of the plan that refuse it or might, each
+ * as a use is. A stay has `where` the OBJECT is, or each place it might be: each with
+ * a `person` or at a `place`, and a `place` of null is somewhere the FILE does not name.
+ * `since` is the OPTION from whose start it is there, and `how`
  * says what that OPTION did, and both are null from the start of the TRIP. A use has its
  * `option`, whether a FACT says that the OPTION requires the OBJECT (`stated`), and `where`
  * the OBJECT is just before the OPTION starts. Only a report that shows a plan holds any, and
@@ -190,11 +207,12 @@ export function objectsIn(report) {
 export function carriedIn(report) {
   const stated = report !== null && typeof report === "object" && report.answer === "FEASIBLE" ? report.objects : null;
   const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
-  const isWhere = (list) => Array.isArray(list) && list.length > 0 && list.every((each) => isRecord(each) && (typeof each.person === "string") !== (typeof each.place === "string"));
+  const isWhere = (list) => Array.isArray(list) && list.length > 0 && list.every((each) => isRecord(each) && (typeof each.person === "string") !== (typeof each.place === "string" || each.place === null));
   const isStay = (each) => isRecord(each) && isWhere(each.where) && (typeof each.since === "string" ? typeof each.how === "string" : each.since === null && each.how === null);
   const isUse = (each) => isRecord(each) && typeof each.option === "string" && typeof each.stated === "boolean" && isWhere(each.where);
-  const isOne = (each) => isRecord(each) && typeof each.object === "string" && Array.isArray(each.path) && each.path.every(isStay) && Array.isArray(each.required_by) && each.required_by.every(isUse);
-  return Array.isArray(stated) && stated.every(isOne) ? stated.map((each) => ({ object: each.object, stays: each.path, uses: each.required_by })) : [];
+  const areUses = (list) => Array.isArray(list) && list.every(isUse);
+  const isOne = (each) => isRecord(each) && typeof each.object === "string" && Array.isArray(each.path) && each.path.every(isStay) && areUses(each.required_by) && areUses(each.refused_by);
+  return Array.isArray(stated) && stated.every(isOne) ? stated.map((each) => ({ object: each.object, stays: each.path, uses: each.required_by, refusals: each.refused_by })) : [];
 }
 
 /** The cases that need something for which `about` says yes, as their places among the cases. */

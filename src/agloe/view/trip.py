@@ -49,9 +49,10 @@ CAPABILITY, and the FACT that the FILE states every one of its OPTIONs that requ
 Whether the PERSONs in an OPTION meet what it requires is for the COMPILER to say.
 
 The page is sent the OBJECTs of the FILE: where each is when the TRIP starts, each OPTION of
-which a FACT says whether it requires the OBJECT, each OPTION of which a FACT says that it
-hands the OBJECT over, keeps it or leaves it alone, and the FACTs that the FILE states every
-OPTION of each kind. Where an OBJECT is in a plan is for the COMPILER to say.
+which a FACT says whether it requires the OBJECT, each OPTION of which a FACT says whether it
+refuses the OBJECT, each OPTION of which a FACT says that it hands the OBJECT over, keeps it
+or leaves it alone, and the FACTs that the FILE states every OPTION of each kind. Where an
+OBJECT is in a plan is for the COMPILER to say.
 
 Each name is sent as the report shows it. A PERSON, a PLACE, an OPTION, a WAY, a WANT, a
 CAPABILITY, a BUDGET or an OBJECT whose name another of its kind has comes with its id, and a
@@ -199,12 +200,14 @@ _OBJECT: _Shape = {
     "name": str,
     "starts": (dict, _NONE),
     "requires": list,
+    "refuses": list,
     "requires_complete": (str, _NONE),
     "transfers": list,
     "transfers_complete": (str, _NONE),
 }
 _OBJECT_STARTS: _Shape = {"person": (str, _NONE), "place": (str, _NONE), "record": str}
 _OBJECT_NEED: _Shape = {"option": str, "name": str, "needed": bool, "record": str}
+_OBJECT_REFUSAL: _Shape = {"option": str, "name": str, "refused": bool, "record": str}
 _TRANSFER: _Shape = {"option": str, "name": str, "does": str, "record": str}
 _DOES = frozenset({"hands_over", "keeps", "nothing"})  # what an OPTION does with an OBJECT
 _CAPABILITY: _Shape = {
@@ -627,17 +630,19 @@ def _objects(file: File, names: Mapping[str, str]) -> list[Trip]:
 
     ``starts`` is the FACT about where the OBJECT is when the TRIP starts: a PERSON has it, or
     it lies at a PLACE. ``requires`` holds each OPTION of which a FACT says whether it requires
-    the OBJECT. ``transfers`` holds each OPTION of which a FACT says what it does with the
-    OBJECT: it hands it over, keeps it, or leaves it alone. Both are in the FILE's order of
+    the OBJECT, and ``refuses`` each one of which a FACT says whether it refuses it.
+    ``transfers`` holds each OPTION of which a FACT says what it does with the OBJECT: it
+    hands it over, keeps it, or leaves it alone. All three are in the FILE's order of
     OPTIONs, each with its FACT. ``requires_complete`` is the FACT that the FILE states every
-    one of its OPTIONs that requires the OBJECT, and ``transfers_complete`` the FACT that it
-    states every OPTION that hands the OBJECT over or keeps it.
+    one of its OPTIONs that requires the OBJECT or refuses it, and ``transfers_complete`` the
+    FACT that it states every OPTION that hands the OBJECT over or keeps it.
     """
     objects: list[Trip] = []
     called = _names(file.objects)
     for thing in file.objects:
         starts = file.object_starts(thing.id)
         needs = [(option, file.object_requirement(option.id, thing.id)) for option in file.options]
+        bars = [(option, file.object_refusal(option.id, thing.id)) for option in file.options]
         does = [(option, file.action(option.id, thing.id)) for option in file.options]
         required, moved = (
             file.object_requirements_complete(thing.id),
@@ -658,6 +663,16 @@ def _objects(file: File, names: Mapping[str, str]) -> list[Trip]:
                         "record": fact.id,
                     }
                     for option, fact in needs
+                    if fact is not None
+                ],
+                "refuses": [
+                    {
+                        "option": option.id,
+                        "name": names[option.id],
+                        "refused": fact.refused,
+                        "record": fact.id,
+                    }
+                    for option, fact in bars
                     if fact is not None
                 ],
                 "requires_complete": None if required is None else required.id,
@@ -1257,9 +1272,9 @@ def _are_objects(
     """Whether these are the OBJECTs of such a TRIP, each with an id of its own.
 
     An OBJECT starts with a PERSON of the TRIP or at a PLACE of the TRIP, and never both. It
-    names each OPTION once among those that require it or do not, and once among those that
-    do something with it: an OPTION of the TRIP, which hands it over, keeps it, or leaves it
-    alone.
+    names each OPTION once among those that require it or do not, once among those that
+    refuse it or do not, and once among those that do something with it: an OPTION of the
+    TRIP, which hands it over, keeps it, or leaves it alone.
     """
     seen: set[str] = set()
     for thing in cast("list[object]", objects):
@@ -1279,7 +1294,8 @@ def _are_objects(
                 return False
             if not (person is None or person in persons) or not (place is None or place in places):
                 return False
-        for kind, shape in (("requires", _OBJECT_NEED), ("transfers", _TRANSFER)):
+        kinds = (("requires", _OBJECT_NEED), ("refuses", _OBJECT_REFUSAL), ("transfers", _TRANSFER))
+        for kind, shape in kinds:
             named: list[object] = []
             for each in cast("list[object]", said[kind]):
                 if not _fits(each, shape):

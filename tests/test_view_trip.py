@@ -260,6 +260,10 @@ def test_every_example_is_sent_as_a_trip_that_a_page_can_draw(path: Path) -> Non
         assert [(each["option"], each["needed"], each["record"]) for each in thing["requires"]] == [
             (option, fact.needed, fact.id) for option, fact in needs if fact is not None
         ]
+        bars = [(each.id, file.object_refusal(each.id, thing["id"])) for each in file.options]
+        assert [(each["option"], each["refused"], each["record"]) for each in thing["refuses"]] == [
+            (option, fact.refused, fact.id) for option, fact in bars if fact is not None
+        ]
         does = [(each.id, file.action(each.id, thing["id"])) for each in file.options]
         assert [(each["option"], each["does"], each["record"]) for each in thing["transfers"]] == [
             (option, fact.does, fact.id) for option, fact in does if fact is not None
@@ -727,6 +731,7 @@ def test_the_objects_of_the_file_are_sent_with_what_the_file_says_of_each() -> N
                     "record": "flight-needs-the-bags",
                 }
             ],
+            "refuses": [],
             "requires_complete": "every-use-of-the-bags",
             "transfers": [
                 {
@@ -2099,6 +2104,7 @@ OBJECT: dict[str, Any] = {
     "name": "the key",
     "starts": {"person": "alex", "place": None, "record": "alex-has-the-key"},
     "requires": [{"option": "night", "name": "night", "needed": True, "record": "night-needs-it"}],
+    "refuses": [{"option": "night", "name": "night", "refused": False, "record": "night-lets-it"}],
     "requires_complete": "every-use-of-the-key",
     "transfers": [
         {"option": "night", "name": "night", "does": "keeps", "record": "night-keeps-it"}
@@ -2120,6 +2126,10 @@ def _object_need(**other: object) -> Callable[[Trip], None]:
     return _object(requires=[{**OBJECT["requires"][0], **other}])
 
 
+def _object_refusal(**other: object) -> Callable[[Trip], None]:
+    return _object(refuses=[{**OBJECT["refuses"][0], **other}])
+
+
 def _transfer(**other: object) -> Callable[[Trip], None]:
     return _object(transfers=[{**OBJECT["transfers"][0], **other}])
 
@@ -2131,17 +2141,25 @@ def test_a_trip_with_an_object_is_a_trip() -> None:
     assert holds(sent)
     # An OBJECT of which the FILE says nothing.
     _object(
-        starts=None, requires=[], requires_complete=None, transfers=[], transfers_complete=None
+        starts=None,
+        requires=[],
+        refuses=[],
+        requires_complete=None,
+        transfers=[],
+        transfers_complete=None,
     )(sent)
     assert holds(sent)
     # One that lies at a PLACE when the TRIP starts.
     _object_starts(person=None, place="hotel")(sent)
     assert holds(sent)
-    # An OPTION hands it over, keeps it, or leaves it alone, and requires it or does not.
+    # An OPTION hands it over, keeps it, or leaves it alone, and requires it or does not, and
+    # refuses it or does not.
     for does in ("hands_over", "keeps", "nothing"):
         _transfer(does=does)(sent)
         assert holds(sent)
     _object_need(needed=False)(sent)
+    assert holds(sent)
+    _object_refusal(refused=True)(sent)
     assert holds(sent)
 
 
@@ -2441,6 +2459,17 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "an option of an object with no fact": _object_need(record=""),
     "an object that names an option twice among what requires it": _object(
         requires=[OBJECT["requires"][0]] * 2
+    ),
+    "an object whose refusals are no list": _object(refuses={}),
+    "an option that refuses an object and is no record": _object(refuses=["night"]),
+    "an option that refuses an object and that the trip does not have": _object_refusal(
+        option="dinner"
+    ),
+    "an option that refuses an object with a blank name": _object_refusal(name=""),
+    "an option that refuses an object as a number": _object_refusal(refused=1),
+    "an option that refuses an object with no fact": _object_refusal(record=""),
+    "an object that names an option twice among what refuses it": _object(
+        refuses=[OBJECT["refuses"][0]] * 2
     ),
     "an option that does something else with an object": _transfer(does="loses"),
     "an option that moves an object and that the trip does not have": _transfer(option="dinner"),

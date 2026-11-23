@@ -1,0 +1,9 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "where-the-bags-start",
+    "galleries-refuse-the-bags",
+    "everything-that-moves-the-bags",
+    "lock-visit"
+  ]
+}

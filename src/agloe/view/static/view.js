@@ -550,8 +550,9 @@ function drawCapabilities(shown) {
 
 /**
  * The OBJECTs of the FILE: a card for each, with where it is when the TRIP starts, and under
- * it the OPTIONs that the FILE says require it or do not, and those that it says hand it
- * over, keep it or leave it alone. An OPTION that the calendar holds is tied to its step.
+ * it the OPTIONs that the FILE says require it or do not, those that it says refuse it or do
+ * not, and those that it says hand it over, keep it or leave it alone. An OPTION that the
+ * calendar holds is tied to its step.
  */
 function drawObjects(shown) {
   const box = part("objects");
@@ -564,7 +565,7 @@ function drawObjects(shown) {
     card.append(made("h3", "card-name", thing.name), made("p", "card-holds", thing.starts));
     if (thing.plan) card.append(made("p", "card-plan", thing.plan));
     const options = made("ul", "card-options");
-    for (const option of [...thing.requires, ...thing.might, ...thing.transfers]) options.append(entry(option, drawingOf(option, option.option), option.does, option.takes, option.plan));
+    for (const option of [...thing.requires, ...thing.refuses, ...thing.might, ...thing.transfers]) options.append(entry(option, drawingOf(option, option.option), option.does, option.takes, option.plan));
     if (options.children.length) card.append(options);
     for (const words of thing.whole) card.append(made("p", "card-whole", words));
     box.append(card);

@@ -206,9 +206,10 @@ export function lines(text, report, trip) {
   }
   // Where each OBJECT is in the plan: under their heading, up to the first line that is not
   // set in, one line for each OBJECT of the report as JSON, and after it one line for each
-  // OPTION that requires it. They are tied only where the words hold exactly as many lines as
-  // that. How far a line is set in is not compared: a name can start with a space. A line
-  // about a requirement is about the OBJECT and about the step that its OPTION is.
+  // OPTION that requires it or refuses it. They are tied only where the words hold exactly as
+  // many lines as that. How far a line is set in is not compared: a name can start with a
+  // space. A line about a requirement or a refusal is about the OBJECT and about the step that
+  // its OPTION is.
   const things = objectsIn(report);
   const above = found.flatMap((line, at) => (line.text === OBJECTS ? [at] : []));
   if (things.length && above.length === 1) {

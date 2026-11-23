@@ -1,0 +1,26 @@
+{
+  "answer": "UNDETERMINED",
+  "missing": [
+    [
+      {
+        "what": "another transfer",
+        "object": "bags",
+        "at_hand_for": [
+          {
+            "option": "museum-visit",
+            "check": "refuses",
+            "stated": true,
+            "covered": false
+          },
+          {
+            "option": "flight",
+            "check": "requires",
+            "stated": true,
+            "covered": true
+          }
+        ],
+        "settled": false
+      }
+    ]
+  ]
+}

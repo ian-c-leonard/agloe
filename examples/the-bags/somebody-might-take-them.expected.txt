@@ -1,0 +1,5 @@
+UNDETERMINED: the FILE does not say enough to tell.
+
+The trip might work if another transfer leaves the bags at hand for Flight home, and keeps the bags out of Museum visit.
+
+That is not settled. What the FILE lists does not do that for the bags, and the COMPILER has not worked out whether another transfer can.
