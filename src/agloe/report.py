@@ -916,7 +916,8 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
     the fourteenth where an OBJECT that was carried would arrive too late. Those are broken
     at one of the plan's steps. So a finding with no line is a fault in this program, and it
     stops here. An OBJECT that would not be at hand has one mark at its step, whatever needs
-    it there: the OPTION requires it, or it is handed over or carried there.
+    it there: the OPTION requires it, or it is handed over or carried there. The mark says
+    how long after the start of the step the OBJECT would arrive, where a finding knows.
     """
     lines = _lines(report.itinerary)
     line_of = {
@@ -926,12 +927,13 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
         step.option: number for number, (step, _) in enumerate(lines) if step.option is not None
     }
     together: dict[tuple[int, Constraint, int | None], list[str]] = {}
-    not_at_hand: dict[int, list[str]] = {}
+    # At each line, each OBJECT that would not be at hand, with how late it would arrive.
+    not_at_hand: dict[int, dict[str, int | None]] = {}
     for found in report.at_worst:
         number = line_of[found.step] if found.step is not None else line_of_option[found.option]
         if found.constraint is Constraint.AT_HAND and found.object is not None:
-            if found.object not in not_at_hand.setdefault(number, []):
-                not_at_hand[number].append(found.object)
+            missing = not_at_hand.setdefault(number, {})
+            missing[found.object] = missing.get(found.object) or found.late
             continue
         together.setdefault((number, found.constraint, found.late), []).extend(found.persons)
     marks: dict[int, list[str]] = {}
@@ -961,11 +963,16 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
             mark = f'This would break the rule "{constraint.value}" for {who}.'
         marks.setdefault(number, []).append(mark)
     things = _names(file.objects)
-    for number, late in not_at_hand.items():
+    for number, missing in not_at_hand.items():
         for thing in file.objects:
-            if thing.id in late:
+            if thing.id not in missing:
+                continue
+            late = missing[thing.id]
+            if late is None:
                 mark = f"{things[thing.id]} would not be at hand when this starts."
-                marks.setdefault(number, []).append(mark)
+            else:
+                mark = f"{things[thing.id]} would arrive {_span(late)} after this starts."
+            marks.setdefault(number, []).append(mark)
     return marks
 
 

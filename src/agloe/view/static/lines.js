@@ -13,7 +13,7 @@
 //
 // Nothing here judges a TRIP. It finds what the report already says, line by line.
 
-import { boughtIn, cappedIn, casesIn, listed, objectsIn, requirementsIn, takenIn, toBuyIn } from "./named.js";
+import { boughtIn, cappedIn, casesIn, listed, notAtHandIn, objectsIn, requirementsIn, takenIn, toBuyIn } from "./named.js";
 
 /** A line that shows one step of a plan: "  2:00 pm to 3:00 pm: Museum visit, Alex and Sam". */
 const STEP = /^ {2}\d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+, .+$/;
@@ -205,6 +205,17 @@ export function lines(text, report, trip) {
     const said = [];
     for (; next < found.length && found[next].text.startsWith("    ") && free(found[next]) && !found[next].about.length; next += 1) said.push(found[next]);
     if (said.length === inOrder.length) said.forEach((line, n) => (line.about = [String(found[at].step), `object:${inOrder[n]}`]));
+  }
+  // A warning that an OBJECT would not be at hand comes last among the warnings under its
+  // step: one line for each such OBJECT that the report as JSON names at that OPTION, in the
+  // FILE's order of OBJECTs. Each is about that OBJECT as well as about its step.
+  for (const { option, objects } of notAtHandIn(report)) {
+    const warned = found.filter((line) => line.warns && line.step !== null && line.step === stepOf(option));
+    if (!objects.every((id) => placeOf.has(id)) || warned.length < objects.length) continue;
+    const last = warned.slice(warned.length - objects.length);
+    if (!last.every((line) => !line.about.length)) continue;
+    const inOrder = [...objects].sort((one, other) => placeOf.get(one) - placeOf.get(other));
+    last.forEach((line, n) => (line.about = [`object:${inOrder[n]}`]));
   }
   // Where each OBJECT is in the plan: under their heading, up to the first line that is not
   // set in, one line for each OBJECT of the report as JSON, and after it one line for each

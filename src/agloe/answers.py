@@ -480,8 +480,10 @@ def _carried(
     later step uses the OBJECT. Where the plan shows no end, nobody knows when the OBJECT
     arrives, and nothing is said of where it is afterwards.
 
-    ``world`` is the worst case, and the plan works in it. So the OBJECT is where this says
-    in every possible world, and the FACTs are there.
+    ``world`` is the worst case, and the plan works in it. So the FACTs are there, and the
+    OBJECT is where this says wherever the steps end as the plan shows them. An OBJECT that
+    is carried arrives when its OPTION ends, and that can be sooner in a possible world:
+    the plan works then too, as the rules page says of a shorter duration.
     """
     people = {person.id: number for number, person in enumerate(file.persons)}
     places = {place.id: number for number, place in enumerate(file.places)}

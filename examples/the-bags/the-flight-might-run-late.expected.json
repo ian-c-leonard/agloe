@@ -134,7 +134,7 @@
       "persons": [
         "jo"
       ],
-      "late": null,
+      "late": "PT30M",
       "object": "bags"
     }
   ]

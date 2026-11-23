@@ -176,6 +176,24 @@ export function takenIn(report) {
 }
 
 /**
+ * The OBJECTs that would not be at hand at each OPTION of a plan if the uncertain parts took
+ * their longest, as a report states it: for each such OPTION its id and the ids of those
+ * OBJECTs, each once, in the report's order. Only a report that shows a plan holds any.
+ */
+export function notAtHandIn(report) {
+  const found = report !== null && typeof report === "object" && report.answer === "FEASIBLE" && Array.isArray(report.at_worst) ? report.at_worst : [];
+  const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
+  const late = new Map();
+  for (const each of found) {
+    if (!isRecord(each) || typeof each.option !== "string" || typeof each.object !== "string") continue;
+    if (typeof each.constraint !== "string" || !each.constraint.startsWith("Each OBJECT is at hand")) continue;
+    if (!late.has(each.option)) late.set(each.option, []);
+    if (!late.get(each.option).includes(each.object)) late.get(each.option).push(each.object);
+  }
+  return [...late].map(([option, objects]) => ({ option, objects }));
+}
+
+/**
  * Where each OBJECT is in a plan, as a report states it: for each OBJECT its id, and the
  * OPTIONs that the report says require it or refuse it, one for each line that the report in
  * words has under the OBJECT. Those lines go in the order of the steps of the plan, and an

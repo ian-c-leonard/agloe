@@ -5,7 +5,7 @@ Saturday 15 May 2027 (times in America/Chicago)
   5:00 pm to 7:30 pm: Flight home, Alex and Sam
     This carries the bags.
   7:45 pm to 7:55 pm: Jo collects the bags, Jo
-    ! the bags would not be at hand when this starts.
+    ! the bags would arrive 30 min after this starts.
 
 WARNING: no plan is sure to hold if the uncertain parts take their longest. Each line marked "!" says what would go wrong at the step above it.
 

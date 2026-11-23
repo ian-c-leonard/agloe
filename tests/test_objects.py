@@ -720,7 +720,21 @@ def test_a_hand_over_is_in_an_option_to_a_person_who_takes_part_once() -> None:
             broken(file, world, plan)
 
 
-def test_where_an_object_is_depends_on_no_duration() -> None:
+def test_a_carry_is_in_an_option_once_and_not_beside_a_hand_over() -> None:
+    file = a_desk(lies_at("passport", "desk"), carries("first", "passport"))
+    world = settled(file)
+    wrong: list[Itinerary] = [
+        (step("first", "desk", 9, "alex", carried=("keys",)),),
+        (step("first", "desk", 9, "alex", carried=("passport", "passport")),),
+        (replace(walk("alex", "desk", "office", 9, 0), carried=("passport",)),),
+        (step("first", "desk", 9, "alex", handed=(("passport", "alex"),), carried=("passport",)),),
+    ]
+    for plan in wrong:
+        with pytest.raises(ValueError, match="carrie"):
+            broken(file, world, plan)
+
+
+def test_where_an_object_is_depends_on_no_duration_unless_it_is_carried() -> None:
     """The same plan at the longest durations has the passport in the same places."""
     file = a_desk(
         has_object("alex", "passport"),
@@ -3049,7 +3063,6 @@ type Chain = tuple[
 # One order of some OPTIONs as gaps, with hand-overs and carries: an OPTION, an OBJECT and a
 # PERSON, or no PERSON for a carry.
 type Ordered = tuple[list[tuple[int, int, int]], list[tuple[int, str, str | None]]]
-NOT_MOVED = "nobody"  # stands for "no hand-over and no carry here" among the choices
 
 
 def for_arrivals(
@@ -3133,19 +3146,21 @@ def every_chain(
                 for does in [world.does.get((options[index].id, thing))]
                 if does in ("hands_over", "carries", "any") and thing not in world.brought
             ]
-            choices = [
+            # In each of them: nothing, a hand-over to one who takes part, or a carry. A
+            # choice names its kind, so that no id of a PERSON can be taken for one.
+            choices: list[list[tuple[str, str | None]]] = [
                 [
-                    NOT_MOVED,
-                    *(who[index] if does != "carries" else ()),
-                    *([None] if does != "hands_over" else []),
+                    ("leave", None),
+                    *(("hand", person) for person in (who[index] if does != "carries" else ())),
+                    *([("carry", None)] if does != "hands_over" else []),
                 ]
                 for index, _, does in slots
             ]
             for chosen in product(*choices):
                 given = [
                     (index, thing, person)
-                    for (index, thing, _), person in zip(slots, chosen, strict=True)
-                    if person != NOT_MOVED
+                    for (index, thing, _), (kind, person) in zip(slots, chosen, strict=True)
+                    if kind != "leave"
                 ]
                 arrive = [
                     gap for thing in mine for gap in for_arrivals(file, world, order, thing, given)
@@ -6644,8 +6659,10 @@ def sail(*persons: str, carried: tuple[str, ...] = (), lands: int | None = 10) -
     return Step("ferry", "quay", "island", persons, seconds(9), end, carried=carried)
 
 
-def bag_not_at_hand(option: str, *persons: str) -> Broken:
-    return Broken(Constraint.AT_HAND, option, persons, object="bag")
+def bag_not_at_hand(option: str, *persons: str, late: int | None = None) -> Broken:
+    """The bag is not at hand for an OPTION. ``late`` is how many seconds after its start
+    the bag would be, where the bag is in an OPTION that ends at the same PLACE."""
+    return Broken(Constraint.AT_HAND, option, persons, late, object="bag")
 
 
 AT_THE_QUAY = frozenset({Where(place="quay")})
@@ -6674,7 +6691,8 @@ def test_an_object_is_at_hand_for_nothing_while_it_is_carried() -> None:
     )
     world = settled(file)
     plan = (sail("alex", carried=("bag",)), step("desk", "island", 9, "sam", minute=30))
-    assert broken(file, world, plan) == [bag_not_at_hand("desk", "sam")]
+    # The finding says how long after the desk opens the bag would be there.
+    assert broken(file, world, plan) == [bag_not_at_hand("desk", "sam", late=1800)]
     assert just_before(file, world, plan)["bag"][1] == IN_THE_FERRY
     # It is still in the ferry after the desk, and nothing lists a later step.
     assert whereabouts(file, world, plan)["bag"][2] == IN_THE_FERRY
@@ -6716,12 +6734,12 @@ def test_an_object_is_carried_only_where_it_is_at_hand() -> None:
     file = a_crossing(lies_at("bag", "island"), carries("ferry", "bag"))
     world = settled(file)
     plan = (sail("alex", carried=("bag",)),)
-    assert broken(file, world, plan) == [bag_not_at_hand("ferry")]
+    assert broken(file, world, plan) == [bag_not_at_hand("ferry", "alex")]
     assert whereabouts(file, world, plan)["bag"] == (ON_THE_ISLAND, ON_THE_ISLAND)
     # With a PERSON who takes part, it is at hand. With anybody else, it is not.
     held = a_crossing(has_object("sam", "bag"), carries("ferry", "bag"))
     assert broken(held, settled(held), (sail("sam", carried=("bag",)),)) == []
-    assert broken(held, settled(held), plan) == [bag_not_at_hand("ferry")]
+    assert broken(held, settled(held), plan) == [bag_not_at_hand("ferry", "alex")]
 
 
 @pytest.mark.parametrize("does", [None, keeps, hands_over])
@@ -6729,7 +6747,7 @@ def test_an_object_is_carried_only_in_an_option_that_carries_it(does: Any) -> No
     facts = [lies_at("bag", "quay")] + ([] if does is None else [does("ferry", "bag")])
     file = a_crossing(*facts)
     plan = (sail("alex", carried=("bag",)),)
-    assert broken(file, settled(file), plan) == [bag_not_at_hand("ferry")]
+    assert broken(file, settled(file), plan) == [bag_not_at_hand("ferry", "alex")]
     assert whereabouts(file, settled(file), plan)["bag"] == (AT_THE_QUAY, AT_THE_QUAY)
 
 
@@ -6748,7 +6766,7 @@ def test_an_option_that_stays_at_one_place_can_carry_an_object() -> None:
     assert broken(file, world, later) == []
     assert just_before(file, world, later)["bag"] == (WITH_ALEX, AT_THE_QUAY)
     meanwhile = (counter, step("booth", "quay", 8, "sam", minute=15))
-    assert broken(file, world, meanwhile) == [bag_not_at_hand("booth", "sam")]
+    assert broken(file, world, meanwhile) == [bag_not_at_hand("booth", "sam", late=900)]
     assert just_before(file, world, meanwhile)["bag"][1] == {Where(option="counter")}
 
 
@@ -6767,7 +6785,7 @@ def test_an_option_that_refuses_an_object_carries_it_only_from_where_it_lies() -
     assert whereabouts(held, settled(held), plan)["bag"] == (WITH_ALEX, WITH_ALEX)
     # Sam sails alone: the bag that Alex has is not at hand.
     alone = (sail("sam", carried=("bag",)),)
-    assert broken(held, settled(held), alone) == [bag_not_at_hand("ferry")]
+    assert broken(held, settled(held), alone) == [bag_not_at_hand("ferry", "sam")]
 
 
 def test_an_option_checks_what_it_requires_before_it_carries() -> None:
@@ -6776,9 +6794,10 @@ def test_an_option_checks_what_it_requires_before_it_carries() -> None:
     )
     world = settled(file)
     assert broken(file, world, (sail("alex"),)) == [bag_not_at_hand("ferry", "alex")]
+    # The requirement and the carry both miss the bag. The two findings are the same, and
+    # one is given.
     assert broken(file, world, (sail("alex", carried=("bag",)),)) == [
-        bag_not_at_hand("ferry", "alex"),
-        bag_not_at_hand("ferry"),
+        bag_not_at_hand("ferry", "alex")
     ]
     # At the quay the ferry happens, with the bag carried or left.
     there = a_crossing(
@@ -6803,8 +6822,8 @@ def test_nothing_takes_an_object_out_of_the_option_that_carries_it() -> None:
         if does is hands_over:
             desk = step("desk", "island", 9, "sam", minute=30, handed=(("bag", "sam"),))
         plan = (sail("alex", carried=("bag",)), desk, step("hut", "island", 11, "sam"))
-        who = ("sam",) if does is hands_over else ()
-        assert broken(file, world, plan) == [bag_not_at_hand("desk", *who)]
+        # The bag would be at the desk half an hour after it opens.
+        assert broken(file, world, plan) == [bag_not_at_hand("desk", "sam", late=1800)]
         assert just_before(file, world, plan)["bag"] == (AT_THE_QUAY, IN_THE_FERRY, ON_THE_ISLAND)
 
 
@@ -6875,7 +6894,7 @@ def test_a_carry_needs_an_object_at_hand_wherever_it_might_be() -> None:
         sail("alex"),
         step("office", "island", 10, "alex", carried=("bag",)),
     )
-    assert broken(file, world, from_the_island) == [bag_not_at_hand("office")]
+    assert broken(file, world, from_the_island) == [bag_not_at_hand("office", "alex")]
 
 
 def test_an_option_with_no_fact_about_an_object_carries_nothing_at_worst() -> None:
@@ -6884,7 +6903,7 @@ def test_an_option_with_no_fact_about_an_object_carries_nothing_at_worst() -> No
     file = a_crossing(lies_at("bag", "quay"), requires_object("office", "bag"), every_use("bag"))
     plan = (sail("alex", carried=("bag",)), step("office", "island", 10, "sam"))
     assert broken(file, worst_case(file), plan) == [
-        bag_not_at_hand("ferry"),
+        bag_not_at_hand("ferry", "alex"),
         bag_not_at_hand("office", "sam"),
     ]
     said = with_these_at_best(file, [Unknown("carries", "ferry", about="bag")])
@@ -7102,3 +7121,140 @@ def test_a_bag_that_the_cabin_refuses_is_dropped_and_carried_in_the_hold() -> No
     ]
     no_drop = a_voyage(options[1:], [fact for fact in facts if fact.get("option") != "drop"], locks)
     assert first_shown(no_drop, worst_case(no_drop)) is None
+
+
+def nine_bags(*boats: tuple[str, int, int, str]) -> File:
+    """Nine things lie at the quay, and Alex's collection on the island at 11:00 am requires
+    them all. Each boat goes across with its own traveler, and can carry every one of them:
+    its name, when it leaves, and how long it takes."""
+    things = ["case", "trunk", "boots", "skis", "poles", "helmet", "wax", "tent", "stove"]
+    riders = ["sam", "jo", "lee", "kim"]
+    options = [moves(name, "quay", "island") for name, _, _, _ in boats]
+    options.append(stays("collection", "island"))
+    facts = [
+        fact for name, hour, minute, length in boats for fact in at(name, hour, minute, length)
+    ]
+    facts += at("collection", 11)
+    for thing in things:
+        facts += [lies_at(thing, "quay"), requires_object("collection", thing)]
+        facts += [carries(name, thing) for name, _, _, _ in boats]
+        facts += [every_use(thing), every_transfer(thing)]
+    locks = [lock(name, rider) for (name, _, _, _), rider in zip(boats, riders, strict=False)]
+    locks.append(lock("collection", "alex"))
+    people = ["alex", *riders[: len(boats)]]
+    return trip(people, ["quay", "island"], options, facts, locks, objects=things)
+
+
+def test_many_objects_with_several_carries_each_are_not_tried_in_every_combination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nine things and four boats: each thing can go four ways, a quarter of a million ways
+    together. Only the last boat listed is there in time. A way that no start times keep
+    is left out for each thing by itself, so the plan is timed a few times."""
+    slow = [("barge", 9, 0, "PT3H"), ("raft", 9, 10, "PT3H"), ("tug", 9, 20, "PT3H")]
+    file = nine_bags(*slow, ("launch", 9, 30, "PT35M"))
+    found, timed = timings_for_the_report(monkeypatch, file)
+    assert found.answer is Answer.FEASIBLE
+    assert carried_in(found.itinerary) == [("launch", tuple(thing.id for thing in file.objects))]
+    assert timed < 200
+    # Where every boat is there in time, the first choice of each thing is the plan.
+    easy = [("barge", 9, 0, "PT35M"), ("raft", 9, 10, "PT35M"), ("tug", 9, 20, "PT35M")]
+    found, timed = timings_for_the_report(monkeypatch, nine_bags(*easy, ("launch", 9, 30, "PT35M")))
+    assert carried_in(found.itinerary) == [("barge", tuple(thing.id for thing in file.objects))]
+    assert timed < 200
+
+
+def a_missed_connection(*more: Document) -> File:
+    """A ferry carries the bag from the quay to the island and takes 30 to 75 minutes from
+    9:00 am. Sam's bus at 10:00 am carries it on to the village, where Jo's inn requires it
+    at 11:00 am."""
+    options = [
+        moves("ferry", "quay", "island"),
+        moves("bus", "island", "village"),
+        stays("inn", "village"),
+    ]
+    facts = [
+        starts_at("ferry", 9),
+        lasts_between("ferry", "PT30M", "PT1H15M"),
+        cutoff("ferry", "PT0S"),
+        *at("bus", 10, 0, "PT20M"),
+        *at("inn", 11),
+        lies_at("bag", "quay"),
+        carries("ferry", "bag"),
+        carries("bus", "bag"),
+        requires_object("inn", "bag"),
+        *more,
+    ]
+    locks = [lock("ferry", "alex"), lock("bus", "sam"), lock("inn", "jo")]
+    return a_voyage(options, facts, locks)
+
+
+def test_a_warning_about_a_missed_carry_names_who_and_how_late() -> None:
+    """If the ferry runs longest, it lands at 10:15 am, and the bus has left without the bag.
+    The finding at the bus names Sam and the quarter of an hour. The inn then has no bag
+    either, and nobody can say how late: it is not on its way there."""
+    file = a_missed_connection()
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE and found.robust is False
+    assert found.at_worst == (
+        bag_not_at_hand("bus", "sam", late=900),
+        bag_not_at_hand("inn", "jo"),
+    )
+    words = report.as_text(file, found)
+    assert "    ! bag would arrive 15 min after this starts.\n" in words
+    assert "    ! bag would not be at hand when this starts.\n" in words
+    at_hand = Constraint.AT_HAND.value
+    assert report.as_json(file, found)["at_worst"] == [
+        {
+            "constraint": at_hand,
+            "option": "bus",
+            "persons": ["sam"],
+            "late": "PT15M",
+            "object": "bag",
+        },
+        {"constraint": at_hand, "option": "inn", "persons": ["jo"], "late": None, "object": "bag"},
+    ]
+    # A bus that also requires the bag has one finding, not two that say the same.
+    both = a_missed_connection(requires_object("bus", "bag"))
+    assert checked(both).at_worst == found.at_worst
+
+
+def test_a_carry_that_ends_sooner_can_break_one_constraint_and_no_plan_that_works() -> None:
+    """A ferry takes 15 to 45 minutes from 9:00 am. The plan has Sam take the bag at a claim
+    at 9:30 am and then go into a gallery at 10:00 am that refuses it. With the short
+    crossing Sam takes the bag, and the gallery refuses it. With the long one the bag is not
+    there to take, and the gallery lets Sam in. So one CONSTRAINT alone can be harder with
+    a shorter time. A plan that works with the longer time still works with the shorter."""
+    options = [
+        moves("ferry", "quay", "island"),
+        stays("claim", "island"),
+        stays("gallery", "island"),
+    ]
+    facts = [
+        starts_at("ferry", 9),
+        lasts_between("ferry", "PT15M", "PT45M"),
+        cutoff("ferry", "PT0S"),
+        *at("claim", 9, 30),
+        *at("gallery", 10),
+        lies_at("bag", "quay"),
+        carries("ferry", "bag"),
+        hands_over("claim", "bag"),
+        refuses_object("gallery", "bag"),
+    ]
+    file = a_voyage(options, facts, [])
+    nine = seconds(9)
+    taken = (
+        Step("ferry", "quay", "island", ("alex",), nine, None, carried=("bag",)),
+        step("claim", "island", 9, "sam", minute=30, handed=(("bag", "sam"),)),
+        step("gallery", "island", 10, "sam"),
+    )
+    short, long = worst_case(file), longest_case(file)
+    assert broken(file, short, in_world(short, taken)) == [
+        Broken(Constraint.REFUSED, "gallery", ("sam",), object="bag")
+    ]
+    assert broken(file, long, in_world(long, taken)) == [bag_not_at_hand("claim", "sam", late=900)]
+    # The plan without the hand-over works with both, and so does every plan that works
+    # with the longer time.
+    left = (taken[0], replace(taken[1], handed=()), taken[2])
+    for world in (short, long):
+        assert broken(file, world, in_world(world, left)) == []
