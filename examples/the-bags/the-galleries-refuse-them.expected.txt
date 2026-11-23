@@ -1,0 +1,7 @@
+INFEASIBLE: this trip cannot work.
+
+These FACTs and DECISIONs rule out every plan by themselves. Take any one away and they no longer do. A FACT that is taken away leaves what it said unknown. Times are in America/Chicago.
+  where-the-bags-start: Alex has the bags when the TRIP starts
+  galleries-refuse-the-bags: Museum visit refuses the bags
+  everything-that-moves-the-bags: the FILE states every OPTION that hands over or keeps the bags: there is none
+  lock-visit: Alex and Sam take part in Museum visit

@@ -171,14 +171,15 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
                 assert line["step"] is None and line["record"] is None, name
         else:
             assert pots == [], name
-        # Each OBJECT of a plan has its line, each OPTION that requires it has one under it,
-        # and each OBJECT that somebody takes at a step has a line under that step.
+        # Each OBJECT of a plan has its line, each OPTION that requires it or refuses it has
+        # one under it, and each OBJECT that somebody takes at a step has a line under that step.
         about = [thing for line in found for thing in line["about"] if thing.startswith("object:")]
         expected: list[str] = []
         for step in said.get("itinerary", []):
             expected += [f"object:{thing}" for thing in step.get("hands_over", {})]
         for thing in said.get("objects", []):
-            expected += [f"object:{thing['object']}"] * (1 + len(thing["required_by"]))
+            checks = len(thing["required_by"]) + len(thing["refused_by"])
+            expected += [f"object:{thing['object']}"] * (1 + checks)
         assert sorted(about) == sorted(expected), name
         carried += bool(expected)
         # Each case in which the trip works has one line, in the order of the report as JSON.
@@ -436,6 +437,46 @@ def test_the_lines_about_an_object_are_tied_to_it_and_to_the_step_they_are_about
         (other,) = lines_of([{**asked, "report": {**said, "itinerary": steps_said}}])
         (takes,) = [line for line in other if line["text"].strip() == "Alex takes the bags here."]
         assert takes["about"] == []
+
+
+def test_a_line_about_an_option_that_refuses_an_object_is_tied_to_both() -> None:
+    """Alex leaves the bags at the cloakroom, and the galleries refuse them."""
+    asked = asked_of(EXAMPLES / "the-bags" / "they-leave-them-at-the-cloakroom.json")
+    (found,) = lines_of([asked])
+    steps = {step["option"]: str(at) for at, step in enumerate(asked["trip"]["steps"])}
+    under = [line for line in found if line["about"] and "Just before it starts" in line["text"]]
+    # The lines go in the order of the steps, and the report as JSON lists the OPTIONs that
+    # require the OBJECT apart from those that refuse it.
+    assert [(line["text"].strip(), line["about"]) for line in under] == [
+        (
+            "Museum visit refuses the bags. Just before it starts: at the Art Institute.",
+            [steps["museum-visit"], "object:bags"],
+        ),
+        (
+            "Flight home requires the bags. Just before it starts: with Alex.",
+            [steps["flight"], "object:bags"],
+        ),
+    ]
+    said = asked["report"]
+    (one,) = said["objects"]
+    (bars,), (needs,) = one["refused_by"], one["required_by"]
+
+    def tied(**other: Any) -> list[list[str]]:
+        report = {**said, "objects": [{**one, **other}]}
+        (lines,) = lines_of([{**asked, "report": report}])
+        return [line["about"] for line in lines if "Just before it starts" in line["text"]]
+
+    # An OPTION that requires the OBJECT and refuses it has its line about requiring first.
+    both = {"required_by": [{**needs, "option": "museum-visit"}], "refused_by": [bars]}
+    assert tied(**both) == [[steps["museum-visit"], "object:bags"]] * 2
+    # A report that names an OPTION that the plan does not hold gives its lines no order, and
+    # one with fewer OPTIONs than the words have lines says less than they do. Neither is tied.
+    assert tied(refused_by=[{**bars, "option": "dinner"}]) == [[], []]
+    assert tied(refused_by=[]) == [[], []]
+    # A report with no list of the OPTIONs that refuse the OBJECT is not one the page knows.
+    short = {key: value for key, value in one.items() if key != "refused_by"}
+    (lines,) = lines_of([{**asked, "report": {**said, "objects": [short]}}])
+    assert not any(line["about"] for line in lines if "Just before it starts" in line["text"])
 
 
 def with_a_passport(content: dict[str, Any]) -> dict[str, Any]:

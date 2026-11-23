@@ -155,14 +155,18 @@ def as_json(file: File, report: Report) -> dict[str, object]:
                         }
                         for stay in carried.stays
                     ],
-                    "required_by": [
-                        {
-                            "option": use.option,
-                            "stated": use.stated,
-                            "where": [_where_as_json(each) for each in use.where],
-                        }
-                        for use in carried.uses
-                    ],
+                    **{
+                        key: [
+                            {
+                                "option": use.option,
+                                "stated": use.stated,
+                                "where": [_where_as_json(each) for each in use.where],
+                            }
+                            for use in carried.uses
+                            if use.check == check
+                        ]
+                        for key, check in (("required_by", "requires"), ("refused_by", "refuses"))
+                    },
                 }
                 for carried in report.objects
             ]
@@ -378,7 +382,10 @@ def _to_buy(report: Report) -> dict[tuple[str, str, str | None], list[Cover]]:
 
 
 def _where_as_json(where: Where) -> dict[str, str | None]:
-    """Where an OBJECT is: the PERSON who has it, or the PLACE where it lies."""
+    """Where an OBJECT is: the PERSON who has it, or the PLACE where it lies.
+
+    A PLACE of null is somewhere the FILE does not name.
+    """
     return {"person": where.person} if where.person is not None else {"place": where.place}
 
 
@@ -431,12 +438,13 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
         if unknown.place is not None:
             out["place"] = unknown.place
         if unknown.what == "another transfer":
-            # The OPTIONs for which the OBJECT has to be at hand in one plan, and whether
-            # what the FILE lists already puts it there. Nobody has worked out whether
-            # another transfer can put it at hand for all of them.
+            # Each check of the OBJECT in one plan: an OPTION that requires it, so that it
+            # has to be at hand, or one that refuses it, so that no PERSON may have it there.
+            # With each comes whether the check already holds with what the FILE lists.
+            # Nobody has worked out whether another transfer can make all of them hold.
             out["at_hand_for"] = [
-                {"option": option, "stated": stated, "covered": covered}
-                for option, stated, covered in needed.at_hand_for
+                {"option": option, "check": check, "stated": stated, "covered": covered}
+                for option, check, stated, covered in needed.at_hand_for
             ]
             out["settled"] = False
         return out
@@ -458,6 +466,7 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
 
 _ABOUT_AN_OBJECT = (
     "does not require",
+    "does not refuse",
     "keeps",
     "does not keep",
     "hands over",
@@ -793,7 +802,7 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
 def _carried_in_words(
     file: File, clock: Clock, itinerary: Itinerary, carried: Carried
 ) -> list[str]:
-    """One OBJECT of a plan in words: where it is throughout, then each OPTION that requires it.
+    """One OBJECT of a plan in words: where it is, then each OPTION that requires or refuses it.
 
     A time has its date where it is not on the day the plan starts.
     """
@@ -817,26 +826,32 @@ def _carried_in_words(
     for use in carried.uses:
         name, where = _name(file, use.option), _where(file, use.where)
         if use.stated:
-            lines.append(f"    {name} requires {thing}. Just before it starts: {where}.")
+            lines.append(f"    {name} {use.check} {thing}. Just before it starts: {where}.")
         else:
-            silent = f"The FILE does not say whether {name} requires {thing}"
+            silent = f"The FILE does not say whether {name} {use.check} {thing}"
             holds = f"Just before it starts: {where}, so the plan holds if it does"
             lines.append(f"    {silent}. {holds}.")
     return lines
 
 
 def _where(file: File, where: Sequence[Where]) -> str:
-    """Where an OBJECT is, or each place it might be: with Alex or at the Art Institute."""
+    """Where an OBJECT is, or each place it might be: with Alex or at the Art Institute.
+
+    A place with no name is somewhere the FILE does not name. An OBJECT that might be with
+    any PERSON, at any PLACE or somewhere the FILE does not name is nobody knows where.
+    """
+    if len(where) == len(file.persons) + len(file.places) + 1:
+        return "nobody knows where"
     people, places = _names(file.persons, "or"), _names(file.places, "or")
-    return _listed(
-        [
-            f"with {people[each.person]}"
-            if each.person is not None
-            else f"at {places[each.place or '']}"
-            for each in where
-        ],
-        "or",
-    )
+
+    def one(each: Where) -> str:
+        if each.person is not None:
+            return f"with {people[each.person]}"
+        if each.place is not None:
+            return f"at {places[each.place]}"
+        return "somewhere the FILE does not name"
+
+    return _listed([one(each) for each in where], "or")
 
 
 def _kinds(file: File, records: Sequence[str]) -> str:
@@ -983,23 +998,50 @@ def _another_transfer(file: File, needed: Missing) -> str:
 
     It names the OPTIONs for which another transfer has to put the OBJECT at hand in one
     plan, and then those for which what the FILE lists already does: another transfer has
-    to leave it at hand there. An OPTION that only might require the OBJECT is named so.
+    to leave it at hand there. Then come the OPTIONs that it has to keep the OBJECT out of,
+    and those that it has to leave it out of. An OPTION that only might require or refuse
+    the OBJECT is named so. An OPTION that a FACT says requires the OBJECT and another says
+    refuses it comes last: the OBJECT has to lie where it starts.
     """
     thing = _names(file.objects)[needed.unknown.about or ""]
+    said = {(option, check) for option, check, stated, _ in needed.at_hand_for if stated}
+    both = {option for option, check in said if check == "requires" and (option, "refuses") in said}
 
-    def for_those(covered: bool) -> str:
-        mine = [each for each in needed.at_hand_for if each[2] is covered]
-        stated = [_name(file, option, "and") for option, said, _ in mine if said]
-        might = [_name(file, option, "and") for option, said, _ in mine if not said]
-        named = [f"for {_listed(stated)}"] if stated else []
+    def those(check: str, covered: bool, link: str) -> str:
+        mine = [
+            (option, stated)
+            for option, kind, stated, holds in needed.at_hand_for
+            if kind == check and holds is covered and option not in both
+        ]
+        stated = [_name(file, option, "and") for option, stated in mine if stated]
+        might = [_name(file, option, "and") for option, stated in mine if not stated]
+        named = [f"{link} {_listed(stated)}"] if stated else []
         if might:
-            they = "it requires" if len(might) == 1 else "they require"
-            named.append(f"for {_listed(might)} if {they} {thing}")
+            they = f"it {check}" if len(might) == 1 else f"they {check[:-1]}"
+            named.append(f"{link} {_listed(might)} if {they} {thing}")
         return ", and ".join(named)
 
-    words = f"another transfer puts {thing} at hand {for_those(False)}"
-    already = for_those(True)
-    return _OwnWords(f"{words}, and leaves {thing} at hand {already}" if already else words)
+    def lies_there(covered: bool) -> str:
+        """The OPTIONs that require and refuse the OBJECT, by whether both checks hold."""
+        holds = {
+            option: all(held for name, _, _, held in needed.at_hand_for if name == option)
+            for option, _, _, _ in needed.at_hand_for
+            if option in both
+        }
+        mine = [_name(file, option, "and") for option, held in holds.items() if held is covered]
+        starts = "starts" if len(mine) == 1 else "start"
+        return f"where {_listed(mine)} {starts}" if mine else ""
+
+    parts = [
+        (f"puts {thing} at hand", those("requires", False, "for")),
+        (f"leaves {thing} at hand", those("requires", True, "for")),
+        (f"keeps {thing}", those("refuses", False, "out of")),
+        (f"leaves {thing}", those("refuses", True, "out of")),
+        (f"puts {thing}", lies_there(False)),
+        (f"leaves {thing}", lies_there(True)),
+    ]
+    does = ", and ".join(f"{verb} {named}" for verb, named in parts if named)
+    return _OwnWords(f"another transfer {does}")
 
 
 def _places(count: int) -> str:
@@ -1047,6 +1089,7 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
         name = _name(file, unknown.option)
         return {
             "does not require": f"{name} does not require {thing}",
+            "does not refuse": f"{name} does not refuse {thing}",
             "keeps": f"{name} keeps {thing}",
             "does not keep": f"{name} does not keep {thing}",
             "hands over": f"{thing} can be handed over in {name}",

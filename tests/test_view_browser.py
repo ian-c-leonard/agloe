@@ -759,7 +759,7 @@ def test_pointing_ties_an_object_to_the_calendar_and_the_report(
             "it can be handed over here",
         ]
         assert card.locator(".card-whole").all_text_contents() == [
-            "The FILE states every one of its OPTIONs that requires it.",
+            "The FILE states every one of its OPTIONs that requires it or refuses it.",
             "The FILE states every OPTION that hands it over or keeps it.",
         ]
         # The card says where the report says the bags are in its plan, worded as the report
@@ -836,6 +836,15 @@ def test_pointing_ties_an_object_to_the_calendar_and_the_report(
     # them, and so does the card: that OPTION is under the OBJECT, and it is its step.
     content = json.loads((EXAMPLES / "the-bags" / "they-carry-them.json").read_text())
     content["facts"] = [fact for fact in content["facts"] if fact["id"] != "every-use-of-the-bags"]
+    # FACTs say that neither OPTION refuses the bags, so the plan holds with Alex carrying them.
+    content["facts"] += [
+        {
+            "id": f"{option}-lets-them-in",
+            "option": option,
+            "refuses": {"object": "bags", "refused": False},
+        }
+        for option in ("museum-visit", "flight")
+    ]
     with opened(chromium, written(tmp_path, content)) as page:
         card = page.locator("#objects .card")
         card.wait_for()
@@ -845,7 +854,13 @@ def test_pointing_ties_an_object_to_the_calendar_and_the_report(
         )
         # No card gives a time, and the part names no clocks.
         assert "clocks" not in (page.text_content("#objects-says") or "")
-        might = card.locator(".entry.not")
+        # The entries that say that an OPTION does not refuse the bags are apart from it.
+        assert card.locator(".entry.not .entry-says").all_text_contents() == [
+            "does not refuse it",
+            "does not refuse it",
+            "the FILE does not say whether this requires it",
+        ]
+        might = card.locator(".entry.not", has_text="the FILE does not say")
         assert might.locator(".entry-name").all_text_contents() == ["Museum visit"]
         assert might.locator(".entry-says").all_text_contents() == [
             "the FILE does not say whether this requires it"
@@ -859,12 +874,13 @@ def test_pointing_ties_an_object_to_the_calendar_and_the_report(
             "    The FILE does not say whether Museum visit requires the bags. Just before it"
             " starts: with Alex, so the plan holds if it does."
         )
+        # The visit is under the bags twice, and both entries are its step.
         might.hover()
-        found = lit(page, objects=["Museum visit"], marks=["Museum visit"])
+        found = lit(page, objects=["Museum visit", "Museum visit"], marks=["Museum visit"])
         assert line in found["rows"]
         # That line of the report is about the step and about the OBJECT.
         page.locator("#report .row", has_text="The FILE does not say whether Museum").hover()
-        lit(page, objects=["the bags", "Museum visit"], marks=["Museum visit"])
+        lit(page, objects=["the bags", "Museum visit", "Museum visit"], marks=["Museum visit"])
     # A FILE with no OBJECT has no such part on its page.
     with opened(chromium, EXAMPLES / "flight-home" / "works.json") as page:
         page.locator("#report .row").first.wait_for()

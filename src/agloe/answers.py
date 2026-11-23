@@ -28,6 +28,7 @@ from agloe.file import (
     Money,
     ObjectStarts,
     Offer,
+    RefusesObject,
     Requires,
     RequiresObject,
     Start,
@@ -36,6 +37,7 @@ from agloe.file import (
 )
 from agloe.reference import (
     Broken,
+    Constraint,
     Itinerary,
     Remaining,
     Unknown,
@@ -97,19 +99,20 @@ class Missing:
     its set. It is the most the OPTION can require for a FEASIBLE TRIP: "one" where it can
     require it of one PERSON, and "none" where it can require nothing.
 
-    ``at_hand_for`` comes with another transfer of an OBJECT. It holds each OPTION for which
-    the OBJECT has to be at hand in one plan that works when the set turns out well. With
-    each comes whether a FACT says that the OPTION requires it: without one, the OPTION
-    might. Then comes whether what the FILE lists already puts the OBJECT at hand there, in
-    that plan. Nobody has worked out whether another transfer can put it at hand for all of
-    them: the set is not settled.
+    ``at_hand_for`` comes with another transfer of an OBJECT. It holds each check of the
+    OBJECT in one plan that works when the set turns out well: an OPTION, and "requires"
+    where the OBJECT has to be at hand for it, or "refuses" where no PERSON may have the
+    OBJECT in it. With each comes whether a FACT says that the OPTION requires or refuses
+    the OBJECT: without one, the OPTION might. Then comes whether the check already holds
+    with what the FILE lists, in that plan. Nobody has worked out whether another transfer
+    can make all of them hold: the set is not settled.
     """
 
     unknown: Unknown
     at_most: int | None
     buys: tuple[Cover, ...] = ()
     of: str | None = None
-    at_hand_for: tuple[tuple[str, bool, bool], ...] = ()
+    at_hand_for: tuple[tuple[str, str, bool, bool], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -168,20 +171,23 @@ class Stay:
 
 @dataclass(frozen=True)
 class Use:
-    """An OPTION of the plan shown that requires an OBJECT, or might.
+    """An OPTION of the plan shown that requires an OBJECT or refuses it, or might.
 
-    ``stated`` says whether a FACT says that it does. ``where`` holds each place the OBJECT
-    might be just before the OPTION starts. Each is at hand.
+    ``check`` is "requires" or "refuses". ``stated`` says whether a FACT says that it does.
+    ``where`` holds each place the OBJECT might be just before the OPTION starts. Each is at
+    hand where the OPTION requires the OBJECT. None is a PERSON who takes part where the
+    OPTION refuses it.
     """
 
     option: str
     stated: bool
     where: tuple[Where, ...]
+    check: str = "requires"
 
 
 @dataclass(frozen=True)
 class Carried:
-    """One OBJECT in the plan shown: where it is throughout, and which OPTIONs require it."""
+    """One OBJECT in the plan shown: where it is, and which OPTIONs require or refuse it."""
 
     object: str
     stays: tuple[Stay, ...]
@@ -216,7 +222,7 @@ class Report:
 
     A FEASIBLE Report says in ``supplies`` who meets each requirement of an OPTION in the
     ITINERARY shown. It says in ``objects`` where each OBJECT is that an OPTION of the
-    ITINERARY requires or might.
+    ITINERARY requires or refuses, or might.
     """
 
     answer: Answer
@@ -355,7 +361,7 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> 
     """
     if isinstance(fact, Has | Requires | CompleteRequires):
         return fact.id in used
-    if isinstance(fact, ObjectStarts | RequiresObject | WithObject):
+    if isinstance(fact, ObjectStarts | RequiresObject | RefusesObject | WithObject):
         return fact.id in used
     if isinstance(fact, CompleteRequiresObject | CompleteTransfers):
         return fact.id in used
@@ -449,12 +455,14 @@ def _carried(
     """Where each OBJECT of a plan is, and the FACTs about OBJECTs that the plan relies on.
 
     For each OPTION in the plan and each OBJECT, the plan relies on the FACT about whether the
-    OPTION requires the OBJECT, where the FILE states one. Where the FILE states none and the
-    set of the OBJECT's requirements is COMPLETE, it relies on that FACT: only it says that
-    the OPTION does not require the OBJECT.
+    OPTION requires the OBJECT, where the FILE states one, and on the FACT about whether it
+    refuses the OBJECT. Where the FILE states none of a kind and the set of the OBJECT's
+    requirements is COMPLETE, it relies on that FACT: only it says that the OPTION does not
+    require the OBJECT, or does not refuse it.
 
-    The rest is about each OBJECT that an OPTION of the plan requires or might. The report
-    says where it is throughout the plan, and the plan relies on each record that says so.
+    The rest is about each OBJECT that an OPTION of the plan requires or refuses, or might.
+    The report says where it is throughout the plan, and the plan relies on each record that
+    says so.
     That is the FACT about where it starts. It is the FACT about what an OPTION does with it,
     for each OPTION of the plan in which it is handed over, and for each one in which a
     PERSON has it or might. Where the FILE states no such FACT and the set of the OBJECT's
@@ -474,7 +482,7 @@ def _carried(
         def rank(each: Where) -> tuple[int, int]:
             if each.person is not None:
                 return (0, people[each.person])
-            return (1, places[each.place]) if each.place is not None else (2, 0)
+            return (1, places[each.place]) if each.place is not None else (2, 0)  # no name: last
 
         return tuple(sorted(where, key=rank))
 
@@ -483,15 +491,17 @@ def _carried(
     relied: set[str] = set()
     carried: list[Carried] = []
     for thing in file.objects:
+        every = file.object_requirements_complete(thing.id)
         for step in steps:
             required = file.object_requirement(step.option or "", thing.id)
-            every = file.object_requirements_complete(thing.id)
-            if required is not None:
-                relied.add(required.id)
-            elif every is not None:
-                relied.add(every.id)
-        asked = any((step.option, thing.id) in world.needs for step in steps)
-        if thing.id not in trails or not asked:
+            refused = file.object_refusal(step.option or "", thing.id)
+            for stated in (required, refused):
+                if stated is not None:
+                    relied.add(stated.id)
+                elif every is not None:
+                    relied.add(every.id)
+        checked = world.needs | world.refuses
+        if thing.id not in trails or not any((step.option, thing.id) in checked for step in steps):
             continue
         trail = trails[thing.id]
         start = file.object_starts(thing.id)
@@ -513,6 +523,9 @@ def _carried(
             if (option, thing.id) in world.needs:
                 stated = file.requires_object(option, thing.id) is True
                 uses.append(Use(option, stated, in_order(before)))
+            if (option, thing.id) in world.refuses:
+                stated = file.refuses_object(option, thing.id) is True
+                uses.append(Use(option, stated, in_order(before), "refuses"))
             if after != before:
                 kept = "kept" if world.does.get((option, thing.id)) == "keeps" else "might be kept"
                 stays.append(Stay(in_order(after), option, "handed over" if taker else kept))
@@ -602,7 +615,8 @@ def _missing(file: File, works: Works, shown: Shown) -> tuple[tuple[Missing, ...
     works with the OBJECT at hand wherever the plan needs it, and nobody has worked out
     whether another transfer can bring it there. So such a set is listed only where no
     settled set asks for as few new things, however many FACTs that one holds. It names the
-    OPTIONs for which the OBJECT has to be at hand. And "this OPTION hands the OBJECT over"
+    OPTIONs for which the OBJECT has to be at hand, and those that it has to stay out of.
+    And "this OPTION hands the OBJECT over"
     is listed only where "this OPTION does not keep the OBJECT" is not enough in its place:
     the second is true of more FILEs.
     """
@@ -678,14 +692,16 @@ def _worth_listing(enough: Sequence[tuple[Unknown, ...]]) -> list[tuple[Unknown,
 
 def _to_bring(
     file: File, enough: Sequence[Unknown], unknown: Unknown, shown: Shown
-) -> tuple[tuple[str, bool, bool], ...]:
-    """For another transfer of an OBJECT, the OPTIONs for which the OBJECT has to be at hand.
+) -> tuple[tuple[str, str, bool, bool], ...]:
+    """For another transfer of an OBJECT, each check of the OBJECT that the plan has to pass.
 
     They are read off the ITINERARY shown in the world where the set turns out well and every
-    other unknown FACT badly: each of its OPTIONs that requires the OBJECT there, in the
-    order of its steps. With each comes whether a FACT says that it requires the OBJECT, and
-    whether the OBJECT is at hand there in the same plan without another transfer: with
-    what the FILE lists, and everything else as in that world. Any other FACT has none.
+    other unknown FACT badly, in the order of its steps. Each OPTION that requires the
+    OBJECT there is a check, "requires": the OBJECT has to be at hand. Each OPTION that
+    refuses it there is a check, "refuses": no PERSON may have the OBJECT in it. With each
+    comes whether a FACT says that the OPTION requires or refuses the OBJECT, and whether
+    the check holds in the same plan without another transfer: with what the FILE lists,
+    and everything else as in that world. Any other FACT has none.
     """
     if unknown.what != "another transfer":
         return ()
@@ -695,14 +711,24 @@ def _to_bring(
     if plan is None:
         raise AssertionError("a set of unknown FACTs that is enough shows no ITINERARY")
     listed_only = replace(world, brought=world.brought - {thing})
-    lacking = {
-        found.option for found in broken_as_listed(file, listed_only, plan) if found.object == thing
+    failing = {
+        (found.option, found.constraint)
+        for found in broken_as_listed(file, listed_only, plan)
+        if found.object == thing
     }
-    return tuple(
-        (step.option, file.requires_object(step.option, thing) is True, step.option not in lacking)
-        for step in plan
-        if step.option is not None and (step.option, thing) in world.needs
-    )
+    checks: list[tuple[str, str, bool, bool]] = []
+    for step in plan:
+        if step.option is None:
+            continue
+        if (step.option, thing) in world.needs:
+            stated = file.requires_object(step.option, thing) is True
+            holds = (step.option, Constraint.AT_HAND) not in failing
+            checks.append((step.option, "requires", stated, holds))
+        if (step.option, thing) in world.refuses:
+            stated = file.refuses_object(step.option, thing) is True
+            holds = (step.option, Constraint.REFUSED) not in failing
+            checks.append((step.option, "refuses", stated, holds))
+    return tuple(checks)
 
 
 def _bought(file: File, enough: Sequence[Unknown], shown: Shown) -> list[tuple[Cover, ...]]:
@@ -927,7 +953,8 @@ def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
     None for an unknown that is not a length of time, and None when any length would do.
     """
     no_length = ("start", "satisfies", "does not satisfy", "another option")
-    no_length += ("requirement", "has", "does not require", "keeps", "does not keep")
+    no_length += ("requirement", "has", "does not require", "does not refuse", "keeps")
+    no_length += ("does not keep",)
     no_length += ("hands over", "starts with", "starts at", "another transfer")
     about_rights = ("needs no right", "another right", "price", "funding", "charged")
     if unknown.what in (*no_length, *about_rights):

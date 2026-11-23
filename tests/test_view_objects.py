@@ -23,13 +23,13 @@ FILES = sorted(
 )
 SAYS = (
     "The OBJECTs of the FILE, each with where it is when the TRIP starts, the OPTIONs that the"
-    " FILE says require it, and those that it says hand it over or keep it."
+    " FILE says require it or refuse it, and those that it says hand it over or keep it."
 )
 # Where a card gives a time of the plan.
 CLOCKS = " Times are on the clocks of America/Chicago."
 RED = " A red edge marks what the report names among what rules out every plan."
 YELLOW = " A yellow edge marks what the report names in what the FILE does not say."
-ALL_REQUIRE = "The FILE states every one of its OPTIONs that requires it."
+ALL_REQUIRE = "The FILE states every one of its OPTIONs that requires it or refuses it."
 ALL_MOVE = "The FILE states every OPTION that hands it over or keeps it."
 NONE = ", and it names none."
 MAY_MOVE = "Another OPTION may hand it over or keep it: the FILE does not say that these are all."
@@ -46,6 +46,19 @@ def all_objects(
 ) -> list[Objects]:
     """What the page shows of the OBJECTs of each TRIP, by the page's own code."""
     return parts("objects", trips, reports, texts)
+
+
+def refusing_nothing(content: dict[str, Any], *things: str) -> list[dict[str, Any]]:
+    """A FACT for each OPTION of a FILE and each of these OBJECTs: the OPTION does not refuse it."""
+    return [
+        {
+            "id": f"{option['id']}-lets-in-{thing}",
+            "option": option["id"],
+            "refuses": {"object": thing, "refused": False},
+        }
+        for option in content["options"]
+        for thing in things
+    ]
 
 
 def objects_of(name: str) -> Objects:
@@ -173,7 +186,8 @@ def test_where_an_object_is_in_a_plan_has_the_names_that_the_page_shows(tmp_path
     # Alex and Sam have a bag each. The two names differ by a space, and a page shows them
     # alike, so each card has the id. The report gives no id, and each card still says where
     # its own bag is.
-    content = {**story, "facts": [*others, *two("alex-bag", "sam-bag")]}
+    lets_in = refusing_nothing(story, "alex-bag", "sam-bag")
+    content = {**story, "facts": [*others, *two("alex-bag", "sam-bag"), *lets_in]}
     content["objects"] = [
         {"id": "alex-bag", "name": "the bags"},
         {"id": "sam-bag", "name": "the  bags"},
@@ -201,7 +215,8 @@ def test_where_an_object_is_in_a_plan_has_the_names_that_the_page_shows(tmp_path
     ]
     # Two PERSONs have one name, once with the accent joined to its letter and once after
     # it. The page shows the id of each, also where it says who has an OBJECT.
-    content = {**story, "facts": [*others, *two("bags", "passport")]}
+    lets_in = refusing_nothing(story, "bags", "passport")
+    content = {**story, "facts": [*others, *two("bags", "passport"), *lets_in]}
     content["objects"] = [
         {"id": "bags", "name": "the bags"},
         {"id": "passport", "name": "a passport"},
@@ -227,6 +242,7 @@ def test_where_an_object_is_in_a_plan_has_the_names_that_the_page_shows(tmp_path
     # flight is all that requires the bags. The other OPTION is under the bags with its id.
     content = json.loads(json.dumps(story))
     content["facts"] = [fact for fact in story["facts"] if fact["id"] != "every-use-of-the-bags"]
+    content["facts"] += refusing_nothing(story, "bags")
     (visit,) = [option for option in content["options"] if option["id"] == "museum-visit"]
     visit["name"] = "Flight  home"
     path.write_text(json.dumps(content))
@@ -249,6 +265,143 @@ def test_where_an_object_is_in_a_plan_has_the_names_that_the_page_shows(tmp_path
     (bags,) = shown["objects"]
     assert [each["option"] for each in bags["might"]] == ["museum-visit"]
     assert [each["plan"] for each in bags["requires"]] == [None]
+
+
+def test_an_option_that_refuses_an_object_is_under_it(tmp_path: Path) -> None:
+    """Alex leaves the bags at the cloakroom, and the galleries refuse them."""
+    (bags,) = objects_of("the-bags/they-leave-them-at-the-cloakroom")["objects"]
+    assert bags["refuses"] == [
+        {
+            "option": "museum-visit",
+            "name": "Museum visit",
+            "does": True,
+            "says": "refuses it",
+            "takes": "In the plan: Alex and Sam take part.",
+            "step": 1,
+            "plan": "Just before it starts: at the Art Institute.",
+            "records": ["galleries-refuse-the-bags"],
+            "clash": [],
+            "finds": None,
+            "cases": [],
+            "asks": [],
+        }
+    ]
+    assert [each["name"] for each in bags["requires"]] == ["Flight home"]
+    assert bags["whole"] == [ALL_REQUIRE, ALL_MOVE]
+    # An OPTION of which a FACT says that it does not refuse the OBJECT says so, and the plan
+    # has no word on it.
+    content = json.loads((STORY / "they-carry-them.json").read_text())
+    content["facts"] += refusing_nothing(content, "bags")
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    assert [
+        (each["name"], each["says"], each["does"], each["plan"]) for each in bags["refuses"]
+    ] == [
+        ("Museum visit", "does not refuse it", False, None),
+        ("Flight home", "does not refuse it", False, None),
+    ]
+    # The records that rule out every plan mark the OPTION that refuses the OBJECT.
+    (bags,) = objects_of("the-bags/the-galleries-refuse-them")["objects"]
+    assert [each["clash"] for each in bags["refuses"]] == [["galleries-refuse-the-bags"]]
+
+
+def test_an_option_of_the_plan_that_might_refuse_an_object_is_under_it(tmp_path: Path) -> None:
+    """Nobody said whether the galleries refuse the bags. Alex leaves them at the cloakroom."""
+    content = json.loads((STORY / "they-leave-them-at-the-cloakroom.json").read_text())
+    gone = ("every-use-of-the-bags", "galleries-refuse-the-bags")
+    content["facts"] = [fact for fact in content["facts"] if fact["id"] not in gone]
+    content["facts"] += [
+        fact for fact in refusing_nothing(content, "bags") if fact["option"] != "museum-visit"
+    ]
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    assert found["answer"] == "FEASIBLE"
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    assert [(each["name"], each["says"], each["plan"]) for each in bags["might"]][-1] == (
+        "Museum visit",
+        "the FILE does not say whether this refuses it",
+        "Just before it starts: at the Art Institute, so the plan holds if it does.",
+    )
+    silent = "The FILE does not say whether Museum visit refuses the bags"
+    assert f"\n    {silent}. {bags['might'][-1]['plan']}\n" in words
+    # The visit is under the bags twice: the FILE does not say whether it requires them either.
+    assert [each["says"][-11:] for each in bags["might"] if each["name"] == "Museum visit"] == [
+        "requires it",
+        " refuses it",
+    ]
+
+
+def test_a_case_marks_the_option_that_an_object_has_to_stay_out_of() -> None:
+    """The trip might work if another transfer keeps the bags out of the visit."""
+    shown = objects_of("the-bags/somebody-might-take-them")
+    (bags,) = shown["objects"]
+    assert bags["asks"] == [
+        "The trip might work if another transfer puts the bags at hand for Flight home, and"
+        " keeps the bags out of Museum visit."
+    ]
+    # The case has the bags at hand for the flight, and out of the visit. Each is marked where
+    # the card says that the OPTION requires the bags, or refuses them, and nowhere else.
+    assert [(each["name"], each["cases"]) for each in bags["requires"]] == [("Flight home", [0])]
+    assert [(each["name"], each["cases"]) for each in bags["refuses"]] == [("Museum visit", [0])]
+    sent, found, words = in_words(STORY / "somebody-might-take-them.json")
+    (need,) = found["missing"][0]
+    swapped = [
+        {**each, "check": "refuses" if each["check"] == "requires" else "requires"}
+        for each in need["at_hand_for"]
+    ]
+    other = {**found, "missing": [[{**need, "at_hand_for": swapped}]]}
+    (shown,) = all_objects([sent], [other], [words])
+    (bags,) = shown["objects"]
+    assert [each["cases"] for each in (*bags["requires"], *bags["refuses"])] == [[], []]
+    # A case about whether an OPTION refuses the OBJECT marks the OBJECT.
+    sent, found, words = in_words(STORY / "nobody-said-whether-they-refuse-them.json")
+    assert found["missing"] == [
+        [{"what": "does not refuse", "option": "museum-visit", "object": "bags"}]
+    ]
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    assert (bags["cases"], shown["says"]) == ([0], SAYS + YELLOW)
+    # It marks the OPTION where a FACT about the two is under the OBJECT.
+    (thing,) = sent["objects"]
+    thing["refuses"].append(
+        {"option": "museum-visit", "name": "Museum visit", "refused": True, "record": "bars"}
+    )
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    assert [(each["name"], each["cases"]) for each in bags["refuses"]] == [
+        ("Flight home", []),
+        ("Museum visit", [0]),
+    ]
+    assert all(each["cases"] == [] for each in (*bags["requires"], *bags["transfers"]))
+
+
+def test_an_object_that_might_be_anywhere_says_that_nobody_knows_where_it_is(
+    tmp_path: Path,
+) -> None:
+    """Nobody said where the bags are. Alex and Sam both stop at the cloakroom, which keeps them."""
+    content = json.loads((STORY / "they-leave-them-at-the-cloakroom.json").read_text())
+    gone = ("where-the-bags-start", "flight-needs-the-bags")
+    content["facts"] = [fact for fact in content["facts"] if fact["id"] not in gone]
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    assert found["answer"] == "FEASIBLE"
+    (shown,) = all_objects([sent], [found], [words])
+    (bags,) = shown["objects"]
+    elsewhere = "at the hotel, at the Art Institute, at O'Hare, at Denver or somewhere the FILE"
+    assert bags["plan"] == (
+        f"In the plan: nobody knows where when the TRIP starts; {elsewhere} does not name from"
+        " 12:55 pm (kept by Drop off at the cloakroom)."
+    )
+    assert f"\n  the bags: {bags['plan'][len('In the plan: ') : -1]}\n" in words
+    (visit,) = bags["refuses"]
+    assert visit["plan"] == f"Just before it starts: {elsewhere} does not name."
+    assert f"\n    Museum visit refuses the bags. {visit['plan']}\n" in f"{words}\n"
 
 
 def test_an_object_that_might_be_in_one_of_several_places_says_each(tmp_path: Path) -> None:
@@ -335,6 +488,7 @@ def test_an_option_of_the_plan_that_might_require_an_object_is_under_it(tmp_path
     """The FILE does not say that the flight is all that requires the bags. Alex carries them."""
     content = json.loads((STORY / "they-carry-them.json").read_text())
     content["facts"] = [fact for fact in content["facts"] if fact["id"] != "every-use-of-the-bags"]
+    content["facts"] += refusing_nothing(content, "bags")
     path = tmp_path / "trip.json"
     path.write_text(json.dumps(content))
     sent, found, words = in_words(path)
@@ -464,35 +618,57 @@ def test_an_object_says_whether_its_options_are_all_there_are() -> None:
         return said
 
     needs, moves = bags["requires"][0], bags["transfers"][0]
+    bars = {"option": needs["option"], "name": needs["name"], "refused": True, "record": "bars-it"}
+    no_refusal = "The FILE says of no OPTION whether it refuses this OBJECT."
+    # One FACT says that the FILE states every OPTION that requires the OBJECT or refuses it.
+    # Without it, the card says of each of the two what the FILE leaves open.
     assert whole(requires_complete=None, transfers_complete=None) == [
         "Other OPTIONs of the FILE may require it too: the FILE does not say that these are all.",
+        no_refusal,
         MAY_MOVE,
     ]
     assert whole(
         requires=[{**needs, "needed": False}], transfers=[{**moves, "does": "nothing"}]
     ) == [
-        "The FILE states every one of its OPTIONs that requires it, and it names none.",
+        "The FILE states every one of its OPTIONs that requires it or refuses it, and it names"
+        " none.",
         "The FILE states every OPTION that hands it over or keeps it, and it names none.",
     ]
+    # An OPTION that refuses the OBJECT is one that the FILE names.
+    assert whole(requires=[], refuses=[bars]) == [ALL_REQUIRE, ALL_MOVE]
     assert whole(requires=[], requires_complete=None) == [
         "The FILE says of no OPTION whether it requires this OBJECT.",
+        no_refusal,
         ALL_MOVE,
     ]
     assert whole(requires=[{**needs, "needed": False}], requires_complete=None)[0] == (
         "The FILE leaves open whether another of its OPTIONs requires this OBJECT."
     )
-    # Every OPTION of the FILE has a FACT about whether it requires the OBJECT.
+    assert whole(refuses=[bars], requires_complete=None)[1] == (
+        "Other OPTIONs of the FILE may refuse it too: the FILE does not say that these are all."
+    )
+    assert whole(refuses=[{**bars, "refused": False}], requires_complete=None)[1] == (
+        "The FILE leaves open whether another of its OPTIONs refuses this OBJECT."
+    )
+    # Every OPTION of the FILE has a FACT about whether it requires the OBJECT, and one about
+    # whether it refuses it.
     every = [
         {**needs, "option": option["id"], "name": option["name"]} for option in sent["options"]
     ]
-    assert whole(requires=every, requires_complete=None)[0] == (
-        "The FILE says of each of its OPTIONs whether it requires this OBJECT."
-    )
-    # A FILE with no OPTION says so: nothing in it can require the OBJECT.
+    all_bar = [
+        {**bars, "option": option["id"], "name": option["name"]} for option in sent["options"]
+    ]
+    assert whole(requires=every, refuses=all_bar, requires_complete=None)[:2] == [
+        "The FILE says of each of its OPTIONs whether it requires this OBJECT.",
+        "The FILE says of each of its OPTIONs whether it refuses this OBJECT.",
+    ]
+    # A FILE with no OPTION says so: nothing in it can require the OBJECT or refuse it.
     walk: Trip = {**sent, "options": [], "steps": [], "rights": [], "wants": [], "capabilities": []}
     lone: Trip = {**bags, "requires": [], "requires_complete": None, "transfers": []}
     (shown,) = all_objects([{**walk, "objects": [lone]}])
-    assert shown["objects"][0]["whole"] == ["The FILE lists no OPTION.", ALL_MOVE[:-1] + NONE]
+    assert shown["objects"][0]["whole"] == ["The FILE lists no OPTION."] * 2 + [
+        ALL_MOVE[:-1] + NONE
+    ]
 
 
 def test_an_option_that_leaves_an_object_alone_or_does_not_require_it_says_so() -> None:
@@ -523,7 +699,7 @@ def test_every_example_shows_its_objects_in_the_words_of_the_report() -> None:
         [found for _, found, _ in asked],
         [words for _, _, words in asked],
     )
-    starts = needs = moves = placed = 0
+    starts = needs = bars = moves = placed = 0
     for path, (sent, _, words), each in zip(FILES, asked, shown, strict=True):
         file = read(path)
         name = f"{path.parent.name}/{path.stem}"
@@ -537,11 +713,14 @@ def test_every_example_shows_its_objects_in_the_words_of_the_report() -> None:
         for thing in each["objects"]:
             if thing["plan"] is not None:
                 again.append(f"  {thing['name']}: {thing['plan'][len('In the plan: ') : -1]}")
-            for option in thing["requires"]:
-                if option["plan"] is not None:
-                    again.append(f"    {option['name']} requires {thing['name']}. {option['plan']}")
+            for check in ("requires", "refuses"):
+                for option in thing[check]:
+                    if option["plan"] is not None:
+                        said = f"{option['name']} {check} {thing['name']}"
+                        again.append(f"    {said}. {option['plan']}")
             for option in thing["might"]:
-                silent = f"The FILE does not say whether {option['name']} requires {thing['name']}"
+                check = "refuses" if option["says"].endswith("refuses it") else "requires"
+                silent = f"The FILE does not say whether {option['name']} {check} {thing['name']}"
                 again.append(f"    {silent}. {option['plan']}")
         if under:
             placed += 1
@@ -559,12 +738,13 @@ def test_every_example_shows_its_objects_in_the_words_of_the_report() -> None:
                 said = thing["starts"][:-1].replace(" it ", f" {called} ", 1)
                 said = said.replace("The TRIP starts", "the TRIP starts", 1)
                 assert f"  {stated.id}: {said}" in words, name
-            for option in thing["requires"]:
+            for option in (*thing["requires"], *thing["refuses"]):
                 if option["step"] is not None:
                     assert sent["steps"][option["step"]]["option"] == option["option"], name
                 (record,) = option["records"]
                 if f"  {record}: " in words:
-                    needs += 1
+                    needs += option in thing["requires"]
+                    bars += option in thing["refuses"]
                     said = option["says"].replace(" it", f" {called}", 1)
                     assert f"  {record}: {option['name']} {said}" in words, name
             for option in thing["transfers"]:
@@ -577,3 +757,4 @@ def test_every_example_shows_its_objects_in_the_words_of_the_report() -> None:
                         said = f"{option['name']} {option['says'].replace(' it', f' {called}', 1)}"
                     assert f"  {record}: {said}" in words, name
     assert min(starts, needs, moves, placed) > 3
+    assert bars > 1

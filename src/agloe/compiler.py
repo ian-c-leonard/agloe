@@ -460,18 +460,20 @@ class _Search:
             self.way_lasts[way.id] = None if longest is None else shortest
         unlisted = world.unlisted is None or bool(world.unlisted)
         self.facts = [fact for fact in file.facts if isinstance(fact, Complete)] if unlisted else []
-        # Each OBJECT that some OPTION requires in this world, unless another transfer brings
-        # it, with the OPTIONs that matter to it: those that require it or do something with
-        # it, by position in the FILE. Where an OBJECT is turns on nothing else.
+        # Each OBJECT that some OPTION requires or refuses in this world, unless another
+        # transfer brings it, with the OPTIONs that matter to it: those that require it,
+        # refuse it or do something with it, by position in the FILE. Where an OBJECT is
+        # turns on nothing else.
         self.matters: dict[str, list[int]] = {}
+        checked = world.needs | world.refuses
         for thing in file.objects:
             touched = [
                 index
                 for index, option in enumerate(file.options)
-                if (option.id, thing.id) in world.needs or (option.id, thing.id) in world.does
+                if (option.id, thing.id) in checked or (option.id, thing.id) in world.does
             ]
-            required = any((option.id, thing.id) in world.needs for option in file.options)
-            if required and thing.id not in world.brought:
+            asked = any((option.id, thing.id) in checked for option in file.options)
+            if asked and thing.id not in world.brought:
                 self.matters[thing.id] = touched
 
     def _count_time(self) -> None:
@@ -545,13 +547,16 @@ class _Search:
 
         The OPTION requires the OBJECT, hands it over or keeps it, and the PERSON can have the
         OBJECT at some time: so they can bring it, take it or leave it there. A PERSON can
-        have it who has it when the TRIP starts, or who can take part in an OPTION that hands
-        it over. Nobody else ever has it, so whether they take part changes nothing about
-        where the OBJECT is.
+        have it who has it when the TRIP starts, or might, or who can take part in an OPTION
+        that hands it over. Nobody else ever has it, so whether they take part changes
+        nothing about where the OBJECT is. An OPTION that refuses the OBJECT hands it over
+        to nobody.
 
         An OPTION that only might keep the OBJECT gives nobody a reason. Where whoever has
-        the OBJECT stays out of it, the OBJECT might be in fewer places afterwards, and it is
-        at hand wherever it was at hand with more.
+        the OBJECT stays out of it, the OBJECT might be in fewer places afterwards. It is
+        at hand wherever it was at hand with more, and no PERSON has it who did not have it
+        with more. An OPTION that refuses the OBJECT gives nobody a reason either: whoever
+        has to leave the OBJECT somewhere first has their reason for the stay that keeps it.
 
         ``self.holders`` keeps, for each OBJECT that matters, the PERSONs who can have it.
         """
@@ -560,24 +565,32 @@ class _Search:
         self.holders: dict[str, set[int]] = {}
         carries: set[tuple[int, int]] = set()
         for thing, matter in self.matters.items():
-            start = world.starts.get(thing)
-            holders = {
-                number
-                for number, person in enumerate(file.persons)
-                if (start is None and thing in world.starts_anywhere)
-                or (start is not None and start.person == person.id)
-            }
+            holders = set(self._might_start_with(thing))
             gain: list[int] = []
             for index in matter:
                 option = file.options[index].id
                 does = world.does.get((option, thing), "nothing")
-                if does in ("hands_over", "any"):
+                hands_over = does in ("hands_over", "any") and (option, thing) not in world.refuses
+                if hands_over:
                     holders |= {n for n in everybody if not self._shut_out(n, index)}
-                if (option, thing) in world.needs or does in ("hands_over", "keeps", "any"):
+                if (option, thing) in world.needs or hands_over or does in ("keeps", "any"):
                     gain.append(index)
             self.holders[thing] = holders
             carries.update((number, index) for number in holders for index in gain)
         return carries
+
+    def _might_start_with(self, thing: str) -> list[int]:
+        """The PERSONs who might have an OBJECT when the TRIP starts, by position in the FILE.
+
+        The PERSON that the world says has it. Everybody, where the world leaves the start
+        to pick, and where nobody knows where the OBJECT starts.
+        """
+        start = self.world.starts.get(thing)
+        return [
+            number
+            for number, person in enumerate(self.file.persons)
+            if start is None or start.person == person.id
+        ]
 
     def _shut_out(self, number: int, index: int) -> bool:
         """Whether this PERSON takes no part in this OPTION, whoever else does.
@@ -658,7 +671,8 @@ class _Search:
                     self._rule_out(number, index)
 
     def _follow(self, thing: str, matter: Sequence[int]) -> None:
-        """One OBJECT is at hand where it is required or handed over.
+        """One OBJECT is at hand where it is required or handed over, and nobody has it where
+        an OPTION refuses it.
 
         The OPTIONs that matter to it and happen form a path, in the order they happen: a
         circuit through a point that stands for the start of the TRIP. An OPTION that comes
@@ -670,9 +684,11 @@ class _Search:
         possible world, and several where an OPTION might keep the OBJECT. An OPTION that
         requires the OBJECT needs each of those places at hand: a PERSON who takes part, or
         the PLACE where it starts. So does a hand-over, and after it the PERSON who took the
-        OBJECT has it. An OPTION that keeps it moves it from whoever takes part to the PLACE
-        where the OPTION starts. Where the world leaves the start to pick, the solver picks
-        it, and where an OPTION might do anything, the solver picks what it does.
+        OBJECT has it. An OPTION that refuses the OBJECT needs none of those places to be a
+        PERSON who takes part. An OPTION that keeps it moves it from whoever takes part to
+        the PLACE where the OPTION starts. Where the world leaves the start to pick, the
+        solver picks it, and where an OPTION might do anything, the solver picks what it
+        does. Where nobody knows where the OBJECT starts, it might be in every place at once.
 
         The reference checker works out the order and the hand-overs again for the choice
         the solver makes, and checks them. So this only has to say when some order and some
@@ -685,17 +701,19 @@ class _Search:
         if not picked and not (moves and self.holders[thing]):
             # Nothing does anything with it, or nobody can ever have it. So it stays where
             # it starts. An OPTION that requires it happens only there, or with the PERSON
-            # who has it.
+            # who has it. Nobody who has it, or might, takes part in an OPTION that refuses
+            # it. Where nobody knows where it starts, it is at hand for nothing, and
+            # everybody might have it.
             start = world.starts.get(thing, Where())
-            holder = [
-                self.takes[number]
-                for number, person in enumerate(file.persons)
-                if person.id == start.person
-            ]
+            might_have = [self.takes[number] for number in self._might_start_with(thing)]
+            holder = might_have if start.person is not None else []
             for index in matter:
                 required = (options[index].id, thing) in world.needs
                 if required and start.place != options[index].origin:
                     model.add_bool_or([self.used[index].negated(), *(row[index] for row in holder)])
+                if (options[index].id, thing) in world.refuses:
+                    for row in might_have:
+                        model.add(row[index] == 0)
             return
         origins = {options[index].origin for index in matter}
         spots = [
@@ -711,13 +729,15 @@ class _Search:
         # Where it starts. A PLACE where none of these OPTIONs starts is as good as anywhere
         # else: the OBJECT is at hand for nothing there, and nothing moves it.
         at_first = some("starts")
-        if thing in world.starts_anywhere and thing not in world.starts:
+        if picked:
             model.add_exactly_one(at_first)
-        else:
-            stated = world.starts.get(thing, Where())
+        elif thing in world.starts:
+            stated = world.starts[thing]
             begins = spots.index(stated) if stated in spots else somewhere_else
             for n, spot in enumerate(at_first):
                 model.add(spot == (n == begins))
+        else:
+            model.add_bool_and(at_first)  # nobody knows where it starts: it might be anywhere
 
         before = {index: some(f"before {options[index].id}") for index in matter}
         after = {index: some(f"after {options[index].id}") for index in matter}
@@ -947,9 +967,10 @@ class _Search:
         PERSONs, in the FILE's order. The result is the choice that the OBJECT is handed over
         in the OPTION, or None where the OPTION hands nothing over.
 
-        The OPTION first checks what it requires, then keeps what it keeps, and then the
-        OBJECT is handed over in it. One that might keep the OBJECT leaves it in both places:
-        with whoever has it, and at the PLACE where the OPTION starts.
+        The OPTION first checks what it requires and what it refuses, then keeps what it
+        keeps, and then the OBJECT is handed over in it. One that might keep the OBJECT
+        leaves it in both places: with whoever has it, and at the PLACE where the OPTION
+        starts. One that refuses the OBJECT hands it over to nobody.
         """
         model, world = self.model, self.world
         option = self.file.options[index]
@@ -957,6 +978,7 @@ class _Search:
         takes = [row[index] for row in self.takes]
         persons = range(len(takes))
         here = next(n for n, spot in enumerate(spots) if spot.place == option.origin)
+        refused = (option.id, thing) in world.refuses
 
         def at_hand(*when: cp_model.LiteralT) -> None:
             """Under these conditions, each place where the OBJECT might be is at hand."""
@@ -968,13 +990,17 @@ class _Search:
 
         if (option.id, thing) in world.needs:
             at_hand(used)
+        if refused:
+            # Nobody who takes part has the OBJECT just before, or might.
+            for n in persons:
+                model.add_bool_or([before[n].negated(), takes[n].negated()])
         action = world.does.get((option.id, thing), "nothing")
         # What is left to choose: which PERSON has the OBJECT handed over, where the OPTION
         # hands it over, and whether the OPTION keeps it, where it might do anything.
         gives: list[cp_model.IntVar] = []
         given: cp_model.IntVar | None = None
         quiet: list[cp_model.LiteralT] = [used]  # the OPTION happens, with no hand-over in it
-        if action in ("hands_over", "any"):
+        if action in ("hands_over", "any") and not refused:
             gives = [model.new_bool_var(f"{thing} to {n} in {option.id}") for n in persons]
             given = model.new_bool_var(f"{thing} handed over in {option.id}")
             model.add_max_equality(given, [0, *gives])

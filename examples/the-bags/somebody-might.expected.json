@@ -8,6 +8,7 @@
         "at_hand_for": [
           {
             "option": "flight",
+            "check": "requires",
             "stated": true,
             "covered": false
           }
