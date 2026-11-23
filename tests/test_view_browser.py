@@ -571,7 +571,7 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
         finally:
             context.close()
     # The keyboard is on the link of a part, and the FILE changes so that the part goes. The
-    # keyboard is then on the link beside it.
+    # page puts the keyboard on no other link. The next Tab goes on from where the link was.
     path = tmp_path / "things.json"
     content = json.loads((story / "they-collect-them.json").read_text())
     path.write_text(json.dumps(content))
@@ -583,6 +583,8 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
         content["facts"] = [fact for fact in content["facts"] if "bags" not in json.dumps(fact)]
         put(path, json.dumps(content).encode())
         page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 7")
+        assert page.evaluate("() => document.activeElement === document.body")
+        page.keyboard.press("Tab")
         focused = page.evaluate("() => document.activeElement.getAttribute('href')")
         assert focused == "#report-part"
     # A calendar that the page could not load has its place on the page, and its link, with
@@ -661,6 +663,24 @@ def test_the_keyboard_lights_up_what_the_pointer_does(chromium: Browser, tmp_pat
         page.keyboard.press("ArrowUp")
         assert page.evaluate(on) == ["options-part", "Museum visit"]
         lit(page, persons=[], options=["Museum visit"])
+        # A key that moves the keyboard nowhere is a use of the keyboard too: Home on the
+        # first drawing of a part, and a key that the page has no use for.
+        for key in ["Home", "Escape"]:
+            page.mouse.move(2, 2)
+            alex.hover()
+            lit(page, persons=["Alex"], options=[])
+            page.keyboard.press(key)
+            assert page.evaluate(on) == ["options-part", "Museum visit"]
+            lit(page, persons=[], options=["Museum visit"])
+        # A key that only changes what other keys do is no use of the keyboard.
+        page.mouse.move(2, 2)
+        alex.hover()
+        page.keyboard.press("Shift")
+        page.keyboard.press("Meta")
+        page.wait_for_timeout(100)
+        lit(page, persons=["Alex"], options=[])
+        page.keyboard.press("Escape")
+        lit(page, persons=[], options=["Museum visit"])
         # A drawing that comes under a pointer at rest, as when the page scrolls, is not
         # pointed at.
         alex.evaluate("(row) => row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))")
@@ -677,6 +697,22 @@ def test_the_keyboard_lights_up_what_the_pointer_does(chromium: Browser, tmp_pat
         page.locator("#options-part h2").hover()
         lit(page, persons=[], options=["Museum visit"], marks=["Museum visit"])
         page.mouse.move(2, 2)
+        lit(page, persons=[], options=["Museum visit"])
+        # A finger on the screen is a pointer too. The drawing under it is lit while the
+        # finger is down, and not only once it is lifted.
+        page.keyboard.press("Escape")
+        lit(page, persons=[], options=["Museum visit"])
+        alex.scroll_into_view_if_needed()
+        box = alex.bounding_box()
+        assert box is not None
+        finger = {"x": round(box["x"] + 30), "y": round(box["y"] + 12)}
+        touch: Any = page.context.new_cdp_session(page)
+        touch.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [finger]})
+        lit(page, persons=["Alex"], options=[])
+        touch.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+        touch.detach()
+        page.locator("#options .item").first.focus()
+        page.keyboard.press("Escape")
         lit(page, persons=[], options=["Museum visit"])
         # The page draws a FILE that has changed, and its drawings are new ones. The page does
         # not guess which of them is the one that the keyboard was on: the keyboard is on
@@ -700,6 +736,16 @@ def test_the_keyboard_lights_up_what_the_pointer_does(chromium: Browser, tmp_pat
         page.keyboard.press("ArrowDown")
         assert page.evaluate(on)[1].startswith("2:00 pm to 3:00 pm: Museum visit")
         lit(page, marks=["Museum visit"], options=["Museum visit"])
+        # With Shift, an arrow key is the browser's. It makes a selection of text longer, and
+        # the keyboard stays on its line.
+        page.locator("#report .row", has_text="2:00 pm to 3:00 pm: Museum visit").dblclick()
+        chosen = "() => getSelection().toString()"
+        before = page.evaluate(chosen)
+        assert before
+        page.keyboard.press("Shift+ArrowRight")
+        after = page.evaluate(chosen)
+        assert after.startswith(before) and len(after) == len(before) + 1
+        assert page.evaluate(on)[1].startswith("2:00 pm to 3:00 pm: Museum visit")
         # The calendar is a part too: Tab reaches one of its drawings, and the arrows the rest.
         page.locator("#calendar").focus()
         page.keyboard.press("Tab")
@@ -716,7 +762,7 @@ def test_the_keyboard_lights_up_what_the_pointer_does(chromium: Browser, tmp_pat
         lit(page, marks=[], options=[], rows=[], persons=[])
         # Each part has one drawing that Tab stops at, however many it holds.
         stops = page.evaluate(
-            """() => [...document.querySelectorAll("#calendar, #drawings > .part")]
+            """() => [...document.querySelectorAll("#calendar-steps, #drawings > .part")]
               .filter((part) => !part.hidden)
               .map((part) => [...part.querySelectorAll("[data-of], [data-record]")])
               .map((drawings) => drawings.filter((each) => each.tabIndex === 0).length)"""
@@ -781,6 +827,83 @@ def test_the_keyboard_lights_up_what_the_pointer_does(chromium: Browser, tmp_pat
                 break
             page.keyboard.press("ArrowRight")
         assert ringed == ["solid", 3]
+    # A part keeps its stop for Tab while the page says more and draws nothing again: here
+    # the page says that it has lost the view.
+    views: list[View] = []
+    story = EXAMPLES / "ending-in-denver" / "works.json"
+    with opened(chromium, story, views=views) as page:
+        page.locator("#options .item").first.wait_for()
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        page.locator("#contents .to", has_text="OPTIONs").press("Enter")
+        page.keyboard.press("Tab")
+        page.keyboard.press("ArrowDown")
+        page.keyboard.press("Tab")
+        assert page.evaluate(on) == ["rights-part", "Museum visit"]
+        cut_off(views[0])
+        page.locator("#answer.lost").wait_for()
+        assert page.evaluate(on) == ["rights-part", "Museum visit"]
+        page.keyboard.press("Shift+Tab")
+        assert page.evaluate(on) == ["options-part", "Blue Line to O'Hare"]
+    # The steps that the FILE gives no time for are under the calendar. They are of the
+    # calendar's part: one stop for Tab, and the arrow keys go from the calendar to them.
+    untimed = json.loads((EXAMPLES / "a-driver" / "depends-on-the-car.json").read_text())
+    untimed["facts"] = [each for each in untimed["facts"] if each["id"] != "drive-back-time"]
+    with opened(chromium, written(tmp_path, untimed)) as page:
+        page.locator("#calendar .mark").first.wait_for()
+        page.locator("#calendar-untimed span").first.wait_for()
+        page.locator("#persons .item").first.wait_for()
+        page.locator("#report .row").first.wait_for()
+        inside = "(box) => document.activeElement.closest(box) !== null"
+        page.locator("#calendar").focus()
+        page.keyboard.press("Tab")
+        assert page.evaluate(inside, "#calendar")
+        page.keyboard.press("End")
+        assert page.evaluate(inside, "#calendar-untimed")
+        back = page.evaluate("() => document.activeElement.textContent")
+        lit(page, untimed=[back])
+        page.keyboard.press("ArrowUp")
+        assert page.evaluate(inside, "#calendar")
+        page.keyboard.press("Tab")
+        assert page.evaluate(inside, "#persons-part")
+        page.keyboard.press("Shift+Tab")
+        assert page.evaluate(inside, "#calendar")
+        stops = page.evaluate(
+            """() => [...document.querySelectorAll("#calendar-steps [data-of]")]
+              .filter((each) => each.tabIndex === 0).length"""
+        )
+        assert stops == 1
+    # On a wide window the drawings are in a pane that cuts off what is outside it. The ring
+    # of the keyboard is inside the pane: at its left, at its right, and at its end.
+    ring = """() => {
+      const at = document.activeElement;
+      const style = getComputedStyle(at);
+      const around = parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset);
+      const pane = document.getElementById("drawings");
+      pane.scrollTop = pane.scrollHeight;
+      const box = at.getBoundingClientRect();
+      const room = pane.getBoundingClientRect();
+      return {
+        ring: style.outlineStyle === "solid" && around >= 4,
+        left: box.left - around >= room.left,
+        right: box.right + around <= room.left + pane.clientWidth,
+        end: box.bottom + around <= room.top + pane.clientHeight,
+      };
+    }"""
+    with opened(chromium, story, wide=1500, tall=700) as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        page.locator("#ways .item").first.wait_for()
+        page.locator("#contents .to", has_text="PERSONs").press("Enter")
+        page.keyboard.press("Tab")
+        assert page.evaluate(on)[0] == "persons-part"
+        found = page.evaluate(ring)
+        assert found["ring"] and found["left"] and found["right"], found
+        last = page.locator("#drawings > .part:not([hidden])").last
+        last.locator("[data-of], [data-record], [data-records]").first.focus()
+        page.keyboard.press("End")
+        found = page.evaluate(ring)
+        assert all(found.values()), found
     # The row of links stays at the top of a window of one column. A line of the report that
     # the keyboard goes up to comes to rest under the row, and not behind it.
     with opened(chromium, EXAMPLES / "several-days" / "works-but-risky.json", 700, 600) as page:

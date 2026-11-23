@@ -27,12 +27,23 @@ let written = []; // what the report on the page was written from: its words, an
 let revealedFor = null; // the drawing that the pointer is on, by what it is of and tied to: the report has moved for it
 // What answers the pointer and the keyboard: a drawing, or a line of the report that is tied.
 const TIED = "[data-of], [data-record], [data-records]";
-// The parts in which the arrow keys move the keyboard from one drawing to the next. The strip
-// and the calendar are two of them, and the calendar has a box of its own that scrolls.
-const GROUPS = "#strip, #calendar, #calendar-untimed, #drawings > .part, #report";
+// The parts for the keyboard: the drawings in each are one stop for Tab, and the arrow keys
+// move the keyboard from one of them to the next. The strip and the calendar are two parts.
+// The calendar and the steps under it that have no time are one, and the calendar has a box
+// of its own that scrolls.
+const GROUPS = "#strip, #calendar-steps, #drawings > .part, #report";
 /** What a drawing is known by while the page stays as it is: what it is of and what it is tied to. */
 const keyOf = (each) => [each.dataset.of, each.dataset.record, each.dataset.records].join("|");
 let byKeys = false; // whether the reader last used the keyboard, and not the pointer
+// The keys that only change what other keys do.
+const ALONE = new Set(["Shift", "Control", "Alt", "AltGraph", "Meta", "CapsLock", "Fn"]);
+// How far an arrow key moves the keyboard through the drawings of a part.
+const STEPS = new Map([
+  ["ArrowDown", 1],
+  ["ArrowRight", 1],
+  ["ArrowUp", -1],
+  ["ArrowLeft", -1],
+]);
 
 function made(tag, className, text = "") {
   return Object.assign(document.createElement(tag), { className, textContent: text });
@@ -677,14 +688,14 @@ function reveal(from) {
 /**
  * What the reader points at: with the pointer, or with the keyboard. It is what they used
  * last that counts. After a key, it is the drawing that the keyboard is on, or nothing. After
- * a move of the pointer, it is what the pointer is on, and where that is nothing drawn, the
- * drawing that the keyboard is on.
+ * a move or a press of the pointer, it is what the pointer is on, and where that is nothing
+ * drawn, the drawing that the keyboard is on. `under` is what the pointer is on, where the
+ * pointer has just said so itself.
  */
-function pointedAt() {
+function pointedAt(under = [...document.querySelectorAll(":hover")].pop() ?? null) {
   const held = document.activeElement !== null && document.activeElement.matches(TIED) ? document.activeElement : null;
   if (byKeys) return held;
-  const under = [...document.querySelectorAll(":hover")].pop() ?? null;
-  return under !== null && under.closest(TIED) !== null ? under : held;
+  return under instanceof Element && under.closest(TIED) !== null ? under : held;
 }
 
 /** What is pointed at is lit again, after the page has written or drawn anew. */
@@ -766,14 +777,8 @@ function drawContents() {
       ...(old ? [why] : []),
     ].join("\n");
   }
-  // A link whose part is gone hands the keyboard to the link that now stands in its place.
-  for (const gone of have.values()) {
-    const held = gone === document.activeElement;
-    let beside = gone.nextElementSibling;
-    while (beside !== null && have.get(beside.getAttribute("href")) === beside) beside = beside.nextElementSibling;
-    gone.remove();
-    if (held) (beside ?? row.lastElementChild)?.focus({ preventScroll: true });
-  }
+  // A link whose part is gone goes too. The page puts the keyboard on no other link.
+  for (const gone of have.values()) gone.remove();
   // A page that is opened at one of its parts goes to that part when the part is drawn. It
   // goes there again each time it draws more, since what is drawn above moves the part. That
   // ends with the report, once every file of the page has come, or as soon as the reader
@@ -906,29 +911,40 @@ const view = new EventSource("events");
 view.onmessage = (message) => hear(JSON.parse(message.data));
 // The page no longer hears the view. What it shows stays, marked, until the view speaks again.
 view.onerror = () => hear({ kind: "lost" });
-// What the reader used last, the keyboard or the pointer, says what is pointed at. A drawing
-// that scrolls under a pointer at rest is not pointed at: only a pointer that moves is.
+// What the reader used last, the keyboard or the pointer, says what is pointed at. A key makes
+// it the keyboard, whether or not the key moves the keyboard. A key that only changes what
+// other keys do, like Shift, is no use of the keyboard.
 addEventListener(
   "keydown",
-  () => {
+  (event) => {
+    if (byKeys || ALONE.has(event.key)) return;
     byKeys = true;
+    light(pointedAt());
   },
   true,
 );
-for (const kind of ["mousemove", "mousedown"]) {
-  addEventListener(
-    kind,
-    () => {
-      if (!byKeys) return;
-      byKeys = false;
-      light(pointedAt());
-    },
-    true,
-  );
-}
-document.querySelector("main").addEventListener("mouseover", () => {
-  if (!byKeys) light(pointedAt());
-});
+// A press of the pointer makes it the pointer, and so does a move of it after a key. A press on
+// a screen that is touched is one: the drawing is lit while the finger is on it. A drawing
+// that scrolls under a pointer at rest is not pointed at after a key: only a pointer that
+// moves is.
+addEventListener(
+  "pointerdown",
+  (event) => {
+    byKeys = false;
+    light(pointedAt(event.target));
+  },
+  true,
+);
+addEventListener(
+  "pointermove",
+  (event) => {
+    if (!byKeys) return;
+    byKeys = false;
+    light(pointedAt(event.target));
+  },
+  true,
+);
+document.querySelector("main").addEventListener("mouseover", (event) => light(pointedAt(event.target)));
 document.querySelector("main").addEventListener("mouseleave", () => light(pointedAt()));
 // The keyboard is on a drawing: it is lit, and it is the one stop for Tab in its part. The
 // keyboard is on something else: what the reader points at otherwise is lit.
@@ -947,10 +963,11 @@ document.querySelector("main").addEventListener("focusin", (event) => {
 document.querySelector("main").addEventListener("focusout", (event) => {
   if (event.relatedTarget === null) queueMicrotask(() => light(pointedAt()));
 });
-// The arrow keys, Home and End move the keyboard through the drawings of one part.
+// The arrow keys, Home and End move the keyboard through the drawings of one part. With
+// Shift, Alt, Control or Meta they are the browser's: Shift and an arrow select text.
 document.querySelector("main").addEventListener("keydown", (event) => {
-  const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
-  if ((step === undefined && event.key !== "Home" && event.key !== "End") || event.altKey || event.ctrlKey || event.metaKey) return;
+  const step = STEPS.get(event.key);
+  if ((step === undefined && event.key !== "Home" && event.key !== "End") || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
   const from = event.target instanceof Element && event.target.matches(TIED) ? event.target : null;
   const group = from === null ? null : from.closest(GROUPS);
   if (group === null) return;
