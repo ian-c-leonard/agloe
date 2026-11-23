@@ -969,7 +969,8 @@ def _asked_of_objects(
     together. Where nothing works, FACTs are taken out of the group one at a time, in the
     FILE's order, as long as nothing works without them. What stays is a group that no FACT
     can leave, and the search goes on with the FACTs outside it. A group of one FACT is a
-    FACT that every set holds.
+    FACT that every set holds. Something works in the bound as it is: the search asks only
+    about new things that can be enough. So no group is empty.
 
     This only saves work. A FILE that says little about its OBJECTs has many unknown FACTs
     about them, and the sets of a size are too many to try one by one.
@@ -999,6 +1000,8 @@ def _asked_of_objects(
             fewer = [each for each in group if each != unknown]
             if nothing_works(fewer):
                 group = fewer
+        if not group:
+            raise AssertionError("nothing works in the upper bound, so no set is enough")
         groups.append(frozenset(group))
         left = [each for each in left if each not in group]
     return groups

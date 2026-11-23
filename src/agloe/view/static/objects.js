@@ -60,7 +60,9 @@ function checkedBy(thing, silent) {
     if (some) return `Other OPTIONs of the FILE may ${verb} it too: the FILE does not say that these are all.`;
     return stated.length ? `The FILE leaves open whether another of its OPTIONs ${does} this OBJECT.` : `The FILE says of no OPTION whether it ${does} this OBJECT.`;
   };
-  return [one(thing.requires, requires, silent.requires, "requires", "require"), one(thing.refuses, refuses, silent.refuses, "refuses", "refuse")];
+  const said = [one(thing.requires, requires, silent.requires, "requires", "require"), one(thing.refuses, refuses, silent.refuses, "refuses", "refuse")];
+  // A FILE with no OPTION says so once.
+  return said[0] === said[1] ? [said[0]] : said;
 }
 
 /**

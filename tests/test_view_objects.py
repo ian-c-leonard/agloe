@@ -666,9 +666,7 @@ def test_an_object_says_whether_its_options_are_all_there_are() -> None:
     walk: Trip = {**sent, "options": [], "steps": [], "rights": [], "wants": [], "capabilities": []}
     lone: Trip = {**bags, "requires": [], "requires_complete": None, "transfers": []}
     (shown,) = all_objects([{**walk, "objects": [lone]}])
-    assert shown["objects"][0]["whole"] == ["The FILE lists no OPTION."] * 2 + [
-        ALL_MOVE[:-1] + NONE
-    ]
+    assert shown["objects"][0]["whole"] == ["The FILE lists no OPTION.", ALL_MOVE[:-1] + NONE]
 
 
 def test_an_option_that_leaves_an_object_alone_or_does_not_require_it_says_so() -> None:
