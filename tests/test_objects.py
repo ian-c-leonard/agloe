@@ -7258,3 +7258,42 @@ def test_a_carry_that_ends_sooner_can_break_one_constraint_and_no_plan_that_work
     left = (taken[0], replace(taken[1], handed=()), taken[2])
     for world in (short, long):
         assert broken(file, world, in_world(world, left)) == []
+
+
+def test_the_choices_for_an_order_that_is_known_to_work_are_made_one_at_a_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Four ferries go across, each with its own traveler, and nine things lie at the quay.
+    Three ferries refuse them, and nobody said what those three do with them. Where every
+    unknown FACT helps, each thing can go across four ways: a quarter of a million ways
+    together. The first of them works, and the search makes no other."""
+    boats = ["early", "express", "fast", "family-ferry"]
+    things = ["case", "trunk", "boots", "skis", "poles", "helmet", "wax", "tent", "stove"]
+    options = [*(moves(boat, "quay", "island") for boat in boats), stays("collection", "island")]
+    facts = [
+        fact for number, boat in enumerate(boats) for fact in at(boat, 9, 10 * number, "PT35M")
+    ]
+    facts += [*at("collection", 11), *(needs_no_right(boat) for boat in boats)]
+    for thing in things:
+        facts += [lies_at(thing, "quay"), hands_over("family-ferry", thing)]
+        facts += [requires_object("collection", thing), every_use(thing)]
+        facts += [refuses_object(boat, thing) for boat in boats[:3]]
+    people = ["alex", "sam", "jo", "lee"]
+    locks = [
+        lock(boat, rider) for boat, rider in zip(boats, ["sam", "jo", "lee", "alex"], strict=True)
+    ]
+    locks.append(lock("collection", "alex"))
+    file = trip(people, ["quay", "island"], options, facts, locks, rights=True, objects=things)
+    made = 0
+    its_own = reference._as_chain  # pyright: ignore[reportPrivateUsage]
+
+    def counted(*given: object) -> object:
+        nonlocal made
+        made += 1
+        return its_own(*given)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(reference, "_as_chain", counted)
+    found = compiler.check(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert asked(found) == [(Unknown("needs no right", "collection"),)]
+    assert made < 500
