@@ -1,4 +1,4 @@
-"""OBJECTs: where a thing is, which OPTIONs require it, and which hand it over or keep it."""
+"""OBJECTs: where a thing is, and which OPTIONs require it, hand it over, keep it or carry it."""
 
 import json
 from collections.abc import Callable, Iterable, Iterator, Sequence
