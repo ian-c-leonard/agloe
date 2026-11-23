@@ -12,36 +12,52 @@
 //
 // Nothing here judges a TRIP. An answer is shown only once the COMPILER has given it, and only
 // for the state of the FILE it was given on. A report that is still on the page after the FILE
-// has changed is marked as old. So is what the page draws of that report's TRIP, until the
-// view has read the FILE as it is now: from then on the page draws that FILE, with no report.
+// has changed is marked as old. So is what the page draws, until the view has read the FILE as
+// it is now: from then on the page draws that FILE, with no report. The page always draws the
+// newest TRIP that it was sent, and marks it as old where it is not of the FILE as it is now,
+// or where the page no longer hears the view.
 
 const OLD = "What the page shows below is on the FILE as it was before.";
 const OLD_REPORT = "The report below is on the FILE as it was before.";
 const seconds = (length) => `${length.toFixed(2)} s`;
-const none = { checking: false, read: null, answer: null, answered: null, problems: null, unreadable: null, unwritable: false, stopped: false, lost: false };
+const none = { checking: false, answer: null, answered: null, problems: null, unreadable: null, unwritable: false, stopped: false, lost: false };
 
 /** Before the view has sent anything. */
 export function start() {
-  return { ...none, view: null, name: null, revision: null, report: null, reported: null, old: false };
+  return { ...none, view: null, name: null, revision: null, read: null, report: null, reported: null, old: false };
 }
 
 /** The state after one more event. */
 export function after(state, event) {
   if (event.kind === "lost") return { ...state, checking: false, lost: true, old: state.report !== null };
   if (event.kind === "file") {
-    // Each view has a name of its own. Where another view now serves this address, the report
-    // on the page is on a FILE that this view knows nothing of, so the page lets it go.
-    const kept = state.view === null || event.view === state.view ? state : { ...state, report: null, reported: null };
+    // The view speaks again of the state that the page knows, after the page had lost it. All
+    // that the page was told of that state stands, and the check goes on where it has no end
+    // yet.
+    if (state.view !== null && event.view === state.view && event.revision === state.revision) {
+      const ended = reportedOn(state) || state.problems !== null || state.unreadable !== null || state.unwritable || state.stopped;
+      return { ...state, lost: false, checking: !ended, old: state.report !== null && !reportedOn(state) };
+    }
+    // Each view has a name of its own. Where another view now serves this address, what is
+    // on the page is of a FILE that this view knows nothing of, so the page lets it go.
+    const kept = state.view === null || event.view === state.view ? state : { ...state, read: null, report: null, reported: null };
     return { ...kept, ...none, view: event.view, name: event.name, revision: event.revision, checking: true, old: kept.report !== null };
   }
   // An event about another state of the FILE than the one the page was last told of says nothing
   // about the FILE on the page, so it is passed over.
   if (event.revision !== state.revision) return state;
   const done = { ...state, checking: false, old: state.report !== null };
-  // The TRIP of the FILE as it is now, before any report on it.
-  if (event.kind === "read") return { ...state, read: event.trip };
+  // The TRIP of the FILE as it is now, before any report on it. A state is read once: what
+  // the view says of it again changes nothing. Where the view has no TRIP to send, the page
+  // keeps the last one that it was sent.
+  if (event.kind === "read") {
+    if (event.trip === null || (state.read !== null && state.read.revision === event.revision)) return state;
+    return { ...state, read: { trip: event.trip, revision: event.revision } };
+  }
   if (event.kind === "answer") return { ...state, answer: event.answer, answered: event.seconds };
   if (event.kind === "report") {
+    // A state has one report. Where the view sends it again, the one on the page stands.
+    if (reportedOn(state)) return { ...state, checking: false, old: false };
     const report = { text: event.text, json: event.json, trip: event.trip, revision: event.revision };
     return { ...done, answer: event.answer, answered: state.answered ?? event.seconds, report, reported: event.seconds, old: false };
   }
@@ -51,6 +67,11 @@ export function after(state, event) {
   if (event.kind === "unwritable") return { ...done, unwritable: true };
   if (event.kind === "stopped") return { ...done, stopped: true };
   throw new Error(`the view sent an event that the page does not know: ${event.kind}`);
+}
+
+/** Whether the report on the page is on the state of the FILE that the page was last told of. */
+function reportedOn(state) {
+  return state.report !== null && state.report.revision === state.revision;
 }
 
 /** How a report is marked: by its answer, or as a warning where its plan comes with one. */
@@ -64,18 +85,20 @@ function markOf(json) {
  * report is on the FILE as it was before, and the problems of a FILE that the format refuses.
  *
  * `calendar` holds the TRIP that the page draws, and the report as JSON for what the drawings
- * mark. Where the report on the page is on the FILE as it is now, that is the TRIP that came
- * with the report. Before that, it is the TRIP as the view read it from the FILE as it is now,
- * with no report, and `ahead` says so: the drawings are then ahead of any report on the page.
+ * mark. It is the newest TRIP that the page was sent: the one that came with the report on
+ * the page, or one that the view read from a later state of the FILE, with no report. `ahead`
+ * says that it is the second: the drawings are then ahead of any report on the page.
  * `calendar` is null where the page has neither, and the TRIP in it is null where the view
  * sent none with the report. `old` says that the report in words is on the FILE as it was
- * before. What the page draws is of that FILE too, unless it is `ahead`.
+ * before. `past` says that of what the page draws: its TRIP is not of the FILE as it is now,
+ * or the page no longer hears the view.
  */
 export function says(state) {
-  const ahead = state.read !== null && (state.report === null || state.report.revision !== state.revision);
-  const calendar = ahead ? { trip: state.read, report: null } : state.report ? { trip: state.report.trip, report: state.report.json } : null;
-  const shown = { name: state.name, report: state.report ? state.report.text : null, calendar, ahead, old: state.old, problems: state.problems };
-  const with_old = (note) => `${note} ${state.old ? (ahead ? OLD_REPORT : OLD) : ""}`.trim();
+  const ahead = state.read !== null && (state.report === null || state.read.revision > state.report.revision);
+  const calendar = ahead ? { trip: state.read.trip, report: null } : state.report ? { trip: state.report.trip, report: state.report.json } : null;
+  const past = calendar !== null && (ahead ? state.lost || state.read.revision !== state.revision : state.old);
+  const shown = { name: state.name, report: state.report ? state.report.text : null, calendar, ahead, old: state.old, past, problems: state.problems };
+  const with_old = (note) => `${note} ${past ? OLD : state.old ? OLD_REPORT : ""}`.trim();
   if (state.lost) {
     return { ...shown, mark: "lost", line: "The view is not answering.", note: with_old("Start agloe view again, and open the address that it prints.") };
   }

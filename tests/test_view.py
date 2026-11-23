@@ -966,7 +966,10 @@ def test_the_page_says_what_the_report_says() -> None:
         assert on_report["mark"] == kind_of(expected), name
         assert on_report["line"] == words.split("\n")[0], name
         assert on_report["report"] == words, name
-        assert (on_report["old"], on_report["ahead"]) == (False, False), name
+        assert (on_report["old"], on_report["ahead"], on_report["past"]) == (False, False, False), (
+            name
+        )
+        assert (on_read["past"], on_answer["past"]) == (False, False), name
         # The calendar is of the TRIP that came with the report.
         assert on_report["calendar"] == {"trip": sent[-1]["trip"], "report": expected}, name
         assert sent[-1]["trip"]["itinerary"] is (expected["answer"] == "FEASIBLE"), name
@@ -988,6 +991,7 @@ def test_the_page_marks_a_report_on_the_file_as_it_was() -> None:
     assert changed["mark"] == "checking"
     assert not any(answer in changed["line"] for answer in ANSWERS)
     assert (changed["report"], changed["old"], changed["ahead"]) == (words, True, False)
+    assert changed["past"] is True
     # Until the view has read the FILE as it is now, the page draws the TRIP of that report,
     # and it is marked with it.
     kept = {"trip": first[-1]["trip"], "report": first[-1]["json"]}
@@ -997,7 +1001,7 @@ def test_the_page_marks_a_report_on_the_file_as_it_was() -> None:
     # The view has read the FILE as it is now: the page draws that FILE, with no report. The
     # report in words is still the one on the FILE as it was, and the page says which is which.
     ahead = {"trip": second[1]["trip"], "report": None}
-    assert (read_again["calendar"], read_again["ahead"]) == (ahead, True)
+    assert (read_again["calendar"], read_again["ahead"], read_again["past"]) == (ahead, True, False)
     assert (read_again["report"], read_again["old"]) == (words, True)
     assert read_again["note"].endswith("The report below is on the FILE as it was before.")
     assert answered["line"].startswith("INFEASIBLE")
@@ -1013,10 +1017,45 @@ def test_the_page_marks_a_report_on_the_file_as_it_was() -> None:
     assert broken["mark"] == "refused"
     assert broken["problems"] == ["/facts/0: fits no known shape"]
     assert not any(answer in broken["line"] for answer in ANSWERS)
-    assert (broken["old"], broken["ahead"]) == (True, False)
+    assert (broken["old"], broken["ahead"], broken["past"]) == (True, False, True)
     assert broken["calendar"] == reported["calendar"]
     assert said[-1]["line"] == "FEASIBLE: this trip works."
     assert said[-1]["problems"] is None
+
+
+def test_the_page_keeps_the_last_file_that_the_view_read() -> None:
+    """A FILE with no report yet changes. What the page draws of it stays until the view has
+    read the FILE again, marked as on the FILE as it was."""
+    file, read_it, answer, _ = sent_for((STORY / "works.json").read_bytes(), 1)
+    away: Events = [
+        {"kind": "file", "name": "trip.json", "revision": 2, "view": "one"},
+        {"kind": "unreadable", "problem": "No such file or directory", "revision": 2},
+    ]
+    back = sent_for((STORY / "cannot-work.json").read_bytes(), 3)
+    (said,) = page_says([[file, read_it, answer, *away, *back]])
+    answered, changed, unreadable, again, read_again = said[3:8]
+    drawn = {"trip": read_it["trip"], "report": None}
+    assert (answered["calendar"], answered["past"]) == (drawn, False)
+    # The FILE changed, and the page has no report to fall back on: the drawing stays.
+    assert (changed["mark"], changed["calendar"], changed["past"]) == ("checking", drawn, True)
+    assert changed["note"] == "What the page shows below is on the FILE as it was before."
+    assert (unreadable["mark"], unreadable["calendar"], unreadable["past"]) == (
+        "unreadable",
+        drawn,
+        True,
+    )
+    assert unreadable["note"].endswith("What the page shows below is on the FILE as it was before.")
+    assert (again["calendar"], again["past"]) == (drawn, True)
+    # The view has read the FILE as it is now: the page draws that one.
+    assert read_again["calendar"] == {"trip": back[1]["trip"], "report": None}
+    assert (read_again["past"], read_again["note"]) == (False, "")
+    # A state of which the view has no TRIP to send leaves the last one on the page.
+    none_to_send = {**back[1], "trip": None}
+    (said,) = page_says([[file, read_it, answer, back[0], none_to_send]])
+    assert (said[-1]["calendar"], said[-1]["past"]) == (drawn, True)
+    # What the view says twice of one state is taken once.
+    (said,) = page_says([[file, read_it, {**read_it, "trip": None}, read_it]])
+    assert said[2] == said[3] == said[4]
 
 
 def test_the_page_takes_no_answer_for_another_state_of_the_file() -> None:
@@ -1100,19 +1139,38 @@ def test_the_page_says_when_it_no_longer_hears_the_view() -> None:
     first = sent_for((STORY / "works.json").read_bytes(), 1)
     again = sent_for((STORY / "works.json").read_bytes(), 1)
     (said,) = page_says([[*first, {"kind": "lost"}, *again]])
-    lost = said[5]
+    reported, lost = said[4:6]
     assert lost["mark"] == "lost"
     assert not any(word in lost["line"] for word in ANSWERS)
     assert lost["old"] is True
     assert lost["report"] == (STORY / "works.expected.txt").read_text()
     # What the page draws stays too: the TRIP of that report, marked with it.
     assert lost["calendar"] == {"trip": first[-1]["trip"], "report": first[-1]["json"]}
-    assert lost["ahead"] is False
-    # The view speaks again: the page starts afresh on the FILE that the view tells it of.
-    assert said[6]["mark"] == "checking"
-    assert said[6]["old"] is True
+    assert (lost["ahead"], lost["past"]) == (False, True)
+    assert lost["note"].endswith("What the page shows below is on the FILE as it was before.")
+    # The view speaks again, of the same state of the FILE: all that the page was told of it
+    # stands. The page never says that a report which it shows is on its way.
+    for after_it in said[6:]:
+        assert after_it == reported
+    # The page lost the view after the view had read the FILE, and before the report. What it
+    # draws is the last that it saw of the FILE, and it is marked so.
+    file, read_it, answer, report = first
+    (said,) = page_says([[file, read_it, answer, {"kind": "lost"}, file, read_it, answer, report]])
+    answered, lost, found, *_ = said[3:]
+    assert (answered["ahead"], answered["past"]) == (True, False)
+    assert lost["calendar"] == answered["calendar"] == {"trip": read_it["trip"], "report": None}
+    assert (lost["ahead"], lost["past"], lost["old"]) == (True, True, False)
+    assert lost["note"].endswith("What the page shows below is on the FILE as it was before.")
+    # The view speaks again: the check goes on, and the answer that was proved stands.
+    assert found == answered
+    assert said[-1] == reported
+    # The view speaks again of another state of the FILE: the page starts afresh on that one,
+    # and marks what it still shows.
+    newer = sent_for((STORY / "works.json").read_bytes(), 2)
+    (said,) = page_says([[*first, {"kind": "lost"}, *newer]])
+    assert (said[6]["mark"], said[6]["old"], said[6]["past"]) == ("checking", True, True)
     assert said[-1]["line"] == "FEASIBLE: this trip works."
-    assert said[-1]["old"] is False
+    assert (said[-1]["old"], said[-1]["past"]) == (False, False)
 
 
 def test_the_page_keeps_no_report_from_another_view() -> None:

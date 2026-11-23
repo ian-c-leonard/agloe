@@ -678,7 +678,7 @@ function show() {
   // Where the page draws the FILE ahead of any report on it, a report that is still on the
   // page is on the FILE as it was: its lines are tied to nothing that the page draws.
   const tied = tie && said.report !== null && !said.ahead ? tie.lines(said.report, said.calendar.report, said.calendar.trip) : null;
-  const drawnOld = said.old && !said.ahead;
+  const drawnOld = said.past;
   const from = [said.report, said.calendar?.report, said.calendar?.trip, tie];
   if (from.some((each, n) => each !== written[n])) {
     written = from;
