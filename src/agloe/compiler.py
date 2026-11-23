@@ -770,6 +770,44 @@ class _Search:
                 handed[index] = given
         model.add_circuit(arcs)
         self._leave_time_to_cross(thing, matter, handed)
+        if not picked:
+            self._clear_before_a_refusal(thing, matter)
+
+    def _clear_before_a_refusal(self, thing: str, matter: Sequence[int]) -> None:
+        """Whoever might have an OBJECT when the TRIP starts gets rid of it before a refusal.
+
+        The path of the OBJECT already says this. Said outright, the solver need not find it
+        out by trying every order.
+
+        A PERSON who has the OBJECT when the TRIP starts, or might, still might have it
+        until they take part in an OPTION that takes it from them: one that keeps it, or one
+        in which it is handed over. A hand-over needs every place the OBJECT might be in at
+        hand, so whoever might have it takes part there. Where nobody knows where the OBJECT
+        starts, it is at hand for nothing, and only an OPTION that keeps it takes it from
+        them. An OPTION that only might keep the OBJECT takes it from nobody for sure, and
+        one that refuses it moves nothing. So such a PERSON takes part in an OPTION that
+        refuses the OBJECT only where they take part in one of the others first. A PERSON's
+        own OPTIONs have turns in the order they do them.
+        """
+        model, world, options = self.model, self.world, self.file.options
+        takes_it = ("keeps", "hands_over", "any") if thing in world.starts else ("keeps", "any")
+        refusing = [index for index in matter if (options[index].id, thing) in world.refuses]
+        clears = [
+            index
+            for index in matter
+            if index not in refusing and world.does.get((options[index].id, thing)) in takes_it
+        ]
+        for number in self._might_start_with(thing):
+            row = self.takes[number]
+            for index in refusing:
+                earlier: list[cp_model.IntVar] = []
+                for other in clears:
+                    name = f"{number} is rid of {thing} in {options[other].id}"
+                    first = model.new_bool_var(f"{name} before {options[index].id}")
+                    model.add_implication(first, row[other])
+                    _when(model.add(self.turn[index] >= self.turn[other] + 1), first)
+                    earlier.append(first)
+                model.add_bool_or([row[index].negated(), *earlier])
 
     def _leave_time_to_cross(
         self, thing: str, matter: Sequence[int], handed: Mapping[int, cp_model.IntVar]

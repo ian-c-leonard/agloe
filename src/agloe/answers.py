@@ -37,7 +37,6 @@ from agloe.file import (
 )
 from agloe.reference import (
     Broken,
-    Constraint,
     Itinerary,
     Remaining,
     Unknown,
@@ -45,6 +44,7 @@ from agloe.reference import (
     World,
     any_works,
     broken_as_listed,
+    brought_in,
     can_work,
     first_shown,
     has_to_end_at,
@@ -59,6 +59,7 @@ from agloe.reference import (
     with_one_required,
     with_these_at_best,
     with_this_long,
+    within_reach,
     worst_case,
 )
 
@@ -707,6 +708,12 @@ def _to_bring(
     comes whether a FACT says that the OPTION requires or refuses the OBJECT, and whether
     the check holds in the same plan without another transfer: with what the FILE lists,
     and everything else as in that world. Any other FACT has none.
+
+    Where the OBJECT is in that plan is worked out from what the FILE lists. An OPTION that
+    a FACT says refuses the OBJECT moves nothing. One that only might refuse it is
+    different: if it does not, it keeps the OBJECT from a PERSON who brings it in, where it
+    keeps the OBJECT. So the OBJECT might be in either place afterwards, and a check holds
+    only where it holds in both.
     """
     if unknown.what != "another transfer":
         return ()
@@ -715,24 +722,31 @@ def _to_bring(
     plan = shown(file, world)
     if plan is None:
         raise AssertionError("a set of unknown FACTs that is enough shows no ITINERARY")
-    listed_only = replace(world, brought=world.brought - {thing})
-    failing = {
-        (found.option, found.constraint)
-        for found in broken_as_listed(file, listed_only, plan)
-        if found.object == thing
+    might_refuse = {
+        pair
+        for pair in world.refuses
+        if pair[1] == thing and file.refuses_object(*pair) is not True
     }
+    does = {
+        pair: "might_keep" if pair in might_refuse and action == "keeps" else action
+        for pair, action in world.does.items()
+    }
+    listed_only = replace(
+        world, brought=world.brought - {thing}, refuses=world.refuses - might_refuse, does=does
+    )
+    steps = [step for step in plan if step.option is not None]
     checks: list[tuple[str, str, bool, bool]] = []
-    for step in plan:
-        if step.option is None:
-            continue
-        if (step.option, thing) in world.needs:
-            stated = file.requires_object(step.option, thing) is True
-            holds = (step.option, Constraint.AT_HAND) not in failing
-            checks.append((step.option, "requires", stated, holds))
-        if (step.option, thing) in world.refuses:
-            stated = file.refuses_object(step.option, thing) is True
-            holds = (step.option, Constraint.REFUSED) not in failing
-            checks.append((step.option, "refuses", stated, holds))
+    # Where the OBJECT might be just before each OPTION of the plan starts.
+    for before, step in zip(whereabouts(file, listed_only, plan)[thing], steps, strict=False):
+        option = step.option or ""
+        if (option, thing) in world.needs:
+            stated = file.requires_object(option, thing) is True
+            holds = within_reach(before, step.persons, step.origin)
+            checks.append((option, "requires", stated, holds))
+        if (option, thing) in world.refuses:
+            stated = file.refuses_object(option, thing) is True
+            holds = not brought_in(before, step.persons)
+            checks.append((option, "refuses", stated, holds))
     return tuple(checks)
 
 
