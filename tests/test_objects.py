@@ -8620,7 +8620,9 @@ def test_the_walk_says_each_place_where_an_object_is_in_some_case() -> None:
             # Some plans hand the OBJECT over or carry it by choice, where a FACT says the
             # OPTION can. The others choose nothing, like a plan that another transfer serves.
             can = world.does.get((each.option or "", thing))
-            handed = ((thing, rng.choice(each.persons)),) if can == "hands_over" else ()
+            # Nothing is handed over in a step with nobody in it.
+            hands = can == "hands_over" and each.persons
+            handed = ((thing, rng.choice(each.persons)),) if hands else ()
             carried = (thing,) if can == "carries" else ()
             if rng.random() < 0.5:
                 handed, carried = (), ()
