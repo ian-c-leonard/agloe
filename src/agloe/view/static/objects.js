@@ -139,8 +139,8 @@ export function objects(trip, report = null, stated = null) {
   // Where an OBJECT is, or each place it might be: with Alex, at the Art Institute or in the
   // flight home. Each name is as "or" joins it, as in the report. A place with no name is
   // somewhere the FILE does not name, and an OBJECT that might be with any PERSON, at any
-  // PLACE or somewhere the FILE does not name is nobody knows where. Null where the TRIP has
-  // no such PERSON, PLACE or OPTION.
+  // PLACE or somewhere the FILE does not name is nobody knows where, whatever OPTION it might
+  // be in too. Null where the TRIP has no such PERSON, PLACE or OPTION.
   const whereIs = (where) => {
     const one = (each) => {
       if (typeof each.person === "string") return people.has(each.person) ? `with ${either(people.get(each.person))}` : null;
@@ -150,7 +150,8 @@ export function objects(trip, report = null, stated = null) {
     };
     const each = where.map(one);
     if (each.includes(null)) return null;
-    return where.length === people.size + places.size + 1 ? "nobody knows where" : listed(each, "or");
+    const outside = where.filter((spot) => typeof spot.option !== "string");
+    return outside.length === people.size + places.size + 1 ? "nobody knows where" : listed(each, "or");
   };
   const carried = new Map(carriedIn(report).map((each) => [each.object, each]));
   // Whether a card gives a time of the plan. The part then says whose clocks it is on.

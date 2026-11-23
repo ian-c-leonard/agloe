@@ -42,6 +42,7 @@ from agloe.reference import (
     broken,
     broken_as_listed,
     first_shown,
+    goes_along,
     in_world,
     itineraries,
     just_before,
@@ -758,7 +759,7 @@ def test_the_two_cases_take_what_the_file_does_not_say_each_its_own_way() -> Non
     # keep it, and nobody knows where the passport is.
     assert worst.needs == everything
     assert worst.refuses == everything
-    assert dict(worst.does) == dict.fromkeys(everything, "might_keep")
+    assert dict(worst.does) == dict.fromkeys(everything, "might_take")
     assert not worst.starts and not worst.starts_anywhere and not worst.brought
     # At best no OPTION requires it or refuses it, and another transfer brings it wherever a
     # plan needs it.
@@ -1102,17 +1103,26 @@ def test_a_plan_that_holds_wherever_the_object_is_can_be_robust() -> None:
     assert found.robust is True
     assert [each.option for each in found.itinerary] == ["short", "check"]
     either = (Where(person="alex"), Where(place="desk"))
+    # Nobody said what the check does with the passport either, and it requires it. So the
+    # passport might go along in the check, and it lies at the desk again when the check ends.
     assert found.objects == (
         Carried(
             "passport",
-            (Stay((Where(person="alex"),)), Stay(either, "short", "might be kept")),
+            (
+                Stay((Where(person="alex"),)),
+                Stay(either, "short", "might be kept"),
+                Stay((*either, Where(option="check")), "check", "might be kept"),
+                Stay(either, "check", "arrived"),
+            ),
             (Use("check", True, either),),
         ),
     )
     words = report.as_text(file, found)
     assert (
         "  passport: with alex when the TRIP starts; with alex or at desk from 9:00 am"
-        " (the FILE does not say what short does with passport)"
+        " (the FILE does not say what short does with passport); with alex, at desk or in"
+        " check from 10:00 am (the FILE does not say what check does with passport); with alex"
+        " or at desk from 10:30 am (where check ends)\n"
     ) in words
     assert "    check requires passport. Just before it starts: with alex or at desk." in words
     # At the shortest durations the rule would show the first appointment.
@@ -1605,6 +1615,7 @@ def test_the_unknown_facts_about_objects_have_a_fixed_order() -> None:
         ("does not refuse", "lunch", None, None),
         ("keeps", "lunch", None, None),
         ("does not keep", "lunch", None, None),
+        ("does not carry", "lunch", None, None),
         ("does not keep or carry", "lunch", None, None),
         ("hands over", "lunch", None, None),
         ("carries", "lunch", None, None),
@@ -1743,11 +1754,20 @@ def test_where_the_file_says_nothing_about_an_option_the_report_names_each_place
         "every-use-of-passport",
     ]
     either = (Where(person="alex"), Where(place="desk"))
+    # The second appointment requires the passport, so it might also take it along. Then the
+    # passport lies at the desk again once that appointment is over.
     assert found.objects[0].stays == (
         Stay((Where(person="alex"),)),
-        Stay(either, "second", "might be kept"),
+        Stay((*either, Where(option="second")), "second", "might be kept"),
+        Stay(either, "second", "arrived"),
         Stay((*either, Where(place="office")), "third", "might be kept"),
     )
+    assert (
+        "  passport: with alex when the TRIP starts; with alex, at desk or in second from"
+        " 10:00 am (the FILE does not say what second does with passport); with alex or at desk"
+        " from 10:30 am (where second ends); with alex, at desk or at office from 11:00 am (the"
+        " FILE does not say what third does with passport)\n"
+    ) in report.as_text(file, found)
 
 
 def test_a_plan_relies_on_no_fact_about_an_object_that_it_does_not_need() -> None:
@@ -2483,9 +2503,11 @@ def test_a_cloakroom_and_a_gallery_are_explained_at_once(monkeypatch: pytest.Mon
     cloakroom at 9:00 am does not refuse them. Nobody said what the cloakroom does with
     them, or whether the gallery refuses them. For each thing, the cloakroom keeps it, or
     the cloakroom can carry it, or the gallery does not refuse it: eighty-one cases. The
-    search finds those four groups, each with the four FACTs about what the cloakroom does
-    and the one about the gallery, and tries a few hundred sets where the sets of four
-    FACTs are tens of thousands."""
+    search finds those four groups, each with the six FACTs about what the cloakroom does
+    and the one about the gallery. Of the six, three say more than any other: that it keeps
+    the thing, hands it over or carries it. Handing over is not enough, so nothing that says
+    less is tried in its place. That leaves four FACTs to try in each group, and 256 sets,
+    where the sets of four FACTs are tens of thousands."""
     things = ["daypack", "camera", "stroller", "umbrella"]
     facts = [*at("cloakroom", 9), *at("gallery", 10), *carried_by_alex(things)]
     for thing in things:
@@ -2505,7 +2527,7 @@ def test_a_cloakroom_and_a_gallery_are_explained_at_once(monkeypatch: pytest.Mon
     assert {frozenset(named) for named in asked(found)} == {
         frozenset(chosen) for chosen in product(*either)
     }
-    assert tried <= 625
+    assert tried == 256
 
 
 def test_each_choice_of_new_things_has_its_own_facts_that_no_set_can_do_without(
@@ -3461,24 +3483,86 @@ def test_the_sets_named_for_objects_are_all_the_smallest_that_are_enough(
     assert held > 20 and pairs > 3
 
 
-def test_fewer_requirements_are_never_harder_for_the_same_plan() -> None:
+def test_a_set_that_says_more_is_enough_where_the_set_that_says_less_is() -> None:
+    """About what an OPTION does with an OBJECT, one unknown FACT can say more than another:
+    whatever turns out, it leaves the other true. Then a set that is enough with the FACT
+    that says less is enough with the one that says more. The search for the sets that a
+    report names counts on it: it tries the sets that say most first, and leaves a set out
+    once the same set with a FACT that says more was not enough."""
+    rng = Random(77)
+    neither = "does not keep or carry"
+    less = {
+        "hands over": [neither, "does not keep", "does not carry"],
+        neither: ["does not keep", "does not carry"],
+        "keeps": ["does not carry"],
+        "carries": ["does not keep"],
+    }
+    compared = both = only_more = 0
+    kinds: set[tuple[str, str]] = set()
+    for _ in range(150):
+        file = a_trip_with_objects(rng, most=1, leave_out=0.3)
+        listed = [unknown for unknown in unknowns(file) if unknown.what not in NEW]
+        for more in listed:
+            for what in less.get(more.what, []):
+                fewer = replace(more, what=what)
+                if fewer not in listed:
+                    continue
+                others: list[Unknown] = []
+                for other in rng.sample(listed, len(listed)):
+                    if rng.random() < 0.5 and one_way_each([more, *others, other]):
+                        others.append(other)
+                with_less = itineraries(file, with_these_at_best(file, [fewer, *others]))
+                with_more = itineraries(file, with_these_at_best(file, [more, *others]))
+                assert with_more or not with_less, (more, what, others)
+                compared += 1
+                both += bool(with_less)
+                only_more += bool(with_more) and not with_less
+                if with_more and not with_less:
+                    kinds.add((more.what, what))
+    assert compared > 100 and both > 20 and only_more > 10
+    assert len(kinds) > 3
+
+
+def chosen_in(plan: Itinerary, option: str, thing: str) -> Itinerary:
+    """The plan with the OBJECT carried in the OPTION by choice, where the OPTION is in it."""
+    for index, step in enumerate(plan):
+        if step.option == option and thing not in step.carried:
+            with_it = replace(step, carried=(*step.carried, thing))
+            return (*plan[:index], with_it, *plan[index + 1 :])
+        if step.option == option:
+            break
+    return plan
+
+
+def test_fewer_requirements_are_never_harder_for_a_plan_that_chooses_what_went_along() -> None:
     """A plan that works where an OPTION requires an OBJECT works where it does not, and one
-    that works where an OPTION refuses an OBJECT works where it does not."""
+    that works where an OPTION refuses an OBJECT works where it does not.
+
+    An OPTION that requires an OBJECT and carries it is different: the OBJECT went along with
+    no choice. Without the requirement the same carry is a choice, and the plan that makes it
+    works. So the best case, in which nothing is required that no FACT requires, is still an
+    upper limit. The plan that leaves the carry out can fail there: the OBJECT stays behind."""
     rng = Random(55)
-    checked_plans = refused = 0
+    checked_plans = refused = chosen = stayed = 0
     for _ in range(120):
         file = a_trip_with_objects(rng, leave_out=0.1, with_ways=0.5)
         world = a_world_with_objects(rng, file)
         for plan in itineraries(file, world):
             for pair in world.needs:
                 easier = replace(world, needs=world.needs - {pair})
-                assert broken_as_listed(file, easier, plan) == []
+                same = plan
+                if goes_along(world, *pair) == "sure":
+                    same = chosen_in(plan, *pair)
+                    chosen += same != plan
+                    stayed += same != plan and broken_as_listed(file, easier, plan) != []
+                assert broken_as_listed(file, easier, same) == []
                 checked_plans += 1
             for pair in world.refuses:
                 easier = replace(world, refuses=world.refuses - {pair})
                 assert broken_as_listed(file, easier, plan) == []
                 refused += 1
     assert checked_plans > 60 and refused > 30
+    assert chosen > 10 and stayed > 5
 
 
 def test_the_compiler_gives_the_reference_checkers_report_for_objects() -> None:
@@ -4709,12 +4793,13 @@ def test_many_appointments_with_one_object_are_quick_for_the_solver() -> None:
 
 
 @pytest.mark.parametrize("stated", [True, False])
-def test_an_object_that_nothing_moves_puts_no_option_in_an_order(stated: bool) -> None:
+def test_an_object_puts_its_options_in_an_order_only_where_one_can_move_it(stated: bool) -> None:
     """The key lies on the desk, and nothing hands it over or keeps it. Alex's check at
-    10:00 am and Sam's check at any time both require it. Where it is turns on no order, so
-    Sam's check is tied to nothing and starts when the TRIP starts. That is so too where
-    the FILE does not state every transfer: a check might keep the key, but only from a
-    PERSON who has it, and nobody can have it."""
+    10:00 am and Sam's check at any time both require it. Where the FILE states every
+    transfer, where the key is turns on no order, so Sam's check is tied to nothing and
+    starts when the TRIP starts. Where it does not, a check that requires the key might
+    take it along. Then the order matters. Sam's check comes before Alex's, so it starts as
+    late as it can, and the key is back on the desk when Alex's check starts."""
     options = [stays("alex-check", "desk"), stays("sam-check", "desk")]
     facts = [
         *at("alex-check", 10),
@@ -4730,9 +4815,15 @@ def test_an_object_that_nothing_moves_puts_no_option_in_an_order(stated: bool) -
     found = checked(file)
     assert found.answer is Answer.FEASIBLE
     assert [(step.option, step.start) for step in found.itinerary] == [
-        ("sam-check", seconds(8)),
+        ("sam-check", seconds(8) if stated else seconds(9, 55)),
         ("alex-check", seconds(10)),
     ]
+    if not stated:
+        either = (Where(place="desk"), Where(option="sam-check"))
+        assert found.objects[0].stays[1:3] == (
+            Stay(either, "sam-check", "might be kept"),
+            Stay((Where(place="desk"),), "sam-check", "arrived"),
+        )
 
 
 def test_eight_checks_of_a_key_that_nothing_moves_are_timed_once(

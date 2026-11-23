@@ -406,6 +406,23 @@ def test_an_object_that_might_be_anywhere_says_that_nobody_knows_where_it_is(
     (visit,) = bags["refuses"]
     assert visit["plan"] == f"Just before it starts: {elsewhere} does not name."
     assert f"\n    Museum visit refuses the bags. {visit['plan']}\n" in f"{words}\n"
+    # An OPTION that the bags might be in is not one of those places. A list that is as long
+    # and has an OPTION in it names each place. With all of them, nobody knows where.
+    anywhere = found["objects"][0]["path"][0]["where"]
+    assert len(anywhere) == len(content["persons"]) + len(content["places"]) + 1
+    named = "with Sam, at the hotel, at the Art Institute, at O'Hare, at Denver, somewhere"
+    for where, said in (
+        (
+            [*anywhere[1:], {"option": "flight"}],
+            f"{named} the FILE does not name or in Flight home",
+        ),
+        ([*anywhere, {"option": "flight"}], "nobody knows where"),
+    ):
+        other = json.loads(json.dumps(found))
+        other["objects"][0]["path"][0]["where"] = where
+        (shown,) = all_objects([sent], [other])
+        plan = shown["objects"][0]["plan"]
+        assert plan.startswith(f"In the plan: {said} when the TRIP starts; "), plan
 
 
 def test_an_object_that_might_be_in_one_of_several_places_says_each(tmp_path: Path) -> None:

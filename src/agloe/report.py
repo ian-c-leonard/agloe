@@ -878,9 +878,11 @@ def _where(file: File, where: Sequence[Where]) -> str:
     """Where an OBJECT is, or each place it might be: with Alex or at the Art Institute.
 
     A place with no name is somewhere the FILE does not name. An OBJECT that might be with
-    any PERSON, at any PLACE or somewhere the FILE does not name is nobody knows where.
+    any PERSON, at any PLACE or somewhere the FILE does not name is nobody knows where. An
+    OPTION that it might be in is not one of those: it is named beside the others.
     """
-    if len(where) == len(file.persons) + len(file.places) + 1:
+    outside = [each for each in where if each.option is None]
+    if len(outside) == len(file.persons) + len(file.places) + 1:
         return "nobody knows where"
     people, places = _names(file.persons, "or"), _names(file.places, "or")
 

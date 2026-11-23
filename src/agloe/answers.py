@@ -679,6 +679,15 @@ def _missing(file: File, works: Works, shown: Shown) -> tuple[tuple[Missing, ...
     And "this OPTION hands the OBJECT over"
     is listed only where "this OPTION does not keep the OBJECT" is not enough in its place:
     the second is true of more FILEs. "This OPTION carries the OBJECT" is the same.
+
+    Not every set is tried. Take two sets that differ in one FACT about what an OPTION does
+    with an OBJECT, where one FACT says more than the other: whatever turns out, the one
+    that says more leaves the other true. Every way the set that says more can turn out is
+    a way the other set can turn out. A set is enough where a plan holds whichever way it
+    turns out, so where the set that says more is not enough, the other is not either. The
+    sets that say most are tried first, and a set is left out once such a set was not
+    enough. This only saves work: a FILE that says little about its OBJECTs has six unknown
+    FACTs about each thing that an OPTION does.
     """
     every = unknowns(file)
     new = ("another option", "another transfer")
@@ -716,13 +725,23 @@ def _missing(file: File, works: Works, shown: Shown) -> tuple[tuple[Missing, ...
                     if size < fewest[number]:
                         continue
                     others = [unknown for unknown in facts if unknown not in in_every_set]
-                    for more in _with_enough_of_each(others, at_least, size - len(in_every_set)):
-                        stated = sorted((*in_every_set, *more), key=place.__getitem__)
-                        if one_way_each(stated) and works(
+                    picks = [
+                        sorted((*in_every_set, *more), key=place.__getitem__)
+                        for more in _with_enough_of_each(others, at_least, size - len(in_every_set))
+                    ]
+                    # The sets that say most come first, so a set is tried only after each
+                    # set that says more than it in one place.
+                    not_enough: set[frozenset[Unknown]] = set()
+                    for stated in sorted(picks, key=_how_little_it_says):
+                        if not one_way_each(stated):
+                            continue
+                        if any(more in not_enough for more in _saying_more(stated)) or not works(
                             file, with_these_at_best(file, (*stated, *some))
                         ):
-                            listed = [place[fact] for fact in stated]
-                            found.append((listed, number, (*stated, *some)))
+                            not_enough.add(frozenset(stated))
+                            continue
+                        listed = [place[fact] for fact in stated]
+                        found.append((listed, number, (*stated, *some)))
                 enough = [each for _, _, each in sorted(found, key=lambda one: one[:2])]
                 if enough:
                     alone = count + size == 1
@@ -775,6 +794,27 @@ _SAYS_MORE_THAN = {
     "keeps": ("does not carry",),
     "carries": ("does not keep",),
 }
+
+
+def _more_than(what: str) -> list[str]:
+    """Each unknown FACT about what an OPTION does with an OBJECT that says more than this."""
+    return [more for more, less in _SAYS_MORE_THAN.items() if what in less]
+
+
+def _how_little_it_says(some: Sequence[Unknown]) -> int:
+    """A number that is smaller for a set than for the same set with a FACT that says less.
+
+    Each FACT counts the FACTs that say more than it. A FACT that says more than another
+    has fewer of those: whatever says more than it says more than the other too.
+    """
+    return sum(len(_more_than(unknown.what)) for unknown in some)
+
+
+def _saying_more(some: Sequence[Unknown]) -> Iterator[frozenset[Unknown]]:
+    """The same set with a FACT that says more in the place of one of its FACTs, each way."""
+    for asked in some:
+        for what in _more_than(asked.what):
+            yield frozenset(replace(u, what=what) if u == asked else u for u in some)
 
 
 def _to_bring(
