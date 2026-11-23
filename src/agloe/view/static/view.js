@@ -25,6 +25,13 @@ let stripRoom = 0; // pixels: how wide the page was when the strip was laid out
 let drawn; // the TRIP that the calendar on the page is of
 let written = []; // what the report on the page was written from: its words, and what its lines are tied to
 let revealedFor = null; // the drawing that the pointer is on, by what it is of and tied to: the report has moved for it
+// What answers the pointer and the keyboard: a drawing, or a line of the report that is tied.
+const TIED = "[data-of], [data-record], [data-records]";
+// The parts in which the arrow keys move the keyboard from one drawing to the next.
+const GROUPS = "#calendar-part, #drawings > .part, #report";
+/** What a drawing is known by: what it is of and what it is tied to. */
+const keyOf = (each) => [each.dataset.of, each.dataset.record, each.dataset.records].join("|");
+let onKey = null; // the drawing that the keyboard is on: its part, what it is known by, and itself
 
 function made(tag, className, text = "") {
   return Object.assign(document.createElement(tag), { className, textContent: text });
@@ -615,7 +622,7 @@ function write(text, tied) {
  * the line is about, so every other drawing of that thing lights up too.
  */
 function light(target) {
-  const tied = "[data-of], [data-record], [data-records]";
+  const tied = TIED;
   const from = target instanceof Element ? target.closest(tied) : null;
   const all = [...document.querySelectorAll(tied)];
   const ids = (each) => [each.dataset.record, ...(each.dataset.records ?? "").split(" ")].filter(Boolean);
@@ -649,7 +656,7 @@ function light(target) {
  * name beside it are one drawing.
  */
 function reveal(from) {
-  const drawing = from === null ? null : [from.dataset.of, from.dataset.record, from.dataset.records].join("|");
+  const drawing = from === null ? null : keyOf(from);
   const entered = drawing !== revealedFor;
   revealedFor = drawing;
   const report = part("report");
@@ -664,9 +671,46 @@ function reveal(from) {
   report.scrollTop += (lines[0].top + lines[0].bottom) / 2 - (box.top + box.bottom) / 2;
 }
 
-/** What is under the pointer is lit again, after the page has written or drawn anew. */
+/** What the pointer is on, or else the drawing that the keyboard is on, or nothing. */
+function pointedAt() {
+  const under = [...document.querySelectorAll(":hover")].pop() ?? null;
+  if (under !== null && under.closest(TIED) !== null) return under;
+  const held = document.activeElement;
+  return held !== null && held.matches(TIED) ? held : null;
+}
+
+/** What is pointed at is lit again, after the page has written or drawn anew. */
 function lightAgain() {
-  requestAnimationFrame(() => light([...document.querySelectorAll(":hover")].pop() ?? null));
+  requestAnimationFrame(() => light(pointedAt()));
+}
+
+/** The drawings of one part that a reader can get to, in the order of the page. */
+function drawingsIn(group) {
+  return [...group.querySelectorAll(TIED)].filter((each) => each.offsetParent !== null);
+}
+
+/**
+ * The keyboard reaches what the pointer does. In each part of the page, and in the report,
+ * one drawing takes the keyboard by Tab: the one that it was on last, or the first. The arrow
+ * keys, Home and End move from it to the others of that part. So a part is one stop for Tab,
+ * however many drawings it holds. The drawing that the keyboard is on is lit as under the
+ * pointer.
+ *
+ * A drawing is made anew when the page draws a FILE that has changed. The keyboard then goes
+ * to the drawing of the same thing in the same part, where there is one.
+ */
+function reach() {
+  for (const group of document.querySelectorAll(GROUPS)) {
+    const all = drawingsIn(group);
+    const kept = onKey !== null && onKey.group === group.id ? all.find((each) => keyOf(each) === onKey.key) : undefined;
+    const stop = kept ?? all.find((each) => each.getAttribute("tabindex") === "0") ?? all[0];
+    for (const each of all) each.tabIndex = each === stop ? 0 : -1;
+    // The drawing that the keyboard was on is gone from the page, and this one stands for it.
+    if (kept !== undefined && document.activeElement !== kept && !onKey.on.isConnected) {
+      onKey.on = kept;
+      kept.focus({ preventScroll: true });
+    }
+  }
 }
 
 /**
@@ -766,12 +810,13 @@ if (typeof ResizeObserver === "function") {
   new ResizeObserver(() => document.documentElement.style.setProperty("--row-of-links", `${part("contents").offsetHeight}px`)).observe(part("contents"));
 }
 
-/** What the page shows now, with the row of links to its parts. */
+/** What the page shows now, with the row of links to its parts, and what the keyboard reaches. */
 function show() {
   try {
     showParts();
   } finally {
     drawContents();
+    reach();
   }
 }
 
@@ -858,7 +903,46 @@ view.onmessage = (message) => hear(JSON.parse(message.data));
 // The page no longer hears the view. What it shows stays, marked, until the view speaks again.
 view.onerror = () => hear({ kind: "lost" });
 document.querySelector("main").addEventListener("mouseover", (event) => light(event.target));
-document.querySelector("main").addEventListener("mouseleave", () => light(null));
+// When the pointer leaves, what the keyboard is on is lit again.
+document.querySelector("main").addEventListener("mouseleave", () => light(pointedAt()));
+// The keyboard is on a drawing: it is lit, and it is the one stop for Tab in its part.
+document.querySelector("main").addEventListener("focusin", (event) => {
+  const drawing = event.target instanceof Element && event.target.matches(TIED) ? event.target : null;
+  const group = drawing === null ? null : drawing.closest(GROUPS);
+  if (group === null) {
+    onKey = null;
+    light(pointedAt());
+    return;
+  }
+  onKey = { group: group.id, key: keyOf(drawing), on: drawing };
+  for (const each of drawingsIn(group)) each.tabIndex = each === drawing ? 0 : -1;
+  light(drawing);
+});
+// The keyboard leaves a drawing for nothing else on the page: nothing is lit by it. A drawing
+// that the page has taken away to draw it anew is another matter: `reach` finds the new one.
+document.querySelector("main").addEventListener("focusout", (event) => {
+  const left = event.target;
+  if (event.relatedTarget !== null || !(left instanceof Element)) return;
+  // A drawing says that it has lost the keyboard while the page is taking it away. Whether
+  // it is still on the page is known only once the page has drawn.
+  queueMicrotask(() => {
+    if (!left.isConnected || document.activeElement === left) return;
+    onKey = null;
+    light(pointedAt());
+  });
+});
+// The arrow keys, Home and End move the keyboard through the drawings of one part.
+document.querySelector("main").addEventListener("keydown", (event) => {
+  const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
+  if ((step === undefined && event.key !== "Home" && event.key !== "End") || event.altKey || event.ctrlKey || event.metaKey) return;
+  const from = event.target instanceof Element && event.target.matches(TIED) ? event.target : null;
+  const group = from === null ? null : from.closest(GROUPS);
+  if (group === null) return;
+  const all = drawingsIn(group);
+  const to = event.key === "Home" ? all[0] : event.key === "End" ? all[all.length - 1] : all[all.indexOf(from) + step];
+  event.preventDefault();
+  to?.focus();
+});
 // A click on a mark of the strip brings the same mark of the calendar into view: that part
 // of the step, in the columns of those PERSONs.
 part("strip").addEventListener("click", (event) => {
@@ -904,6 +988,7 @@ if (typeof ResizeObserver === "function") {
   new ResizeObserver(() => {
     if (onStrip === null || part("calendar-part").clientWidth === stripRoom) return;
     drawStrip(onStrip);
+    reach();
     lightAgain();
   }).observe(part("calendar-part"));
 }

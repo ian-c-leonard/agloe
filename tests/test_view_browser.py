@@ -603,6 +603,96 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
         assert page.locator("#contents .to").count() == 0
 
 
+def test_the_keyboard_lights_up_what_the_pointer_does(chromium: Browser, tmp_path: Path) -> None:
+    """Tab reaches one drawing in each part, and the arrow keys move from it to the others."""
+    # The part that the keyboard is in, and the name of the drawing that it is on.
+    on = """() => {
+      const at = document.activeElement;
+      const name = at.querySelector("h3, b")?.textContent ?? at.textContent.trim();
+      return [at.closest("section")?.id ?? null, name];
+    }"""
+    walk = "the walk between the hotel and the Art Institute"
+    path = tmp_path / "trip.json"
+    path.write_bytes((EXAMPLES / "ending-in-denver" / "works.json").read_bytes())
+    with opened(chromium, path) as page:
+        page.locator("#options .item").first.wait_for()
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        # From the link to a part, Tab goes to the first drawing of the part. It lights up
+        # what the pointer lights up there: the step, and its line of the report.
+        page.locator("#contents .to", has_text="OPTIONs").press("Enter")
+        page.keyboard.press("Tab")
+        assert page.evaluate(on) == ["options-part", "Museum visit"]
+        found = lit(page, options=["Museum visit"], marks=["Museum visit"])
+        assert any("2:00 pm to 3:00 pm: Museum visit" in row for row in found["rows"])
+        # The arrow keys move through the drawings of the part, and stop at its two ends.
+        page.keyboard.press("ArrowDown")
+        assert page.evaluate(on) == ["options-part", "Blue Line to O'Hare"]
+        lit(page, options=["Blue Line to O'Hare"], marks=["Blue Line to O'Hare"])
+        page.keyboard.press("End")
+        page.keyboard.press("ArrowDown")
+        assert page.evaluate(on) == ["options-part", "Flight home"]
+        lit(page, options=["Flight home"], marks=["Flight home"])
+        page.keyboard.press("Home")
+        page.keyboard.press("ArrowUp")
+        assert page.evaluate(on) == ["options-part", "Museum visit"]
+        page.keyboard.press("ArrowRight")
+        assert page.evaluate(on) == ["options-part", "Blue Line to O'Hare"]
+        # A part is one stop for Tab. The next Tab leaves it for the next part, and Tab the
+        # other way comes back to the drawing that the keyboard was on.
+        page.keyboard.press("Tab")
+        assert page.evaluate(on) == ["rights-part", "Museum visit"]
+        lit(page, rights=["Museum visit"], options=[])
+        page.keyboard.press("Shift+Tab")
+        assert page.evaluate(on) == ["options-part", "Blue Line to O'Hare"]
+        # The pointer lights up what it is on. When it leaves, what the keyboard is on is
+        # lit again.
+        page.locator("#persons .item").first.hover()
+        lit(page, persons=["Alex"], options=[])
+        page.mouse.move(2, 2)
+        lit(page, persons=[], options=["Blue Line to O'Hare"])
+        # The page draws a FILE that has changed. The keyboard stays on the drawing of the
+        # same thing.
+        changed = json.loads(path.read_text())
+        changed["persons"][0]["name"] = "Alexandra"
+        put(path, json.dumps(changed).encode())
+        page.locator("#persons .item-name", has_text="Alexandra").wait_for()
+        page.locator("#report .row", has_text="Alexandra").first.wait_for()
+        assert page.evaluate(on) == ["options-part", "Blue Line to O'Hare"]
+        lit(page, options=["Blue Line to O'Hare"], marks=["Blue Line to O'Hare"])
+        # In the report, one line takes the keyboard, and the arrow keys go from line to line
+        # of those that are about something on the page.
+        page.locator("#report").focus()
+        page.keyboard.press("Tab")
+        assert page.evaluate(on)[1].startswith(f"1:45 pm to 2:00 pm: {walk}")
+        lit(page, marks=[walk], ways=[walk])
+        page.keyboard.press("ArrowDown")
+        assert page.evaluate(on)[1].startswith("2:00 pm to 3:00 pm: Museum visit")
+        lit(page, marks=["Museum visit"], options=["Museum visit"])
+        # The calendar is a part too: Tab reaches one of its drawings, and the arrows the rest.
+        page.locator("#calendar").focus()
+        page.keyboard.press("Tab")
+        assert page.evaluate("() => document.activeElement.closest('#calendar') !== null")
+        first = page.evaluate("() => document.activeElement.dataset.of")
+        page.keyboard.press("End")
+        last = page.evaluate(
+            "() => document.activeElement.dataset.of ?? document.activeElement.dataset.record"
+        )
+        assert first != last
+        # With the keyboard on something that is no drawing, nothing is lit.
+        page.locator("#contents .to").first.focus()
+        lit(page, marks=[], options=[], rows=[], persons=[])
+        # Each part has one drawing that Tab stops at, however many it holds.
+        stops = page.evaluate(
+            """() => [...document.querySelectorAll("#calendar-part, #drawings > .part")]
+              .filter((part) => !part.hidden)
+              .map((part) => [...part.querySelectorAll("[data-of], [data-record]")])
+              .map((drawings) => drawings.filter((each) => each.tabIndex === 0).length)"""
+        )
+        # The calendar, the PERSONs, the PLACEs, the WANTs, the OPTIONs, the rights and the WAYs.
+        assert stops == [1] * 7
+
+
 def test_the_report_on_the_page_is_the_report_in_words(chromium: Browser) -> None:
     """Character for character, before its lines are tied and after."""
     for name in [
@@ -1383,7 +1473,8 @@ def test_on_a_wide_window_the_report_stays_beside_the_drawings(chromium: Browser
             assert page.locator(pane).get_attribute("tabindex") == "0"
         page.evaluate("() => { document.getElementById('report').scrollTop = 0; }")
         page.locator("#drawings").focus()
-        for _ in range(4):
+        # Tab stops once in each part on its way to the report.
+        for _ in range(16):
             page.keyboard.press("Tab")
             if page.evaluate("() => document.activeElement.id") == "report":
                 break
