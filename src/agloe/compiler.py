@@ -750,20 +750,18 @@ class _Search:
 
         # Where it starts. A PLACE where none of these OPTIONs starts is as good as anywhere
         # else: the OBJECT is at hand for nothing there, and nothing moves it. It starts in
-        # no OPTION.
-        at_first = some("starts")
-        for spot in at_first[somewhere_else + 1 :]:
-            model.add(spot == 0)
+        # no OPTION, so those spots are no choice.
+        starts = [model.new_bool_var(f"{thing} starts {n}") for n in range(somewhere_else + 1)]
+        at_first: list[cp_model.IntVar | int] = [*starts, *(0 for _ in carriers)]
         if picked:
-            model.add_exactly_one(at_first[: somewhere_else + 1])
+            model.add_exactly_one(starts)
         elif thing in world.starts:
             stated = world.starts[thing]
             begins = spots.index(stated) if stated in spots else somewhere_else
-            for n, spot in enumerate(at_first[: somewhere_else + 1]):
+            for n, spot in enumerate(starts):
                 model.add(spot == (n == begins))
         else:
-            # Nobody knows where it starts: it might be anywhere.
-            model.add_bool_and(at_first[: somewhere_else + 1])
+            model.add_bool_and(starts)  # nobody knows where it starts: it might be anywhere
 
         before = {index: some(f"before {options[index].id}") for index in matter}
         after = {index: some(f"after {options[index].id}") for index in matter}
