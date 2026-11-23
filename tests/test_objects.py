@@ -9294,6 +9294,8 @@ def test_many_services_that_can_each_carry_the_bags_are_not_tried_in_every_combi
         nonlocal made
         for each in sets(things):
             made += 1
+            # A search that makes every set of twenty vans would never end: fail at once.
+            assert made < 100, "the search makes set after set"
             yield each
 
     monkeypatch.setattr(reference, "scheduled", counted)
