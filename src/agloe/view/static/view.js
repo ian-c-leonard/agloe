@@ -35,8 +35,9 @@ const GROUPS = "#strip, #calendar-steps, #drawings > .part, #report";
 /** What a drawing is known by while the page stays as it is: what it is of and what it is tied to. */
 const keyOf = (each) => [each.dataset.of, each.dataset.record, each.dataset.records].join("|");
 let byKeys = false; // whether the reader last used the keyboard, and not the pointer
-// The keys that only change what other keys do.
-const ALONE = new Set(["Shift", "Control", "Alt", "AltGraph", "Meta", "CapsLock", "Fn"]);
+// The keys that only change what other keys do: the modifier keys of the standard for the
+// keys of a keyboard, which lists these and no others.
+const ALONE = new Set(["Alt", "AltGraph", "CapsLock", "Control", "Fn", "FnLock", "Hyper", "Meta", "NumLock", "ScrollLock", "Shift", "Super", "Symbol", "SymbolLock"]);
 // How far an arrow key moves the keyboard through the drawings of a part.
 const STEPS = new Map([
   ["ArrowDown", 1],
@@ -690,7 +691,7 @@ function reveal(from) {
  * last that counts. After a key, it is the drawing that the keyboard is on, or nothing. After
  * a move or a press of the pointer, it is what the pointer is on, and where that is nothing
  * drawn, the drawing that the keyboard is on. `under` is what the pointer is on, where the
- * pointer has just said so itself.
+ * browser has just said so.
  */
 function pointedAt(under = [...document.querySelectorAll(":hover")].pop() ?? null) {
   const held = document.activeElement !== null && document.activeElement.matches(TIED) ? document.activeElement : null;
@@ -923,27 +924,21 @@ addEventListener(
   },
   true,
 );
-// A press of the pointer makes it the pointer, and so does a move of it after a key. A press on
-// a screen that is touched is one: the drawing is lit while the finger is on it. A drawing
-// that scrolls under a pointer at rest is not pointed at after a key: only a pointer that
-// moves is.
-addEventListener(
-  "pointerdown",
-  (event) => {
-    byKeys = false;
-    light(pointedAt(event.target));
-  },
-  true,
-);
-addEventListener(
-  "pointermove",
-  (event) => {
-    if (!byKeys) return;
-    byKeys = false;
-    light(pointedAt(event.target));
-  },
-  true,
-);
+// A move or a press of the pointer after a key makes it the pointer. After a key, a drawing
+// that scrolls under a pointer at rest is not pointed at: only a pointer that moves is. A
+// finger on a screen points with a tap: the browser tells the page of a tap as of a move and
+// a press of the pointer, once the finger has lifted. A swipe points at nothing.
+for (const kind of ["mousemove", "mousedown"]) {
+  addEventListener(
+    kind,
+    (event) => {
+      if (!byKeys) return;
+      byKeys = false;
+      light(pointedAt(event.target));
+    },
+    true,
+  );
+}
 document.querySelector("main").addEventListener("mouseover", (event) => light(pointedAt(event.target)));
 document.querySelector("main").addEventListener("mouseleave", () => light(pointedAt()));
 // The keyboard is on a drawing: it is lit, and it is the one stop for Tab in its part. The

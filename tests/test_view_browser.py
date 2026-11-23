@@ -675,8 +675,8 @@ def test_the_keyboard_lights_up_what_the_pointer_does(chromium: Browser, tmp_pat
         # A key that only changes what other keys do is no use of the keyboard.
         page.mouse.move(2, 2)
         alex.hover()
-        page.keyboard.press("Shift")
-        page.keyboard.press("Meta")
+        for key in ["Shift", "Meta", "Control", "Alt", "CapsLock", "NumLock", "ScrollLock"]:
+            page.keyboard.press(key)
         page.wait_for_timeout(100)
         lit(page, persons=["Alex"], options=[])
         page.keyboard.press("Escape")
@@ -698,18 +698,48 @@ def test_the_keyboard_lights_up_what_the_pointer_does(chromium: Browser, tmp_pat
         lit(page, persons=[], options=["Museum visit"], marks=["Museum visit"])
         page.mouse.move(2, 2)
         lit(page, persons=[], options=["Museum visit"])
-        # A finger on the screen is a pointer too. The drawing under it is lit while the
-        # finger is down, and not only once it is lifted.
+        # A finger on the screen points with a tap, and a swipe points at nothing. The finger
+        # goes down on a PERSON and moves the page: what the keyboard is on stays lit.
         page.keyboard.press("Escape")
         lit(page, persons=[], options=["Museum visit"])
+        touch: Any = page.context.new_cdp_session(page)
+
+        def finger(kind: str, *at: tuple[float, float]) -> None:
+            points = [{"x": round(x), "y": round(y)} for x, y in at]
+            touch.send("Input.dispatchTouchEvent", {"type": kind, "touchPoints": points})
+
         alex.scroll_into_view_if_needed()
         box = alex.bounding_box()
         assert box is not None
-        finger = {"x": round(box["x"] + 30), "y": round(box["y"] + 12)}
-        touch: Any = page.context.new_cdp_session(page)
-        touch.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [finger]})
+        before = page.evaluate("() => scrollY")
+        finger("touchStart", (box["x"] + 30, box["y"] + 12))
+        for moved in range(1, 7):
+            finger("touchMove", (box["x"] + 30, box["y"] + 12 - 20 * moved))
+        # The finger rests before it lifts, so that the page does not go on moving by itself.
+        page.wait_for_timeout(200)
+        finger("touchEnd")
+        page.wait_for_function("(before) => scrollY > before", arg=before)
+        page.wait_for_function(
+            """() => new Promise((say) => setTimeout(say, 200, scrollY))
+              .then((was) => was === scrollY)"""
+        )
+        lit(page, persons=[], options=["Museum visit"])
+        # The pointer is at rest on one PERSON, and the finger taps another: the one that is
+        # tapped is lit once the finger has lifted, and the keyboard is on it.
+        sam = page.locator("#persons .item").nth(1)
+        sam.hover()
+        lit(page, persons=["Sam"], options=[])
+        box = alex.bounding_box()
+        assert box is not None
+        finger("touchStart", (box["x"] + 30, box["y"] + 12))
+        finger("touchEnd")
         lit(page, persons=["Alex"], options=[])
-        touch.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+        assert page.evaluate(on)[0] == "persons-part"
+        # The pointer moves again where it was: what it is on is lit.
+        box = sam.bounding_box()
+        assert box is not None
+        page.mouse.move(box["x"] + box["width"] / 2 + 6, box["y"] + box["height"] / 2 + 3)
+        lit(page, persons=["Sam"], options=[])
         touch.detach()
         page.locator("#options .item").first.focus()
         page.keyboard.press("Escape")
