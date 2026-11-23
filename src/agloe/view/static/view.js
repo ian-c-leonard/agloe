@@ -664,7 +664,48 @@ function lightAgain() {
   requestAnimationFrame(() => light([...document.querySelectorAll(":hover")].pop() ?? null));
 }
 
+/**
+ * What the row of links says of one part of the page: how many things the part holds, where
+ * that is a number worth saying, and whether something in it has the red edge or the yellow
+ * edge. The part is drawn, and this is noted on it.
+ */
+function noted(id, count, clash, asked) {
+  Object.assign(part(id).dataset, { count: count === null ? "" : String(count), clash: clash ? "yes" : "", asked: asked ? "yes" : "" });
+}
+
+/**
+ * The row of links to the parts that the page shows now, in the order of the page: the
+ * calendar, each part that shows what the FILE holds, and the report. A link has the heading
+ * of its part, how many things the part holds, and the red or the yellow edge where something
+ * in the part has it. So a reader of a long page sees where the report names something, and
+ * gets there with one click or from the keyboard. A page with one part has no such row.
+ */
+function drawContents() {
+  const parts = [...document.querySelectorAll("#drawings > section, #report-part")].filter((each) => !each.hidden);
+  const row = part("contents");
+  row.hidden = parts.length < 2;
+  row.replaceChildren(
+    ...parts.map((each) => {
+      const clash = each.dataset.clash === "yes";
+      const asked = each.dataset.asked === "yes";
+      const link = Object.assign(made("a", `to${clash ? " clash" : ""}${asked ? " asked" : ""}`, each.querySelector("h2").textContent), { href: `#${each.id}` });
+      if (each.dataset.count) link.append(made("span", "count", each.dataset.count));
+      link.title = [...(clash ? ["The report names something here among what rules out every plan."] : []), ...(asked ? ["The report names something here that the reader should look at: a yellow edge marks it."] : [])].join("\n");
+      return link;
+    }),
+  );
+}
+
+/** What the page shows now, with the row of links to its parts. */
 function show() {
+  try {
+    showParts();
+  } finally {
+    drawContents();
+  }
+}
+
+function showParts() {
   const said = says(state);
   document.title = said.name ? `${said.name}: Agloe` : "Agloe";
   part("name").textContent = said.name || "";
@@ -695,7 +736,9 @@ function show() {
     else if (said.calendar.trip !== each.of) {
       each.of = said.calendar.trip;
       try {
-        each.draw(each.words(each.of, said.calendar.report, tied ? tie.statedIn(tied) : null));
+        const shown = each.words(each.of, said.calendar.report, tied ? tie.statedIn(tied) : null);
+        each.draw(shown);
+        noted(each.id, Array.isArray(shown[each.name]) ? shown[each.name].length : null, shown.clash, shown.asked);
         lightAgain();
       } catch (problem) {
         part(each.id).hidden = true;
@@ -717,6 +760,7 @@ function show() {
   try {
     laid = lay(drawn, said.calendar.report, tied ? tie.warningsOf(tied) : [], tied ? tie.statedIn(tied) : []);
     draw(laid);
+    noted("calendar-part", null, laid.clash, laid.warned || laid.asked);
     lightAgain();
   } catch (problem) {
     // Half a calendar is no calendar. The report below is whole.

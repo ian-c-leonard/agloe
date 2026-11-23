@@ -26,7 +26,10 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 @media (min-width: 1400px) {
   body { height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
   main { width: 100%; max-width: 1800px; min-height: 0; padding-bottom: 12px; overflow-y: auto; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-rows: auto minmax(320px, 1fr); column-gap: 28px; }
-  .answer { grid-column: 1 / -1; }
+  .answer, .contents { grid-column: 1 / -1; }
+  .contents { position: static; padding: 0; border-bottom: 0; }
+  main:has(> .contents:not([hidden])) { grid-template-rows: auto auto minmax(320px, 1fr); }
+  .calendar-part, .part, .report-part { scroll-margin-top: 0; }
   .drawings { min-height: 0; overflow-y: auto; align-content: start; padding-right: 6px; }
   .report-part { min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
   .report-part pre { min-height: 0; overflow-y: auto; }
@@ -47,6 +50,14 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .answer.infeasible .line, .answer.refused .line, .answer.unreadable .line { color: var(--stop); }
 .problems { padding-left: 20px; margin-top: 6px; font: 13px/1.5 var(--mono); color: var(--ink2); display: grid; gap: 3px; }
 
+/* The row of links to the parts of the page. It stays at the top while a long page scrolls. */
+.contents { position: sticky; top: 0; z-index: 6; display: flex; flex-wrap: wrap; gap: 4px 6px; padding: 7px 0; background: var(--ground); border-bottom: 1px solid var(--line); }
+.contents .to { display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 9px; border: 1.2px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink2); font: 500 12.5px var(--text); text-decoration: none; }
+.contents .to:hover, .contents .to:focus-visible { border-color: var(--ink); color: var(--ink); }
+.contents .count { font: 500 11px var(--mono); color: var(--muted); }
+.contents .to.asked { border-color: var(--warn); box-shadow: 0 0 0 1px var(--warn); }
+.contents .to.clash { border-color: var(--stop); box-shadow: 0 0 0 1px var(--stop); }
+.calendar-part, .part, .report-part { scroll-margin-top: 48px; }
 .report-part, .calendar-part, .part { display: grid; gap: 8px; }
 .report-part h2, .calendar-part h2, .part h2 { font: 600 13px var(--text); color: var(--ink2); }
 .report-part pre { margin: 0; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; font: 13px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -417,6 +417,104 @@ def test_the_page_draws_the_file_before_the_report_comes(chromium: Browser, tmp_
         assert "In the plan" not in (page.text_content("#drawings") or "")
 
 
+def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_path: Path) -> None:
+    """One link for each part that the page shows, marked where the report names something."""
+    # The heading of each part that the page shows, and the words of each link.
+    shown = """() => {
+      const parts = [...document.querySelectorAll("#drawings > section, #report-part")];
+      const links = [...document.querySelectorAll("#contents .to")];
+      const heading = (each) => each.querySelector("h2").textContent;
+      return {
+        parts: parts.filter((each) => !each.hidden).map(heading),
+        links: links.map((each) => each.firstChild.textContent),
+        counts: links.map((each) => each.querySelector(".count")?.textContent ?? null),
+      };
+    }"""
+    # For each link: whether it has an edge of this kind, and whether something in its part has.
+    edges = """(kind) => [...document.querySelectorAll("#contents .to")].map((link) => {
+      const part = document.querySelector(link.getAttribute("href"));
+      return [link.classList.contains(kind), part.querySelector(`.${kind}:not(.key-box)`) !== null];
+    })"""
+    story = EXAMPLES / "the-bags"
+    with opened(chromium, story / "nobody-collects-them.json", wide=1100, tall=800) as page:
+        page.locator("#objects .card").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 8")
+        found = page.evaluate(shown)
+        # In the order of the page, each with the heading of its part. This FILE has no WANT,
+        # no BUDGET of its own to show and no CAPABILITY, so the row has no link for them.
+        assert found["links"] == found["parts"]
+        assert found["links"] == [
+            "Calendar",
+            "PERSONs",
+            "PLACEs",
+            "OPTIONs",
+            "BOOKINGs and OFFERs",
+            "WAYs",
+            "OBJECTs",
+            "The COMPILER's report",
+        ]
+        # A part that holds things says how many.
+        assert found["counts"] == [None, "2", "4", "2", "2", "2", "1", None]
+        # A link has the red edge where something in its part has it, and only there.
+        red = page.evaluate(edges, "clash")
+        assert all(link is part for link, part in red)
+        assert [link for link, _ in red] == [True, False, True, True, False, False, True, False]
+        assert page.locator("#contents .to.asked").count() == 0
+        # A click brings the part into view under the row, and the row stays at the top.
+        page.locator("#contents .to", has_text="OPTIONs").click()
+        page.wait_for_function(
+            """() => {
+              const row = document.getElementById("contents").getBoundingClientRect();
+              const part = document.getElementById("options-part").getBoundingClientRect();
+              return scrollY > 0 && row.top === 0 && part.top >= row.bottom - 1 && part.top < 100;
+            }"""
+        )
+        # The last part is as far up as the page goes, and in view.
+        page.locator("#contents .to", has_text="OBJECTs").click()
+        page.wait_for_function(
+            """() => {
+              const row = document.getElementById("contents").getBoundingClientRect();
+              const part = document.getElementById("objects-part").getBoundingClientRect();
+              return row.top === 0 && part.top >= row.bottom - 1 && part.top < innerHeight / 2;
+            }"""
+        )
+        # The keyboard reaches each link.
+        page.locator("#contents .to").first.focus()
+        page.keyboard.press("Tab")
+        assert page.evaluate("() => document.activeElement.textContent") == "PERSONs2"
+    # A link has the yellow edge where the report names something in what the FILE does not say.
+    with opened(chromium, EXAMPLES / "flight-home" / "depends-on-the-cab.json") as page:
+        page.locator("#options .item.asked").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to.asked').length > 0")
+        yellow = page.evaluate(edges, "asked")
+        assert all(link is part for link, part in yellow)
+        assert page.locator("#contents .to.asked").all_text_contents() == ["OPTIONs4"]
+        assert page.locator("#contents .to.clash").count() == 0
+    # On a wide window the row is above the two panes. A click moves the pane of the drawings,
+    # and the page stays where it is.
+    with opened(chromium, story / "they-collect-them.json", wide=1500, tall=700) as page:
+        page.locator("#objects .card").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 8")
+        page.locator("#contents .to", has_text="OBJECTs").click()
+        page.wait_for_function(
+            """() => {
+              const pane = document.getElementById("drawings");
+              const part = document.getElementById("objects-part").getBoundingClientRect();
+              const box = pane.getBoundingClientRect();
+              const inside = part.top >= box.top - 1 && part.top < box.bottom;
+              return scrollY === 0 && pane.scrollTop > 0 && inside;
+            }"""
+        )
+        assert page.locator("#contents .to.clash, #contents .to.asked").count() == 0
+    # A FILE that the format refuses has nothing to draw, and so no row.
+    path = tmp_path / "trip.json"
+    path.write_text("{}")
+    refused = "() => document.getElementById('line').textContent.startsWith('This FILE does not')"
+    with opened(chromium, path, once=refused) as page:
+        assert page.locator("#contents").is_hidden()
+        assert page.locator("#contents .to").count() == 0
+
+
 def test_the_report_on_the_page_is_the_report_in_words(chromium: Browser) -> None:
     """Character for character, before its lines are tied and after."""
     for name in [
