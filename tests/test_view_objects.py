@@ -33,7 +33,10 @@ YELLOW = " A yellow edge marks what the report names in what the FILE does not s
 ALL_REQUIRE = "The FILE states every one of its OPTIONs that requires it or refuses it."
 ALL_MOVE = "The FILE states every OPTION that hands it over, keeps it or carries it."
 NONE = ", and it names none."
-MAY_MOVE = "Another OPTION may hand it over, keep it or carry it: the FILE does not say that these are all."
+MAY_MOVE = (
+    "Another OPTION may hand it over, keep it or carry it: "
+    "the FILE does not say that these are all."
+)
 UNSAID = "The FILE does not say where it is when the TRIP starts."
 
 type Trip = dict[str, Any]
