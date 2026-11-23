@@ -5,6 +5,7 @@ from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import replace
 from itertools import combinations, pairwise, permutations, product
 from random import Random
+from typing import Any
 
 import pytest
 from ortools.sat.python import cp_model
@@ -2292,6 +2293,54 @@ def the_solver_gives_up_after(monkeypatch: pytest.MonkeyPatch, conflicts: int) -
     monkeypatch.setattr(compiler, "_solver", capped)
 
 
+def test_the_model_says_nothing_about_an_order_that_fixed_starts_rule_out() -> None:
+    """The gallery at 10:00 am refuses the camera that Alex has. At coffee at 11:00 am Alex
+    could hand it to Jo, and a locker at 9:00 am keeps it. Coffee comes after the gallery,
+    so it is no way for Alex to be rid of the camera before the gallery, and the model has
+    no choice for that. The locker comes before, and the model has one."""
+
+    def choices(*more: Document, show: bool = False) -> list[str]:
+        """The names of the choices in the solver's model of the worst case."""
+        names = ["locker", "gallery", "coffee", *(["show"] if show else [])]
+        facts = [
+            *at("locker", 9),
+            *at("gallery", 10),
+            *at("coffee", 11),
+            has_object("alex", "camera"),
+            keeps("locker", "camera"),
+            refuses_object("gallery", "camera"),
+            hands_over("coffee", "camera"),
+            every_use("camera"),
+            every_transfer("camera"),
+            *more,
+        ]
+        locks = [lock("gallery", "alex"), lock("coffee", "alex", "jo")]
+        locks += [lock("show", "jo")] if show else []
+        options = [stays(name, "museum") for name in names]
+        file = trip(["alex", "jo"], ["museum"], options, facts, locks, objects=["camera"])
+        found = checked(file)
+        assert [(each.option, each.persons) for each in found.itinerary][:3] == [
+            ("locker", ("alex",)),
+            ("gallery", ("alex",)),
+            ("coffee", ("alex", "jo")),
+        ]
+        search = compiler._Search(file, worst_case(file), plain=True)  # pyright: ignore[reportPrivateUsage]
+        model: Any = search.model.proto
+        return [str(each.name) for each in model.variables]
+
+    names = choices()
+    assert [name for name in names if " is rid of " in name] == [
+        "0 is rid of camera in locker before gallery"
+    ]
+    assert "gallery after coffee" not in names
+    # A show at noon refuses the camera too, and Jo is LOCKed into it. Jo can take the
+    # camera at coffee. The locker is over by then, so it is no way for Jo to be rid of what
+    # Jo takes at coffee, and the model has no choice for that either.
+    names = choices(*at("show", 12), refuses_object("show", "camera"), show=True)
+    assert "show after coffee" in names
+    assert not any(name.startswith("1 is rid of camera in locker") for name in names)
+
+
 def test_five_visitors_are_shown_at_once_whoever_might_have_the_bag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2386,6 +2435,34 @@ def test_two_options_for_one_want_are_explained_at_once(monkeypatch: pytest.Monk
         for show in ("matinee", "evening")
     ]
     assert tried <= 16
+
+
+def test_a_cloakroom_and_a_gallery_are_explained_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Alex brings four things and is LOCKed into the gallery at 10:00 am. A stop at the
+    cloakroom at 9:00 am does not refuse them. Nobody said what the cloakroom does with
+    them, or whether the gallery refuses them. For each thing, either the cloakroom keeps
+    it or the gallery does not refuse it: sixteen cases. The search finds those four groups,
+    each with the three FACTs about what the cloakroom does and the one about the gallery,
+    and tries a few hundred sets where the sets of four FACTs are tens of thousands."""
+    things = ["daypack", "camera", "stroller", "umbrella"]
+    facts = [*at("cloakroom", 9), *at("gallery", 10), *carried_by_alex(things)]
+    for thing in things:
+        facts += lets_in(thing, "cloakroom")
+    options = [stays("cloakroom", "museum"), stays("gallery", "museum")]
+    file = trip(["alex"], ["museum"], options, facts, [lock("gallery", "alex")], objects=things)
+    found, tried = sets_tried_for(monkeypatch, file)
+    either = [
+        (
+            Unknown("keeps", "cloakroom", about=thing),
+            Unknown("does not refuse", "gallery", about=thing),
+        )
+        for thing in things
+    ]
+    assert len(asked(found)) == 16
+    assert {frozenset(named) for named in asked(found)} == {
+        frozenset(chosen) for chosen in product(*either)
+    }
+    assert tried <= 256
 
 
 def test_each_choice_of_new_things_has_its_own_facts_that_no_set_can_do_without(
