@@ -16,7 +16,7 @@
             "option": "flight",
             "check": "requires",
             "stated": true,
-            "covered": false
+            "covered": true
           }
         ],
         "settled": false

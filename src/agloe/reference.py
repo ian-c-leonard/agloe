@@ -1713,12 +1713,14 @@ def _least_broken(
     fourteenth CONSTRAINT. Where the OPTION refuses it and a PERSON who takes part has it,
     or might, that is the fifteenth. Where the plan hands the OBJECT over there and it
     cannot be, the PERSON who was to have it comes with it: the fifteenth CONSTRAINT where
-    the OPTION refuses the OBJECT, and the fourteenth otherwise. And the result says where
-    the OBJECT might be: when the TRIP starts, and then after each OPTION.
+    the OPTION refuses the OBJECT, and the fourteenth where the OBJECT is not at hand or
+    the OPTION does not hand it over. One hand-over can break both. And the result says
+    where the OBJECT might be: when the TRIP starts, and then after each OPTION.
 
     Each OPTION first checks what it requires and what it refuses, then keeps what it keeps,
-    and then the OBJECT is handed over in it. An OPTION that refuses the OBJECT hands it
-    over to nobody. In a world that leaves nothing to pick there is one way to go. An
+    and then the OBJECT is handed over in it. An OPTION that refuses the OBJECT moves
+    nothing: it keeps the OBJECT from nobody, and nobody takes the OBJECT there. In a world
+    that leaves nothing to pick there is one way to go. An
     OPTION that does whichever thing suits the plan gives a way for each: it leaves the
     OBJECT alone, it keeps it, or it hands it over as the plan says. Where it does not hand
     it over, a hand-over that the plan has there is broken. Each start the world can pick
@@ -1750,17 +1752,20 @@ def _least_broken(
                 broken = (*broken, (position, Constraint.REFUSED, None))
             choices = ("nothing", "keeps", "hands_over") if action == "any" else (action,)
             for pick, does in enumerate(choices):
-                after, found = _left(does, places, persons, origin), broken
-                at_hand = not refused and _within_reach(after, persons, origin)
+                after = places if refused else _left(does, places, persons, origin)
+                found = broken
+                can_be = does == "hands_over" and _within_reach(after, persons, origin)
                 if taker is None:
                     if does == "hands_over" and action == "any":
                         continue  # with no hand-over planned, that is "nothing"
-                elif does == "hands_over" and at_hand:
+                elif can_be and not refused:
                     after = frozenset({Where(person=taker)})
                 else:
                     # Not handed over: it stays, or is kept.
-                    why = Constraint.REFUSED if refused else Constraint.AT_HAND
-                    found = (*broken, (position, why, taker))
+                    if refused:
+                        found = (*found, (position, Constraint.REFUSED, taker))
+                    if not can_be:
+                        found = (*found, (position, Constraint.AT_HAND, taker))
                 known = following.get(after)
                 if known is None or (len(found), (*picks, pick)) < (len(known[1]), known[0]):
                     following[after] = ((*picks, pick), found, (*trail, after))
@@ -1824,13 +1829,16 @@ def _one_further(
     for places, taken in reached.items():
         if (option, thing) in world.needs and not _within_reach(places, persons, origin):
             continue
-        if refused and _brought_in(places, persons):
+        if refused:
+            # It moves nothing: it keeps the OBJECT from nobody, and nobody takes it there.
+            if not _brought_in(places, persons):
+                keep(places, taken)
             continue
         for does in ("nothing", "keeps", "hands_over") if action == "any" else (action,):
             after = _left(does, places, persons, origin)
             if does != "hands_over" or action != "any":  # with "any" that is "nothing"
                 keep(after, taken)
-            if does == "hands_over" and not refused and _within_reach(after, persons, origin):
+            if does == "hands_over" and _within_reach(after, persons, origin):
                 for person in persons:
                     there = frozenset({Where(person=person)})
                     if after != there:  # they have it already
@@ -1949,9 +1957,9 @@ def _chains(
 
     Where an OBJECT is turns on the order in which the OPTIONs happen, also among OPTIONs of
     different PERSONs that start at one instant. Each PERSON's own order is given. So every
-    order that keeps those is a candidate. Only the OPTIONs that require the OBJECT, refuse
-    it or can move it matter to it, as ``_can_move`` says: the others change nothing,
-    wherever they come. And the OBJECTs do not affect each other. So each OBJECT that some
+    order that keeps those is a candidate. Only the OPTIONs that check the OBJECT or can
+    move it matter to it, as ``_ordered_by`` and ``_can_move`` say: the others change
+    nothing, wherever they come. And the OBJECTs do not affect each other. So each OBJECT that some
     OPTION of the plan requires or refuses and some OPTION can move has an order of its own,
     among its own OPTIONs.
 
@@ -1997,6 +2005,27 @@ def _chains(
     return _orders_together(file, world, who, orders, happening, asked, alike, soonest or {})
 
 
+def _can_have(
+    file: File,
+    world: World,
+    who: tuple[tuple[str, ...], ...],
+    happening: Sequence[int],
+    thing: str,
+) -> set[str | None]:
+    """The PERSONs who can have an OBJECT at some time in a plan.
+
+    A PERSON can have it who has it when the TRIP starts, or might, or who takes part in an
+    OPTION of the plan that hands it over and does not refuse it. An OPTION that only might
+    hand it over counts as one that does. Nobody else ever has the OBJECT.
+    """
+    holders = {each.person for start in _begins(file, world, thing) for each in start}
+    for index in happening:
+        pair = (file.options[index].id, thing)
+        if world.does.get(pair) in ("hands_over", "any") and pair not in world.refuses:
+            holders.update(who[index])
+    return holders
+
+
 def _can_move(
     file: File,
     world: World,
@@ -2007,22 +2036,17 @@ def _can_move(
     """The OPTIONs of a plan that can move an OBJECT, by position in the FILE.
 
     An OPTION can move it where it hands it over, or where it keeps it and a PERSON who takes
-    part can have it. A PERSON can have it who has it when the TRIP starts, or might, or who
-    takes part in an OPTION of the plan that hands it over. Nobody else ever has it, and an
-    OPTION keeps nothing from them. An OPTION that only might hand it over or keep it counts
-    as well. An OPTION that refuses the OBJECT cannot move it: nobody who has it takes
-    part, and nobody takes it there.
+    part can have it, as ``_can_have`` says: an OPTION keeps nothing from anybody else. An
+    OPTION that only might hand it over or keep it counts as well. An OPTION that refuses
+    the OBJECT cannot move it: nobody who has it takes part, and nobody takes it there.
     """
     options = file.options
+    holders = _can_have(file, world, who, happening, thing)
     does = {
         index: world.does.get((options[index].id, thing))
         for index in happening
         if (options[index].id, thing) not in world.refuses
     }
-    holders = {each.person for start in _begins(file, world, thing) for each in start}
-    for index, action in does.items():
-        if action in ("hands_over", "any"):
-            holders.update(who[index])
     return {
         index
         for index, action in does.items()
@@ -2038,16 +2062,25 @@ def _ordered_by(
     happening: Sequence[int],
     thing: str,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    """The OPTIONs of a plan that require or refuse one OBJECT, and those it puts in an order.
+    """The OPTIONs of a plan that check one OBJECT, and those that it puts in an order.
 
-    Both are by position in the FILE. The second are the OPTIONs that require it, refuse it
-    or can move it. An OBJECT that no OPTION of the plan can move stays where it starts. So
-    the order of the OPTIONs that require or refuse it changes nothing, and it puts none in
-    an order.
+    Both are by position in the FILE. An OPTION checks the OBJECT where it requires it, or
+    where it refuses it and a PERSON who takes part can have it, as ``_can_have`` says.
+    Nobody else ever has the OBJECT, so a refusal asks nothing of an OPTION with nobody
+    else in it, wherever that OPTION comes.
+
+    The second are the OPTIONs that check the OBJECT or can move it. An OBJECT that no
+    OPTION of the plan can move stays where it starts. So the order of the OPTIONs that
+    check it changes nothing, and it puts none in an order.
     """
     options = file.options
-    checked = world.needs | world.refuses
-    checking = tuple(index for index in happening if (options[index].id, thing) in checked)
+    holders = _can_have(file, world, who, happening, thing)
+    checking = tuple(
+        index
+        for index in happening
+        if (options[index].id, thing) in world.needs
+        or ((options[index].id, thing) in world.refuses and not holders.isdisjoint(who[index]))
+    )
     can_move = _can_move(file, world, who, happening, thing)
     if not can_move:
         return checking, ()
@@ -2177,8 +2210,8 @@ def _orders_together(
         cannot be at hand whatever was handed over, or where a PERSON has it in an OPTION
         that refuses it, and with it every order that starts the same way. Where another
         transfer brings the OBJECT, every order works, with no hand-over. An OBJECT that
-        nothing moves has no order, and is taken through the OPTIONs that require or refuse
-        it as the FILE lists them.
+        nothing moves has no order, and is taken through the OPTIONs that check it as the
+        FILE lists them.
         """
         thing = asked[number]
         brought = thing in world.brought

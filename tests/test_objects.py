@@ -563,6 +563,17 @@ def test_an_object_is_not_handed_over_in_an_option_that_refuses_it() -> None:
     assert broken(file, world, taken) == [refused("first", "alex")]
     assert whereabouts(file, world, taken)["passport"][1] == {Where(place="desk")}
     assert broken(file, world, (step("first", "desk", 9, "alex"),)) == []
+    # A hand-over there of a passport that is not at hand breaks both CONSTRAINTs. So does
+    # one in an OPTION that refuses the passport and does not hand it over.
+    far = a_desk(
+        lies_at("passport", "office"),
+        hands_over("first", "passport"),
+        refuses_object("first", "passport"),
+    )
+    both = [refused("first", "alex"), not_at_hand("first", "alex")]
+    assert broken(far, settled(far), taken) == both
+    plain = a_desk(lies_at("passport", "desk"), refuses_object("first", "passport"))
+    assert broken(plain, settled(plain), taken) == both
     # The search finds no hand-over there either: an appointment that requires the passport
     # at the office cannot be reached with it.
     needed = replace(
@@ -598,6 +609,17 @@ def test_an_option_that_keeps_an_object_and_refuses_it_checks_first() -> None:
     )
     plan = (step("first", "desk", 9, "alex"),)
     assert broken(file, settled(file), plan) == [refused("first", "alex")]
+    # An OPTION that refuses the passport moves nothing: Alex still has it afterwards.
+    assert whereabouts(file, settled(file), plan)["passport"] == (
+        frozenset({Where(person="alex")}),
+        frozenset({Where(person="alex")}),
+    )
+    # Where nobody said what the appointment does with it, that is no different.
+    silent = a_desk(
+        has_object("alex", "passport"), every_use("passport"), refuses_object("first", "passport")
+    )
+    assert worst_case(silent).does["first", "passport"] == "might_keep"
+    assert whereabouts(silent, worst_case(silent), plan)["passport"][1] == {Where(person="alex")}
 
 
 def test_an_option_that_keeps_an_object_clears_whoever_takes_part_for_one_that_refuses_it() -> None:
@@ -1917,9 +1939,11 @@ def test_where_nobody_knows_who_has_an_object_everybody_stops_where_it_is_kept()
     assert compiler.check(file) == found
     elsewhere = (Where(place="museum"), Where(place="hotel"), Where())
     (bags,) = found.objects
+    # Nobody knows whether Alex or Sam has the bags. So the report does not say that the
+    # cloakroom kept them: it keeps them if anybody there has them.
     assert bags.stays == (
         Stay((Where(person="alex"), Where(person="sam"), *elsewhere)),
-        Stay(elsewhere, "cloakroom", "kept"),
+        Stay(elsewhere, "cloakroom", "kept if held"),
     )
     assert bags.uses == (Use("visit", True, elsewhere, "refuses"),)
     relied = [record for record in found.relies_on if "bags" in record]
@@ -1927,6 +1951,7 @@ def test_where_nobody_knows_who_has_an_object_everybody_stops_where_it_is_kept()
     words = report.as_text(file, found)
     there = "at museum, at hotel or somewhere the FILE does not name"
     assert f"  bags: nobody knows where when the TRIP starts; {there} from " in words
+    assert " (kept by cloakroom if anybody there has bags)\n" in words
     assert f"    visit refuses bags. Just before it starts: {there}." in words
     said = json.loads(json.dumps(report.as_json(file, found)))
     assert said["objects"][0]["refused_by"] == [
@@ -2062,6 +2087,151 @@ def test_another_transfer_is_worded_by_what_it_has_to_do_at_each_option() -> Non
         "another transfer puts bags at hand for check-in, and leaves bags out of lunch and"
         " check-in if they refuse bags.",
     )
+
+
+def test_a_refusing_option_is_not_credited_with_what_it_cannot_do() -> None:
+    """Alex has the bag, and is LOCKed into the entry at 9:00 am and the gallery at 10:00 am.
+    The entry refuses the bag and keeps it. The gallery requires it and refuses it. No FACT
+    says that the FILE states every transfer.
+
+    Alex cannot bring the bag through the entry, so the entry keeps nothing. Another
+    transfer has to keep the bag out of the entry, and put it where the gallery starts.
+    Whatever the FILE says the entry does with the bag, the report is the same."""
+    options = [stays("entry", "museum"), stays("gallery", "museum")]
+
+    def said(*entry_does: Document) -> tuple[tuple[tuple[str, str, bool, bool], ...], str]:
+        facts = [
+            *at("entry", 9),
+            *at("gallery", 10),
+            has_object("alex", "bag"),
+            refuses_object("entry", "bag"),
+            *entry_does,
+            requires_object("gallery", "bag"),
+            refuses_object("gallery", "bag"),
+            every_use("bag"),
+        ]
+        locks = [lock("entry", "alex"), lock("gallery", "alex")]
+        file = trip(["alex"], ["museum"], options, facts, locks, objects=["bag"])
+        found = checked(file)
+        (words,) = [
+            line for line in report.as_text(file, found).splitlines() if line.startswith("The trip")
+        ]
+        return found.missing[0][0].at_hand_for, words
+
+    expected = (
+        (
+            ("entry", "refuses", True, False),
+            ("gallery", "requires", True, True),
+            ("gallery", "refuses", True, False),
+        ),
+        "The trip might work if another transfer keeps bag out of entry, and puts bag where"
+        " gallery starts.",
+    )
+    assert said(keeps("entry", "bag")) == expected
+    assert said(does_with("entry", "bag", "nothing")) == expected
+    assert said(hands_over("entry", "bag")) == expected
+    assert said() == expected
+
+
+def five_museum_visitors(*more: Document) -> File:
+    """Five visitors, each LOCKed into two visits of their own at the museum.
+
+    Every visit takes half an hour, can start at any time and refuses the bag. A stop at the
+    cloakroom at 9:00 am keeps the bag. The TRIP starts at 8:00 am, and both sets of the bag
+    are COMPLETE."""
+    people = [f"person-{number}" for number in range(5)]
+    visits = [f"visit-{number}" for number in range(10)]
+    options = [stays("cloakroom", "museum"), *(stays(name, "museum") for name in visits)]
+    facts = [*at("cloakroom", 9, length="PT5M"), keeps("cloakroom", "bag")]
+    for name in visits:
+        facts += [*whenever(name, "PT30M"), refuses_object(name, "bag")]
+    facts += [every_use("bag"), every_transfer("bag"), *more]
+    locks = [trip_starts(8)]
+    for number, person in enumerate(people):
+        locks += [lock(f"visit-{2 * number}", person), lock(f"visit-{2 * number + 1}", person)]
+    return trip(people, ["museum"], options, facts, locks, objects=["bag"])
+
+
+def test_a_refusal_orders_only_the_options_of_those_who_can_have_the_object(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One visitor has the bag. Nobody else can ever have it, so the refusals of the other
+    eight visits ask nothing, wherever those visits come. Only the cloakroom and the two
+    visits of whoever has the bag have an order. The eleven OPTIONs have very many."""
+    file = five_museum_visitors(has_object("person-0", "bag"))
+    # Who is in each OPTION, in the FILE's order: the cloakroom, and then the ten visits.
+    who = (("person-0",), *((f"person-{number // 2}",) for number in range(10)))
+    happening = list(range(len(file.options)))
+    ordered = reference._ordered_by(  # pyright: ignore[reportPrivateUsage]
+        file, worst_case(file), who, happening, "bag"
+    )
+    assert ordered == ((1, 2), (0, 1, 2))
+    timed = 0
+    its_own = reference._times  # pyright: ignore[reportPrivateUsage]
+
+    def counted(
+        count: int,
+        gaps: list[tuple[int, int, int]],
+        fixed: dict[int, int],
+        not_before: dict[int, int],
+        no_later: dict[int, int],
+    ) -> list[int] | None:
+        nonlocal timed
+        timed += 1
+        return its_own(count, gaps, fixed, not_before, no_later)
+
+    monkeypatch.setattr(reference, "_times", counted)
+    found = compiler.check(file)
+    assert found.answer is Answer.FEASIBLE
+    assert timed < 10
+    # Whoever has the bag stops at the cloakroom first. The others start when the TRIP starts.
+    starts = {each.option: each.start for each in found.itinerary}
+    assert [each.persons for each in found.itinerary if each.option == "cloakroom"] == [
+        ("person-0",)
+    ]
+    assert starts["visit-0"] == seconds(9, 5) and starts["visit-2"] == seconds(8)
+
+
+def test_an_option_that_hands_an_object_over_and_refuses_it_gives_it_to_nobody() -> None:
+    """The bag lies on a desk. Alex's security appointment at 10:00 am hands it over and
+    refuses it, so nobody takes it there. Sam's inspection requires the bag at that desk and
+    can start at any time. Nothing can move the bag, so nothing ties the inspection to the
+    appointment: it starts when the TRIP starts, at 8:00 am."""
+
+    def a_desk_with(security_at: int, *deposit: Document) -> File:
+        options = [stays("security", "desk"), stays("inspection", "desk")]
+        facts = [
+            *at("security", security_at),
+            *whenever("inspection"),
+            lies_at("bag", "desk"),
+            hands_over("security", "bag"),
+            refuses_object("security", "bag"),
+            requires_object("inspection", "bag"),
+            every_use("bag"),
+            every_transfer("bag"),
+            *deposit,
+        ]
+        locks = [trip_starts(8), lock("security", "alex"), lock("inspection", "sam")]
+        if deposit:
+            options.append(stays("deposit", "desk"))
+            locks.append(lock("deposit", "alex"))
+        return trip(["alex", "sam"], ["desk"], options, facts, locks, objects=["bag"])
+
+    found = checked(a_desk_with(10))
+    assert found.answer is Answer.FEASIBLE
+    assert [(each.option, each.start) for each in found.itinerary] == [
+        ("inspection", seconds(8)),
+        ("security", seconds(10)),
+    ]
+    # Alex cannot come to have the bag through security. So a deposit that Alex is in keeps
+    # nothing from Alex, and it ties the inspection to nothing either.
+    found = checked(a_desk_with(9, *at("deposit", 10), keeps("deposit", "bag")))
+    assert found.answer is Answer.FEASIBLE
+    assert [(each.option, each.start) for each in found.itinerary] == [
+        ("inspection", seconds(8)),
+        ("security", seconds(9)),
+        ("deposit", seconds(10)),
+    ]
 
 
 # Checked on FILEs made at random.
@@ -2265,14 +2435,14 @@ def ordered_by(
 ) -> list[int]:
     """The OPTIONs of a plan that one OBJECT puts in an order, as the rules page says.
 
-    Those that require it, refuse it or can move it, where some OPTION can move it. An OPTION
-    can move it where it hands it over, or where it keeps it and a PERSON who takes part can
-    have it. An OPTION that refuses it cannot move it. A PERSON can have it who has it when
-    the TRIP starts, or might, or who takes part in an OPTION of the plan that hands it
-    over. "Might" counts as "does".
+    Those that require it, those that can move it, and those that refuse it where a PERSON
+    who takes part can have it, where some OPTION can move it. An OPTION can move it where
+    it hands it over, or where it keeps it and a PERSON who takes part can have it. An
+    OPTION that refuses it cannot move it. A PERSON can have it who has it when the TRIP
+    starts, or might, or who takes part in an OPTION of the plan that hands it over and
+    does not refuse it. "Might" counts as "does".
     """
     options = file.options
-    checked_by = world.needs | world.refuses
     hands = [
         index
         for index in happening
@@ -2294,10 +2464,18 @@ def ordered_by(
     ]
     if not hands and not keeps_it:
         return []
+    refuses_it = [
+        index
+        for index in happening
+        if (options[index].id, thing) in world.refuses and can_have.intersection(who[index])
+    ]
     return [
         index
         for index in happening
-        if (options[index].id, thing) in checked_by or index in hands or index in keeps_it
+        if (options[index].id, thing) in world.needs
+        or index in refuses_it
+        or index in hands
+        or index in keeps_it
     ]
 
 
@@ -2731,9 +2909,10 @@ def test_the_examples_about_the_bags_say_what_the_rules_page_says() -> None:
     ]
     taken = result("somebody-might-take-them")
     assert named("somebody-might-take-them") == [(("another transfer", None, "bags"),)]
+    # The visit refuses the bags, so it cannot keep them: Alex still has them for the flight.
     assert taken.missing[0][0].at_hand_for == (
         ("museum-visit", "refuses", True, False),
-        ("flight", "requires", True, False),
+        ("flight", "requires", True, True),
     )
 
 
@@ -4041,9 +4220,11 @@ def test_an_option_that_refuses_an_object_cannot_move_it() -> None:
     move it, and it puts no OPTION in an order. The same holds for one that keeps it."""
     who = (("alex",), ("sam",), ())
     ordered_by_it = reference._ordered_by  # pyright: ignore[reportPrivateUsage]
-    for does, start in (
-        (hands_over("first", "passport"), lies_at("passport", "desk")),
-        (keeps("first", "passport"), has_object("alex", "passport")),
+    # The OPTIONs that check the passport, with the first appointment refusing it. Where
+    # the passport lies on the desk, Alex can never have it, and the refusal asks nothing.
+    for does, start, checking in (
+        (hands_over("first", "passport"), lies_at("passport", "desk"), (1,)),
+        (keeps("first", "passport"), has_object("alex", "passport"), (0, 1)),
     ):
         file = a_desk(start, does, requires_object("second", "passport"))
         assert ordered_by_it(file, settled(file), who, [0, 1], "passport") == ((1,), (0, 1))
@@ -4053,7 +4234,7 @@ def test_an_option_that_refuses_an_object_cannot_move_it() -> None:
             refuses_object("first", "passport"),
             requires_object("second", "passport"),
         )
-        assert ordered_by_it(barred, settled(barred), who, [0, 1], "passport") == ((0, 1), ())
+        assert ordered_by_it(barred, settled(barred), who, [0, 1], "passport") == (checking, ())
 
 
 def test_the_compiler_asks_its_solver_about_a_file_with_objects(
@@ -4182,11 +4363,16 @@ def every_way(
     There is a way for each start: the places where the OBJECT might be then. An OPTION that
     does whichever thing suits the plan gives a way in which it leaves the OBJECT alone,
     then one in which it keeps it, and then, where the plan has a hand-over there and the
-    OBJECT can be handed over, one in which it hands it over. It can be where it is at hand
-    and the OPTION does not refuse it. A hand-over of the plan that does not happen is
-    broken. So is a refusal, where a PERSON who takes part might have the OBJECT. Each way
-    says what it breaks, and where the OBJECT might be when the TRIP starts and after each
-    OPTION.
+    OBJECT is at hand, one in which it hands it over. A hand-over of the plan that does not
+    happen is broken.
+
+    An OPTION that refuses the OBJECT is different: it moves nothing. The refusal is broken
+    where a PERSON who takes part might have the OBJECT. A hand-over that the plan has there
+    breaks the refusal too, and it breaks the other CONSTRAINT as well where the OPTION
+    could not hand the OBJECT over anyway.
+
+    Each way says what it breaks, and where the OBJECT might be when the TRIP starts and
+    after each OPTION.
     """
 
     def go(position: int, places: frozenset[Where], broke: Breaks, trail: Trail) -> Iterator[Run]:
@@ -4202,9 +4388,15 @@ def every_way(
             broke = (*broke, (position, Constraint.REFUSED, None))
         action = world.does.get((option, thing), "nothing")
         taker = handed.get(option)
-        why = Constraint.REFUSED if refused else Constraint.AT_HAND
-        not_taken = broke if taker is None else (*broke, (position, why, taker))
-        given = taker is not None and reach and not refused
+        if refused:
+            if taker is not None:
+                broke = (*broke, (position, Constraint.REFUSED, taker))
+                if action not in ("hands_over", "any") or not reach:
+                    broke = (*broke, (position, Constraint.AT_HAND, taker))
+            yield from go(position + 1, places, broke, (*trail, places))
+            return
+        not_taken = broke if taker is None else (*broke, (position, Constraint.AT_HAND, taker))
+        given = taker is not None and reach
         for does in ("nothing", "keeps") if action == "any" else (action,):
             if does == "hands_over" and given:
                 continue  # it is handed over, below

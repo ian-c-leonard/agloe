@@ -972,7 +972,7 @@ class _Search:
         The OPTION first checks what it requires and what it refuses, then keeps what it
         keeps, and then the OBJECT is handed over in it. One that might keep the OBJECT
         leaves it in both places: with whoever has it, and at the PLACE where the OPTION
-        starts. One that refuses the OBJECT hands it over to nobody.
+        starts. One that refuses the OBJECT moves nothing.
         """
         model, world = self.model, self.world
         option = self.file.options[index]
@@ -993,16 +993,20 @@ class _Search:
         if (option.id, thing) in world.needs:
             at_hand(used)
         if refused:
-            # Nobody who takes part has the OBJECT just before, or might.
+            # Nobody who takes part has the OBJECT just before, or might. So the OPTION
+            # moves nothing: it keeps the OBJECT from nobody, and nobody takes it there.
             for n in persons:
                 model.add_bool_or([before[n].negated(), takes[n].negated()])
+            for n in range(len(spots)):
+                _when(model.add(after[n] == before[n]), used)
+            return None
         action = world.does.get((option.id, thing), "nothing")
         # What is left to choose: which PERSON has the OBJECT handed over, where the OPTION
         # hands it over, and whether the OPTION keeps it, where it might do anything.
         gives: list[cp_model.IntVar] = []
         given: cp_model.IntVar | None = None
         quiet: list[cp_model.LiteralT] = [used]  # the OPTION happens, with no hand-over in it
-        if action in ("hands_over", "any") and not refused:
+        if action in ("hands_over", "any"):
             gives = [model.new_bool_var(f"{thing} to {n} in {option.id}") for n in persons]
             given = model.new_bool_var(f"{thing} handed over in {option.id}")
             model.add_max_equality(given, [0, *gives])

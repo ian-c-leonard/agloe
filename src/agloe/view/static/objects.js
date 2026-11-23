@@ -34,6 +34,7 @@ const ABOUT_MOVING = new Set(["hands over", "keeps", "does not keep"]);
 const HOW = new Map([
   ["handed over", (option) => `handed over in ${option}`],
   ["kept", (option) => `kept by ${option}`],
+  ["kept if held", (option, thing) => `kept by ${option} if anybody there has ${thing}`],
   ["might be kept", (option, thing) => `the FILE does not say what ${option} does with ${thing}`],
 ]);
 

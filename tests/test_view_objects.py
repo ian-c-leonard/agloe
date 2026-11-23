@@ -341,7 +341,7 @@ def test_a_case_marks_the_option_that_an_object_has_to_stay_out_of() -> None:
     shown = objects_of("the-bags/somebody-might-take-them")
     (bags,) = shown["objects"]
     assert bags["asks"] == [
-        "The trip might work if another transfer puts the bags at hand for Flight home, and"
+        "The trip might work if another transfer leaves the bags at hand for Flight home, and"
         " keeps the bags out of Museum visit."
     ]
     # The case has the bags at hand for the flight, and out of the visit. Each is marked where
@@ -396,7 +396,7 @@ def test_an_object_that_might_be_anywhere_says_that_nobody_knows_where_it_is(
     elsewhere = "at the hotel, at the Art Institute, at O'Hare, at Denver or somewhere the FILE"
     assert bags["plan"] == (
         f"In the plan: nobody knows where when the TRIP starts; {elsewhere} does not name from"
-        " 12:55 pm (kept by Drop off at the cloakroom)."
+        " 12:55 pm (kept by Drop off at the cloakroom if anybody there has the bags)."
     )
     assert f"\n  the bags: {bags['plan'][len('In the plan: ') : -1]}\n" in words
     (visit,) = bags["refuses"]

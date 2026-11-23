@@ -159,9 +159,10 @@ class Stay:
     """Where an OBJECT is from one point of the plan shown.
 
     ``where`` holds each place it might be: one, or several where the FILE leaves open what an
-    OPTION does with it. ``since`` is the OPTION from whose start it is there, and None from
-    the start of the TRIP. ``how`` says what the OPTION did: "handed over", "kept" or "might
-    be kept".
+    OPTION does with it or where it starts. ``since`` is the OPTION from whose start it is
+    there, and None from the start of the TRIP. ``how`` says what the OPTION did: "handed
+    over", "kept" or "might be kept". It is "kept if held" where the OPTION keeps the OBJECT
+    and nobody knows whether a PERSON in it has it: then the OPTION keeps it if one does.
     """
 
     where: tuple[Where, ...]
@@ -527,7 +528,11 @@ def _carried(
                 stated = file.refuses_object(option, thing.id) is True
                 uses.append(Use(option, stated, in_order(before), "refuses"))
             if after != before:
-                kept = "kept" if world.does.get((option, thing.id)) == "keeps" else "might be kept"
+                # It is kept for sure where whoever might have it takes part.
+                sure = all(each.person in step.persons for each in before)
+                kept = "might be kept"
+                if world.does.get((option, thing.id)) == "keeps":
+                    kept = "kept" if sure else "kept if held"
                 stays.append(Stay(in_order(after), option, "handed over" if taker else kept))
         carried.append(Carried(thing.id, tuple(stays), tuple(uses)))
     return tuple(carried), relied

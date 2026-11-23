@@ -819,6 +819,7 @@ def _carried_in_words(
         how = {
             "handed over": f"handed over in {name}",
             "kept": f"kept by {name}",
+            "kept if held": f"kept by {name} if anybody there has {thing}",
             "might be kept": f"the FILE does not say what {name} does with {thing}",
         }[stay.how or ""]
         stays.append(f"{where} from {clock.time(starts[stay.since], first_day)} ({how})")
