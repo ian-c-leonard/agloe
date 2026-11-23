@@ -370,6 +370,8 @@ def test_the_page_draws_the_file_before_the_report_comes(chromium: Browser, tmp_
         assert "When the page last heard the view, it said: FEASIBLE. The report is on" in note
         assert note.endswith("The FILE may have changed since then.")
         page.wait_for_function(waiting_again, timeout=20_000)
+        # The keyboard is on a link of the row. It stays there when the page says more.
+        page.locator("#contents .to", has_text="OPTIONs").focus()
         # The report comes: the page draws the plan, and ties the report to it.
         go.write_text("")
         page.locator("#report .row").first.wait_for()
@@ -379,6 +381,7 @@ def test_the_page_draws_the_file_before_the_report_comes(chromium: Browser, tmp_
         )
         assert "In the plan: Alex and Sam take part." in (page.text_content("#options") or "")
         assert page.locator(".old").count() == 0
+        assert page.evaluate("() => document.activeElement.getAttribute('href')") == "#options-part"
         # The page loses the view and finds it again, with the report on the page. It marks
         # what it shows while it hears nothing. Then all of it stands as it was: the page
         # never says that a report which it shows is on its way.
@@ -386,6 +389,10 @@ def test_the_page_draws_the_file_before_the_report_comes(chromium: Browser, tmp_
         cut_off(views[0])
         page.locator("#report-part.old").wait_for()
         assert page.locator("#calendar-part.old").count() == 1
+        # Each link of the row is pale where its part is, and says why.
+        links = page.locator("#contents .to")
+        assert page.locator("#contents .to.old").count() == links.count() > 5
+        assert "the FILE as it is now" in (links.first.get_attribute("title") or "")
         page.wait_for_function(
             """(line) => document.querySelectorAll(".old").length === 0
               && document.getElementById("line").textContent === line""",
@@ -427,7 +434,7 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
       return {
         parts: parts.filter((each) => !each.hidden).map(heading),
         links: links.map((each) => each.firstChild.textContent),
-        counts: links.map((each) => each.querySelector(".count")?.textContent ?? null),
+        counts: links.map((each) => each.querySelector(".count").textContent || null),
       };
     }"""
     # For each link: whether it has an edge of this kind, and whether something in its part has.
@@ -482,6 +489,22 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
         page.locator("#contents .to").first.focus()
         page.keyboard.press("Tab")
         assert page.evaluate("() => document.activeElement.textContent") == "PERSONs2"
+    # In a narrower window the row takes two lines. The part still comes to rest under it.
+    under_the_row = """(id) => {
+      const row = document.getElementById("contents").getBoundingClientRect();
+      const part = document.getElementById(id).getBoundingClientRect();
+      return { row: [row.top, row.bottom], part: part.top, at: scrollY };
+    }"""
+    with opened(chromium, story / "they-collect-them.json", wide=700, tall=800) as page:
+        page.locator("#objects .card").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 8")
+        assert page.evaluate(under_the_row, "options-part")["row"][1] > 50
+        page.locator("#contents .to", has_text="OPTIONs").click()
+        page.wait_for_function("() => scrollY > 0")
+        page.wait_for_timeout(200)
+        found = page.evaluate(under_the_row, "options-part")
+        assert found["row"][0] == 0
+        assert found["row"][1] <= found["part"] < found["row"][1] + 30
     # A link has the yellow edge where the report names something in what the FILE does not say.
     with opened(chromium, EXAMPLES / "flight-home" / "depends-on-the-cab.json") as page:
         page.locator("#options .item.asked").first.wait_for()
@@ -506,6 +529,17 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
             }"""
         )
         assert page.locator("#contents .to.clash, #contents .to.asked").count() == 0
+    # A wide window that is too short for its panes scrolls as a whole. The row goes with
+    # it, and covers no part that a link leads to.
+    with opened(chromium, story / "they-collect-them.json", wide=1400, tall=420) as page:
+        page.locator("#objects .card").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 8")
+        page.locator("#contents .to", has_text="The COMPILER's report").click()
+        page.wait_for_function("() => document.querySelector('main').scrollTop > 0")
+        page.wait_for_timeout(200)
+        found = page.evaluate(under_the_row, "report-part")
+        assert 0 <= found["part"] < 420
+        assert found["row"][1] <= found["part"]
     # A calendar that the page could not load has its place on the page, and its link, with
     # no edge: nothing in it is marked.
     with opened(chromium, story / "nobody-collects-them.json", without=("calendar.js",)) as page:
@@ -1330,6 +1364,25 @@ def test_on_a_wide_window_the_report_stays_beside_the_drawings(chromium: Browser
         page.wait_for_function("() => document.querySelector('#calendar .stripe:hover') !== null")
         assert page.locator("#calendar .way-name.lit").count() == 1
         assert page.evaluate(PLACED)["at"] == placed["at"]
+    # A window too short for its panes shows the upper part of the report. A line that is
+    # lit under the window is brought into the part that the window shows.
+    with opened(chromium, path, wide=1400, tall=460) as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#persons .item").first.scroll_into_view_if_needed()
+        below = page.evaluate(
+            """() => {
+              const report = document.getElementById("report");
+              const row = report.querySelector(".row[data-record='alex-start']");
+              report.scrollTop += row.getBoundingClientRect().top - innerHeight - 1;
+              const at = row.getBoundingClientRect();
+              const box = report.getBoundingClientRect();
+              return at.top >= innerHeight && at.bottom <= box.bottom;
+            }"""
+        )
+        assert below, "the line is not under the window and inside its pane"
+        page.locator("#persons .item").first.hover()
+        lit(page, persons=["Alex"])
+        page.wait_for_function(f"() => ({PLACED})().shown === 1")
     # A shallow window keeps panes that a reader can use: the whole of it scrolls instead.
     with opened(chromium, path, wide=1400, tall=260) as page:
         page.locator("#report .row").first.wait_for()

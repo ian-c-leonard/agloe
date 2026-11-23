@@ -654,10 +654,13 @@ function reveal(from) {
   revealedFor = drawing;
   const report = part("report");
   if (!entered || from === null || report.contains(from) || report.scrollHeight <= report.clientHeight) return;
-  const box = report.getBoundingClientRect();
+  // What the reader sees of the report: the part of it that is in the window. A window too
+  // short for the panes shows the upper part only.
+  const pane = report.getBoundingClientRect();
+  const box = { top: Math.max(pane.top, 0), bottom: Math.min(pane.bottom, innerHeight) };
   const lines = [...report.querySelectorAll(".row.lit")].map((line) => line.getBoundingClientRect());
-  if (!lines.length || lines.some((at) => at.top >= box.top && at.bottom <= box.bottom)) return;
-  // The middle of the first line goes to the middle of the report.
+  if (!lines.length || box.bottom <= box.top || lines.some((at) => at.top >= box.top && at.bottom <= box.bottom)) return;
+  // The middle of the first line goes to the middle of what the reader sees of the report.
   report.scrollTop += (lines[0].top + lines[0].bottom) / 2 - (box.top + box.bottom) / 2;
 }
 
@@ -686,17 +689,38 @@ function drawContents() {
   const parts = [...document.querySelectorAll("#drawings > section, #report-part")].filter((each) => !each.hidden);
   const row = part("contents");
   row.hidden = parts.length < 2;
-  row.replaceChildren(
-    ...parts.map((each) => {
-      const clash = each.dataset.clash === "yes";
-      const asked = each.dataset.asked === "yes";
-      const link = Object.assign(made("a", `to${clash ? " clash" : ""}${asked ? " asked" : ""}`, each.querySelector("h2").textContent), { href: `#${each.id}` });
-      if (each.dataset.count) link.append(made("span", "count", each.dataset.count));
-      link.title = [...(clash ? ["The report names something here among what rules out every plan."] : []), ...(asked ? ["The report names something here that the reader should look at: a yellow edge marks it."] : [])].join("\n");
-      return link;
-    }),
-  );
+  // A link stays where it is while its part is on the page, so the keyboard keeps its place
+  // on it when the page says more. The parts and the links are both in the order of the page.
+  const have = new Map([...row.children].map((link) => [link.getAttribute("href"), link]));
+  let last = null;
+  for (const each of parts) {
+    const href = `#${each.id}`;
+    let link = have.get(href);
+    if (link === undefined) {
+      link = Object.assign(made("a", "to"), { href });
+      link.append(made("span", "", ""), made("span", "count", ""));
+      row.insertBefore(link, last === null ? row.firstChild : last.nextSibling);
+    }
+    have.delete(href);
+    last = link;
+    const clash = each.dataset.clash === "yes";
+    const asked = each.dataset.asked === "yes";
+    // A part that is pale shows what is not of the FILE as it is now, and so does its link.
+    const old = each.classList.contains("old");
+    link.className = `to${clash ? " clash" : ""}${asked ? " asked" : ""}${old ? " old" : ""}`;
+    link.firstChild.textContent = each.querySelector("h2").textContent;
+    link.lastChild.textContent = each.dataset.count ?? "";
+    link.title = [
+      ...(clash ? ["The report names something here among what rules out every plan."] : []),
+      ...(asked ? ["The report names something here that the reader should look at: a yellow edge marks it."] : []),
+      ...(old ? ["What this part shows is not of the FILE as it is now."] : []),
+    ].join("\n");
+  }
+  for (const gone of have.values()) gone.remove();
 }
+
+// A part comes to rest under the row of links, however many lines the row takes.
+new ResizeObserver(() => document.documentElement.style.setProperty("--row-of-links", `${part("contents").offsetHeight}px`)).observe(part("contents"));
 
 /** What the page shows now, with the row of links to its parts. */
 function show() {
