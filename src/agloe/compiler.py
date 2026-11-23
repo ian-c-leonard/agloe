@@ -833,7 +833,6 @@ class _Search:
             lands = spots.index(ends_at) if ends_at in spots else somewhere_else
             name = f"{thing} has arrived from {options[carrier].id} for {options[index].id}"
             came = model.new_bool_var(name)
-            model.add_implication(came, before[aboard])
             over = self.start[carrier] + self.lasts[carrier]
             _when(model.add(self.start[index] >= over), came)
             still = model.new_bool_var(f"{thing} is still in {options[carrier].id}: {name}")

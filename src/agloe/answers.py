@@ -736,8 +736,10 @@ def _to_bring(
     the check holds in the same plan without another transfer: with what the FILE lists,
     and everything else as in that world. Any other FACT has none.
 
-    Where the OBJECT is in that plan is worked out from what the FILE lists. An OPTION that
-    a FACT says refuses the OBJECT moves nothing. One that only might refuse it is
+    Where the OBJECT is in that plan is worked out from what the FILE lists. The plan has no
+    hand-over and no carry of the OBJECT: another transfer brings it. So it is just before
+    each OPTION where the OPTION before left it. An OPTION that a FACT says refuses the
+    OBJECT moves nothing. One that only might refuse it is
     different: if it does not, it keeps the OBJECT from a PERSON who brings it in, where it
     keeps the OBJECT. So the OBJECT might be in either place afterwards, and a check holds
     only where it holds in both.
@@ -764,7 +766,7 @@ def _to_bring(
     steps = [step for step in plan if step.option is not None]
     checks: list[tuple[str, str, bool, bool]] = []
     # Where the OBJECT might be just before each OPTION of the plan starts.
-    for before, step in zip(just_before(file, listed_only, plan)[thing], steps, strict=True):
+    for before, step in zip(whereabouts(file, listed_only, plan)[thing], steps, strict=False):
         option = step.option or ""
         if (option, thing) in world.needs:
             stated = file.requires_object(option, thing) is True
