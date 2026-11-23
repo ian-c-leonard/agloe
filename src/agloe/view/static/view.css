@@ -28,7 +28,8 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
   main { width: 100%; max-width: 1800px; min-height: 0; padding-bottom: 12px; overflow-y: auto; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-rows: auto minmax(320px, 1fr); column-gap: 28px; }
   .answer, .contents { grid-column: 1 / -1; }
   main:has(> .contents:not([hidden])) { grid-template-rows: auto auto minmax(320px, 1fr); }
-  .drawings { min-height: 0; overflow-y: auto; align-content: start; padding-right: 6px; }
+  /* The pane cuts off what is outside it. It keeps room at its edges for the ring of the keyboard. */
+  .drawings { min-height: 0; overflow-y: auto; align-content: start; padding: 0 6px 6px; margin-left: -6px; }
   .report-part { min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
   .report-part pre { min-height: 0; overflow-y: auto; }
   /* With nothing drawn, the report has the page to itself. */
@@ -58,14 +59,18 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .contents .to.clash { border-color: var(--stop); box-shadow: 0 0 0 1px var(--stop); }
 /* A link is pale where its part is: what the part shows is not of the FILE as it is now. */
 .contents .to.old { opacity: 0.45; }
-/* A part comes to rest under the row, however many lines the row takes. */
-.calendar-part, .part, .report-part { scroll-margin-top: calc(var(--row-of-links, 36px) + 12px); }
+/* What the page brings into view comes to rest under the row, however many lines the row
+   takes: a part that a link leads to, and a drawing that the keyboard goes to. */
+html { scroll-padding-top: calc(var(--row-of-links, 0px) + 12px); }
 /* On a wide window the row is above the two panes, and goes with the page where that scrolls. */
 @media (min-width: 1400px) {
   .contents { position: static; padding: 0; border-bottom: 0; }
-  .calendar-part, .part, .report-part { scroll-margin-top: 0; }
+  html { scroll-padding-top: 0; }
 }
 .report-part, .calendar-part, .part { display: grid; gap: 8px; }
+/* The calendar with the steps under it that have no time. */
+.calendar-steps { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
+.calendar-steps:not(:has(> :not([hidden]))) { display: none; }
 .report-part h2, .calendar-part h2, .part h2 { font: 600 13px var(--text); color: var(--ink2); }
 .report-part pre { margin: 0; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; font: 13px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 /* A report on the FILE as it was before is shown pale until the next report comes. So is its calendar. */
@@ -219,6 +224,10 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .card.clash, .entry.clash, .item.clash, .has.clash, .in-full.clash { border-style: solid; border-color: var(--stop); box-shadow: inset 0 0 0 1.5px var(--stop); }
 .card.asked, .entry.asked, .item.asked, .has.asked { border-style: solid; border-color: var(--warn); box-shadow: inset 0 0 0 1.5px var(--warn); }
 .card.lit, .entry.lit, .item.lit, .has.lit, .in-full.lit, .person.lit, .strip-people .lit { background: var(--lit); }
+/* The drawing that the keyboard is on. */
+[data-of]:focus-visible, [data-record]:focus-visible, [data-records]:focus-visible { outline: 2.5px solid var(--ink); outline-offset: 2px; border-radius: 3px; }
+/* A mark of the strip that is a tick has no width of its own: the ring goes around the tick. */
+.bar:focus-visible .bar-tick, .bar:focus-visible .bar-several { outline: 3px solid var(--ink); outline-offset: 3px; }
 
 .key { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 12px; }
 .key span { display: inline-flex; align-items: center; gap: 6px; }
