@@ -2197,7 +2197,9 @@ def test_what_the_file_lists_covers_a_check_only_whichever_way_an_open_refusal_t
     )
 
 
-def five_museum_visitors(*more: Document, collection: bool = False, meeting: bool = False) -> File:
+def five_museum_visitors(
+    *more: Document, collection: bool = False, meeting: bool = False, briefing: bool = False
+) -> File:
     """Five visitors, each LOCKed into two visits of their own at the museum.
 
     Every visit takes half an hour, can start at any time and refuses the bag. A stop at the
@@ -2205,17 +2207,24 @@ def five_museum_visitors(*more: Document, collection: bool = False, meeting: boo
     are COMPLETE. With ``collection``, all five are LOCKed into a collection at noon that
     takes five minutes and hands the bag over, and the TRIP ends when it is over. With
     ``meeting``, all five are LOCKed into a meeting at 8:00 am that takes five minutes and
-    hands the bag over."""
+    hands the bag over. With ``briefing``, all five are LOCKed into a briefing at 8:00 am,
+    and nobody said what it does with the bag: no FACT says that the FILE states every
+    OPTION that hands the bag over or keeps it."""
     people = [f"person-{number}" for number in range(5)]
     visits = [f"visit-{number}" for number in range(10)]
     options = [stays("cloakroom", "museum"), *(stays(name, "museum") for name in visits)]
     facts = [*at("cloakroom", 9, length="PT5M"), keeps("cloakroom", "bag")]
     for name in visits:
         facts += [*whenever(name, "PT30M"), refuses_object(name, "bag")]
-    facts += [every_use("bag"), every_transfer("bag"), *more]
+    facts += [every_use("bag"), *([] if briefing else [every_transfer("bag")]), *more]
     locks = [trip_starts(8)]
     for number, person in enumerate(people):
         locks += [lock(f"visit-{2 * number}", person), lock(f"visit-{2 * number + 1}", person)]
+    if briefing:
+        options.append(stays("briefing", "museum"))
+        facts += [*at("briefing", 8, length="PT5M")]
+        facts += [does_with(name, "bag", "nothing") for name in visits]
+        locks += [lock("briefing", *people)]
     if collection:
         options.append(stays("collection", "museum"))
         facts += [*at("collection", 12, length="PT5M"), hands_over("collection", "bag")]
@@ -2302,11 +2311,17 @@ def test_five_visitors_are_shown_at_once_whoever_might_have_the_bag(
             stops = [each.persons for each in found.itinerary if each.option == "cloakroom"]
             assert stops == [("person-0",) if holder else everybody]
             assert not any(each.handed for each in found.itinerary)
+    # A briefing that only might keep the bag takes it from nobody for sure. So all five
+    # still stop at the cloakroom, and the report comes at once.
+    found, timed = timings_for_the_report(monkeypatch, five_museum_visitors(briefing=True))
+    assert found.answer is Answer.FEASIBLE
+    assert timed < 10
+    assert [each.persons for each in found.itinerary if each.option == "cloakroom"] == [everybody]
 
 
-def carried_by_alex(things: Sequence[str]) -> list[Document]:
-    """A FACT for each of these OBJECTs: Alex has it when the TRIP starts."""
-    return [{**has_object("alex", thing), "id": f"{thing}-start"} for thing in things]
+def carried_by_alex(things: Sequence[str], person: str = "alex") -> list[Document]:
+    """A FACT for each of these OBJECTs: Alex has it when the TRIP starts, or this PERSON."""
+    return [{**has_object(person, thing), "id": f"{thing}-start"} for thing in things]
 
 
 def sets_tried_for(monkeypatch: pytest.MonkeyPatch, file: File) -> tuple[Report, int]:
@@ -2382,29 +2397,50 @@ def test_each_choice_of_new_things_has_its_own_facts_that_no_set_can_do_without(
     Alex needs another OPTION. Each choice has its own five FACTs, and the search tries one
     set for each."""
     things = ["camera", "recorder", "stroller", "bag", "umbrella"]
-    facts = [
-        *at("recital", 19),
-        satisfies("recital", "music"),
-        needs_right("recital"),
-        offer("recital", 1, price="0.00 USD"),
-        every_right("recital", "recital-offer"),
-        *carried_by_alex(things),
-    ]
-    options, wants = [stays("recital", "hall")], [must("music", "alex", "jo")]
-    file = trip(
-        ["alex", "jo"], ["hall"], options, facts, [], wants=wants, rights=True, objects=things
-    )
-    found, tried = sets_tried_for(monkeypatch, file)
+
+    def a_recital(carrier: str, *more: Document) -> File:
+        facts = [
+            *at("recital", 19),
+            satisfies("recital", "music"),
+            needs_right("recital"),
+            offer("recital", 1, price="0.00 USD"),
+            every_right("recital", "recital-offer"),
+            *carried_by_alex(things, carrier),
+            *more,
+        ]
+        options, wants = [stays("recital", "hall")], [must("music", "alex", "jo")]
+        people = ["alex", "jo"]
+        return trip(people, ["hall"], options, facts, [], wants=wants, rights=True, objects=things)
+
+    def not_required(some: Sequence[str]) -> list[Unknown]:
+        return [Unknown("does not require", "recital", about=thing) for thing in some]
+
+    def not_refused(some: Sequence[str]) -> list[Unknown]:
+        return [Unknown("does not refuse", "recital", about=thing) for thing in some]
+
+    def another_for(person: str) -> Unknown:
+        return Unknown("another option", want="music", person=person)
+
+    found, tried = sets_tried_for(monkeypatch, a_recital("alex"))
     assert asked(found) == [
-        (
-            *(Unknown("does not require", "recital", about=thing) for thing in things),
-            Unknown("another option", want="music", person="alex"),
-        ),
-        (
-            *(Unknown("does not refuse", "recital", about=thing) for thing in things),
-            Unknown("another option", want="music", person="jo"),
-        ),
+        (*not_required(things), another_for("alex")),
+        (*not_refused(things), another_for("jo")),
     ]
+    assert tried < 10
+    # The sets are listed in the order of their FACTs, whichever new thing each comes with.
+    # Where Jo brings the five things, the set that comes first is the one with another
+    # OPTION for Jo, though Alex is listed before Jo.
+    found, tried = sets_tried_for(monkeypatch, a_recital("jo"))
+    assert asked(found) == [
+        (*not_required(things), another_for("jo")),
+        (*not_refused(things), another_for("alex")),
+    ]
+    # FACTs say that the recital does not require three of the things. Where Jo takes the
+    # place, two FACTs are left to ask, and where Alex takes it, five. The report names the
+    # smaller set, and the search tries no set of two FACTs for the choice that asks five.
+    stated = [requires_object("recital", thing, False) for thing in things[:3]]
+    found, tried = sets_tried_for(monkeypatch, a_recital("alex", *stated))
+    assert asked(found) == [(*not_required(things[3:]), another_for("alex"))]
     assert tried < 10
 
 

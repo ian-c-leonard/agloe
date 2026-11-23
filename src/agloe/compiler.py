@@ -790,12 +790,16 @@ class _Search:
         A PERSON has the OBJECT, or might, from the start of the TRIP where they have it
         then or might, and from an OPTION in which they take it. They still might have it
         until they take part in an OPTION that takes it from them: one that keeps it, or one
-        in which it is handed to somebody else. A hand-over needs every place the OBJECT
-        might be in at hand, so whoever might have it takes part there. An OPTION that only
-        might keep the OBJECT takes it from nobody for sure, and one that refuses it moves
-        nothing. So such a PERSON takes part in an OPTION that refuses the OBJECT only where
-        one of those others comes in between, with them in it. A PERSON's own OPTIONs have
-        turns in the order they do them.
+        in which it is handed over. A hand-over needs every place the OBJECT might be in at
+        hand, so whoever might have it takes part there. An OPTION that only might keep the
+        OBJECT takes it from nobody for sure, and one that refuses it moves nothing. So such
+        a PERSON takes part in an OPTION that refuses the OBJECT only where they take part
+        in one of those others before it. A PERSON's own OPTIONs have turns in the order
+        they do them.
+
+        This says less than the path does. An OPTION that takes the OBJECT from a PERSON
+        before they take it does not help them, and neither does a hand-over to themselves:
+        then they take it again, and the same holds from there on.
 
         ``handed`` holds, for each OPTION that can hand the OBJECT over, the choice that it
         does. ``picked`` says that the world leaves the start to pick: then nobody is known
@@ -818,7 +822,10 @@ class _Search:
             _when(model.add(self.turn[first] >= self.turn[then] + 1), later.negated())
 
         def rid_of_it(number: int, since: int | None, until: int) -> list[cp_model.IntVar]:
-            """Each way this PERSON can be rid of the OBJECT before one OPTION, after another."""
+            """Each way this PERSON can be rid of the OBJECT before one OPTION.
+
+            ``since`` is the OPTION in which they take it, where they do. That one is no way.
+            """
             row = self.takes[number]
             ways: list[cp_model.IntVar] = []
             for other in dict.fromkeys((*keeping, *handed)):
@@ -828,12 +835,8 @@ class _Search:
                 way = model.new_bool_var(f"{name} before {options[until].id}")
                 model.add_implication(way, row[other])
                 _when(model.add(self.turn[until] >= self.turn[other] + 1), way)
-                if since is not None:
-                    _when(model.add(self.turn[other] >= self.turn[since] + 1), way)
                 if other in handed and other not in keeping:
-                    # It is handed over there, and to somebody else.
-                    model.add_implication(way, handed[other])
-                    model.add_implication(way, self.given_to[thing, other][number].negated())
+                    model.add_implication(way, handed[other])  # it is handed over there
                 ways.append(way)
             return ways
 
