@@ -8962,6 +8962,27 @@ def test_an_access_cutoff_is_for_persons_and_not_for_an_object_that_travels_alon
     assert compiler.check(file) == found
 
 
+def test_what_is_left_of_a_plan_has_to_work_in_the_order_listed() -> None:
+    """Jo starts at A. A WAY between A and B takes no time. At 9:00 am Jo goes to B, back to
+    A and to B again. Without the first crossing, the plan lists a crossing from B first,
+    and Jo is at A: it does not work as listed. Without the last, it does."""
+    file = trip(
+        ["jo"],
+        ["a", "b"],
+        [],
+        [starts_from("jo", "a"), takes("door", "PT0S")],
+        [],
+        [way_between("door", "a", "b")],
+    )
+    over = Step(None, "a", "b", ("jo",), seconds(9), seconds(9), "door")
+    back = Step(None, "b", "a", ("jo",), seconds(9), seconds(9), "door")
+    world = worst_case(file)
+    assert broken_as_listed(file, world, (over, back, over)) == []
+    assert broken_as_listed(file, world, (back, over)) != []
+    assert broken(file, world, (back, over)) == []
+    assert reference.needless(file, world, (over, back, over)) == [(2, "jo")]
+
+
 def test_what_can_be_taken_out_names_the_way_by_its_step() -> None:
     """Jo starts at A, takes the bus to a visit at B that a LOCK names, and takes the bus
     back. The way back can be taken out, and the way there cannot. The answer says which
@@ -8985,42 +9006,78 @@ def test_what_can_be_taken_out_names_the_way_by_its_step() -> None:
 
 
 def test_how_much_the_check_of_what_can_be_taken_out_tries() -> None:
-    """Twelve visits, each the only OPTION for a must of Jo's, and Jo is in each. A visit
-    with nobody in it changes nothing, so it is never tried: Jo leaves and the visit goes,
-    or Jo stays. That is four thousand plans to check, and not half a million. A van that
-    can carry the bags counts as one more thing that can go or stay, like the service. An
-    OPTION that a LOCK puts a PERSON into can never be left with nobody, so it counts for
-    nothing."""
+    """Twelve visits, each the only OPTION for a must of Jo's, and Jo is in each. A bag lies
+    there. Some visits hand it over, some keep it, some do nothing with it, and of some
+    nobody says. None can carry it, so a visit with nobody in it changes nothing and is
+    never tried: Jo leaves and the visit goes, or Jo stays. That is four thousand plans to
+    check, and not half a million. A van that can carry the bags counts as one more thing
+    that can go or stay, like the service. An OPTION that a LOCK puts a PERSON into can
+    never be left with nobody, so it counts for nothing. Seven shuttles that Jo rides and
+    that can each carry a bag are two thousand plans: each has Jo in it, or nobody, or is
+    gone."""
     visits = [f"visit-{number}" for number in range(12)]
-    facts: list[Document] = [starts_from("jo", "hall")]
+    facts: list[Document] = [starts_from("jo", "hall"), lies_at("bag", "hall"), every_use("bag")]
     for number, visit in enumerate(visits):
         facts += [
             *at(visit, 9 + number // 2, 30 * (number % 2)),
             satisfies(visit, f"want-{number}"),
         ]
+        does = ["hands_over", "keeps", "nothing", None][number % 4]
+        facts += [does_with(visit, "bag", does)] if does else []
     wants = [must(f"want-{number}", "jo") for number in range(12)]
-    file = trip(["jo"], ["hall"], [stays(visit, "hall") for visit in visits], facts, [], (), wants)
+    options = [stays(visit, "hall") for visit in visits]
+    file = trip(["jo"], ["hall"], options, facts, [], (), wants, objects=["bag"])
     plan = tuple(
         Step(visit, "hall", "hall", ("jo",), seconds(9 + n // 2, 30 * (n % 2)), None)
         for n, visit in enumerate(visits)
     )
     plan = tuple(replace(each, end=each.start + 1800) for each in plan)
     world = worst_case(file)
+    # A visit that does nothing with the bag has no entry: that is what None stands for.
+    assert {world.does.get((visit, "bag")) for visit in visits} == {
+        "hands_over",
+        "keeps",
+        None,
+        "might_keep",
+    }
     assert broken_as_listed(file, world, plan) == []
     checked_plans = 0
-    its_own = reference.broken
+    its_own = reference.broken_as_listed
 
     def counted(*given: Any, **named: Any) -> Any:
         nonlocal checked_plans
         checked_plans += 1
         return its_own(*given, **named)
 
-    reference.broken = counted
+    reference.broken_as_listed = counted
     try:
         assert reference.needless(file, world, plan) == []
+        assert checked_plans == 2**12 - 1
+
+        # Seven shuttles between A and B, one an hour. Each can carry the bag, and none does.
+        rides = [f"ride-{number}" for number in range(7)]
+        ends = ["a", "b"]
+        stated: list[Document] = [starts_from("jo", "a"), lies_at("bag", "a"), every_use("bag")]
+        stated += [every_transfer("bag")]
+        for number, ride in enumerate(rides):
+            stated += [*at(ride, 9 + number), carries(ride, "bag")]
+        shuttles = [
+            moves(ride, ends[number % 2], ends[(number + 1) % 2])
+            for number, ride in enumerate(rides)
+        ]
+        back_and_forth = trip(["jo"], ends, shuttles, stated, [], objects=["bag"])
+        ridden = tuple(
+            Step(ride, ends[n % 2], ends[(n + 1) % 2], ("jo",), seconds(9 + n), seconds(9 + n, 30))
+            for n, ride in enumerate(rides)
+        )
+        world = worst_case(back_and_forth)
+        assert broken_as_listed(back_and_forth, world, ridden) == []
+        checked_plans = 0
+        # The last ride can go. It is the first thing found: Jo out of it, and the ride gone.
+        assert reference.needless(back_and_forth, world, ridden) == [(6, "jo"), (6, None)]
+        assert 0 < checked_plans < 3**7
     finally:
-        reference.broken = its_own
-    assert checked_plans == 2**12 - 1
+        reference.broken_as_listed = its_own
 
     many = some_vans(10)
     visit = replace(step("visit", "museum", 13, "alex", "sam"), end=seconds(14, 30))

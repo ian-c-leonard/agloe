@@ -26,7 +26,7 @@ from typing import Literal, NamedTuple
 
 from agloe.file import Booking, Complete, File, Offer, Satisfies, StartsFrom, Want, WithObject
 
-_MOST_TO_TAKE_OUT = 12  # ``needless`` tries every combination of things to take out
+_MOST_PLANS_TO_CHECK = 4096  # ``needless`` checks every plan with something taken out
 
 
 class Constraint(Enum):
@@ -2734,8 +2734,9 @@ def needless(file: File, world: World, itinerary: Itinerary) -> list[tuple[int, 
 
     Each thing taken out is named with the position of its step in the ITINERARY: a PERSON
     out of an OPTION or a WAY, or a whole OPTION, with None for the PERSON. It tries every
-    combination of PERSONs in OPTIONs that no LOCK requires, with all the times left as
-    they are. An OPTION that has nobody in it can be taken out by itself.
+    combination of PERSONs in OPTIONs that no LOCK requires. All the times are left as they
+    are, and so is the order in which the ITINERARY lists the steps that stay: what is
+    left has to work as listed. An OPTION that has nobody in it can be taken out by itself.
 
     An OPTION whose last PERSON is taken out goes with them, or stays with nobody in it.
     Both are tried where the OPTION can carry an OBJECT, or might: then a later step of the
@@ -2757,13 +2758,17 @@ def needless(file: File, world: World, itinerary: Itinerary) -> list[tuple[int, 
             world.does.get((option.id, thing.id), "nothing") not in still for thing in file.objects
         )
     }
-    # Each free PERSON goes or stays. So does each OPTION that can be left with nobody in
-    # it and can move an OBJECT.
-    can_be_left = sum(
-        step.option in moving and all((index, person) in free for person in step.persons)
-        for index, step in enumerate(itinerary)
-    )
-    if len(free) + can_be_left > _MOST_TO_TAKE_OUT:
+    # How many plans there are to check: each step with every group of its free PERSONs
+    # taken out. Where that leaves an OPTION with nobody, it goes, or stays if it can move
+    # an OBJECT.
+    plans = 1
+    for index, step in enumerate(itinerary):
+        loose = sum((index, person) in free for person in step.persons)
+        if step.option is None or loose < len(step.persons):
+            plans *= 2**loose
+        else:
+            plans *= 2**loose - 1 + (2 if step.option in moving else 1)
+    if plans > _MOST_PLANS_TO_CHECK:
         raise ValueError("this ITINERARY is too large for the reference checker")
     for size in range(len(free) + 1):
         for out in combinations(free, size):
@@ -2791,7 +2796,7 @@ def needless(file: File, world: World, itinerary: Itinerary) -> list[tuple[int, 
                         # A PERSON who is taken out has nothing handed over to them there.
                         handed = tuple(each for each in step.handed if each[1] in staying[index])
                         smaller.append(replace(step, persons=staying[index], handed=handed))
-                    if not broken(file, world, tuple(smaller)):
+                    if not broken_as_listed(file, world, tuple(smaller)):
                         return [*out, *((index, None) for index in gone)]
     return []
 
@@ -2807,11 +2812,11 @@ def itineraries(file: File, world: World, known: Routes | None = None) -> list[I
 
     A choice is who takes part, which OPTIONs happen with nobody in them, and the order in
     which each PERSON does their OPTIONs. Only an OPTION that ``could_run_alone`` names is
-    tried with nobody in it: any other one changes nothing there, and the choice without
-    it comes first. There is one ITINERARY for each choice that is left, the one that
-    ``scheduled`` gives. Another ITINERARY for the same choice, with other WAYs, other
-    hand-overs or other carries, is not returned, though PERSONs take part in it as few
-    times.
+    tried with nobody in it. Where a choice works with another one, the same choice works
+    without it and comes first: no OPTION requires or refuses what it moves. There is one
+    ITINERARY for each choice that is left, the one that ``scheduled`` gives. Another
+    ITINERARY for the same choice, with other WAYs, other hand-overs or other carries, is
+    not returned, though PERSONs take part in it as few times.
 
     An OPTION with nobody in it adds nothing to the times PERSONs take part. So an
     ITINERARY returned can have one that it does not need, and ``needless`` then names it

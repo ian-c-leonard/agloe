@@ -274,6 +274,48 @@ def clock_of(time: dict[str, Any], start: dict[str, Any]) -> str:
     return f"{shown} on {day} {MONTHS[month - 1]}{'' if same_year else f' {year}'}"
 
 
+def test_the_calendar_says_how_late_a_step_with_nobody_in_it_can_end_on_the_next_day() -> None:
+    """A van leaves A at 11:00 pm with the bag and takes between half an hour and two hours
+    and one second. Jo collects the bag at B at 1:00 am the next day. Nobody rides the van.
+    The calendar says that it can end as late as 1:00:01 am, and on which day that is."""
+    late_night = starts_at("pickup", 1)
+    late_night["starts_at"] = late_night["starts_at"].replace("2027-05-15", "2027-05-16")
+    facts = [
+        starts_at("van", 23),
+        lasts_between("van", "PT30M", "PT2H1S"),
+        cutoff("van", "PT0S"),
+        needs_right("van"),
+        every_right("van"),
+        late_night,
+        lasts("pickup", "PT30M"),
+        cutoff("pickup", "PT0S"),
+        needs_no_right("pickup"),
+        starts_from("jo", "b"),
+        lies_at("bag", "a"),
+        carries("van", "bag"),
+        requires_object("pickup", "bag"),
+        every_use("bag"),
+        every_transfer("bag"),
+    ]
+    options = [moves("van", "a", "b"), stays("pickup", "b")]
+    file = trip(
+        ["jo"], ["a", "b"], options, facts, [lock("pickup", "jo")], rights=True, objects=["bag"]
+    )
+    found = compiler.check(file)
+    assert found.answer is Answer.FEASIBLE
+    sent, words = sent_for(file, found), report.as_text(file, found)
+    laid = calendar(sent, report.as_json(file, found), words)
+    assert warnings_are_those_of_the_report(sent, words, laid, "the van at night")
+    van = (
+        " Nobody of the TRIP is in van (a to b) on Saturday 15 May 2027, 11:00 pm to 11:30 pm,"
+        " or as late as 1:00:01 am on 16 May, so no column shows it."
+    )
+    assert van in laid["says"]
+    assert van == nobody_in(sent, sent["steps"][0], "Saturday 15 May 2027, 11:00 pm to 11:30 pm")
+    # The pickup is the one step with a mark, and the report warns there: the bag might be late.
+    assert laid["warned"] is True
+
+
 def test_a_time_after_midnight_is_written_with_its_date_and_its_seconds() -> None:
     start = {"at": "2027-05-15T23:00:00", "offset": None}
     assert clock_of({"at": "2027-05-16T01:00:01", "offset": None}, start) == "1:00:01 am on 16 May"
@@ -680,8 +722,11 @@ def warnings_are_those_of_the_report(
     assert (WARNS in calendar_of["says"]) is drawn_with_one, name
     later = [n for n in under if n not in marked and sent["steps"][n]["persons"]]
     count = "1 step" if len(later) == 1 else f"{len(later)} steps"
-    also = f" The report also warns of something at {count} after the days shown."
-    assert (also in calendar_of["says"]) is bool(later), name
+    if later:
+        also = f" The report also warns of something at {count} after the days shown."
+        assert also in calendar_of["says"], name
+    else:
+        assert "The report also warns of something" not in calendar_of["says"], name
     for number, lines in under.items():
         if not sent["steps"][number]["persons"]:
             there = nobody_in(sent, sent["steps"][number], said_at[number])
