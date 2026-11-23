@@ -1,12 +1,14 @@
 """What the page is sent of a TRIP, so that it can draw it.
 
-The page reads no FILE. With each report, the view sends what a drawing needs: the PERSONs and
-the PLACEs by name, the days, and the steps with who takes part in each. All of it is read from
-the FILE by the reader that the COMPILER uses, or taken from the COMPILER's report.
+The page reads no FILE. The view sends what a drawing needs: the PERSONs and the PLACEs by
+name, the days, and the steps with who takes part in each. All of it is read from the FILE by
+the reader that the COMPILER uses, or taken from the COMPILER's report. The view sends it as
+soon as the FILE is read, from the FILE alone, and once more with the report.
 
 For a FEASIBLE TRIP the steps are the ITINERARY of the report, and each says which of its
 PERSONs a LOCK names. A report on any other TRIP shows no ITINERARY. Its steps are the OPTIONs
-that a LOCK names, at the times the FILE states.
+that a LOCK names, at the times the FILE states. So they are before there is a report, and
+the TRIP then says that it has none.
 
 Each step names the FACTs and DECISIONs of the FILE that are about its OPTION or its WAY. A
 report names FACTs and DECISIONs too. So the page can mark the steps that a report is about,
@@ -121,7 +123,7 @@ _TRIP: _Shape = {
     "persons": list,
     "places": list,
     "starts_from": list,
-    "itinerary": bool,
+    "itinerary": (bool, _NONE),
     "days": list,
     "until": (str, _NONE),
     "starts": (dict, _NONE),
@@ -274,14 +276,21 @@ class _Day:
     changes: bool
 
 
-def shown(file: File, report: Report) -> Trip | None:
+def shown(file: File, report: Report | None = None) -> Trip | None:
     """The TRIP as a page draws it, from the FILE and from the COMPILER's report on it.
+
+    With no report, it is the TRIP as the FILE alone gives it: the COMPILER has not reported
+    yet. Its steps are then the OPTIONs that a LOCK names, and it says that it has no report.
 
     None where the TRIP holds a time outside the years 0001 to 9999: such a time cannot be
     written, so there is nothing true to draw.
     """
-    planned = report.answer is Answer.FEASIBLE
-    steps = _in_the_itinerary(file, report) if planned else _named_by_a_lock(file)
+    planned = report is not None and report.answer is Answer.FEASIBLE
+    steps = (
+        _in_the_itinerary(file, report)
+        if report is not None and planned
+        else _named_by_a_lock(file)
+    )
     names = _names((*file.options, *file.ways))
     people, sites = _names(file.persons, "and"), _names(file.places)
     locked: dict[str, set[str]] = {}
@@ -327,7 +336,7 @@ def shown(file: File, report: Report) -> Trip | None:
         # Each time gives its offset where the report's do, where these are not at one, and
         # where the clocks show one of them twice: only its offset says which of the two it is.
         offsets = (
-            reports.clock_for(file, report).offsets
+            (report is not None and reports.clock_for(file, report).offsets)
             or len({local(moment, file.zone).utcoffset() for moment in times}) > 1
             or any(_comes_twice(file, moment) for moment in times)
         )
@@ -345,7 +354,9 @@ def shown(file: File, report: Report) -> Trip | None:
                 for fact in (file.starts_from(each.id) for each in file.persons)
                 if fact is not None
             ],
-            "itinerary": planned,
+            # Yes where the steps are the ITINERARY of the report, no where the report shows
+            # none, and nothing where there is no report yet.
+            "itinerary": None if report is None else planned,
             "days": [
                 {
                     "date": day.date.isoformat(),
@@ -1399,7 +1410,8 @@ def _fits(value: object, shape: _Shape) -> bool:
     for name, kinds in shape.items():
         held = record[name]
         # In Python a yes or no is a number too. Here it is one only where a yes or no is asked.
-        if isinstance(held, bool) and kinds is not bool:
+        asked = kinds if isinstance(kinds, tuple) else (kinds,)
+        if isinstance(held, bool) and bool not in asked:
             return False
         if not isinstance(held, kinds):
             return False

@@ -4,10 +4,11 @@ A state of a FILE is its content at one moment. ``checked`` takes that content, 
 is about exactly those bytes, whatever happens to the FILE on disk in the meantime. Nothing is
 written anywhere.
 
-The events: ``answer`` as soon as the answer is proved, then ``report`` with the report in words
-and as JSON, and with the TRIP as the page draws it. A FILE that does not follow the format has
-no report, and gets ``refused`` with the problems. A report that cannot be written gets
-``unwritable``, after its answer.
+The events: ``read`` as soon as the FILE is read, with the TRIP as the page draws it from the
+FILE alone. Then ``answer`` as soon as the answer is proved, then ``report`` with the report in
+words and as JSON, and with the TRIP as the page draws it with that report. A FILE that does not
+follow the format has no report, and gets ``refused`` with the problems. A report that cannot be
+written gets ``unwritable``, after its answer.
 
 ``python -m agloe.view.check`` reads the content from its input and prints each event as one
 line of JSON. The view runs that in a process of its own, because a check can only be stopped
@@ -29,7 +30,7 @@ type Event = dict[str, object]
 
 
 def checked(content: bytes) -> Iterator[Event]:
-    """The events for a FILE with this content: ``refused``, or ``answer`` and what follows it."""
+    """The events for a FILE with this content: ``refused``, or ``read`` and what follows it."""
     try:
         # The text is read as ``agloe check`` reads it from disk, with every kind of line ending
         # taken for one, so that both name the same line of a FILE that is no JSON.
@@ -40,6 +41,8 @@ def checked(content: bytes) -> Iterator[Event]:
     except FileError as refused:
         yield {"kind": "refused", "problems": list(refused.problems)}
         return
+    # A page can draw the FILE while the COMPILER works: what the FILE holds needs no report.
+    yield {"kind": "read", "trip": _to_draw(file, None)}
     started = time.perf_counter()
     for found in compiler.reports(file):
         seconds = round(time.perf_counter() - started, 3)
@@ -60,11 +63,12 @@ def checked(content: bytes) -> Iterator[Event]:
         yield {**event, "trip": _to_draw(file, found)}
 
 
-def _to_draw(file: File, found: Report) -> object:
+def _to_draw(file: File, found: Report | None) -> object:
     """The TRIP as the page draws it, or None where there is none to send.
 
-    The report is whole without it. So a fault in what makes the drawing costs the reader the
-    calendar, and never the report.
+    ``found`` is the report on it, or None before there is one. The report is whole without
+    the TRIP. So a fault in what makes the drawing costs the reader the calendar, and never
+    the report.
     """
     try:
         sent = trip.shown(file, found)

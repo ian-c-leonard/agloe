@@ -574,6 +574,8 @@ function noCalendar(words) {
   drawStrip(null);
   part("calendar").hidden = part("calendar-key").hidden = part("calendar-untimed").hidden = true;
   part("calendar-says").textContent = words;
+  // Nothing in this part is marked now, whatever an earlier calendar held.
+  noted("calendar-part", null, false, false);
 }
 
 /** The report in words on the page: line by line where its lines are tied, and whole where not. */
@@ -653,10 +655,13 @@ function reveal(from) {
   revealedFor = drawing;
   const report = part("report");
   if (!entered || from === null || report.contains(from) || report.scrollHeight <= report.clientHeight) return;
-  const box = report.getBoundingClientRect();
+  // What the reader sees of the report: the part of it that is in the window. A window too
+  // short for the panes shows the upper part only.
+  const pane = report.getBoundingClientRect();
+  const box = { top: Math.max(pane.top, 0), bottom: Math.min(pane.bottom, innerHeight) };
   const lines = [...report.querySelectorAll(".row.lit")].map((line) => line.getBoundingClientRect());
-  if (!lines.length || lines.some((at) => at.top >= box.top && at.bottom <= box.bottom)) return;
-  // The middle of the first line goes to the middle of the report.
+  if (!lines.length || box.bottom <= box.top || lines.some((at) => at.top >= box.top && at.bottom <= box.bottom)) return;
+  // The middle of the first line goes to the middle of what the reader sees of the report.
   report.scrollTop += (lines[0].top + lines[0].bottom) / 2 - (box.top + box.bottom) / 2;
 }
 
@@ -665,8 +670,116 @@ function lightAgain() {
   requestAnimationFrame(() => light([...document.querySelectorAll(":hover")].pop() ?? null));
 }
 
+/**
+ * What the row of links says of one part of the page: how many things the part holds, where
+ * that is a number worth saying, and whether something in it has the red edge or the yellow
+ * edge. The part is drawn, and this is noted on it.
+ */
+function noted(id, count, clash, asked) {
+  Object.assign(part(id).dataset, { count: count === null ? "" : String(count), clash: clash ? "yes" : "", asked: asked ? "yes" : "" });
+}
+
+/**
+ * The row of links to the parts that the page shows now, in the order of the page: the
+ * calendar, each part that shows what the FILE holds, and the report. A link has the heading
+ * of its part, how many things the part holds, and the red or the yellow edge where something
+ * in the part has it. So a reader of a long page sees where the report names something, and
+ * gets there with one click or from the keyboard. A page with one part has no such row.
+ */
+function drawContents() {
+  const parts = [...document.querySelectorAll("#drawings > section, #report-part")].filter((each) => !each.hidden);
+  const row = part("contents");
+  row.hidden = parts.length < 2;
+  // A link stays where it is while its part is on the page, so the keyboard keeps its place
+  // on it when the page says more. The parts and the links are both in the order of the page.
+  const have = new Map([...row.children].map((link) => [link.getAttribute("href"), link]));
+  let last = null;
+  for (const each of parts) {
+    const href = `#${each.id}`;
+    let link = have.get(href);
+    if (link === undefined) {
+      link = Object.assign(made("a", "to"), { href });
+      link.append(made("span", "", ""), made("span", "count", ""));
+      row.insertBefore(link, last === null ? row.firstChild : last.nextSibling);
+    }
+    have.delete(href);
+    last = link;
+    const clash = each.dataset.clash === "yes";
+    const asked = each.dataset.asked === "yes";
+    // A part that is pale shows what is not of the FILE as it is now, and so does its link.
+    const old = each.classList.contains("old");
+    link.className = `to${clash ? " clash" : ""}${asked ? " asked" : ""}${old ? " old" : ""}`;
+    link.firstChild.textContent = each.querySelector("h2").textContent;
+    link.lastChild.textContent = each.dataset.count ?? "";
+    // The page knows of a change to the FILE only where the view told it of one.
+    const why = row.dataset.lost === "yes" ? "What this part shows is the last that the view sent." : "What this part shows is on the FILE as it was before.";
+    link.title = [
+      ...(clash ? ["The report names something here among what rules out every plan."] : []),
+      ...(asked ? ["The report names something here that the reader should look at: a yellow edge marks it."] : []),
+      ...(old ? [why] : []),
+    ].join("\n");
+  }
+  // A link whose part is gone hands the keyboard to the link that now stands in its place.
+  for (const gone of have.values()) {
+    const held = gone === document.activeElement;
+    let beside = gone.nextElementSibling;
+    while (beside !== null && have.get(beside.getAttribute("href")) === beside) beside = beside.nextElementSibling;
+    gone.remove();
+    if (held) (beside ?? row.lastElementChild)?.focus({ preventScroll: true });
+  }
+  // A page that is opened at one of its parts goes to that part when the part is drawn. It
+  // goes there again each time it draws more, since what is drawn above moves the part. That
+  // ends with the report, once every file of the page has come, or as soon as the reader
+  // moves the page themselves.
+  if (toPart !== null) {
+    const target = parts.find((each) => `#${each.id}` === toPart);
+    if (target !== undefined) {
+      if (coming === 0 && !part("report-part").hidden) toPart = null;
+      requestAnimationFrame(() => target.scrollIntoView());
+    }
+  }
+}
+
+// The part that the address of the page names, until the page has gone to it for good.
+let toPart = location.hash.length > 1 ? location.hash : null;
+for (const kind of ["wheel", "touchmove", "keydown", "mousedown"]) {
+  addEventListener(
+    kind,
+    () => {
+      toPart = null;
+    },
+    { once: true, passive: true },
+  );
+}
+// How many files of the page are still on their way.
+let coming = 0;
+/** One more file of the page is on its way. This says so, and gives what to do once it has come or failed. */
+function awaited(does) {
+  coming += 1;
+  return (given) => {
+    coming -= 1;
+    return does(given);
+  };
+}
+
+// A part comes to rest under the row of links, however many lines the row takes.
+if (typeof ResizeObserver === "function") {
+  new ResizeObserver(() => document.documentElement.style.setProperty("--row-of-links", `${part("contents").offsetHeight}px`)).observe(part("contents"));
+}
+
+/** What the page shows now, with the row of links to its parts. */
 function show() {
+  try {
+    showParts();
+  } finally {
+    drawContents();
+  }
+}
+
+function showParts() {
   const said = says(state);
+  // The row of links says why a part is pale: the page has lost the view, or the FILE changed.
+  part("contents").dataset.lost = said.mark === "lost" ? "yes" : "";
   document.title = said.name ? `${said.name}: Agloe` : "Agloe";
   part("name").textContent = said.name || "";
   part("answer").className = `answer ${said.mark}`;
@@ -676,7 +789,10 @@ function show() {
   part("problems").hidden = !said.problems;
   // The lines of the report, each tied to the step or the record that it is about, once the
   // page can tie them. Until then, and where it cannot, the report is on the page as it is.
-  const tied = tie && said.report !== null ? tie.lines(said.report, said.calendar.report, said.calendar.trip) : null;
+  // Where the page draws the FILE ahead of any report on it, a report that is still on the
+  // page is on the FILE as it was: its lines are tied to nothing that the page draws.
+  const tied = tie && said.report !== null && !said.ahead ? tie.lines(said.report, said.calendar.report, said.calendar.trip) : null;
+  const drawnOld = said.past;
   const from = [said.report, said.calendar?.report, said.calendar?.trip, tie];
   if (from.some((each, n) => each !== written[n])) {
     written = from;
@@ -688,12 +804,14 @@ function show() {
   // Each part that shows what the FILE holds is put on the page once for each TRIP, like the
   // calendar. It needs no calendar, and a fault in it leaves the rest of the page as it is.
   for (const each of held) {
-    part(each.id).classList.toggle("old", said.old);
+    part(each.id).classList.toggle("old", drawnOld);
     if (said.calendar === null || each.words === null) part(each.id).hidden = true;
     else if (said.calendar.trip !== each.of) {
       each.of = said.calendar.trip;
       try {
-        each.draw(each.words(each.of, said.calendar.report, tied ? tie.statedIn(tied) : null));
+        const shown = each.words(each.of, said.calendar.report, tied ? tie.statedIn(tied) : null);
+        each.draw(shown);
+        noted(each.id, Array.isArray(shown[each.name]) ? shown[each.name].length : null, shown.clash, shown.asked);
         lightAgain();
       } catch (problem) {
         part(each.id).hidden = true;
@@ -706,7 +824,7 @@ function show() {
   // The answer and the report are on the page before the calendar is drawn. The calendar is
   // drawn once for each TRIP, so it stays as the reader left it while the page says more.
   part("calendar-part").hidden = said.calendar === null || lay === null;
-  part("calendar-part").classList.toggle("old", said.old);
+  part("calendar-part").classList.toggle("old", drawnOld);
   if (said.calendar === null || lay === null) return;
   if (lay === false) return noCalendar("The page could not load its calendar.");
   if (said.calendar.trip === drawn) return;
@@ -715,6 +833,7 @@ function show() {
   try {
     laid = lay(drawn, said.calendar.report, tied ? tie.warningsOf(tied) : [], tied ? tie.statedIn(tied) : []);
     draw(laid);
+    noted("calendar-part", null, laid.clash, laid.warned || laid.asked);
     lightAgain();
   } catch (problem) {
     // Half a calendar is no calendar. The report below is whole.
@@ -751,34 +870,34 @@ part("strip").addEventListener("click", (event) => {
 });
 show();
 import("./calendar.js").then(
-  (loaded) => {
+  awaited((loaded) => {
     lay = loaded.calendar;
     show();
-  },
-  () => {
+  }),
+  awaited(() => {
     // The page goes on without a calendar, and says so where the calendar would be.
     lay = false;
     show();
-  },
+  }),
 );
 import("./lines.js").then(
-  (loaded) => {
+  awaited((loaded) => {
     // The report is written again with its lines tied, and the calendar and the parts of the
     // FILE are drawn with what the report says of them.
     tie = loaded;
     drawn = undefined;
     for (const each of held) each.of = undefined;
     show();
-  },
-  () => {}, // The report stays on the page as it is, and nothing lights up.
+  }),
+  awaited(() => show()), // The report stays on the page as it is, and nothing lights up.
 );
 for (const each of held) {
   each.load().then(
-    (loaded) => {
+    awaited((loaded) => {
       each.words = loaded[each.name];
       show();
-    },
-    () => {}, // The page goes on without this part.
+    }),
+    awaited(() => show()), // The page goes on without this part.
   );
 }
 // The strip is laid out again when the page has more room for it, or less.
@@ -790,11 +909,11 @@ if (typeof ResizeObserver === "function") {
   }).observe(part("calendar-part"));
 }
 import("./strip.js").then(
-  (loaded) => {
+  awaited((loaded) => {
     // The calendar is drawn again, with the strip above it.
     turn = loaded.strip;
     drawn = undefined;
     show();
-  },
-  () => {}, // The calendar stays on the page as it is, with no strip above it.
+  }),
+  awaited(() => show()), // The calendar stays on the page as it is, with no strip above it.
 );

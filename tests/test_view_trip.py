@@ -892,6 +892,39 @@ def test_names_are_sent_as_the_report_shows_them() -> None:
         assert each["name"] in words, each["name"]
 
 
+def test_a_file_with_no_report_is_sent_as_the_file_alone_gives_it() -> None:
+    """Before the COMPILER has reported, a page can draw what the FILE holds."""
+    no_plan = Report(Answer.INFEASIBLE)
+    for name in ("works", "works-but-risky", "cannot-work", "depends-on-the-cab"):
+        file = read(STORY / f"{name}.json")
+        found = compiler.check(file)
+        first, with_it = shown(file), shown(file, found)
+        assert first is not None and with_it is not None
+        # It says that it has no report, and it is a TRIP that a page can draw.
+        assert first["itinerary"] is None, name
+        assert holds(first), name
+        # Its steps are the OPTIONs that a LOCK names, as for a report that shows no ITINERARY.
+        assert first == {**cast("Trip", shown(file, no_plan)), "itinerary": None}, name
+        # What the FILE holds is the same with the report and without it.
+        for part in (
+            "zone",
+            "persons",
+            "places",
+            "starts_from",
+            "wants",
+            "options",
+            "ways",
+            "complete_travel",
+            "rights",
+            "budgets",
+            "capabilities",
+            "objects",
+        ):
+            assert first[part] == with_it[part], (name, part)
+        if found.answer is not Answer.FEASIBLE:
+            assert first == {**with_it, "itinerary": None}, name
+
+
 def test_names_that_look_the_same_on_a_page_come_with_their_ids() -> None:
     """Two PERSONs are called Joséphine, spelled with two different sets of characters.
 
@@ -1789,6 +1822,8 @@ def test_a_trip_with_a_time_that_cannot_be_written_cannot_be_drawn() -> None:
     )
     assert shown(file, Report(Answer.INFEASIBLE)) is None
     assert shown(file, Report(Answer.UNDETERMINED)) is None
+    # So it is before the COMPILER has reported.
+    assert shown(file) is None
     begins = instant(last)
     step = Step("fireworks", "pier", "pier", ("alex",), begins, begins + 1)
     assert shown(file, Report(Answer.FEASIBLE, itinerary=(step,))) is None
@@ -2559,6 +2594,7 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "a latest end with no end": _set("steps", 1, "end", to=None),
     "a step of an itinerary with no time": _no_time,
     "a way and a person whom no lock names, with no itinerary": _set("itinerary", to=False),
+    "a way and a person whom no lock names, with no report": _set("itinerary", to=None),
     "parts that are no list": _set("steps", 0, "parts", to={}),
     "a part that is no record": _set("steps", 0, "parts", 0, to=[0, 79200, 80400]),
     "a part with no day": _drop("steps", 0, "parts", 0, "day"),

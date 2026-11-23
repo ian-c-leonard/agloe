@@ -13,8 +13,10 @@ loads its calendar, the ties of its lines and its strip beside the answer, and d
 each arrives. So a test also waits for what it expects to be lit, and never reads it at once.
 """
 
+import contextlib
 import json
 import os
+import socket
 import sys
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -25,6 +27,8 @@ import pytest
 from playwright.sync_api import Browser, Page, Route, sync_playwright
 from playwright.sync_api import Error as BrowserError
 
+from agloe.view import View
+from agloe.view.check import checked
 from tests.stories import (
     EXAMPLES,
     budget,
@@ -37,7 +41,7 @@ from tests.stories import (
     takes,
     way_between,
 )
-from tests.test_view import serving
+from tests.test_view import put, serving, stand_in
 
 CHICAGO = "[America/Chicago]"
 # The page shows the report on the FILE, and has said what its calendar holds.
@@ -198,15 +202,23 @@ def opened(
     without: tuple[str, ...] = (),
     held: tuple[str, list[Route]] | None = None,
     faulty: tuple[str, str, list[str]] | None = None,
+    python: str = sys.executable,
+    once: str = ANSWERED,
+    views: list[View] | None = None,
 ) -> Generator[Page]:
     """The page of the view of one FILE, once it shows the report on it.
 
     ``without`` names files of the page that the browser cannot load. ``held`` names one that
     the browser gets only when the test lets it: the test finds its request in the list.
     ``faulty`` names one that the browser gets with other code in it, and the list that takes
-    the faults of the page, which are then no failure of the test.
+    the faults of the page, which are then no failure of the test. ``python`` is the program
+    that checks the FILE, where a test stands another one in, and ``once`` says what the page
+    shows when such a test wants it. ``views`` takes the view itself, for a test that cuts the
+    page off from it.
     """
-    with serving(path) as view:
+    with serving(path, python=python) as view:
+        if views is not None:
+            views.append(view)
         context = chromium.new_context(viewport={"width": wide, "height": tall})
         try:
             page = context.new_page()
@@ -228,11 +240,20 @@ def opened(
                 requests = held[1]
                 page.route(f"**/{held[0]}", lambda route: requests.append(route))
             page.goto(view.address)
-            page.wait_for_function(ANSWERED, timeout=60_000)
+            page.wait_for_function(once, timeout=60_000)
             yield page
             assert faulty is not None or problems == []
         finally:
             context.close()
+
+
+def cut_off(view: View) -> None:
+    """End every connection that a page has to the view, as a network that fails does."""
+    with view.changed:
+        pages = list(view.pages)
+    for page in pages:
+        with contextlib.suppress(OSError):
+            page.shutdown(socket.SHUT_RDWR)
 
 
 def lit(page: Page, **expected: list[str]) -> dict[str, list[str]]:
@@ -265,6 +286,321 @@ def starts(person: str, place: str) -> Document:
 def ids_of(rows: list[str]) -> list[str]:
     """The ids that these lines of a report start with."""
     return [row.strip().split(":")[0] for row in rows]
+
+
+def test_the_page_draws_the_file_before_the_report_comes(chromium: Browser, tmp_path: Path) -> None:
+    """A report can take minutes. What the FILE holds is on the page once the view has read it."""
+    path = tmp_path / "trip.json"
+    path.write_bytes((EXAMPLES / "ending-in-denver" / "works.json").read_bytes())
+    first, answer, report = (json.dumps(event) for event in checked(path.read_bytes()))
+    # In the place of the check: it says what it read and the answer at once, and gives the
+    # report when the test lets it.
+    (tmp_path / "python.first").write_text(f"{first}\n{answer}\n")
+    (tmp_path / "python.report").write_text(f"{report}\n")
+    go = tmp_path / "python.go"
+    waits = 'cat "$0.first"\nwhile [ ! -e "$0.go" ]; do sleep 0.05; done\ncat "$0.report"'
+    # The page shows the answer, and has said what its calendar holds.
+    answered = """() => {
+      const said = (id) => document.getElementById(id).textContent;
+      return said("line").startsWith("FEASIBLE") && said("calendar-says") !== "";
+    }"""
+    # Nothing on the page is marked as old, and the report is on its way.
+    waiting_again = """() => {
+      const line = document.getElementById("line").textContent;
+      return document.querySelectorAll(".old").length === 0 && line.endsWith("on its way.");
+    }"""
+    views: list[View] = []
+    held = stand_in(tmp_path, waits)
+    with opened(chromium, path, python=held, once=answered, views=views) as page:
+        # The answer is on the page, and the report is not.
+        assert (page.text_content("#line") or "").endswith("The report is on its way.")
+        assert page.locator("#report-part").is_hidden()
+        # The page draws the FILE all the same.
+        page.locator("#persons .item").first.wait_for()
+        page.locator("#options .item").first.wait_for()
+        assert page.locator("#persons .item-name").all_text_contents() == ["Alex", "Sam"]
+        assert page.locator("#places .card-name").all_text_contents() == [
+            "the hotel",
+            "the Art Institute",
+            "O'Hare",
+            "Denver",
+        ]
+        assert page.locator("#options .item").count() == 3
+        assert page.locator("#wants .card").count() == 1
+        assert page.locator("#ways .item").count() == 1
+        # The calendar holds what a LOCK names, and says that there is no report yet. Nothing
+        # on the page speaks of a plan, and nothing is marked.
+        page.locator("#calendar .mark").first.wait_for()
+        assert (page.text_content("#calendar-says") or "").startswith(
+            "The page has no report on this FILE yet."
+        )
+        assert page.locator("#calendar .mark").count() == 1
+        assert "In the plan" not in (page.text_content("#drawings") or "")
+        marked = "#drawings :is(.clash, .asked, .warned):not(.key-box)"
+        assert page.locator(marked).count() == 0
+        assert page.locator(".old").count() == 0
+        # Pointing ties the drawings of one step, with no line of a report to tie them to.
+        page.locator("#options .item", has_text="Museum visit").hover()
+        found = lit(page, options=["Museum visit"], marks=["Museum visit"])
+        assert found["rows"] == []
+        # The FILE is taken away, and the page has no report to fall back on. What it draws
+        # stays, marked as on the FILE as it was, and the page says so.
+        content = path.read_bytes()
+        path.unlink()
+        page.locator("#calendar-part.old").wait_for()
+        assert (page.text_content("#line") or "").startswith("The FILE cannot be read")
+        assert page.locator("#persons-part.old, #places-part.old, #options-part.old").count() == 3
+        assert page.locator("#persons .item").count() == 2
+        assert page.locator("#calendar .mark").count() == 1
+        assert (page.text_content("#note") or "").endswith(
+            "What the page shows below is on the FILE as it was before."
+        )
+        # The FILE is back: the page draws it as it is now.
+        put(path, content)
+        page.wait_for_function(waiting_again)
+        assert page.locator("#persons .item").count() == 2
+        # The page loses the view. What it draws is the last that it saw of the FILE, and it
+        # is marked so. It finds the view again: nothing is marked, and the answer stands.
+        cut_off(views[0])
+        page.locator("#calendar-part.old").wait_for()
+        assert page.text_content("#line") == "The view is not answering."
+        assert page.locator("#persons-part.old").count() == 1
+        # The page says what it said last, and that what it shows is the last it was sent.
+        note = page.text_content("#note") or ""
+        assert "When the page last heard the view, it said: FEASIBLE. The report is on" in note
+        assert note.endswith("The FILE may have changed since then.")
+        page.wait_for_function(waiting_again, timeout=20_000)
+        # The keyboard is on a link of the row. It stays there when the page says more.
+        page.locator("#contents .to", has_text="OPTIONs").focus()
+        # The report comes: the page draws the plan, and ties the report to it.
+        go.write_text("")
+        page.locator("#report .row").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#calendar .mark').length > 1")
+        assert (page.text_content("#calendar-says") or "").startswith(
+            "The ITINERARY of the report."
+        )
+        assert "In the plan: Alex and Sam take part." in (page.text_content("#options") or "")
+        assert page.locator(".old").count() == 0
+        assert page.evaluate("() => document.activeElement.getAttribute('href')") == "#options-part"
+        # The page loses the view and finds it again, with the report on the page. It marks
+        # what it shows while it hears nothing. Then all of it stands as it was: the page
+        # never says that a report which it shows is on its way.
+        line = page.text_content("#line")
+        cut_off(views[0])
+        page.locator("#report-part.old").wait_for()
+        assert page.locator("#calendar-part.old").count() == 1
+        # Each link of the row is pale where its part is, and says why. The page knows of no
+        # change to the FILE, so the link speaks of none.
+        links = page.locator("#contents .to")
+        assert page.locator("#contents .to.old").count() == links.count() > 5
+        assert links.first.get_attribute("title") == (
+            "What this part shows is the last that the view sent."
+        )
+        page.wait_for_function(
+            """(line) => document.querySelectorAll(".old").length === 0
+              && document.getElementById("line").textContent === line""",
+            arg=line,
+            timeout=20_000,
+        )
+        assert page.locator("#report .row").count() > 5
+        # The FILE changes. As soon as the view has read it, the page draws the FILE as it is
+        # now, with no report. The report in words is still on the FILE as it was: it is
+        # marked so, the page says which is which, and its lines are tied to nothing.
+        go.unlink()
+        changed = json.loads(path.read_text())
+        changed["persons"][0]["name"] = "Alexandra"
+        (tmp_path / "python.first").write_text(
+            "".join(
+                f"{json.dumps(event)}\n"
+                for event in list(checked(json.dumps(changed).encode()))[:2]
+            )
+        )
+        path.write_text(json.dumps(changed))
+        page.locator("#persons .item-name", has_text="Alexandra").wait_for()
+        # The link to the report is pale with it, and says that the FILE has changed.
+        assert page.locator("#contents .to.old").all_text_contents() == ["The COMPILER's report"]
+        assert page.locator("#contents .to.old").get_attribute("title") == (
+            "What this part shows is on the FILE as it was before."
+        )
+        assert (page.text_content("#note") or "").endswith(
+            "The report below is on the FILE as it was before."
+        )
+        assert page.locator("#report-part.old").count() == 1
+        assert page.locator("#drawings .old").count() == 0
+        assert page.locator("#report .row").count() == 0
+        assert "Alex and Sam" in (page.text_content("#report") or "")
+        assert "In the plan" not in (page.text_content("#drawings") or "")
+
+
+def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_path: Path) -> None:
+    """One link for each part that the page shows, marked where the report names something."""
+    # The heading of each part that the page shows, and the words of each link.
+    shown = """() => {
+      const parts = [...document.querySelectorAll("#drawings > section, #report-part")];
+      const links = [...document.querySelectorAll("#contents .to")];
+      const heading = (each) => each.querySelector("h2").textContent;
+      return {
+        parts: parts.filter((each) => !each.hidden).map(heading),
+        links: links.map((each) => each.firstChild.textContent),
+        counts: links.map((each) => each.querySelector(".count").textContent || null),
+      };
+    }"""
+    # For each link: whether it has an edge of this kind, and whether something in its part has.
+    edges = """(kind) => [...document.querySelectorAll("#contents .to")].map((link) => {
+      const part = document.querySelector(link.getAttribute("href"));
+      return [link.classList.contains(kind), part.querySelector(`.${kind}:not(.key-box)`) !== null];
+    })"""
+    story = EXAMPLES / "the-bags"
+    with opened(chromium, story / "nobody-collects-them.json", wide=1100, tall=800) as page:
+        page.locator("#objects .card").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 8")
+        found = page.evaluate(shown)
+        # In the order of the page, each with the heading of its part. This FILE has no WANT,
+        # no BUDGET of its own to show and no CAPABILITY, so the row has no link for them.
+        assert found["links"] == found["parts"]
+        assert found["links"] == [
+            "Calendar",
+            "PERSONs",
+            "PLACEs",
+            "OPTIONs",
+            "BOOKINGs and OFFERs",
+            "WAYs",
+            "OBJECTs",
+            "The COMPILER's report",
+        ]
+        # A part that holds things says how many.
+        assert found["counts"] == [None, "2", "4", "2", "2", "2", "1", None]
+        # A link has the red edge where something in its part has it, and only there.
+        red = page.evaluate(edges, "clash")
+        assert all(link is part for link, part in red)
+        assert [link for link, _ in red] == [True, False, True, True, False, False, True, False]
+        assert page.locator("#contents .to.asked").count() == 0
+        # A click brings the part into view under the row, and the row stays at the top.
+        page.locator("#contents .to", has_text="OPTIONs").click()
+        page.wait_for_function(
+            """() => {
+              const row = document.getElementById("contents").getBoundingClientRect();
+              const part = document.getElementById("options-part").getBoundingClientRect();
+              return scrollY > 0 && row.top === 0 && part.top >= row.bottom - 1 && part.top < 100;
+            }"""
+        )
+        # The last part is as far up as the page goes, and in view.
+        page.locator("#contents .to", has_text="OBJECTs").click()
+        page.wait_for_function(
+            """() => {
+              const row = document.getElementById("contents").getBoundingClientRect();
+              const part = document.getElementById("objects-part").getBoundingClientRect();
+              return row.top === 0 && part.top >= row.bottom - 1 && part.top < innerHeight / 2;
+            }"""
+        )
+        # The keyboard reaches each link.
+        page.locator("#contents .to").first.focus()
+        page.keyboard.press("Tab")
+        assert page.evaluate("() => document.activeElement.textContent") == "PERSONs2"
+    # In a narrower window the row takes two lines. The part still comes to rest under it.
+    under_the_row = """(id) => {
+      const row = document.getElementById("contents").getBoundingClientRect();
+      const part = document.getElementById(id).getBoundingClientRect();
+      return { row: [row.top, row.bottom], part: part.top, at: scrollY };
+    }"""
+    with opened(chromium, story / "they-collect-them.json", wide=700, tall=800) as page:
+        page.locator("#objects .card").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 8")
+        assert page.evaluate(under_the_row, "options-part")["row"][1] > 50
+        page.locator("#contents .to", has_text="OPTIONs").click()
+        page.wait_for_function("() => scrollY > 0")
+        page.wait_for_timeout(200)
+        found = page.evaluate(under_the_row, "options-part")
+        assert found["row"][0] == 0
+        assert found["row"][1] <= found["part"] < found["row"][1] + 30
+    # A link has the yellow edge where the report names something in what the FILE does not say.
+    with opened(chromium, EXAMPLES / "flight-home" / "depends-on-the-cab.json") as page:
+        page.locator("#options .item.asked").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to.asked').length > 0")
+        yellow = page.evaluate(edges, "asked")
+        assert all(link is part for link, part in yellow)
+        assert page.locator("#contents .to.asked").all_text_contents() == ["OPTIONs4"]
+        assert page.locator("#contents .to.clash").count() == 0
+    # On a wide window the row is above the two panes. A click moves the pane of the drawings,
+    # and the page stays where it is.
+    with opened(chromium, story / "they-collect-them.json", wide=1500, tall=700) as page:
+        page.locator("#objects .card").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 8")
+        page.locator("#contents .to", has_text="OBJECTs").click()
+        page.wait_for_function(
+            """() => {
+              const pane = document.getElementById("drawings");
+              const part = document.getElementById("objects-part").getBoundingClientRect();
+              const box = pane.getBoundingClientRect();
+              const inside = part.top >= box.top - 1 && part.top < box.bottom;
+              return scrollY === 0 && pane.scrollTop > 0 && inside;
+            }"""
+        )
+        assert page.locator("#contents .to.clash, #contents .to.asked").count() == 0
+    # A wide window that is too short for its panes scrolls as a whole. The row goes with
+    # it, and covers no part that a link leads to.
+    with opened(chromium, story / "they-collect-them.json", wide=1400, tall=420) as page:
+        page.locator("#objects .card").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 8")
+        page.locator("#contents .to", has_text="The COMPILER's report").click()
+        page.wait_for_function("() => document.querySelector('main').scrollTop > 0")
+        page.wait_for_timeout(200)
+        found = page.evaluate(under_the_row, "report-part")
+        assert 0 <= found["part"] < 420
+        assert found["row"][1] <= found["part"]
+    # A link that is opened in a tab of its own leads to its part too: the page goes to the
+    # part that its address names, once that part is drawn.
+    with serving(story / "they-collect-them.json") as view:
+        context = chromium.new_context(viewport={"width": 700, "height": 780})
+        try:
+            page = context.new_page()
+            page.goto(f"{view.address}#objects-part")
+            page.locator("#objects .card").first.wait_for()
+            page.wait_for_function(
+                """() => {
+                  const row = document.getElementById("contents").getBoundingClientRect();
+                  const part = document.getElementById("objects-part").getBoundingClientRect();
+                  return scrollY > 0 && part.top >= row.bottom - 1 && part.top < innerHeight / 2;
+                }"""
+            )
+            # Once the report is there, the page stays where the reader puts it.
+            page.locator("#report .row").first.wait_for()
+            page.evaluate("() => scrollTo(0, 0)")
+            page.wait_for_timeout(300)
+            assert page.evaluate("() => scrollY") == 0
+        finally:
+            context.close()
+    # The keyboard is on the link of a part, and the FILE changes so that the part goes. The
+    # keyboard is then on the link beside it.
+    path = tmp_path / "things.json"
+    content = json.loads((story / "they-collect-them.json").read_text())
+    path.write_text(json.dumps(content))
+    with opened(chromium, path) as page:
+        page.locator("#objects .card").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 8")
+        page.locator("#contents .to", has_text="OBJECTs").focus()
+        content["objects"] = []
+        content["facts"] = [fact for fact in content["facts"] if "bags" not in json.dumps(fact)]
+        put(path, json.dumps(content).encode())
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 7")
+        focused = page.evaluate("() => document.activeElement.getAttribute('href')")
+        assert focused == "#report-part"
+    # A calendar that the page could not load has its place on the page, and its link, with
+    # no edge: nothing in it is marked.
+    with opened(chromium, story / "nobody-collects-them.json", without=("calendar.js",)) as page:
+        page.locator("#objects .card.clash").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to.clash').length > 0")
+        assert page.locator("#contents .to").first.text_content() == "Calendar"
+        red = page.evaluate(edges, "clash")
+        assert all(link is part for link, part in red)
+        assert red[0] == [False, False]
+    # A FILE that the format refuses has nothing to draw, and so no row.
+    path = tmp_path / "trip.json"
+    path.write_text("{}")
+    refused = "() => document.getElementById('line').textContent.startsWith('This FILE does not')"
+    with opened(chromium, path, once=refused) as page:
+        assert page.locator("#contents").is_hidden()
+        assert page.locator("#contents .to").count() == 0
 
 
 def test_the_report_on_the_page_is_the_report_in_words(chromium: Browser) -> None:
@@ -1089,6 +1425,25 @@ def test_on_a_wide_window_the_report_stays_beside_the_drawings(chromium: Browser
         page.wait_for_function("() => document.querySelector('#calendar .stripe:hover') !== null")
         assert page.locator("#calendar .way-name.lit").count() == 1
         assert page.evaluate(PLACED)["at"] == placed["at"]
+    # A window too short for its panes shows the upper part of the report. A line that is
+    # lit under the window is brought into the part that the window shows.
+    with opened(chromium, path, wide=1400, tall=460) as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#persons .item").first.scroll_into_view_if_needed()
+        below = page.evaluate(
+            """() => {
+              const report = document.getElementById("report");
+              const row = report.querySelector(".row[data-record='alex-start']");
+              report.scrollTop += row.getBoundingClientRect().top - innerHeight - 1;
+              const at = row.getBoundingClientRect();
+              const box = report.getBoundingClientRect();
+              return at.top >= innerHeight && at.bottom <= box.bottom;
+            }"""
+        )
+        assert below, "the line is not under the window and inside its pane"
+        page.locator("#persons .item").first.hover()
+        lit(page, persons=["Alex"])
+        page.wait_for_function(f"() => ({PLACED})().shown === 1")
     # A shallow window keeps panes that a reader can use: the whole of it scrolls instead.
     with opened(chromium, path, wide=1400, tall=260) as page:
         page.locator("#report .row").first.wait_for()

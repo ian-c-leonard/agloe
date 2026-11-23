@@ -95,9 +95,12 @@ function saysOf(trip, timed) {
     return `The ITINERARY of the report.${more}`;
   }
   const empty = trip.days.length ? more : " So the calendar is empty.";
-  if (!trip.steps.length) return `The report shows no ITINERARY, and no LOCK names an OPTION.${empty}`;
-  if (!timed) return `The report shows no ITINERARY, and the FILE gives no time to the OPTIONs that a LOCK names.${empty}`;
-  return `The report shows no ITINERARY. The calendar holds only the OPTIONs that a LOCK names, at the times the FILE states.${more}`;
+  // A TRIP with no report yet says so, and has no ITINERARY to show either. The page speaks
+  // for itself: the COMPILER may have reported, and the page not have heard of it.
+  const why = trip.itinerary === null ? "The page has no report on this FILE yet" : "The report shows no ITINERARY";
+  if (!trip.steps.length) return `${why}, and no LOCK names an OPTION.${empty}`;
+  if (!timed) return `${why}, and the FILE gives no time to the OPTIONs that a LOCK names.${empty}`;
+  return `${why}. The calendar holds only the OPTIONs that a LOCK names, at the times the FILE states.${more}`;
 }
 
 /**
@@ -180,7 +183,7 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
   const asked = steps.some((step) => step.cases.length && (step.parts.length || step.when === null));
   const asks = !needed.length ? "" : asked ? " A yellow edge marks each step shown that the report names in what the FILE does not say." : " What the report says the FILE does not say is not about a step shown here.";
   const says = saysOf(trip, steps.length - untimed.length) + rulesOut(ruled.size, marked.size) + warns + asks;
-  if (!trip.days.length) return { ...none, says, zone: trip.zone, itinerary: trip.itinerary, asked, persons: trip.persons, untimed };
+  if (!trip.days.length) return { ...none, says, zone: trip.zone, itinerary: trip.itinerary, clash: marked.size > 0, asked, persons: trip.persons, untimed };
 
   // ---- the hours that every day shows: from the earliest start of a step on any day to the
   // latest end of a part of one. A step that runs past midnight counts to midnight on the day
