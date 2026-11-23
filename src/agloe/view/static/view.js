@@ -573,6 +573,8 @@ function noCalendar(words) {
   drawStrip(null);
   part("calendar").hidden = part("calendar-key").hidden = part("calendar-untimed").hidden = true;
   part("calendar-says").textContent = words;
+  // Nothing in this part is marked now, whatever an earlier calendar held.
+  noted("calendar-part", null, false, false);
 }
 
 /** The report in words on the page: line by line where its lines are tied, and whole where not. */

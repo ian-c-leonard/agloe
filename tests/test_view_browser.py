@@ -506,6 +506,15 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
             }"""
         )
         assert page.locator("#contents .to.clash, #contents .to.asked").count() == 0
+    # A calendar that the page could not load has its place on the page, and its link, with
+    # no edge: nothing in it is marked.
+    with opened(chromium, story / "nobody-collects-them.json", without=("calendar.js",)) as page:
+        page.locator("#objects .card.clash").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to.clash').length > 0")
+        assert page.locator("#contents .to").first.text_content() == "Calendar"
+        red = page.evaluate(edges, "clash")
+        assert all(link is part for link, part in red)
+        assert red[0] == [False, False]
     # A FILE that the format refuses has nothing to draw, and so no row.
     path = tmp_path / "trip.json"
     path.write_text("{}")
