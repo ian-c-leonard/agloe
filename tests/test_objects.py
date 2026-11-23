@@ -1595,7 +1595,7 @@ def test_a_set_says_one_thing_about_what_an_option_does_and_where_an_object_star
 
 def test_the_unknown_facts_about_objects_have_a_fixed_order() -> None:
     """For each OPTION: that it does not require the OBJECT, that it does not refuse it, then
-    the four ways that what it does with it can help. Where the OBJECT starts comes after the
+    the five ways that what it does with it can help. Where the OBJECT starts comes after the
     OPTIONs and the WAYs: with each PERSON, then at each PLACE. Another transfer comes last."""
     file = a_lunch()
     about = [(each.what, each.option, each.person, each.place) for each in unknowns(file)]
@@ -1605,6 +1605,7 @@ def test_the_unknown_facts_about_objects_have_a_fixed_order() -> None:
         ("does not refuse", "lunch", None, None),
         ("keeps", "lunch", None, None),
         ("does not keep", "lunch", None, None),
+        ("does not keep or carry", "lunch", None, None),
         ("hands over", "lunch", None, None),
         ("carries", "lunch", None, None),
         ("starts with", None, "alex", None),
@@ -6797,12 +6798,41 @@ def test_an_option_checks_what_it_requires_before_it_carries() -> None:
     assert broken(file, world, (sail("alex", carried=("bag",)),)) == [
         bag_not_at_hand("ferry", "alex")
     ]
-    # At the quay the ferry happens, with the bag carried or left.
+    # At the quay the ferry happens, and the bag goes along: see the next test.
     there = a_crossing(
         lies_at("bag", "quay"), carries("ferry", "bag"), requires_object("ferry", "bag")
     )
-    for plan in ((sail("alex"),), (sail("alex", carried=("bag",)),)):
-        assert broken(there, settled(there), plan) == []
+    assert broken(there, settled(there), (sail("alex", carried=("bag",)),)) == []
+
+
+def test_an_object_that_an_option_requires_and_carries_always_goes_along() -> None:
+    """The ferry requires the bag and carries it, as a drive requires its car. So the bag
+    goes where the ferry goes: a plan in which the ferry sails and the bag stays does not
+    work. A kiosk at the quay that requires the bag half an hour later misses it."""
+    file = a_crossing(
+        lies_at("bag", "quay"),
+        carries("ferry", "bag"),
+        requires_object("ferry", "bag"),
+        requires_object("kiosk", "bag"),
+    )
+    world = settled(file)
+    kiosk = step("kiosk", "quay", 9, "sam", minute=30)
+    assert broken(file, world, (sail("alex"), kiosk)) == [bag_not_at_hand("ferry", "alex")]
+    assert broken(file, world, (sail("alex", carried=("bag",)), kiosk)) == [
+        bag_not_at_hand("kiosk", "sam")
+    ]
+    assert (
+        whereabouts(file, world, (sail("alex", carried=("bag",)), kiosk))["bag"][1] == IN_THE_FERRY
+    )
+    # A ferry that does not require the bag leaves the choice: see the test of the choice.
+    # And the search has no plan in which the bag stays.
+    locked = replace(
+        file,
+        decisions=(answers.Lock("a", "ferry", ("alex",)), answers.Lock("b", "kiosk", ("sam",))),
+    )
+    assert first_shown(locked, world) is None
+    without = replace(locked, decisions=locked.decisions[:1])
+    assert carried_in(first_shown(without, world)) == [("ferry", ("bag",))]
 
 
 def test_nothing_takes_an_object_out_of_the_option_that_carries_it() -> None:
@@ -6881,11 +6911,12 @@ def test_a_carry_needs_an_object_at_hand_wherever_it_might_be() -> None:
     counter = step("counter", "quay", 8, "alex")
     plan = (counter, sail("alex", carried=("bag",)), step("hut", "island", 11, "sam"))
     assert broken(file, world, plan) == []
+    # Nobody says what the hut does with the bag that it requires: it might take it along.
     assert whereabouts(file, world, plan)["bag"] == (
         WITH_ALEX,
         WITH_ALEX | AT_THE_QUAY,
         IN_THE_FERRY,
-        ON_THE_ISLAND,
+        ON_THE_ISLAND | {Where(option="hut")},
     )
     from_the_island = (
         counter,
