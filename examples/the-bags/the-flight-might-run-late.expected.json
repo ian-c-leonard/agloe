@@ -1,0 +1,141 @@
+{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "bag-drop",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T16:55:00-05:00[America/Chicago]",
+      "end": "2027-05-15T17:00:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "flight",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T17:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T19:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "flight-tickets",
+        "sam": "flight-tickets"
+      },
+      "carries": [
+        "bags"
+      ]
+    },
+    {
+      "option": "collection",
+      "persons": [
+        "jo"
+      ],
+      "start": "2027-05-15T19:45:00-05:00[America/Chicago]",
+      "end": "2027-05-15T19:55:00-05:00[America/Chicago]"
+    }
+  ],
+  "relies_on": [
+    "alex-start",
+    "sam-start",
+    "bag-drop-time",
+    "bag-drop-length",
+    "bag-drop-arrival",
+    "bag-drop-is-walk-up",
+    "flight-time",
+    "flight-length",
+    "boarding",
+    "flight-needs-a-ticket",
+    "flight-tickets",
+    "jo-start",
+    "collection-time",
+    "collection-length",
+    "collection-arrival",
+    "collection-is-walk-up",
+    "where-the-bags-start",
+    "bag-drop-keeps-the-bags",
+    "cabin-refuses-the-bags",
+    "hold-carries-the-bags",
+    "collection-needs-the-bags",
+    "every-use-of-the-bags",
+    "trip-start",
+    "lock-flight",
+    "lock-collection"
+  ],
+  "robust": false,
+  "objects": [
+    {
+      "object": "bags",
+      "path": [
+        {
+          "where": [
+            {
+              "person": "alex"
+            }
+          ],
+          "since": null,
+          "how": null
+        },
+        {
+          "where": [
+            {
+              "place": "ohare"
+            }
+          ],
+          "since": "bag-drop",
+          "how": "kept"
+        },
+        {
+          "where": [
+            {
+              "option": "flight"
+            }
+          ],
+          "since": "flight",
+          "how": "carried"
+        },
+        {
+          "where": [
+            {
+              "place": "denver"
+            }
+          ],
+          "since": "flight",
+          "how": "arrived"
+        }
+      ],
+      "required_by": [
+        {
+          "option": "collection",
+          "stated": true,
+          "where": [
+            {
+              "place": "denver"
+            }
+          ]
+        }
+      ],
+      "refused_by": [
+        {
+          "option": "flight",
+          "stated": true,
+          "where": [
+            {
+              "place": "ohare"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "at_worst": [
+    {
+      "constraint": "Each OBJECT is at hand where it is required, handed over or carried",
+      "option": "collection",
+      "persons": [
+        "jo"
+      ],
+      "late": "PT30M",
+      "object": "bags"
+    }
+  ]
+}

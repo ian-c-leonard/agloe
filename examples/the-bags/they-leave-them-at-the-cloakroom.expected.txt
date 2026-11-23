@@ -37,7 +37,7 @@ The plan relies on these FACTs and DECISIONs:
   cloakroom-keeps-the-bags: Drop off at the cloakroom keeps the bags
   cloakroom-returns-the-bags: the bags can be handed over in Pick up at the cloakroom
   every-use-of-the-bags: of the OPTIONs in this FILE, only Flight home requires the bags, and only Museum visit refuses the bags
-  everything-that-moves-the-bags: the FILE states every OPTION that hands over or keeps the bags: Drop off at the cloakroom and Pick up at the cloakroom
+  everything-that-moves-the-bags: the FILE states every OPTION that hands over, keeps or carries the bags: Drop off at the cloakroom and Pick up at the cloakroom
   trip-start: the TRIP starts at 12:30 pm on Saturday 15 May 2027
   lock-visit: Alex and Sam take part in Museum visit
   lock-flight: Alex and Sam take part in Flight home

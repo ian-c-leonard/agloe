@@ -1,0 +1,48 @@
+FEASIBLE: this trip works.
+
+Saturday 15 May 2027 (times in America/Chicago)
+  4:55 pm to 5:00 pm: Bag drop, Alex
+  5:00 pm to 7:30 pm: Flight home, Alex and Sam
+    This carries the bags.
+  7:30 pm to 7:40 pm: Baggage claim, Alex
+    Alex takes the bags here.
+  7:40 pm to 8:20 pm: the cab home, Alex
+  8:20 pm to 8:50 pm: Unpacking, Alex
+
+The plan relies on these FACTs and DECISIONs:
+  alex-start: Alex starts from O'Hare
+  sam-start: Sam starts from O'Hare
+  bag-drop-time: Bag drop can start at any time
+  bag-drop-length: Bag drop takes 5 min
+  bag-drop-arrival: nobody has to be at O'Hare before Bag drop starts
+  bag-drop-is-walk-up: nobody needs a right to take part in Bag drop
+  flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
+  flight-length: Flight home takes 2 h 30 min
+  boarding: people must be at O'Hare 45 min before Flight home starts
+  flight-needs-a-ticket: people need a right to take part in Flight home
+  flight-tickets: a BOOKING for Flight home covers Alex and Sam
+  claim-time: Baggage claim can start at any time
+  claim-length: Baggage claim takes 10 min
+  claim-arrival: nobody has to be at Denver before Baggage claim starts
+  claim-is-walk-up: nobody needs a right to take part in Baggage claim
+  unpacking-time: Unpacking can start at any time
+  unpacking-length: Unpacking takes 30 min
+  unpacking-arrival: nobody has to be at home before Unpacking starts
+  unpacking-is-free: nobody needs a right to take part in Unpacking
+  cab-home-length: the cab home takes 40 min
+  where-the-bags-start: Alex has the bags when the TRIP starts
+  bag-drop-keeps-the-bags: Bag drop keeps the bags
+  cabin-refuses-the-bags: Flight home refuses the bags
+  hold-carries-the-bags: Flight home can carry the bags
+  claim-returns-the-bags: the bags can be handed over in Baggage claim
+  unpacking-needs-the-bags: Unpacking requires the bags
+  every-use-of-the-bags: of the OPTIONs in this FILE, only Unpacking requires the bags, and only Flight home refuses the bags
+  everything-that-moves-the-bags: the FILE states every OPTION that hands over, keeps or carries the bags: Bag drop, Flight home and Baggage claim
+  trip-start: the TRIP starts at 3:30 pm on Saturday 15 May 2027
+  lock-flight: Alex and Sam take part in Flight home
+  lock-unpacking: Alex takes part in Unpacking
+
+Where each OBJECT is:
+  the bags: with Alex when the TRIP starts; at O'Hare from 4:55 pm (kept by Bag drop); in Flight home from 5:00 pm (carried); at Denver from 7:30 pm (where Flight home ends); with Alex from 7:30 pm (handed over in Baggage claim)
+    Flight home refuses the bags. Just before it starts: at O'Hare.
+    Unpacking requires the bags. Just before it starts: with Alex.

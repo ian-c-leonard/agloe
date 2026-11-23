@@ -707,8 +707,8 @@
           "properties": {
             "object": { "$ref": "#/$defs/id" },
             "does": {
-              "description": "`hands_over`: where the OBJECT is at hand, a PERSON who takes part can have it from the start of the OPTION. `keeps`: where a PERSON who takes part has the OBJECT, it lies at the PLACE where the OPTION starts from then on. `nothing`: the OPTION leaves the OBJECT alone.",
-              "enum": ["hands_over", "keeps", "nothing"]
+              "description": "`hands_over`: where the OBJECT is at hand, a PERSON who takes part can have it from the start of the OPTION. `keeps`: where a PERSON who takes part has the OBJECT, it lies at the PLACE where the OPTION starts from then on. `carries`: where the OBJECT is at hand, it can be carried in the OPTION. Then it is in the OPTION from its start, and lies at the PLACE where the OPTION ends from its end. `nothing`: the OPTION leaves the OBJECT alone.",
+              "enum": ["hands_over", "keeps", "carries", "nothing"]
             }
           }
         }
@@ -733,7 +733,7 @@
     },
     "complete_transfers": {
       "title": "CompleteTransfers",
-      "description": "A FACT: the FILE states every OPTION that hands the OBJECT over or keeps it. Each is in the FILE, with a FACT that says so. So an OPTION of the FILE with no FACT about that leaves the OBJECT alone, and nothing outside the FILE transfers it.",
+      "description": "A FACT: the FILE states every OPTION that hands the OBJECT over, keeps it or carries it. Each is in the FILE, with a FACT that says so. So an OPTION of the FILE with no FACT about that leaves the OBJECT alone, and nothing outside the FILE transfers it.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "complete"],

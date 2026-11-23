@@ -128,6 +128,7 @@ def as_json(file: File, report: Report) -> dict[str, object]:
                 "end": None if step.end is None else written(step.end, file.zone),
                 **({"rights": rights[step.option]} if step.option in rights else {}),
                 **({"hands_over": dict(step.handed)} if step.handed else {}),
+                **({"carries": list(step.carried)} if step.carried else {}),
             }
             for step in report.itinerary
         ]
@@ -382,10 +383,12 @@ def _to_buy(report: Report) -> dict[tuple[str, str, str | None], list[Cover]]:
 
 
 def _where_as_json(where: Where) -> dict[str, str | None]:
-    """Where an OBJECT is: the PERSON who has it, or the PLACE where it lies.
+    """Where an OBJECT is: the PERSON who has it, the PLACE where it lies, or the OPTION it is in.
 
     A PLACE of null is somewhere the FILE does not name.
     """
+    if where.option is not None:
+        return {"option": where.option}
     return {"person": where.person} if where.person is not None else {"place": where.place}
 
 
@@ -405,6 +408,8 @@ def _broken_as_json(file: File, report: Report, found: Broken) -> dict[str, obje
         out["start"] = written(step.start, file.zone)
     out["persons"] = list(found.persons)
     out["late"] = None if found.late is None else length_written(found.late)
+    if found.object is not None:
+        out["object"] = found.object
     return out
 
 
@@ -470,6 +475,7 @@ _ABOUT_AN_OBJECT = (
     "keeps",
     "does not keep",
     "hands over",
+    "carries",
     "starts with",
     "starts at",
     "another transfer",
@@ -712,6 +718,8 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
         for thing, person in step.handed:
             taker = _people(file, (person,))
             lines.append(f"    {taker} takes {_names(file.objects)[thing]} here.")
+        for thing in step.carried:
+            lines.append(f"    This carries {_names(file.objects)[thing]}.")
     if not report.itinerary:
         lines += ["", "Nobody has to do anything."]
     relied_on = [fact for fact in file.facts if fact.id in report.relies_on]
@@ -808,6 +816,7 @@ def _carried_in_words(
     """
     thing = _names(file.objects)[carried.object]
     starts = {step.option: step.start for step in itinerary if step.option is not None}
+    ends = {step.option: step.end for step in itinerary if step.option is not None}
     first_day = clock.day(itinerary[0].start)
     stays: list[str] = []
     for stay in carried.stays:
@@ -816,11 +825,17 @@ def _carried_in_words(
             stays.append(f"{where} when the TRIP starts")
             continue
         name = _name(file, stay.since)
+        over = ends[stay.since]
+        if stay.how == "arrived" and over is not None:
+            # It lies there from the end of the OPTION that carried it.
+            stays.append(f"{where} from {clock.time(over, first_day)} (where {name} ends)")
+            continue
         how = {
             "handed over": f"handed over in {name}",
             "kept": f"kept by {name}",
             "kept if held": f"kept by {name} if anybody there has {thing}",
             "might be kept": f"the FILE does not say what {name} does with {thing}",
+            "carried": "carried",
         }[stay.how or ""]
         stays.append(f"{where} from {clock.time(starts[stay.since], first_day)} ({how})")
     lines = [f"  {thing}: {'; '.join(stays)}"]
@@ -850,6 +865,8 @@ def _where(file: File, where: Sequence[Where]) -> str:
             return f"with {people[each.person]}"
         if each.place is not None:
             return f"at {places[each.place]}"
+        if each.option is not None:
+            return f"in {_name(file, each.option, 'or')}"
         return "somewhere the FILE does not name"
 
     return _listed([one(each) for each in where], "or")
@@ -894,8 +911,11 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
 
     A line is known by its number, counting from zero. PERSONs who share a line and are in the
     same trouble are named together. Longer durations break only CONSTRAINTs about time, and
-    those are broken at one of the plan's steps. So a finding with no line is a fault in this
-    program, and it stops here.
+    the fourteenth where an OBJECT that was carried would arrive too late. Those are broken
+    at one of the plan's steps. So a finding with no line is a fault in this program, and it
+    stops here. An OBJECT that would not be at hand has one mark at its step, whatever needs
+    it there: the OPTION requires it, or it is handed over or carried there. The mark says
+    how long after the start of the step the OBJECT would arrive, where a finding knows.
     """
     lines = _lines(report.itinerary)
     line_of = {
@@ -905,8 +925,14 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
         step.option: number for number, (step, _) in enumerate(lines) if step.option is not None
     }
     together: dict[tuple[int, Constraint, int | None], list[str]] = {}
+    # At each line, each OBJECT that would not be at hand, with how late it would arrive.
+    not_at_hand: dict[int, dict[str, int | None]] = {}
     for found in report.at_worst:
         number = line_of[found.step] if found.step is not None else line_of_option[found.option]
+        if found.constraint is Constraint.AT_HAND and found.object is not None:
+            # Each finding about this OBJECT at this step has the same delay.
+            not_at_hand.setdefault(number, {})[found.object] = found.late
+            continue
         together.setdefault((number, found.constraint, found.late), []).extend(found.persons)
     marks: dict[int, list[str]] = {}
     for (option, offer, budget), covers in _to_buy(report).items():
@@ -934,6 +960,17 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
         else:
             mark = f'This would break the rule "{constraint.value}" for {who}.'
         marks.setdefault(number, []).append(mark)
+    things = _names(file.objects)
+    for number, missing in not_at_hand.items():
+        for thing in file.objects:
+            if thing.id not in missing:
+                continue
+            late = missing[thing.id]
+            if late is None:
+                mark = f"{things[thing.id]} would not be at hand when this starts."
+            else:
+                mark = f"{things[thing.id]} would arrive {_span(late)} after this starts."
+            marks.setdefault(number, []).append(mark)
     return marks
 
 
@@ -1094,6 +1131,7 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
             "keeps": f"{name} keeps {thing}",
             "does not keep": f"{name} does not keep {thing}",
             "hands over": f"{thing} can be handed over in {name}",
+            "carries": f"{name} can carry {thing}",
         }[unknown.what]
     if unknown.what == "price":
         buyers = tuple(cover.person for cover in needed.buys)
@@ -1225,6 +1263,7 @@ def _record(file: File, clock: Clock, record: str) -> str:
         return {
             "hands_over": f"{thing} can be handed over in {_name(file, found.option)}",
             "keeps": f"{_name(file, found.option)} keeps {thing}",
+            "carries": f"{_name(file, found.option)} can carry {thing}",
             "nothing": f"{_name(file, found.option)} leaves {thing} alone",
         }[found.does]
     if isinstance(found, CompleteRequiresObject):
@@ -1258,7 +1297,7 @@ def _record(file: File, clock: Clock, record: str) -> str:
         ]
         thing = _names(file.objects)[found.object]
         said = _listed(which) if which else "there is none"
-        return f"the FILE states every OPTION that hands over or keeps {thing}: {said}"
+        return f"the FILE states every OPTION that hands over, keeps or carries {thing}: {said}"
     name = _name(file, found.option)
     if isinstance(found, Lock):
         verb = "takes" if len(found.persons) == 1 else "take"

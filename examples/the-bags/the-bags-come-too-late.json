@@ -1,0 +1,53 @@
+{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" },
+    { "id": "jo", "name": "Jo" }
+  ],
+  "places": [
+    { "id": "ohare", "name": "O'Hare" },
+    { "id": "denver", "name": "Denver" }
+  ],
+  "objects": [
+    { "id": "bags", "name": "the bags" }
+  ],
+  "options": [
+    { "id": "bag-drop", "name": "Bag drop", "place": "ohare" },
+    { "id": "flight", "name": "Flight home", "from": "ohare", "to": "denver" },
+    { "id": "collection", "name": "Jo collects the bags", "place": "denver" }
+  ],
+  "ways": [],
+  "wants": [],
+  "facts": [
+    { "id": "alex-start", "person": "alex", "starts_from": "ohare" },
+    { "id": "sam-start", "person": "sam", "starts_from": "ohare" },
+    { "id": "bag-drop-time", "option": "bag-drop", "starts_any_time": true },
+    { "id": "bag-drop-length", "option": "bag-drop", "duration": "PT5M" },
+    { "id": "bag-drop-arrival", "option": "bag-drop", "arrive_before_start": "PT0S" },
+    { "id": "bag-drop-is-walk-up", "option": "bag-drop", "needs_right": false },
+    { "id": "flight-time", "option": "flight", "starts_at": "2027-05-15T17:00:00-05:00[America/Chicago]" },
+    { "id": "flight-length", "option": "flight", "duration": "PT2H30M" },
+    { "id": "boarding", "option": "flight", "arrive_before_start": "PT45M" },
+    { "id": "flight-needs-a-ticket", "option": "flight", "needs_right": true },
+    { "id": "flight-tickets", "booking": { "option": "flight", "covers": ["alex", "sam"] } },
+    { "id": "every-flight-ticket", "complete": { "rights_to": "flight" } },
+    { "id": "jo-start", "person": "jo", "starts_from": "denver" },
+    { "id": "collection-time", "option": "collection", "starts_at": "2027-05-15T19:00:00-05:00[America/Chicago]" },
+    { "id": "collection-length", "option": "collection", "duration": "PT10M" },
+    { "id": "collection-arrival", "option": "collection", "arrive_before_start": "PT0S" },
+    { "id": "collection-is-walk-up", "option": "collection", "needs_right": false },
+    { "id": "every-way", "complete": { "leaving": { "earliest": "2027-05-15T00:00:00-05:00[America/Chicago]", "latest": "2027-05-15T23:59:00-05:00[America/Chicago]" } } },
+    { "id": "where-the-bags-start", "object": "bags", "starts_with": "alex" },
+    { "id": "bag-drop-keeps-the-bags", "option": "bag-drop", "with_object": { "object": "bags", "does": "keeps" } },
+    { "id": "cabin-refuses-the-bags", "option": "flight", "refuses": { "object": "bags", "refused": true } },
+    { "id": "hold-carries-the-bags", "option": "flight", "with_object": { "object": "bags", "does": "carries" } },
+    { "id": "collection-needs-the-bags", "option": "collection", "requires": { "object": "bags", "needed": true } },
+    { "id": "every-use-of-the-bags", "complete": { "requires_object": "bags" } },
+    { "id": "everything-that-moves-the-bags", "complete": { "transfers": "bags" } }
+  ],
+  "decisions": [
+    { "id": "trip-start", "trip_starts_at": "2027-05-15T15:30:00-05:00[America/Chicago]" },
+    { "id": "lock-flight", "lock": "flight", "persons": ["alex", "sam"] },
+    { "id": "lock-collection", "lock": "collection", "persons": ["jo"] }
+  ]
+}

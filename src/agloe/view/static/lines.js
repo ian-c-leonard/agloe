@@ -13,7 +13,7 @@
 //
 // Nothing here judges a TRIP. It finds what the report already says, line by line.
 
-import { boughtIn, cappedIn, casesIn, listed, objectsIn, requirementsIn, takenIn, toBuyIn } from "./named.js";
+import { boughtIn, cappedIn, casesIn, listed, notAtHandIn, objectsIn, requirementsIn, takenIn, toBuyIn } from "./named.js";
 
 /** A line that shows one step of a plan: "  2:00 pm to 3:00 pm: Museum visit, Alex and Sam". */
 const STEP = /^ {2}\d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+, .+$/;
@@ -189,20 +189,33 @@ export function lines(text, report, trip) {
   }
   // Under a step of the plan, after what the report warns of there, a line says who takes
   // an OBJECT at that step: one line for each OBJECT that the report as JSON has somebody take
-  // at that OPTION, in the FILE's order of OBJECTs. Each is about the step and about the
-  // OBJECT. A line under a step is set in by four spaces, whatever the name it starts with.
+  // at that OPTION, in the FILE's order of OBJECTs. After those comes one line for each
+  // OBJECT that is carried in that OPTION, in the same order. Each is about the step and about
+  // the OBJECT. A line under a step is set in by four spaces, whatever the name it starts with.
   const planned = trip !== null && trip.itinerary;
   const stepOf = (option) => (planned ? trip.steps.findIndex((each) => each.option === option) : -1);
   const placeOf = new Map((trip === null ? [] : trip.objects).map((each, n) => [each.id, n]));
-  for (const { option, objects } of takenIn(report)) {
+  for (const { option, objects, carried } of takenIn(report)) {
     const at = found.findIndex((line) => line.step !== null && line.step === stepOf(option) && !line.warns && line.meets === null);
-    if (at < 0 || !objects.every((id) => placeOf.has(id))) continue;
-    const inOrder = [...objects].sort((one, other) => placeOf.get(one) - placeOf.get(other));
+    if (at < 0 || ![...objects, ...carried].every((id) => placeOf.has(id))) continue;
+    const byPlace = (ids) => [...ids].sort((one, other) => placeOf.get(one) - placeOf.get(other));
+    const inOrder = [...byPlace(objects), ...byPlace(carried)];
     let next = at + 1;
     while (next < found.length && found[next].warns) next += 1;
     const said = [];
     for (; next < found.length && found[next].text.startsWith("    ") && free(found[next]) && !found[next].about.length; next += 1) said.push(found[next]);
     if (said.length === inOrder.length) said.forEach((line, n) => (line.about = [String(found[at].step), `object:${inOrder[n]}`]));
+  }
+  // A warning that an OBJECT would not be at hand comes last among the warnings under its
+  // step: one line for each such OBJECT that the report as JSON names at that OPTION, in the
+  // FILE's order of OBJECTs. Each is about that OBJECT as well as about its step.
+  for (const { option, objects } of notAtHandIn(report)) {
+    const warned = found.filter((line) => line.warns && line.step !== null && line.step === stepOf(option));
+    if (!objects.every((id) => placeOf.has(id)) || warned.length < objects.length) continue;
+    const last = warned.slice(warned.length - objects.length);
+    if (!last.every((line) => !line.about.length)) continue;
+    const inOrder = [...objects].sort((one, other) => placeOf.get(one) - placeOf.get(other));
+    last.forEach((line, n) => (line.about = [`object:${inOrder[n]}`]));
   }
   // Where each OBJECT is in the plan: under their heading, up to the first line that is not
   // set in, one line for each OBJECT of the report as JSON, and after it one line for each

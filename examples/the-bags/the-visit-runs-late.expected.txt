@@ -10,7 +10,7 @@ These FACTs and DECISIONs rule out every plan by themselves. Take any one away a
   every-way: every way from one PLACE straight to another that leaves between 12:00 am on Saturday 15 May 2027 and 11:59 pm is listed
   where-the-bags-start: the TRIP starts with the bags at the hotel
   flight-needs-the-bags: Flight home requires the bags
-  everything-that-moves-the-bags: the FILE states every OPTION that hands over or keeps the bags: Collect the bags
+  everything-that-moves-the-bags: the FILE states every OPTION that hands over, keeps or carries the bags: Collect the bags
   trip-start: the TRIP starts at 1:00 pm on Saturday 15 May 2027
   lock-visit: Alex and Sam take part in Museum visit
   lock-flight: Alex and Sam take part in Flight home

@@ -63,7 +63,7 @@ Describes a set that a FACT states the FILE holds in full: a set of OPTIONs and 
 - Every right to a stated OPTION that anybody on the TRIP holds or can get. The BOOKINGs in the FILE secure those that are held. Nobody on the TRIP can get another, except by a place of an OFFER that the FACT names.
 - Every OPTION of the FILE that requires a stated CAPABILITY. Each one has a FACT that says so. An OPTION of the FILE with no such FACT does not require it.
 - Every OPTION of the FILE that requires or refuses a stated OBJECT. Each one has a FACT that says so. An OPTION of the FILE with no such FACT does neither.
-- Every OPTION that hands a stated OBJECT over or keeps it. Each one is in the FILE, with a FACT that says so. Nothing else transfers the OBJECT.
+- Every OPTION that hands a stated OBJECT over, keeps it or carries it. Each one is in the FILE, with a FACT that says so. Nothing else transfers the OBJECT.
 
 A COMPLETE set that is empty means "we looked, and there is nothing". A FACT that one set is COMPLETE says nothing about any other set. So a FACT about travel between two PLACEs says nothing about travel through a third PLACE as a whole: each leg of that travel is straight travel by itself, and only a FACT that covers the leg rules it out.
 
