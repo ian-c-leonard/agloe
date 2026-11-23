@@ -71,8 +71,8 @@ ONLY_LOCKS = (
 )
 # Before the COMPILER has reported on the FILE.
 NO_REPORT = (
-    "The COMPILER has not reported on this FILE yet. The calendar holds only the OPTIONs that a"
-    " LOCK names, at the times the FILE states."
+    "The page has no report on this FILE yet. The calendar holds only the OPTIONs that a LOCK"
+    " names, at the times the FILE states."
 )
 
 type Trip = dict[str, Any]
@@ -1209,10 +1209,10 @@ def test_a_calendar_with_nothing_on_it_says_why() -> None:
     # Before the COMPILER has reported, each says that instead.
     early = calendars([cast("Trip", shown(nothing_locked)), cast("Trip", shown(no_time))])
     assert [each["says"] for each in early] == [
-        "The COMPILER has not reported on this FILE yet, and no LOCK names an OPTION. So the"
-        " calendar is empty.",
-        "The COMPILER has not reported on this FILE yet, and the FILE gives no time to the"
-        " OPTIONs that a LOCK names. So the calendar is empty.",
+        "The page has no report on this FILE yet, and no LOCK names an OPTION. So the calendar"
+        " is empty.",
+        "The page has no report on this FILE yet, and the FILE gives no time to the OPTIONs that"
+        " a LOCK names. So the calendar is empty.",
     ]
     assert untimed["untimed"] == [
         {

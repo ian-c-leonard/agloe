@@ -332,7 +332,7 @@ def test_the_page_draws_the_file_before_the_report_comes(chromium: Browser, tmp_
         # on the page speaks of a plan, and nothing is marked.
         page.locator("#calendar .mark").first.wait_for()
         assert (page.text_content("#calendar-says") or "").startswith(
-            "The COMPILER has not reported on this FILE yet."
+            "The page has no report on this FILE yet."
         )
         assert page.locator("#calendar .mark").count() == 1
         assert "In the plan" not in (page.text_content("#drawings") or "")
@@ -365,6 +365,11 @@ def test_the_page_draws_the_file_before_the_report_comes(chromium: Browser, tmp_
         page.locator("#calendar-part.old").wait_for()
         assert page.text_content("#line") == "The view is not answering."
         assert page.locator("#persons-part.old").count() == 1
+        # The page says that this is the last it was sent, and which answer was proved.
+        assert (page.text_content("#note") or "").endswith(
+            "The FILE may have changed since then."
+            " The last answer that the view sent on this FILE was FEASIBLE."
+        )
         page.wait_for_function(waiting_again, timeout=20_000)
         # The report comes: the page draws the plan, and ties the report to it.
         go.write_text("")

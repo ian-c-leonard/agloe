@@ -19,6 +19,10 @@
 
 const OLD = "What the page shows below is on the FILE as it was before.";
 const OLD_REPORT = "The report below is on the FILE as it was before.";
+// What the page says while it no longer hears the view. It knows of no change to the FILE,
+// so it says of none.
+const LAST = "What the page shows below is the last that the view sent. The FILE may have changed since then.";
+const EARLIER = "The report is on an earlier state of the FILE than what the page draws.";
 const seconds = (length) => `${length.toFixed(2)} s`;
 const none = { checking: false, answer: null, answered: null, problems: null, unreadable: null, unwritable: false, stopped: false, lost: false };
 
@@ -98,9 +102,17 @@ export function says(state) {
   const calendar = ahead ? { trip: state.read.trip, report: null } : state.report ? { trip: state.report.trip, report: state.report.json } : null;
   const past = calendar !== null && (ahead ? state.lost || state.read.revision !== state.revision : state.old);
   const shown = { name: state.name, report: state.report ? state.report.text : null, calendar, ahead, old: state.old, past, problems: state.problems };
-  const with_old = (note) => `${note} ${past ? OLD : state.old ? OLD_REPORT : ""}`.trim();
+  // A report on the page and a drawing of a later state of the FILE: the page says which is which.
+  const earlier = state.report !== null && ahead ? [EARLIER] : [];
+  const with_old = (note) => [note, ...(past ? [OLD, ...earlier] : state.old ? [OLD_REPORT] : [])].join(" ").trim();
   if (state.lost) {
-    return { ...shown, mark: "lost", line: "The view is not answering.", note: with_old("Start agloe view again, and open the address that it prints.") };
+    // The problems of a FILE that the format refused are above the note, so the line says
+    // whose they are. An answer that was proved, and that no report on the page shows, is
+    // still said.
+    const line = state.problems ? "The view is not answering. The problems below are from the last check that it sent." : "The view is not answering.";
+    const last = calendar !== null || state.report !== null ? [LAST, ...earlier] : [];
+    const answered = state.answer !== null && !reportedOn(state) ? [`The last answer that the view sent on this FILE was ${state.answer}.`] : [];
+    return { ...shown, mark: "lost", line, note: ["Start agloe view again, and open the address that it prints.", ...last, ...answered].join(" ") };
   }
   if (state.problems) {
     return { ...shown, mark: "refused", line: "This FILE does not follow the format, so it has no report.", note: with_old("") };
