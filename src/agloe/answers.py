@@ -477,8 +477,9 @@ def _carried(
 
     An OBJECT that is carried is in the OPTION from its start, and lies at the PLACE where
     the OPTION ends from its end, as the plan shows that end. That is said whether or not a
-    later step uses the OBJECT. Where the plan shows no end, nobody knows when the OBJECT
-    arrives, and nothing is said of where it is afterwards.
+    later step uses the OBJECT. The plan shows that end. A plan that works has a carry only
+    where it needs one: something uses the OBJECT afterwards, or whoever had it goes on to
+    an OPTION that refuses it. Both come after the OPTION is over, so its end is known.
 
     ``world`` is the worst case, and the plan works in it. So the FACTs are there, and the
     OBJECT is where this says wherever the steps end as the plan shows them. An OBJECT that
@@ -552,7 +553,7 @@ def _carried(
                     kept = "kept" if sure else "kept if held"
                 how = "carried" if loaded else "handed over" if taker else kept
                 stays.append(Stay(in_order(after), option, how))
-                if loaded and step.end is not None:
+                if loaded:
                     stays.append(Stay((Where(place=step.destination),), option, "arrived"))
         carried.append(Carried(thing.id, tuple(stays), tuple(uses)))
     return tuple(carried), relied

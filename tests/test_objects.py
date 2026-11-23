@@ -6972,10 +6972,10 @@ def test_an_option_that_uses_a_carried_object_waits_until_it_has_arrived() -> No
     assert start_of(shown, "office") == seconds(10)
 
 
-def two_ferries(desk_at: tuple[int, int]) -> File:
-    """A slow ferry from 9:00 am to 10:00 am and a fast one from 9:05 am to 9:15 am. Both can
-    carry the bag that lies at the quay, and the slow one is listed first. Jo's desk on the
-    island requires the bag."""
+def two_ferries(desk_at: tuple[int, int], fast_leaves: tuple[int, int] = (9, 5)) -> File:
+    """A slow ferry from 9:00 am to 10:00 am and a fast one that takes ten minutes, from
+    9:05 am unless the story says otherwise. Both can carry the bag that lies at the quay,
+    and the slow one is listed first. Jo's desk on the island requires the bag."""
     options = [
         moves("slow", "quay", "island"),
         moves("fast", "quay", "island"),
@@ -6983,7 +6983,7 @@ def two_ferries(desk_at: tuple[int, int]) -> File:
     ]
     facts = [
         *at("slow", 9, 0, "PT1H"),
-        *at("fast", 9, 5, "PT10M"),
+        *at("fast", *fast_leaves, "PT10M"),
         *at("desk", *desk_at),
         lies_at("bag", "quay"),
         carries("slow", "bag"),
@@ -7004,8 +7004,12 @@ def test_two_carries_that_end_at_one_place_are_told_apart_by_their_times() -> No
     assert carried_in(first_shown(later, worst_case(later))) == [("slow", ("bag",))]
     neither = two_ferries((9, 10))
     assert first_shown(neither, worst_case(neither)) is None
+    # The fast ferry is kept beside the slow one whichever of them leaves first.
+    before = two_ferries((9, 30), fast_leaves=(8, 55))
+    assert carried_in(first_shown(before, worst_case(before))) == [("fast", ("bag",))]
     # The solver's search gives the same reports.
     assert carried_in(checked(file).itinerary) == [("fast", ("bag",))]
+    assert carried_in(checked(before).itinerary) == [("fast", ("bag",))]
     assert carried_in(checked(later).itinerary) == [("slow", ("bag",))]
     assert checked(neither).answer is Answer.INFEASIBLE
 
@@ -7340,12 +7344,12 @@ def test_a_carried_object_is_no_sooner_there_than_its_carry_though_a_person_is()
     options = [moves("ferry", "quay", "island"), stays("desk", "island")]
     bridge = [way_between("bridge", "quay", "island")]
 
-    def with_the_desk_at(hour: int, minute: int) -> File:
+    def with_the_desk_at(hour: int, minute: int, held: bool = False) -> File:
         facts = [
             *at("ferry", 9, 0, "PT1H"),
             *at("desk", hour, minute),
             takes("bridge", "PT15M"),
-            lies_at("bag", "quay"),
+            has_object("alex", "bag") if held else lies_at("bag", "quay"),
             carries("ferry", "bag"),
             requires_object("desk", "bag"),
             every_use("bag"),
@@ -7362,3 +7366,49 @@ def test_a_carried_object_is_no_sooner_there_than_its_carry_though_a_person_is()
     later = checked(with_the_desk_at(10, 0))
     assert later.answer is Answer.FEASIBLE
     assert carried_in(later.itinerary) == [("ferry", ("bag",))]
+    # It is the same where Alex has the bag and is on the ferry with it.
+    assert checked(with_the_desk_at(9, 30, held=True)).answer is Answer.INFEASIBLE
+    in_time = checked(with_the_desk_at(10, 0, held=True))
+    assert carried_in(in_time.itinerary) == [("ferry", ("bag",))]
+
+
+def test_a_choice_that_comes_first_is_kept_beside_one_that_counts_on_no_arrival() -> None:
+    """The bag lies at the quay. Sam can take it at a pick-up there and bring it on the
+    ferry, or the ferry can carry it. Either way Alex takes it at a claim on the island and
+    walks on to an inn that requires it. Both ways have two hand-overs or carries. The
+    carry is in the OPTION listed first, so it is the one shown, though it counts on an
+    arrival and the other way counts on none."""
+    options = [
+        moves("ferry", "quay", "island"),
+        stays("pick-up", "quay"),
+        stays("errand", "quay"),
+        stays("claim", "island"),
+        stays("inn", "village"),
+    ]
+    facts = [
+        *at("ferry", 9, 0, "PT1H"),
+        *at("pick-up", 8, 30),
+        *at("errand", 8, 30),
+        *whenever("claim"),
+        *at("inn", 11, 30),
+        lies_at("bag", "quay"),
+        carries("ferry", "bag"),
+        hands_over("pick-up", "bag"),
+        hands_over("claim", "bag"),
+        requires_object("inn", "bag"),
+    ]
+    locks = [
+        lock("errand", "alex"),
+        lock("pick-up", "sam"),
+        lock("ferry", "alex", "sam"),
+        lock("claim", "alex", "sam"),
+        lock("inn", "alex"),
+    ]
+    file = a_voyage(options, facts, locks)
+    shown = first_shown(file, worst_case(file))
+    moved = [(each.option, each.carried, each.handed) for each in shown or () if each.option]
+    assert [each for each in moved if each[1] or each[2]] == [
+        ("ferry", ("bag",), ()),
+        ("claim", (), (("bag", "alex"),)),
+    ]
+    assert checked(file).itinerary == shown

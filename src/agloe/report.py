@@ -835,9 +835,7 @@ def _carried_in_words(
             "kept": f"kept by {name}",
             "kept if held": f"kept by {name} if anybody there has {thing}",
             "might be kept": f"the FILE does not say what {name} does with {thing}",
-            "carried": "carried"
-            if over is not None
-            else f"carried, and nobody knows when {name} ends",
+            "carried": "carried",
         }[stay.how or ""]
         stays.append(f"{where} from {clock.time(starts[stay.since], first_day)} ({how})")
     lines = [f"  {thing}: {'; '.join(stays)}"]
@@ -932,8 +930,8 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
     for found in report.at_worst:
         number = line_of[found.step] if found.step is not None else line_of_option[found.option]
         if found.constraint is Constraint.AT_HAND and found.object is not None:
-            missing = not_at_hand.setdefault(number, {})
-            missing[found.object] = missing.get(found.object) or found.late
+            # Each finding about this OBJECT at this step has the same delay.
+            not_at_hand.setdefault(number, {})[found.object] = found.late
             continue
         together.setdefault((number, found.constraint, found.late), []).extend(found.persons)
     marks: dict[int, list[str]] = {}

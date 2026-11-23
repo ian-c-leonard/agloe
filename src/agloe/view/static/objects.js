@@ -35,15 +35,14 @@ const ABOUT_MOVING = new Set(["hands over", "keeps", "does not keep", "carries"]
 
 /**
  * How an OBJECT came to be where it is from the start of an OPTION, as the report words it:
- * give it the name of the OPTION, the name of the OBJECT, and whether the plan says when the
- * OPTION ends.
+ * give it the name of the OPTION and the name of the OBJECT.
  */
 const HOW = new Map([
   ["handed over", (option) => `handed over in ${option}`],
   ["kept", (option) => `kept by ${option}`],
   ["kept if held", (option, thing) => `kept by ${option} if anybody there has ${thing}`],
   ["might be kept", (option, thing) => `the FILE does not say what ${option} does with ${thing}`],
-  ["carried", (option, thing, ends) => (ends ? "carried" : `carried, and nobody knows when ${option} ends`)],
+  ["carried", () => "carried"],
 ]);
 
 /** What an OPTION does with an OBJECT, as the report words it. */
@@ -170,7 +169,7 @@ export function objects(trip, report = null, stated = null) {
       if (stay.how === "arrived") return ends === null ? null : `${where} from ${clock(ends, first)} (where ${named.get(stay.since)} ends)`;
       const how = HOW.get(stay.how);
       if (how === undefined) return null;
-      return `${where} from ${clock(startOf.get(stay.since), first)} (${how(named.get(stay.since), thing.name, ends !== null)})`;
+      return `${where} from ${clock(startOf.get(stay.since), first)} (${how(named.get(stay.since), thing.name)})`;
     });
     const usesOf = (list, check) => list.map((use) => ({ option: use.option, check, stated: use.stated, where: startOf.has(use.option) ? whereIs(use.where) : null }));
     const all = said === null ? [] : [...usesOf(said.uses, "requires"), ...usesOf(said.refusals, "refuses")];
