@@ -45,6 +45,7 @@
           { "$ref": "#/$defs/object_starts_with" },
           { "$ref": "#/$defs/object_starts_at" },
           { "$ref": "#/$defs/requires_object" },
+          { "$ref": "#/$defs/refuses_object" },
           { "$ref": "#/$defs/with_object" },
           { "$ref": "#/$defs/complete_for_an_object" },
           { "$ref": "#/$defs/complete_transfers" }
@@ -665,6 +666,30 @@
         }
       }
     },
+    "refuses_object": {
+      "title": "RefusesObject",
+      "description": "A FACT: whether an OPTION refuses an OBJECT.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "option", "refuses"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "option": { "$ref": "#/$defs/id" },
+        "refuses": {
+          "title": "ObjectRefusal",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["object", "refused"],
+          "properties": {
+            "object": { "$ref": "#/$defs/id" },
+            "refused": {
+              "description": "True: no PERSON has the OBJECT while they take part in the OPTION. Nobody who takes part has it just before the OPTION starts, and it is not handed over in the OPTION. False: the OPTION does not refuse it.",
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
     "with_object": {
       "title": "WithObject",
       "description": "A FACT: what an OPTION does with an OBJECT.",
@@ -691,7 +716,7 @@
     },
     "complete_for_an_object": {
       "title": "CompleteForAnObject",
-      "description": "A FACT: the FILE states every one of its OPTIONs that requires the OBJECT. Each has a FACT that it does. So an OPTION of the FILE with no FACT about that does not require it.",
+      "description": "A FACT: the FILE states every one of its OPTIONs that requires the OBJECT or refuses it. Each has a FACT that it does. So an OPTION of the FILE with no FACT that it requires the OBJECT does not require it, and one with no FACT that it refuses the OBJECT does not refuse it.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "complete"],

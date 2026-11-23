@@ -394,6 +394,20 @@ class RequiresObject:
 
 
 @dataclass(frozen=True)
+class RefusesObject:
+    """A FACT: whether an OPTION refuses an OBJECT.
+
+    Where it does, no PERSON has the OBJECT while they take part in the OPTION: nobody who
+    takes part has it just before the OPTION starts, and it is not handed over in the OPTION.
+    """
+
+    id: str
+    option: str
+    object: str
+    refused: bool
+
+
+@dataclass(frozen=True)
 class WithObject:
     """A FACT: what an OPTION does with an OBJECT.
 
@@ -450,6 +464,7 @@ type Fact = (
     | CompleteRequires
     | ObjectStarts
     | RequiresObject
+    | RefusesObject
     | WithObject
     | CompleteRequiresObject
     | CompleteTransfers
@@ -751,8 +766,27 @@ class File:
         return False if whole else None
 
     def object_requirements_complete(self, object: str) -> CompleteRequiresObject | None:
-        """The FACT that the FILE states every OPTION that requires this OBJECT, if any."""
+        """The FACT that the FILE states every OPTION that requires or refuses this OBJECT."""
         return self._object_requirements_complete.get(object)
+
+    def object_refusal(self, option: str, object: str) -> RefusesObject | None:
+        """The FACT about whether this OPTION refuses this OBJECT, if there is one."""
+        return self._object_refusals.get((option, object))
+
+    def refuses_object(self, option: str, object: str) -> bool | None:
+        """Whether this OPTION refuses this OBJECT, as far as the FILE says.
+
+        None where the FILE does not say. A FACT about the two settles it. Without one, a FACT
+        that the set of the OBJECT's requirements is COMPLETE settles it too: the OPTION does
+        not refuse it. That FACT is about the OPTIONs of the FILE only, so the answer is None
+        for anything else. A FACT that the OPTION requires the OBJECT says nothing here.
+        """
+        stated = self._object_refusals.get((option, object))
+        if stated is not None:
+            return stated.refused
+        listed = option in self._options_listed
+        whole = listed and self.object_requirements_complete(object) is not None
+        return False if whole else None
 
     def action(self, option: str, object: str) -> WithObject | None:
         """The FACT about what this OPTION does with this OBJECT, if there is one."""
@@ -776,14 +810,19 @@ class File:
         return self._transfers_complete.get(object)
 
     def objects_asked_for(self) -> tuple[Object, ...]:
-        """The OBJECTs that some OPTION of the FILE requires or might, in the FILE's order.
+        """The OBJECTs that some OPTION of the FILE requires or refuses, or might.
 
-        Nothing turns on any other OBJECT: no OPTION of the FILE needs it at hand.
+        They are in the FILE's order. Nothing turns on any other OBJECT: no OPTION of the
+        FILE asks where it is.
         """
         return tuple(
             each
             for each in self.objects
-            if any(self.requires_object(option.id, each.id) is not False for option in self.options)
+            if any(
+                self.requires_object(option.id, each.id) is not False
+                or self.refuses_object(option.id, each.id) is not False
+                for option in self.options
+            )
         )
 
     @cached_property
@@ -796,6 +835,14 @@ class File:
             (fact.option, fact.object): fact
             for fact in self.facts
             if isinstance(fact, RequiresObject)
+        }
+
+    @cached_property
+    def _object_refusals(self) -> dict[tuple[str, str], RefusesObject]:
+        return {
+            (fact.option, fact.object): fact
+            for fact in self.facts
+            if isinstance(fact, RefusesObject)
         }
 
     @cached_property
@@ -1149,6 +1196,7 @@ def load(document: object) -> File:
     able: set[tuple[str, str]] = set()  # each PERSON and CAPABILITY that a FACT is about
     required: set[tuple[str, str]] = set()  # each OPTION and CAPABILITY that a FACT is about
     needed: set[tuple[str, str]] = set()  # each OPTION and OBJECT with a FACT about a requirement
+    refused: set[tuple[str, str]] = set()  # each OPTION and OBJECT with a FACT about a refusal
     acted: set[tuple[str, str]] = set()  # each OPTION and OBJECT with a FACT about what it does
     offered: list[tuple[str, str, str]] = []  # where an OFFER is, its id and its OPTION
     closures: list[tuple[str, str, tuple[str, ...]]] = []  # the same for a COMPLETE set of rights
@@ -1322,6 +1370,17 @@ def load(document: object) -> File:
                 problems.append(f"{where}: another FACT already states this about {both}")
             required.add((fact["option"], asked["capability"]))
             facts.append(Requires(fact["id"], fact["option"], asked["capability"], asked["of"]))
+            continue
+        if "refuses" in fact:
+            asked = fact["refuses"]
+            known(where, asked["object"], "OBJECT", object_ids)
+            if (fact["option"], asked["object"]) in refused:
+                both = f"{fact['option']} and {asked['object']}"
+                problems.append(f"{where}: another FACT already states this about {both}")
+            refused.add((fact["option"], asked["object"]))
+            facts.append(
+                RefusesObject(fact["id"], fact["option"], asked["object"], asked["refused"])
+            )
             continue
         if "with_object" in fact:
             done = fact["with_object"]

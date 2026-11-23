@@ -293,6 +293,17 @@ class RequiresObject(TypedDict):
     requires: ObjectRequirement
 
 
+class ObjectRefusal(TypedDict):
+    object: Id
+    refused: bool
+
+
+class RefusesObject(TypedDict):
+    id: Id
+    option: Id
+    refuses: ObjectRefusal
+
+
 class Action(TypedDict):
     object: Id
     does: Literal["hands_over", "keeps", "nothing"]
@@ -375,6 +386,7 @@ class File(TypedDict):
         | ObjectStartsWith
         | ObjectStartsAt
         | RequiresObject
+        | RefusesObject
         | WithObject
         | CompleteForAnObject
         | CompleteTransfers

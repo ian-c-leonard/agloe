@@ -44,6 +44,7 @@ from agloe.file import (
     Payment,
     Person,
     Place,
+    RefusesObject,
     Requires,
     RequiresObject,
     Satisfies,
@@ -1172,6 +1173,9 @@ def _record(file: File, clock: Clock, record: str) -> str:
     if isinstance(found, RequiresObject):
         does = "requires" if found.needed else "does not require"
         return f"{_name(file, found.option)} {does} {_names(file.objects)[found.object]}"
+    if isinstance(found, RefusesObject):
+        does = "refuses" if found.refused else "does not refuse"
+        return f"{_name(file, found.option)} {does} {_names(file.objects)[found.object]}"
     if isinstance(found, WithObject):
         thing = _names(file.objects)[found.object]
         return {
@@ -1180,16 +1184,27 @@ def _record(file: File, clock: Clock, record: str) -> str:
             "nothing": f"{_name(file, found.option)} leaves {thing} alone",
         }[found.does]
     if isinstance(found, CompleteRequiresObject):
-        which = [
+        requiring = [
             _name(file, fact.option, "and")
             for fact in file.facts
             if isinstance(fact, RequiresObject) and fact.object == found.object and fact.needed
         ]
+        refusing = [
+            _name(file, fact.option, "and")
+            for fact in file.facts
+            if isinstance(fact, RefusesObject) and fact.object == found.object and fact.refused
+        ]
         thing = _names(file.objects)[found.object]
-        if not which:
-            return f"no OPTION in this FILE requires {thing}"
-        verb = "requires" if len(which) == 1 else "require"
-        return f"of the OPTIONs in this FILE, only {_listed(which)} {verb} {thing}"
+        if not requiring and not refusing:
+            return f"no OPTION in this FILE requires or refuses {thing}"
+
+        def only(which: list[str], one: str, several: str) -> str:
+            if not which:
+                return f"none {one} {thing}"
+            return f"only {_listed(which)} {one if len(which) == 1 else several} {thing}"
+
+        asks = only(requiring, "requires", "require")
+        return f"of the OPTIONs in this FILE, {asks}, and {only(refusing, 'refuses', 'refuse')}"
     if isinstance(found, CompleteTransfers):
         which = [
             _name(file, fact.option, "and")
