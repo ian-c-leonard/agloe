@@ -269,6 +269,22 @@ def test_a_trip_with_no_report_has_a_calendar_of_what_is_locked_and_says_so() ->
     assert laid["days"] == with_none["days"]
 
 
+def test_a_calendar_with_no_day_says_that_it_marks_a_step_with_no_time(tmp_path: Path) -> None:
+    """A LOCK names the Skydeck visit, the FILE gives it no time, and nobody has a ticket."""
+    content = json.loads((EXAMPLES / "a-ticket" / "cannot-work.json").read_text())
+    content["decisions"] = [each for each in content["decisions"] if each["id"] == "lock-skydeck"]
+    content["facts"] = [fact for fact in content["facts"] if fact["id"] != "skydeck-time"]
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found = with_its_report(path)
+    assert (found["answer"], sent["days"]) == ("INFEASIBLE", [])
+    laid = calendar(sent, found)
+    (step,) = laid["untimed"]
+    assert step["clash"]
+    # The whole says so too: the row of links marks the calendar by it.
+    assert laid["clash"] is True
+
+
 def test_a_trip_with_no_itinerary_has_a_calendar_of_what_is_locked() -> None:
     """And the calendar says so, in words."""
     laid = calendar(drawn(STORY / "cannot-work.json"))
