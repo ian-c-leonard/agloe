@@ -389,10 +389,13 @@ def test_the_page_draws_the_file_before_the_report_comes(chromium: Browser, tmp_
         cut_off(views[0])
         page.locator("#report-part.old").wait_for()
         assert page.locator("#calendar-part.old").count() == 1
-        # Each link of the row is pale where its part is, and says why.
+        # Each link of the row is pale where its part is, and says why. The page knows of no
+        # change to the FILE, so the link speaks of none.
         links = page.locator("#contents .to")
         assert page.locator("#contents .to.old").count() == links.count() > 5
-        assert "the FILE as it is now" in (links.first.get_attribute("title") or "")
+        assert links.first.get_attribute("title") == (
+            "What this part shows is the last that the view sent."
+        )
         page.wait_for_function(
             """(line) => document.querySelectorAll(".old").length === 0
               && document.getElementById("line").textContent === line""",
@@ -414,6 +417,11 @@ def test_the_page_draws_the_file_before_the_report_comes(chromium: Browser, tmp_
         )
         path.write_text(json.dumps(changed))
         page.locator("#persons .item-name", has_text="Alexandra").wait_for()
+        # The link to the report is pale with it, and says that the FILE has changed.
+        assert page.locator("#contents .to.old").all_text_contents() == ["The COMPILER's report"]
+        assert page.locator("#contents .to.old").get_attribute("title") == (
+            "What this part shows is on the FILE as it was before."
+        )
         assert (page.text_content("#note") or "").endswith(
             "The report below is on the FILE as it was before."
         )
@@ -540,6 +548,43 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
         found = page.evaluate(under_the_row, "report-part")
         assert 0 <= found["part"] < 420
         assert found["row"][1] <= found["part"]
+    # A link that is opened in a tab of its own leads to its part too: the page goes to the
+    # part that its address names, once that part is drawn.
+    with serving(story / "they-collect-them.json") as view:
+        context = chromium.new_context(viewport={"width": 700, "height": 780})
+        try:
+            page = context.new_page()
+            page.goto(f"{view.address}#objects-part")
+            page.locator("#objects .card").first.wait_for()
+            page.wait_for_function(
+                """() => {
+                  const row = document.getElementById("contents").getBoundingClientRect();
+                  const part = document.getElementById("objects-part").getBoundingClientRect();
+                  return scrollY > 0 && part.top >= row.bottom - 1 && part.top < innerHeight / 2;
+                }"""
+            )
+            # Once the report is there, the page stays where the reader puts it.
+            page.locator("#report .row").first.wait_for()
+            page.evaluate("() => scrollTo(0, 0)")
+            page.wait_for_timeout(300)
+            assert page.evaluate("() => scrollY") == 0
+        finally:
+            context.close()
+    # The keyboard is on the link of a part, and the FILE changes so that the part goes. The
+    # keyboard is then on the link beside it.
+    path = tmp_path / "things.json"
+    content = json.loads((story / "they-collect-them.json").read_text())
+    path.write_text(json.dumps(content))
+    with opened(chromium, path) as page:
+        page.locator("#objects .card").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 8")
+        page.locator("#contents .to", has_text="OBJECTs").focus()
+        content["objects"] = []
+        content["facts"] = [fact for fact in content["facts"] if "bags" not in json.dumps(fact)]
+        put(path, json.dumps(content).encode())
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 7")
+        focused = page.evaluate("() => document.activeElement.getAttribute('href')")
+        assert focused == "#report-part"
     # A calendar that the page could not load has its place on the page, and its link, with
     # no edge: nothing in it is marked.
     with opened(chromium, story / "nobody-collects-them.json", without=("calendar.js",)) as page:
