@@ -17,7 +17,10 @@ import contextlib
 import http.client
 import json
 import os
+import shutil
 import socket
+import ssl
+import subprocess
 import sys
 import threading
 from collections.abc import Generator
@@ -25,7 +28,6 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import pytest
 from playwright.sync_api import Browser, Page, Route, sync_playwright
@@ -2339,78 +2341,108 @@ def test_the_page_shows_what_it_can_without_a_part_that_cannot_load(chromium: Br
         assert page.locator("#calendar .mark.warned").count() == 0
 
 
-@contextmanager
-def gateway(view: View) -> Generator[str]:
-    """A gateway in front of the view, as its owner would run one. Gives its address.
+class Gateway:
+    """A gateway in front of a view, as its owner would run one, for a browser of a test.
 
-    It passes each request on to the view under the name that the browser asked for, with
-    what the browser said of itself, and passes what the view answers back as it comes. A
-    browser that takes it for its proxy reaches the view under any name.
+    It speaks to the browser over a secured line, with a certificate that it makes for the
+    test and that nobody trusts. It passes each request on to the view under the name that
+    the browser asked for, with what the browser said of itself, and passes what the view
+    answers back as it comes. ``port`` is where it listens. ``to`` is the view, once there is
+    one: the view needs the port of the gateway for its name.
     """
 
-    class Passed(BaseHTTPRequestHandler):
-        def log_message(self, format: str, *args: object) -> None:
-            """Nothing is logged."""
+    def __init__(self, folder: Path) -> None:
+        self.to: View | None = None
+        gateway = self
 
-        def do_GET(self) -> None:
-            asked = urlsplit(self.path)
-            path = f"{asked.path or '/'}{f'?{asked.query}' if asked.query else ''}"
-            between = {"connection", "proxy-connection", "transfer-encoding"}
-            said = {
-                name: value for name, value in self.headers.items() if name.lower() not in between
-            }
-            onward = http.client.HTTPConnection("127.0.0.1", port_of(view), timeout=120)
-            try:
-                onward.request("GET", path, headers=said)
-                reply = onward.getresponse()
-                self.send_response(reply.status)
-                for name, value in reply.getheaders():
-                    if name.lower() not in between:
-                        self.send_header(name, value)
-                self.end_headers()
-                while chunk := reply.read1(65536):
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
-            except OSError:
-                return  # the browser or the view has gone
-            finally:
-                onward.close()
+        class Passed(BaseHTTPRequestHandler):
+            def log_message(self, format: str, *args: object) -> None:
+                """Nothing is logged."""
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Passed)
-    server.daemon_threads = True
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{server.server_address[1]}"
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=20)
+            def do_GET(self) -> None:
+                view = gateway.to
+                assert view is not None
+                between = {"connection", "transfer-encoding"}
+                said = {
+                    name: value
+                    for name, value in self.headers.items()
+                    if name.lower() not in between
+                }
+                onward = http.client.HTTPConnection("127.0.0.1", port_of(view), timeout=120)
+                try:
+                    onward.request("GET", self.path, headers=said)
+                    reply = onward.getresponse()
+                    self.send_response(reply.status)
+                    for name, value in reply.getheaders():
+                        if name.lower() not in between:
+                            self.send_header(name, value)
+                    self.end_headers()
+                    while chunk := reply.read1(65536):
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                except OSError:
+                    return  # the browser or the view has gone
+                finally:
+                    onward.close()
+
+        key, certificate = folder / "gateway.key", folder / "gateway.pem"
+        made = ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1"]
+        made += ["-subj", "/CN=view.example.org", "-keyout", str(key), "-out", str(certificate)]
+        subprocess.run(made, check=True, capture_output=True)
+        secured = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        secured.load_cert_chain(certificate, key)
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Passed)
+        self._server.daemon_threads = True
+        self._server.socket = secured.wrap_socket(self._server.socket, server_side=True)
+        self.port = int(self._server.server_address[1])
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    def close(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(timeout=20)
 
 
 def test_the_page_works_through_a_gateway_under_the_name_of_the_gateway(
     chromium: Browser, tmp_path: Path
 ) -> None:
     """The owner of the view gives it the name of a gateway. A browser on another machine asks
-    the gateway for that name, and gets the whole page: the answer, the report, the calendar,
-    and each change to the FILE. Under another name the view refuses it."""
+    the gateway for that name over a secured line, and gets the whole page: the answer, the
+    report, the calendar, and each change to the FILE. A sign-in on another site can send the
+    reader back to the page. Under another name the view refuses the browser."""
+    if shutil.which("openssl") is None:
+        if os.environ.get("CI"):
+            pytest.fail(
+                "the checks need openssl, to make a certificate for the gateway of this test"
+            )
+        pytest.skip(
+            "no openssl on this machine, to make a certificate for the gateway of this test"
+        )
     path = tmp_path / "trip.json"
     path.write_bytes((EXAMPLES / "ending-in-denver" / "works.json").read_bytes())
-    with serving(path, allowed_host="view.example.org") as view, gateway(view) as through:
-        context = chromium.new_context(proxy={"server": through})
-        try:
-            page = context.new_page()
+    gateway = Gateway(tmp_path)
+    # A browser of its own: every name under example.org is this machine, and the certificate
+    # of the gateway is taken as it is.
+    browser = chromium.browser_type.launch(
+        args=["--host-resolver-rules=MAP *.example.org 127.0.0.1", "--ignore-certificate-errors"]
+    )
+    name = f"view.example.org:{gateway.port}"
+    address = f"https://{name}/"
+    try:
+        with serving(path, allowed_host=name) as view:
+            gateway.to = view
+            page = browser.new_page()
             problems: list[str] = []
             page.on("pageerror", lambda problem: problems.append(str(problem)))
-            got = page.goto("http://view.example.org/")
+            got = page.goto(address)
             assert got is not None and got.status == 200
             page.wait_for_function(ANSWERED, timeout=60_000)
             assert (page.text_content("#line") or "").startswith("FEASIBLE")
             page.locator("#calendar .mark").first.wait_for()
             page.locator("#report .row").first.wait_for()
-            page.locator("#objects-part, #ways .item").first.wait_for()
-            # Every file of the page came under that name, and the page asked no other host.
-            assert page.evaluate("() => location.host") == "view.example.org"
+            page.locator("#ways .item").first.wait_for()
+            assert page.evaluate("() => [location.protocol, location.host]") == ["https:", name]
             # The page follows the FILE through the gateway.
             changed = json.loads(path.read_text())
             changed["persons"][0]["name"] = "Alexandra"
@@ -2419,19 +2451,51 @@ def test_the_page_works_through_a_gateway_under_the_name_of_the_gateway(
             page.locator("#report .row", has_text="Alexandra").first.wait_for()
             assert problems == []
             # Under a name that the owner did not give, the view refuses the same browser.
-            other = context.new_page()
-            refused = other.goto("http://other.example.org/")
+            refused = browser.new_page().goto(f"https://other.example.org:{gateway.port}/")
             assert refused is not None and refused.status == 403
-        finally:
-            context.close()
+            # A sign-in on another site sends its reader back with a link. The page opens.
+            # The page of that site reads nothing of the view, and when it opens the view in
+            # a window, it keeps no hold on that window.
+            elsewhere = f"""<!doctype html><title>a sign-in</title>
+              <a id="back" href="{address}">back to the view</a>
+              <script>
+                window.read = null;
+                fetch("{address}events").then(
+                  () => {{ window.read = "read"; }},
+                  () => {{ window.read = "refused"; }},
+                );
+                window.opened = window.open("{address}");
+              </script>"""
+            signin = browser.new_page()
+            signin.route(
+                "https://signin.example.net/**",
+                lambda route: route.fulfill(body=elsewhere, content_type="text/html"),
+            )
+            with signin.context.expect_page() as popup:
+                signin.goto("https://signin.example.net/")
+            popup.value.wait_for_function(ANSWERED, timeout=60_000)
+            signin.wait_for_function("() => window.read !== null")
+            assert signin.evaluate("() => window.read") == "refused"
+            signin.wait_for_function("() => window.opened.closed")
+            signin.click("#back")
+            signin.wait_for_function(ANSWERED, timeout=60_000)
+            assert signin.url == address
+    finally:
+        browser.close()
+        gateway.close()
     # A view with no such name refuses the gateway's name too.
-    with serving(path) as view, gateway(view) as through:
-        context = chromium.new_context(proxy={"server": through})
-        try:
-            refused = context.new_page().goto("http://view.example.org/")
+    gateway = Gateway(tmp_path)
+    browser = chromium.browser_type.launch(
+        args=["--host-resolver-rules=MAP *.example.org 127.0.0.1", "--ignore-certificate-errors"]
+    )
+    try:
+        with serving(path) as view:
+            gateway.to = view
+            refused = browser.new_page().goto(f"https://view.example.org:{gateway.port}/")
             assert refused is not None and refused.status == 403
-        finally:
-            context.close()
+    finally:
+        browser.close()
+        gateway.close()
 
 
 def test_a_link_on_another_site_opens_the_page_and_its_page_reads_nothing(

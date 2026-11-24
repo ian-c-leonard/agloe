@@ -73,8 +73,8 @@ _LONGEST_NAME = 253  # letters and dots: the names of the internet are no longer
 # A name whose last part is a number is an address made of numbers to a browser. It rewrites
 # such an address, or refuses it. So the view takes one only as a browser writes it.
 _A_NUMBER = re.compile(r"[0-9]+|0x[0-9a-f]*")
-# The port that a browser leaves out of what it sends, for each way of reaching a gateway.
-_USUAL = {"http": 80, "https": 443}
+# The port that a browser leaves out of what it sends over a secured line.
+_USUAL = 443
 # The ports from 1024 up that browsers refuse to open a page on: the bad ports of the Fetch
 # Standard.
 REFUSED_BY_BROWSERS = frozenset(
@@ -83,7 +83,7 @@ REFUSED_BY_BROWSERS = frozenset(
 )
 # The rest of those bad ports. The view never serves on a port below 1024. A gateway can.
 _REFUSED_FOR_A_GATEWAY = REFUSED_BY_BROWSERS | frozenset(
-    {1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95}
+    {0, 1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95}
     | {101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161}
     | {179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563}
     | {587, 601, 636, 989, 990, 993, 995}
@@ -219,7 +219,10 @@ def _named(name: str) -> tuple[str, int | None]:
             with contextlib.suppress(ValueError):
                 whole = str(ipaddress.IPv4Address(host)) == host
         if whole and port in _REFUSED_FOR_A_GATEWAY:
-            raise NotAHost(f"{name!r}: browsers refuse to open a page on port {port}")
+            raise NotAHost(
+                f"{name!r}: port {port} is on the list of ports that browsers refuse to open "
+                "a page on, the blocked ports of the Fetch Standard"
+            )
         if whole and (port is None or 1 <= port <= 65535):
             return host, port
     raise NotAHost(
@@ -274,18 +277,16 @@ class View:
 
         A browser on this machine reaches the view by the address of this machine. Where the
         owner has given one more name, a browser reaches it by that name too, through the
-        gateway that has the name. The gateway may speak to the browser over a secured line,
-        or over one that is not. A browser leaves the usual port of each out of what it
-        sends: 443 for a secured line, and 80 for the other. So a name with one of those
-        ports is the bare name for that line, and the name with the port for the other.
+        gateway that has the name. The gateway speaks to browsers over a secured line, so
+        a page that came through it says that it comes from one. A browser leaves the usual
+        port of such a line, 443, out of what it sends.
         """
         own = (f"127.0.0.1:{self._port}", f"localhost:{self._port}")
         sites = {host: {f"http://{host}"} for host in own}
         if self._gateway is not None:
             name, port = self._gateway
-            for how, usual in _USUAL.items():
-                sent = name if port is None or port == usual else f"{name}:{port}"
-                sites.setdefault(sent, set()).add(f"{how}://{sent}")
+            sent = name if port is None or port == _USUAL else f"{name}:{port}"
+            sites.setdefault(sent, set()).add(f"https://{sent}")
         return sites
 
     def serve(self) -> None:
@@ -515,6 +516,7 @@ class _Asked(BaseHTTPRequestHandler):
         view = self.server.view
         # A request that names two hosts, or says twice where it comes from, is no request.
         once = ("Host", "Origin", "Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest")
+        once += ("Sec-Purpose", "Purpose")
         if any(len(self.headers.get_all(name) or []) > 1 for name in once):
             self.send_error(HTTPStatus.BAD_REQUEST)
             return
@@ -538,16 +540,21 @@ class _Asked(BaseHTTPRequestHandler):
         A page from elsewhere reaches this machine under a name of its own, or its browser
         says in the request that it comes from another site. Both are refused. A request
         that says nothing of where it comes from is taken. One thing is taken from another
-        site: a link that opens the page itself, in a window of its own. A sign-in at a
-        gateway sends its reader back to the page that way. What the page is to show, and
-        the page's own files, are for the page alone. The names of hosts count whatever the
-        case of their letters, and blanks around what a line says are no part of it.
+        site: a request to open the page itself in a window of its own, as a link, a form
+        or a redirect makes one. A sign-in at a gateway sends its reader back to the page
+        that way. What the page is to show, and the page's own files, are for the page
+        alone. A request that a browser makes ahead of its reader, to have a page ready, is
+        refused: the view answers when somebody opens the page. The names of hosts count
+        whatever the case of their letters, and blanks around what a line says are no part
+        of it.
         """
 
         def said(name: str) -> str | None:
             value = self.headers.get(name)
             return None if value is None else value.strip(" \t")
 
+        if said("Sec-Purpose") is not None or (said("Purpose") or "").lower() == "prefetch":
+            return False
         sites = view.sites().get((said("Host") or "").lower())
         if sites is None:
             return False
