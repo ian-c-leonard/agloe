@@ -154,7 +154,7 @@ So a PERSON can take WAYs before their first OPTION and after their last one, an
 
 - **FEASIBLE:** one ITINERARY, with its way to pay, works in every possible world.
 - **INFEASIBLE:** no ITINERARY works in any possible world.
-- **UNDETERMINED:** the COMPILER finds no ITINERARY that works in all of them, and it cannot rule the TRIP out. Some ITINERARY works in some possible world, or the answer turns on another transfer of an OBJECT, which the COMPILER does not work out. The report says which.
+- **UNDETERMINED:** no ITINERARY works in all of them, and the COMPILER cannot rule the TRIP out. Some ITINERARY works in some possible world, or the answer turns on another transfer of an OBJECT, which the COMPILER does not work out. The report says which.
 
 A FEASIBLE report names the BUDGET that pays for each place at a price above nothing, and the travelers act on it. So a way to pay that would have to change with a FACT nobody knows is none. Give two BUDGETs a cap of 1 USD each. Either can pay for Sam's place at 1 USD. An old BOOKING paid 1 USD and names no BUDGET: the money came from one of the two, or from outside the FILE. Every possible world has a way to pay, and the TRIP is UNDETERMINED: no report can tell Sam which BUDGET to use.
 
