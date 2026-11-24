@@ -790,6 +790,18 @@ def test_two_names_that_a_page_shows_alike_come_with_their_ids() -> None:
         file = load(document)
         words = report.as_text(file, compiler.check(file)).splitlines()
         assert words[3] == f"  9:00 am to 9:30 am: call, Ann Lee (a) and {name} (b)"
+    # A name that a page shows as a name with its id is in quotes: a mark of direction after
+    # it shows as nothing.
+    document["persons"] = [
+        {"id": "a", "name": "Alex"},
+        {"id": "b", "name": "Alex"},
+        {"id": "c", "name": "Alex (b)\u200e"},
+    ]
+    document["decisions"] = [lock("call", "a", "b", "c")]
+    file = load(document)
+    words = report.as_text(file, compiler.check(file)).splitlines()
+    assert words[3] == '  9:00 am to 9:30 am: call, Alex (a), Alex (b) and "Alex (b)\u200e"'
+    document["decisions"] = [lock("call", "a", "b")]
     # Two names that only look alike to a reader are two names: another alphabet, a dash.
     document["persons"] = [{"id": "a", "name": "Paris"}, {"id": "b", "name": "P\u0430ris"}]
     file = load(document)
