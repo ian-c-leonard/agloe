@@ -26,6 +26,7 @@ from agloe.file import (
     Capability,
     Complete,
     CompleteFor,
+    CompleteNeedsRightFor,
     CompleteRequires,
     CompleteRequiresObject,
     CompleteRights,
@@ -37,6 +38,7 @@ from agloe.file import (
     Lock,
     Money,
     NeedsRight,
+    NeedsRightFor,
     Object,
     ObjectStarts,
     Offer,
@@ -169,6 +171,16 @@ def as_json(file: File, report: Report) -> dict[str, object]:
                         ]
                         for key, check in (("required_by", "requires"), ("refused_by", "refuses"))
                     },
+                    "covered_in": [
+                        {
+                            "option": use.option,
+                            "stated": use.stated,
+                            "where": [_where_as_json(each) for each in use.where],
+                            "booking": use.by,
+                        }
+                        for use in carried.uses
+                        if use.by is not None
+                    ],
                 }
                 for carried in report.objects
             ]
@@ -500,6 +512,8 @@ _ABOUT_AN_OBJECT = (
     "carries",
     "starts with",
     "starts at",
+    "needs no right for",
+    "another right for",
     "another transfer",
 )
 
@@ -773,12 +787,23 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
             # A BOOKING can cover more PERSONs than the plan credits to it.
             found = next((fact for fact in file.facts if fact.id == record), None)
             credited = tuple(cover.person for cover in report.rights if cover.by == record)
+            # The OBJECTs that the plan uses the BOOKING for.
+            things = [
+                carried.object
+                for carried in report.objects
+                if any(use.by == record for use in carried.uses)
+            ]
             used_for = ""
-            if isinstance(found, Booking) and not credited:
+            if isinstance(found, Booking) and not credited and not things:
                 # In a FILE with a cap, a plan relies on a BOOKING whose right nobody uses.
                 used_for = "; this plan counts what it paid, and nobody uses its right"
-            elif isinstance(found, Booking) and set(credited) != set(found.covers):
-                used_for = f"; this plan uses it for {_people(file, credited)}"
+            elif isinstance(found, Booking) and (
+                set(credited) != set(found.covers) or set(things) != set(found.objects)
+            ):
+                shown = _names(file.objects)
+                users = [_people(file, credited)] if credited else []
+                users += [shown[thing.id] for thing in file.objects if thing.id in things]
+                used_for = f"; this plan uses it for {_listed(users)}"
             lines.append(f"  {record}: {_record(file, clock, record)}{used_for}")
     if report.supplies:
         lines += ["", "Who meets the requirements:"]
@@ -870,7 +895,11 @@ def _carried_in_words(
     lines = [f"  {thing}: {'; '.join(stays)}"]
     for use in carried.uses:
         name, where = _name(file, use.option), _where(file, use.where)
-        if use.stated:
+        if use.by is not None:
+            needs = "needs a right for" if use.stated else "might need a right for"
+            covers = f"{use.by} covers {thing}" + ("" if use.stated else " if it does")
+            lines.append(f"    {name} {needs} {thing}. Just before it starts: {where}. {covers}.")
+        elif use.stated:
             lines.append(f"    {name} {use.check} {thing}. Just before it starts: {where}.")
         else:
             silent = f"The FILE does not say whether {name} {use.check} {thing}"
@@ -1175,6 +1204,8 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
             "does not keep or carry": f"{name} neither keeps nor carries {thing}",
             "hands over": f"{thing} can be handed over in {name}",
             "carries": f"{name} can carry {thing}",
+            "needs no right for": f"{name} needs no right for {thing}",
+            "another right for": _OwnWords(f"a right to {name} is found that covers {thing}"),
         }[unknown.what]
     if unknown.what == "price":
         buyers = tuple(cover.person for cover in needed.buys)
@@ -1341,7 +1372,21 @@ def _record(file: File, clock: Clock, record: str) -> str:
         thing = _names(file.objects)[found.object]
         said = _listed(which) if which else "there is none"
         return f"the FILE states every OPTION that hands over, keeps or carries {thing}: {said}"
+    if isinstance(found, CompleteNeedsRightFor):
+        which = [
+            _name(file, fact.option, "and")
+            for fact in file.facts
+            if isinstance(fact, NeedsRightFor) and fact.object == found.object and fact.needed
+        ]
+        thing = _names(file.objects)[found.object]
+        if not which:
+            return f"no OPTION in this FILE needs a right for {thing}"
+        needs = "needs" if len(which) == 1 else "need"
+        return f"of the OPTIONs in this FILE, only {_listed(which)} {needs} a right for {thing}"
     name = _name(file, found.option)
+    if isinstance(found, NeedsRightFor):
+        needs = "needs a right" if found.needed else "needs no right"
+        return f"{name} {needs} for {_names(file.objects)[found.object]}"
     if isinstance(found, Lock):
         verb = "takes" if len(found.persons) == 1 else "take"
         return f"{_people(file, found.persons)} {verb} part in {name}"
@@ -1361,7 +1406,10 @@ def _record(file: File, clock: Clock, record: str) -> str:
         who = "people need" if found.needed else "nobody needs"
         return f"{who} a right to take part in {name}"
     if isinstance(found, Booking):
-        covers = f"a BOOKING for {name} covers {_people(file, found.covers)}"
+        things = _names(file.objects)
+        covered = [_people(file, found.covers)] if found.covers else []
+        covered += [things[thing.id] for thing in file.objects if thing.id in found.objects]
+        covers = f"a BOOKING for {name} covers {_listed(covered)}"
         if not file.caps:
             return covers
         if found.paid is None:

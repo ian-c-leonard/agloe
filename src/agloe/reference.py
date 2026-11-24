@@ -1974,7 +1974,7 @@ def _least_broken(
             # A right is needed where a PERSON who takes part has the OBJECT, where it is
             # handed over and where it is carried. That is one requirement, so one finding:
             # for whoever has it, or else for whoever takes it, or else for the carry.
-            lacks: str | None | bool = False
+            lacks: str | bool | None = False
             if uncovered and held:
                 lacks = None
             elif uncovered and taker is not None:
