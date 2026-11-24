@@ -322,9 +322,10 @@ class Offer:
 class CompleteRights:
     """A FACT: the rights to an OPTION are COMPLETE.
 
-    The BOOKINGs in the FILE secure every right to it that anybody on the TRIP holds. Nobody
-    on the TRIP can get another, except by a place of an OFFER that the FACT names in
-    ``offers``. Those are all the OFFERs the FILE has for the OPTION.
+    The BOOKINGs in the FILE secure every right for a PERSON to take part in it that anybody
+    on the TRIP holds. Nobody on the TRIP can get another, except by a place of an OFFER
+    that the FACT names in ``offers``. Those are all the OFFERs the FILE has for the OPTION.
+    The FACT says nothing of a right for an OBJECT.
     """
 
     id: str

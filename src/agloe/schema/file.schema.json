@@ -528,7 +528,7 @@
     },
     "complete_rights": {
       "title": "CompleteRights",
-      "description": "A FACT: the rights to the OPTION are COMPLETE. The BOOKINGs in the FILE secure every right to it that anybody on the TRIP holds. Nobody on the TRIP can get another, except by a place of an OFFER that this FACT names.",
+      "description": "A FACT: the rights to the OPTION are COMPLETE. The BOOKINGs in the FILE secure every right for a PERSON to take part in it that anybody on the TRIP holds. Nobody on the TRIP can get another, except by a place of an OFFER that this FACT names. The FACT says nothing of a right for an OBJECT.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "complete"],
