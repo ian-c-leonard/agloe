@@ -512,18 +512,8 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
       const part = document.getElementById(id).getBoundingClientRect();
       return { row: [row.top, row.bottom], part: part.top, at: scrollY };
     }"""
-    with opened(chromium, story / "they-collect-them.json", wide=700, tall=800) as page:
-        page.locator("#objects .card").first.wait_for()
-        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 9")
-        assert page.evaluate(under_the_row, "options-part")["row"][1] > 50
-        page.locator("#contents .to", has_text="OPTIONs").click()
-        page.wait_for_function("() => scrollY > 0")
-        page.wait_for_timeout(200)
-        found = page.evaluate(under_the_row, "options-part")
-        assert found["row"][0] == 0
-        assert found["row"][1] <= found["part"] < found["row"][1] + 30
-    # In a narrow window, such as the browser beside an agent, the row is one line from one
-    # edge of the window to the other. It scrolls sideways, and the page does not.
+    # How the row lies: how many lines its links take, from where to where it reaches, how
+    # many links it cuts off, and how wide the page is beside the window.
     one_line = """() => {
       const row = document.getElementById("contents");
       const at = row.getBoundingClientRect();
@@ -536,6 +526,19 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
         page: [document.documentElement.scrollWidth, document.documentElement.clientWidth],
       };
     }"""
+    with opened(chromium, story / "they-collect-them.json", wide=700, tall=800) as page:
+        page.locator("#objects .card").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 9")
+        found = page.evaluate(one_line)
+        assert (found["lines"], found["cut"], found["sides"]) == (2, 0, [28, 672])
+        page.locator("#contents .to", has_text="OPTIONs").click()
+        page.wait_for_function("() => scrollY > 0")
+        page.wait_for_timeout(200)
+        found = page.evaluate(under_the_row, "options-part")
+        assert found["row"][0] == 0
+        assert found["row"][1] <= found["part"] < found["row"][1] + 30
+    # In a narrow window, such as the browser beside an agent, the row is one line from one
+    # edge of the window to the other. It scrolls sideways, and the page does not.
     # Whether a link is in view, whole, in the row.
     whole = """(link) => {
       const row = document.getElementById("contents").getBoundingClientRect();
