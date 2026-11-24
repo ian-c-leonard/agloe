@@ -2283,6 +2283,34 @@ def test_a_click_on_the_strip_brings_the_step_into_view(chromium: Browser, tmp_p
         dinner.click()
         assert page.evaluate(INSIDE, "dinner") == {"across": True, "down": True}
         assert grid.evaluate("(grid) => grid.scrollLeft") == 0
+        # The keyboard does what the click does. End takes it to the last mark of the strip,
+        # and Enter brings that step into view.
+        dinner.focus()
+        page.keyboard.press("End")
+        assert (page.evaluate("() => document.activeElement.title") or "").startswith("brunch")
+        assert page.evaluate(INSIDE, "brunch")["across"] is False
+        page.keyboard.press("Enter")
+        assert page.evaluate(INSIDE, "brunch") == {"across": True, "down": True}
+        assert grid.evaluate("(grid) => grid.scrollLeft") > 0
+        # Space does the same, and the keyboard stays on the mark. The names of the PERSONs
+        # come before the marks of the strip, so the arrow keys go back to dinner.
+        page.keyboard.press("ArrowLeft")
+        page.keyboard.press("ArrowLeft")
+        assert (page.evaluate("() => document.activeElement.title") or "").startswith("dinner")
+        assert page.evaluate(INSIDE, "dinner")["across"] is False
+        page.keyboard.press("Space")
+        assert page.evaluate(INSIDE, "dinner") == {"across": True, "down": True}
+        assert grid.evaluate("(grid) => grid.scrollLeft") == 0
+        assert (page.evaluate("() => document.activeElement.title") or "").startswith("dinner")
+        # With Shift, Control, Alt or Meta, the key is the browser's.
+        page.keyboard.press("End")
+        for held in ["Shift", "Control", "Alt", "Meta"]:
+            page.keyboard.press(f"{held}+Enter")
+            assert page.evaluate(INSIDE, "brunch")["across"] is False, held
+        # A mark of the strip says to a reader who cannot see it that it can be pressed.
+        assert brunch.get_attribute("role") == "button"
+        # A mark of the calendar does nothing when it is pressed, and does not say so.
+        assert page.locator("#calendar .mark").first.get_attribute("role") is None
 
 
 def test_the_page_shows_what_it_can_without_a_part_that_cannot_load(chromium: Browser) -> None:
