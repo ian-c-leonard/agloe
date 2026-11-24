@@ -20,8 +20,11 @@ from agloe.reference import (
     Constraint,
     Step,
     Unknown,
+    Where,
     best_case,
     broken_as_listed,
+    goes_along,
+    itineraries,
     unknowns,
     with_these_at_best,
     worst_case,
@@ -46,7 +49,15 @@ from tests.stories import (
     stays,
     trip,
 )
-from tests.test_objects import a_trip_with_services, at
+from tests.test_objects import (
+    NEW,
+    a_trip_with_objects,
+    a_trip_with_services,
+    as_visits,
+    asked,
+    at,
+    smallest_sets,
+)
 
 
 def checked(file: File) -> Report:
@@ -254,6 +265,142 @@ def test_the_two_cases_of_a_right_for_an_object() -> None:
     assert not [each for each in unknowns(booked) if each.what in about_rights]
 
 
+# The search of the reference checker.
+
+
+def after_the_train(file: File, start: Where, *persons: str) -> set[frozenset[Where]]:
+    """Each set of places where the search can leave the bike once the train has left A, at worst.
+
+    ``start`` is where the bike is before, and ``persons`` take the train.
+    """
+    visits = as_visits([("train", persons, "a")])
+    reached = reference._first_hand_overs(  # pyright: ignore[reportPrivateUsage]
+        worst_case(file), "bike", visits, [frozenset({start})], lambda option, person: (0, 0), {}
+    )
+    return {places for places, _ in reached}
+
+
+def without(file: File, record: str) -> File:
+    """The same FILE with one FACT left out."""
+    assert any(fact.id == record for fact in file.facts)
+    return replace(file, facts=tuple(fact for fact in file.facts if fact.id != record))
+
+
+def test_the_search_keeps_no_choice_that_puts_the_object_in_an_option_with_no_right() -> None:
+    """The search takes an OBJECT through the OPTIONs of a plan and keeps the choices that can
+    still work. Where an OPTION needs a right for the OBJECT and nothing covers it, the
+    search keeps no choice in which the OBJECT is in that OPTION. The walk of a plan finds
+    each of them broken, as the tests above show, so none of them is a plan that works."""
+    on_the_platform, with_alex = Where(place="a"), Where(person="alex")
+    # A PERSON who takes part has the bike.
+    held = a_train(has_object("alex", "bike"))
+    assert after_the_train(held, with_alex, "alex") == set()
+    assert after_the_train(held, with_alex, "jo") == {frozenset({with_alex})}
+    # The train requires the bike, and nobody knows what it does with it: it might take
+    # along what lies where it starts.
+    might_take = a_train(lies_at("bike", "a"), requires_object("train", "bike"))
+    assert worst_case(might_take).does == {("train", "bike"): "might_take"}
+    assert after_the_train(might_take, on_the_platform, "alex") == set()
+    assert broken_as_listed(might_take, worst_case(might_take), (ride("alex"),)) == [
+        uncovered("alex")
+    ]
+    # The train requires the bike and carries it: the bike goes along with no choice.
+    carried = [lies_at("bike", "a"), carries("train", "bike")]
+    sure = a_train(*carried, requires_object("train", "bike"))
+    assert goes_along(worst_case(sure), "train", "bike") == "sure"
+    assert after_the_train(sure, on_the_platform, "alex") == set()
+    # The train carries the bike, and nobody knows whether it requires it: it might go along.
+    might = without(a_train(*carried), "every-use-of-bike")
+    assert goes_along(worst_case(might), "train", "bike") == "might"
+    assert after_the_train(might, on_the_platform, "alex") == set()
+    assert broken_as_listed(might, worst_case(might), (ride("alex"),)) == [uncovered("alex")]
+    # The bike can be handed over in the train, or carried by choice. The search chooses
+    # neither: the bike stays on the platform.
+    for does in (hands_over("train", "bike"), carries("train", "bike")):
+        by_choice = a_train(lies_at("bike", "a"), does)
+        assert after_the_train(by_choice, on_the_platform, "alex") == {frozenset({on_the_platform})}
+    # With a BOOKING that covers the bike, it is handed to Alex, or it stays.
+    booked = a_train(lies_at("bike", "a"), hands_over("train", "bike"), booking("train", "bike"))
+    assert after_the_train(booked, on_the_platform, "alex") == {
+        frozenset({on_the_platform}),
+        frozenset({with_alex}),
+    }
+
+
+def test_the_object_goes_round_an_option_that_has_no_right_for_it() -> None:
+    """The bike lies at A, and a ride at B requires it. Alex can take it at the shop and
+    bring it on the train, which needs a right for it that nothing gives. Or a van carries
+    it to B with nobody in it. The first way has the hand-over that the rules put first,
+    and it does not work. So the search drops it at the train, and the plan is the van."""
+    options = [stays("shop", "a"), moves("van", "a", "b"), moves("train", "a", "b")]
+    options += [stays("ride", "b")]
+    facts = [*at("shop", 8), *at("van", 8, 30), *at("train", 9), *at("ride", 10)]
+    facts += [starts_from("alex", "a"), lies_at("bike", "a"), hands_over("shop", "bike")]
+    facts += [carries("van", "bike"), requires_object("ride", "bike"), every_use("bike")]
+    facts += [every_transfer("bike"), needs_right_for("train", "bike"), every_right_for("bike")]
+    locks = [lock("shop", "alex"), lock("train", "alex"), lock("ride", "alex")]
+    file = trip(["alex"], ["a", "b"], options, facts, locks, objects=["bike"], object_rights=True)
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [(step.option, step.persons, step.handed, step.carried) for step in found.itinerary] == [
+        ("shop", ("alex",), (), ()),
+        ("van", (), (), ("bike",)),
+        ("train", ("alex",), (), ()),
+        ("ride", ("alex",), (), ()),
+    ]
+
+
+def test_an_object_that_only_a_right_asks_about_is_handed_on_before_the_option() -> None:
+    """Alex has the bike, and nothing requires it. The train needs a right for it that
+    nothing gives. Alex meets Jo first, and the bike can be handed over there. So Jo takes
+    the bike, and Alex takes the train without it: the search follows an OBJECT that only
+    a right asks about."""
+    options = [stays("meet", "a"), moves("train", "a", "b")]
+    facts = [*at("meet", 8), *at("train", 9), starts_from("alex", "a"), starts_from("jo", "a")]
+    facts += [has_object("alex", "bike"), hands_over("meet", "bike"), every_use("bike")]
+    facts += [every_transfer("bike"), needs_right_for("train", "bike"), every_right_for("bike")]
+    locks = [lock("meet", "alex"), lock("train", "alex")]
+    file = trip(
+        ["alex", "jo"], ["a", "b"], options, facts, locks, objects=["bike"], object_rights=True
+    )
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [(step.option, step.persons, step.handed) for step in found.itinerary] == [
+        ("meet", ("alex", "jo"), (("bike", "jo"),)),
+        ("train", ("alex",), ()),
+    ]
+
+
+def test_nobody_has_the_object_from_a_hand_over_in_an_option_with_no_right() -> None:
+    """The search orders only the OPTIONs that matter to an OBJECT. An OPTION that needs a
+    right for the OBJECT that nothing gives is like one that refuses it there: nobody
+    takes the OBJECT in it. So nobody has the OBJECT afterwards because of it, and it does
+    not move the OBJECT, by a hand-over or by a carry."""
+    options = [stays("desk", "a"), stays("lunch", "a")]
+    facts = [*at("desk", 8), *at("lunch", 9), starts_from("alex", "a"), lies_at("bike", "a")]
+    facts += [hands_over("desk", "bike"), every_use("bike"), every_transfer("bike")]
+    locks = [lock("desk", "alex"), lock("lunch", "alex")]
+
+    def a_desk(*rights: Document) -> File:
+        stated = [*facts, *rights]
+        return trip(["alex"], ["a"], options, stated, locks, objects=["bike"], object_rights=True)
+
+    orders = ((0, 1),)
+    no_right = a_desk(needs_right_for("desk", "bike"), every_right_for("bike"))
+    world = worst_case(no_right)
+    assert world.uncovered == {("desk", "bike")}
+    assert reference._can_have(no_right, world, orders, "bike") == {}  # pyright: ignore[reportPrivateUsage]
+    assert reference._can_move(no_right, world, orders, [0, 1], "bike") == set()  # pyright: ignore[reportPrivateUsage]
+    carrying = a_desk(carries("lunch", "bike"), needs_right_for("lunch", "bike"))
+    world = worst_case(carrying)
+    assert world.uncovered == {("desk", "bike"), ("lunch", "bike")}
+    assert reference._can_move(carrying, world, orders, [0, 1], "bike") == set()  # pyright: ignore[reportPrivateUsage]
+    free = a_desk(every_right_for("bike"))
+    world = worst_case(free)
+    assert reference._can_have(free, world, orders, "bike") == {1: {"alex"}}  # pyright: ignore[reportPrivateUsage]
+    assert reference._can_move(free, world, orders, [0, 1], "bike") == {0}  # pyright: ignore[reportPrivateUsage]
+
+
 # Both checkers, and the report.
 
 
@@ -287,6 +434,31 @@ def test_a_car_that_alex_has_needs_its_ticket_on_the_ferry() -> None:
             "booking": "ferry-booking",
         }
     ]
+
+
+def test_the_report_names_a_booking_only_where_the_object_needs_its_right() -> None:
+    """A BOOKING covers the car on the ferry. The report names it where the ferry needs a
+    right for the car and the car is on the ferry in the plan, and nowhere else."""
+
+    def covered_in(file: File) -> list[tuple[str, str | None]]:
+        found = checked(file)
+        assert found.answer is Answer.FEASIBLE
+        assert ("ferry-booking" in found.relies_on) == (
+            "covers car.\n" in report.as_text(file, found)
+        )
+        return [(use.option, use.by) for carried in found.objects for use in carried.uses]
+
+    covers = booking("ferry", "car")
+    # Nothing requires the car, so only the right asks about it. The report still says
+    # where the car is, and what covers it.
+    alone = a_ferry(TICKET, NO_OTHER, covers, drive=False)
+    assert covered_in(alone) == [("ferry", "ferry-booking")]
+    assert [carried.object for carried in checked(alone).objects] == ["car"]
+    # The car stands on the quay, and the plan does not carry it: it is not on the ferry.
+    assert covered_in(a_ferry(TICKET, NO_OTHER, covers, holds=False, drive=False)) == []
+    # The ferry needs no right for the car.
+    free = [needs_right_for("ferry", "car", False), needs_right_for("drive", "car", False)]
+    assert covered_in(a_ferry(*free, covers)) == [("drive", None)]
 
 
 def test_a_car_with_no_ticket_might_have_another() -> None:
@@ -520,6 +692,23 @@ def test_another_transfer_and_an_option_of_which_nobody_knows_what_it_does() -> 
         "a right to ferry is found that covers bike"
         " and another transfer puts bike at hand for ferry."
     ]
+    # The bike lies on the quay, where the ferry starts. No transfer is needed, and the
+    # ferry still might take the bike along with no right.
+    on_the_quay = a_quay(needs, bike_at="quay")
+    assert cases_of(on_the_quay, checked(on_the_quay)) == [
+        "ferry does not carry bike.",
+        "A right to ferry is found that covers bike.",
+    ]
+    # The ferry carries the bike, and nobody says whether it requires it. So the bike might
+    # go along, and no transfer cures that: the ferry cannot sail where a transfer brings
+    # the bike.
+    might = without(a_quay(carries("ferry", "bike")), "every-use-of-bike")
+    world = with_these_at_best(might, [Unknown("another transfer", about="bike")])
+    assert goes_along(world, "ferry", "bike") == "might"
+    assert reference.taken_with_no_right(world, "ferry", "bike")
+    assert not reference.any_works(might, world) and not compiler.works(might, world)
+    words = report.as_text(might, checked(might))
+    assert "\nThe trip works if ferry does not require bike.\n" in words
     left_alone = a_quay(needs, does_with("ferry", "bike", "nothing"))
     found = checked(left_alone)
     assert cases_of(left_alone, found) == ["another transfer puts bike where ferry starts."]
@@ -675,6 +864,41 @@ def test_the_options_for_one_object_are_named_together_with_two_objects() -> Non
     instead = "a BOOKING for it that covers bike is enough instead."
     assert words.count(f"If train-0 does need a right for bike, {instead}") == 1
     assert words.count("is enough instead.") == 4
+    # One BOOKING for each train covers both OBJECTs.
+    tickets = [booking(train, "bike", "trailer") for train in ("train-0", "train-1")]
+    booked = two_trains(*needed, *tickets)
+    found = checked(booked)
+    assert found.answer is Answer.FEASIBLE
+    assert [[use.by for use in carried.uses] for carried in found.objects] == [
+        ["train-0-booking", "train-1-booking"],
+        ["train-0-booking", "train-1-booking"],
+    ]
+
+
+def test_two_cases_that_turn_on_one_right_say_once_that_a_booking_is_enough() -> None:
+    """Alex has the bike on the first train, and nobody says whether that train needs a
+    right for it. Then the express needs one that nothing gives, and nobody says whether
+    the local needs one. Each case names the first train. The report says once that a
+    BOOKING for the first train is enough instead."""
+    places = ["stop-0", "stop-1", "stop-2"]
+    options = [moves("train-0", "stop-0", "stop-1"), moves("express", "stop-1", "stop-2")]
+    options += [moves("local", "stop-1", "stop-2"), stays("ride", "stop-2")]
+    facts = [starts_from("alex", "stop-0"), has_object("alex", "bike"), every_use("bike")]
+    facts += [*at("train-0", 9), *at("express", 10), *at("local", 11), *at("ride", 12)]
+    facts += [every_transfer("bike"), requires_object("ride", "bike")]
+    facts += [needs_right_for("express", "bike"), needs_right_for("ride", "bike", False)]
+    locks = [lock("train-0", "alex"), lock("ride", "alex")]
+    file = trip(["alex"], places, options, facts, locks, objects=["bike"], object_rights=True)
+    found = checked(file)
+    assert cases_of(file, found)[:2] == [
+        "train-0 needs no right for bike and a right to express is found that covers bike.",
+        "train-0 and local need no right for bike.",
+    ]
+    words = report.as_text(file, found)
+    instead = "a BOOKING for it that covers bike is enough instead."
+    assert words.count(f"If train-0 does need a right for bike, {instead}") == 1
+    assert words.count(f"If local does need a right for bike, {instead}") == 1
+    assert words.count("is enough instead.") == 2
 
 
 def with_rights(rng: Random, file: File) -> File:
@@ -700,14 +924,19 @@ def with_rights(rng: Random, file: File) -> File:
 
 
 def test_both_checkers_agree_on_trips_with_rights_for_objects() -> None:
-    """On random trips with vans and FACTs about rights for the OBJECTs, the solver's search and
-    the COMPILER give the report that the reference checker gives. A plan that is shown
-    works as listed in the worst case, and it relies on each BOOKING that it names."""
+    """On random trips with FACTs about rights for the OBJECTs, the solver's search and the
+    COMPILER give the report that the reference checker gives. Some trips have vans that
+    run with nobody in them. The others have OBJECTs to fetch, to ship across and to use,
+    with hand-overs and OPTIONs that keep them. A plan that is shown works as listed in
+    the worst case, and it relies on each BOOKING that it names."""
     rng = Random(16)
     seen: dict[Answer, int] = {}
     covered = asked = 0
-    for _ in range(120):
-        file = with_rights(rng, a_trip_with_services(rng))
+    for number in range(260):
+        if number < 120:
+            file = with_rights(rng, a_trip_with_services(rng))
+        else:
+            file = with_rights(rng, a_trip_with_objects(rng, most=2, leave_out=0.08))
         found = checked(file)
         seen[found.answer] = seen.get(found.answer, 0) + 1
         if found.answer is Answer.FEASIBLE:
@@ -717,5 +946,33 @@ def test_both_checkers_agree_on_trips_with_rights_for_objects() -> None:
         covered += bool(named)
         about = ("needs no right for", "another right for")
         asked += any(each.unknown.what in about for group in found.missing for each in group)
-    assert seen[Answer.FEASIBLE] > 20 and seen[Answer.UNDETERMINED] > 20
-    assert covered > 5 and asked > 15
+    assert seen[Answer.FEASIBLE] > 60 and seen[Answer.UNDETERMINED] > 90
+    assert seen[Answer.INFEASIBLE] > 40
+    assert covered > 5 and asked > 60
+
+
+def test_the_sets_named_for_rights_are_all_the_smallest_that_are_enough() -> None:
+    """Checked by trying every set of that size and of each smaller one, on random trips with
+    FACTs about rights for the OBJECTs. Each set that a report names is enough, and it is
+    not enough with one FACT less."""
+    rng = Random(2)
+    compared = several = about_a_right = 0
+    for number in range(170):
+        if number < 70:
+            file = with_rights(rng, a_trip_with_services(rng))
+        else:
+            file = with_rights(rng, a_trip_with_objects(rng, most=1, leave_out=0.08))
+        named_sets = asked(answers.check(file))
+        for named in named_sets:
+            assert itineraries(file, with_these_at_best(file, named))
+            for left_out in named:
+                fewer = [unknown for unknown in named if unknown != left_out]
+                assert not itineraries(file, with_these_at_best(file, fewer))
+        plain = [unknown for unknown in unknowns(file) if unknown.what not in NEW]
+        if named_sets and len(named_sets[0]) <= 3 and len(plain) <= 13:
+            assert named_sets == smallest_sets(file)
+            compared += 1
+            several += len(named_sets) > 1
+            rights = ("needs no right for", "another right for")
+            about_a_right += any(u.what in rights for named in named_sets for u in named)
+    assert compared > 40 and several > 10 and about_a_right > 20

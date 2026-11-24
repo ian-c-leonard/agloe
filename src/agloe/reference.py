@@ -2373,10 +2373,13 @@ type _Ordered = tuple[
 def _asked_about(
     file: File, world: World, who: tuple[tuple[str, ...], ...], empty: Set[int] = frozenset()
 ) -> tuple[list[int], list[str]]:
-    """The OPTIONs of a plan that happen, and the OBJECTs that one of them requires or refuses.
+    """The OPTIONs of a plan that happen, and the OBJECTs that one of them asks about.
 
-    The OPTIONs are by position in the FILE. ``who`` names the PERSONs in each, and ``empty``
-    holds the OPTIONs that happen with nobody in them.
+    An OPTION asks about an OBJECT where it requires it or refuses it, and where it needs a
+    right for it that nothing gives: a PERSON who has the OBJECT hands it on first, or
+    leaves it where an OPTION keeps it. The OPTIONs are by position in the FILE. ``who``
+    names the PERSONs in each, and ``empty`` holds the OPTIONs that happen with nobody in
+    them.
     """
     happening = [index for index, persons in enumerate(who) if persons or index in empty]
     checked = world.needs | world.refuses | world.uncovered
@@ -2473,8 +2476,10 @@ def _can_have(
 
     The OPTIONs are by position in the FILE. A PERSON can have the OBJECT in an OPTION who
     has it when the TRIP starts, or might, or who takes part before that in an OPTION of
-    the plan that hands it over and does not refuse it. ``orders`` says what comes before
-    what for each PERSON. An OPTION that only might hand it over counts as one that does.
+    the plan that hands it over and does not refuse it. An OPTION that needs a right for
+    the OBJECT that nothing gives is like one that refuses it here: nobody takes the
+    OBJECT in it. ``orders`` says what comes before what for each PERSON. An OPTION that
+    only might hand it over counts as one that does.
     Nobody else has the OBJECT just before the OPTION starts: nobody comes to have it by a
     carry.
     """
@@ -2509,7 +2514,8 @@ def _can_move(
     takes part, and nobody takes it there. An OPTION that carries it can move it also where
     no PERSON can ever have it: then it lies at the PLACE where the OPTION starts. An
     OPTION with nobody in it can move it only by carrying it too: an OBJECT is handed over
-    to a PERSON who takes part.
+    to a PERSON who takes part. An OPTION that needs a right for the OBJECT that nothing
+    gives does not move it: in a plan that works, the OBJECT is never in it.
     """
     options = file.options
     holders = _can_have(file, world, orders, thing)
@@ -2518,9 +2524,11 @@ def _can_move(
     for index in happening:
         pair = (options[index].id, thing)
         action = world.does.get(pair)
+        if pair in world.uncovered:
+            continue
         if action in ("carries", "any", "might_take", "might_carry"):
             moving.add(index)
-        elif pair in world.refuses or pair in world.uncovered or index not in attended:
+        elif pair in world.refuses or index not in attended:
             continue
         elif action == "hands_over" or (action in ("keeps", "might_keep") and index in holders):
             moving.add(index)
@@ -2540,7 +2548,8 @@ def _ordered_by(
     in order. An OPTION checks the OBJECT where it requires it, or where it refuses it and a
     PERSON who takes part can have it by then, as ``_can_have`` says. Nobody else has the
     OBJECT then, so a refusal asks nothing of an OPTION with nobody else in it, wherever
-    that OPTION comes.
+    that OPTION comes. An OPTION that needs a right for the OBJECT that nothing gives
+    checks it in the same way: no PERSON who takes part has it.
 
     The second are the OPTIONs that check the OBJECT or can move it. An OBJECT that no
     OPTION of the plan can move stays where it starts. So the order of the OPTIONs that
@@ -3033,13 +3042,17 @@ def could_run_alone(
     With ``who``, they are OPTIONs that this choice of PERSONs leaves out. Such an OPTION
     has a start it can take. It requires no CAPABILITY: a requirement is about the PERSONs
     in the OPTION. And it can move an OBJECT that some OPTION of the FILE requires or
-    refuses: it carries
-    it, or might. An OPTION with nobody in it keeps nothing and hands nothing over, and it
-    meets no must. So any other one changes nothing for anybody: a plan that works with it
-    works without it, and rules 4 and 5 put the plan without it first.
+    refuses: it carries it, or might. An OPTION with nobody in it keeps nothing and hands
+    nothing over, and it meets no must. So any other one changes nothing for anybody: a
+    plan that works with it works without it, and rules 4 and 5 put the plan without it
+    first.
+
+    An OBJECT that an OPTION only needs a right for gives it no purpose. Such an OBJECT is
+    in the way only while a PERSON who takes part has it: it is handed over or carried
+    there only by a choice of the plan, and it goes along with no choice only where the
+    OPTION requires it. An OPTION with nobody in it takes nothing from a PERSON.
     """
-    checked = world.needs | world.refuses | world.uncovered
-    asked = {thing for _, thing in checked} - world.brought
+    asked = {thing for _, thing in world.needs | world.refuses} - world.brought
     carrying = ("carries", "any", "might_take", "might_carry")
     alone: list[int] = []
     for index, option in enumerate(file.options):
