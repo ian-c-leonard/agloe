@@ -33,7 +33,7 @@ function offerOf(offer) {
  * part in it, as the report words it. A right for an OBJECT is another matter.
  */
 function wholeOf(complete) {
-  if (complete === null) return "Another right to it may exist: the FILE does not say that these are all.";
+  if (complete === null) return "Another right for a PERSON to take part in it may exist: the FILE does not say that these are all.";
   const except = complete.offers.length ? `, except from ${listed(complete.offers)}` : "";
   return `The FILE lists every right for a PERSON to take part in it: nobody on the trip holds another or can get one${except}.`;
 }
@@ -88,7 +88,7 @@ export function rights(trip, report = null, stated = null) {
   const needing = (option) => trip.objects.flatMap((each) => each.rights.filter((right) => right.option === option && right.needed).map((right) => ({ id: each.id, name: each.name, record: right.record })));
   // The OBJECTs of which a FACT says that the FILE lists every right to an OPTION that
   // covers them, each with that FACT.
-  const closedFor = (option) => trip.objects.flatMap((each) => each.rights_closed.filter((closed) => closed.option === option).map((closed) => ({ name: each.name, record: closed.record })));
+  const closedFor = (option) => trip.objects.flatMap((each) => each.rights_closed.filter((closed) => closed.option === option).map((closed) => ({ name: closed.called, record: closed.record })));
   const shown = trip.rights
     .filter((each) => each.needs?.needed === true || each.bookings.length || each.offers.length || each.complete !== null || needing(each.option).length || closedFor(each.option).length)
     .map((each) => ({

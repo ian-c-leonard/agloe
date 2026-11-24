@@ -1680,17 +1680,24 @@ def _describe(error: ValidationError, shapes: dict[str, dict[str, object]]) -> s
             kinds = {
                 "complete_set": bool(keys & {"from", "to", "leaving"}),
                 "complete_for_a_want": "satisfies" in keys,
-                "complete_rights": bool(keys & {"rights_to", "offers"}),
+                # The rights to an OPTION are for the PERSONs, or for the OBJECT that the
+                # FACT names. A FACT that names an OBJECT is meant for the OBJECT, whatever
+                # else it holds.
+                "complete_rights": bool(keys & {"rights_to", "offers"})
+                and "for_object" not in keys,
+                "complete_rights_for_an_object": "for_object" in keys,
                 "complete_for_a_capability": "requires" in keys,
                 "complete_for_an_object": "requires_object" in keys,
                 "complete_transfers": "transfers" in keys,
+                "complete_rights_needed_for_an_object": "needs_right_for" in keys,
             }
             meant = [kind for kind, there in kinds.items() if there] or ["complete_set"]
             if len(meant) > 1:
                 return (
                     f"{where}: a COMPLETE set is of one kind: travel, the OPTIONs that SATISFY"
                     " a WANT, the rights to an OPTION, the OPTIONs that require a CAPABILITY,"
-                    " the OPTIONs that require an OBJECT, or the transfers of an OBJECT"
+                    " the OPTIONs that require an OBJECT, the transfers of an OBJECT, or the"
+                    " OPTIONs that need a right for an OBJECT"
                 )
             misses = [miss for miss in misses if name(miss) == meant[0]] or misses
         asked = record.get("requires")

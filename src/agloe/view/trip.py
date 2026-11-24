@@ -214,7 +214,7 @@ _OBJECT: _Shape = {
     "rights_complete": (str, _NONE),
     "rights_closed": list,
 }
-_OBJECT_CLOSED: _Shape = {"option": str, "name": str, "record": str}
+_OBJECT_CLOSED: _Shape = {"option": str, "name": str, "record": str, "called": str}
 _OBJECT_STARTS: _Shape = {"person": (str, _NONE), "place": (str, _NONE), "record": str}
 _OBJECT_NEED: _Shape = {"option": str, "name": str, "needed": bool, "record": str}
 _OBJECT_REFUSAL: _Shape = {"option": str, "name": str, "refused": bool, "record": str}
@@ -667,10 +667,13 @@ def _objects(file: File, names: Mapping[str, str]) -> list[Trip]:
     keeps it or carries it. ``rights`` holds each OPTION of which a FACT says whether it
     needs a right for the OBJECT, and ``rights_complete`` is the FACT that the FILE states
     every one of its OPTIONs that does. ``rights_closed`` holds each OPTION of which a FACT
-    says that the FILE lists every right to it that covers the OBJECT, with that FACT.
+    says that the FILE lists every right to it that covers the OBJECT, with that FACT. The
+    report names the OBJECT there as a BOOKING names it, so that no PERSON shows the same
+    name, and ``called`` is that name.
     """
     objects: list[Trip] = []
     called = _names(file.objects)
+    among_all = _names([*file.persons, *file.objects])
     for thing in file.objects:
         starts = file.object_starts(thing.id)
         needs = [(option, file.object_requirement(option.id, thing.id)) for option in file.options]
@@ -736,7 +739,12 @@ def _objects(file: File, names: Mapping[str, str]) -> list[Trip]:
                 ],
                 "rights_complete": None if ticketed is None else ticketed.id,
                 "rights_closed": [
-                    {"option": option.id, "name": names[option.id], "record": fact.id}
+                    {
+                        "option": option.id,
+                        "name": names[option.id],
+                        "record": fact.id,
+                        "called": among_all[thing.id],
+                    }
                     for option, fact in closed
                     if fact is not None
                 ],
@@ -1373,6 +1381,8 @@ def _are_objects(
                     return False
                 stated = cast("dict[str, object]", each)
                 if not cast("str", stated["name"]).strip() or not stated["record"]:
+                    return False
+                if kind == "rights_closed" and not cast("str", stated["called"]).strip():
                     return False
                 if kind == "transfers" and stated["does"] not in _DOES:
                     return False

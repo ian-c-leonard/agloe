@@ -27,7 +27,10 @@ SAYS = "The BOOKINGs and the OFFERs of the FILE, each under the OPTION that it g
 RED = " A red edge marks what the report names among what rules out every plan."
 YELLOW = " A yellow edge marks what the report names in what the FILE does not say."
 NEEDED = "People need a right to take part."
-NOT_ALL = "Another right to it may exist: the FILE does not say that these are all."
+NOT_ALL = (
+    "Another right for a PERSON to take part in it may exist:"
+    " the FILE does not say that these are all."
+)
 ALL = (
     "The FILE lists every right for a PERSON to take part in it:"
     " nobody on the trip holds another or can get one"
@@ -265,6 +268,17 @@ def test_the_rights_card_says_what_it_does_not_cover_for_an_object(tmp_path: Pat
         in text
     )
     assert (ferry["whole"], "the-car-deck-is-full" in ferry["clash"]) == (f"{ALL}.", True)
+    # Where the car is called Alex too, the card names it as the report does, with its id.
+    content["objects"][0]["name"] = "Alex"
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    assert ferry["closed"] == [
+        "The FILE lists every right to it that covers Alex (car):"
+        " nobody on the trip holds another or can get one."
+    ]
+    assert "that covers Alex (car): nobody on the trip" in text
+    content["objects"][0]["name"] = "the car"
     content["facts"] = [fact for fact in content["facts"] if fact["id"] != "the-car-deck-is-full"]
     # Nobody needs a right to take part in the ferry, and it has no BOOKING: it still needs
     # a right for the car, so it has a card.

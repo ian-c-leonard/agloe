@@ -576,6 +576,9 @@ WITH_OFFERS: Document = {
     "complete": {"rights_to": "ferry", "for_object": "car", "offers": []},
 }
 
+EXTRA: Document = {"id": "whole", "complete": {"needs_right_for": "car", "extra": "car"}}
+TWO_KINDS: Document = {"id": "whole", "complete": {"needs_right_for": "car", "transfers": "car"}}
+
 
 @pytest.mark.parametrize(
     ("facts", "problem"),
@@ -583,7 +586,10 @@ WITH_OFFERS: Document = {
         ([FULL, {**FULL, "id": "again"}], "another FACT already states this about ferry and car"),
         ([no_other_right_for("ferry", "bike")], "bike is not an OBJECT in this FILE"),
         ([no_other_right_for("train", "car")], "train is not an OPTION in this FILE"),
-        ([WITH_OFFERS], "/facts/"),
+        # The FACT names an OBJECT, so it is meant for the OBJECT: the OFFERs are what is wrong.
+        ([WITH_OFFERS], "Additional properties are not allowed ('offers' was unexpected)"),
+        ([EXTRA], "Additional properties are not allowed ('extra' was unexpected)"),
+        ([TWO_KINDS], "a COMPLETE set is of one kind"),
     ],
 )
 def test_the_format_refuses_a_set_of_rights_for_an_object_that_cannot_be_meant(
@@ -652,6 +658,11 @@ def test_a_car_with_no_ticket_on_a_full_deck_cannot_cross() -> None:
     stated = "the FILE lists every right to ferry that covers car"
     said = f"  every-right-to-ferry-for-car: {stated}: {whole}"
     assert said in report.as_text(file, found).split("\n")
+    # Where the car is called alex too, the line names it as a BOOKING does, with its id.
+    named = replace(file, objects=(replace(file.objects[0], name="alex"),))
+    stated = "the FILE lists every right to ferry that covers alex (car)"
+    said = f"  every-right-to-ferry-for-car: {stated}: {whole}"
+    assert said in report.as_text(named, checked(named)).split("\n")
     # Alex holds a seat, and a seat is still on OFFER.
     people = [needs_right("ferry"), needs_no_right("drive"), booking("ferry", "alex")]
     seats = {"id": "ferry-seats", "offer": {"option": "ferry", "places": 20}}

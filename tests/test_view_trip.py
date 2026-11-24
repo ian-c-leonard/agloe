@@ -772,7 +772,12 @@ def test_the_objects_of_the_file_are_sent_with_what_the_file_says_of_each() -> N
     # A FACT says that the FILE lists every right to the ferry that covers the car.
     sold_out = drawn(EXAMPLES / "a-car-ferry" / "the-car-deck-is-sold-out.json")
     assert sold_out["objects"][0]["rights_closed"] == [
-        {"option": "ferry", "name": "Car ferry to Muskegon", "record": "the-car-deck-is-full"}
+        {
+            "option": "ferry",
+            "name": "Car ferry to Muskegon",
+            "record": "the-car-deck-is-full",
+            "called": "the car",
+        }
     ]
     # A luggage service with no BOOKING has rights to show: it has no place for the bags.
     service = drawn(EXAMPLES / "the-bags" / "the-service-has-no-place-for-the-bags.json")
@@ -2150,7 +2155,9 @@ OBJECT: dict[str, Any] = {
     "transfers_complete": "everything-that-moves-the-key",
     "rights": [{"option": "night", "name": "night", "needed": True, "record": "night-needs-key"}],
     "rights_complete": "every-ticket-for-the-key",
-    "rights_closed": [{"option": "night", "name": "night", "record": "no-other-key-right"}],
+    "rights_closed": [
+        {"option": "night", "name": "night", "record": "no-other-key-right", "called": "the key"}
+    ],
 }
 
 

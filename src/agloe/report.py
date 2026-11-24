@@ -1491,7 +1491,8 @@ def _record(file: File, clock: Clock, record: str) -> str:
             closed += f", except from {_listed(found.offers)}"
         return f"the FILE lists every right for a PERSON to take part in {name}: {closed}"
     if isinstance(found, CompleteRightsFor):
-        thing = _names(file.objects)[found.object]
+        # The OBJECT is named as a BOOKING names it: no PERSON shows the same name.
+        thing = _names([*file.persons, *file.objects])[found.object]
         closed = "nobody on the trip holds another or can get one"
         return f"the FILE lists every right to {name} that covers {thing}: {closed}"
     return _cutoff(file, name, found)
