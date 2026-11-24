@@ -453,6 +453,18 @@ class _Search:
         self.no_time = reference.NoTimeBetween(file, world)
         self.have_to = _have_to_take(file, world, self.does)
         self.usable = [each.fixed_start is not None or each.free_start for each in self.terms]
+        # Where another transfer brings an OBJECT, the model does not follow it. An OPTION
+        # that takes it along with no choice, or might, cannot happen where it needs a right
+        # for the OBJECT and nothing covers it: the transfer puts the OBJECT at hand, and
+        # no transfer covers it.
+        for index, option in enumerate(file.options):
+            if any(
+                thing.id in world.brought
+                and (option.id, thing.id) in world.uncovered
+                and reference.goes_along(world, option.id, thing.id) is not None
+                for thing in file.objects
+            ):
+                self.usable[index] = False
         self.endless = [each.longest is None for each in self.terms]
         self.moves = [option.origin != option.destination for option in file.options]
         self.lasts = [each.shortest for each in self.terms]

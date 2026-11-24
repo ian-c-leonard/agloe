@@ -1054,7 +1054,31 @@ def _each_alone(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
         *_requirements(file, world, taking_part),
         *_within(file, itinerary),
         *_rights(file, world, taking_part),
+        *_taken_along(file, world, itinerary),
     ]
+
+
+def _taken_along(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
+    """The sixteenth CONSTRAINT for an OBJECT that another transfer might bring.
+
+    Nothing follows such an OBJECT through a plan: the transfer puts it at hand where the
+    plan needs it, and takes it from a PERSON before an OPTION that needs a right for it.
+    One thing no transfer cures. An OPTION that requires the OBJECT and carries it takes
+    it along whenever it happens, and one of which nobody knows whether it requires the
+    OBJECT might. Where such an OPTION needs a right for the OBJECT and nothing covers the
+    OBJECT there, it cannot happen. The Broken names everybody who takes part.
+    """
+    out: list[Broken] = []
+    for step in itinerary:
+        if step.option is None:
+            continue
+        for thing in file.objects:
+            pair = (step.option, thing.id)
+            unmet = thing.id in world.brought and pair in world.uncovered
+            if unmet and goes_along(world, *pair) is not None:
+                who = _in_file_order_of_persons(file, step.persons)
+                out.append(Broken(Constraint.COVERED, step.option, who, object=thing.id))
+    return out
 
 
 def _rights(file: File, world: World, taking_part: Mapping[str, tuple[str, ...]]) -> list[Broken]:

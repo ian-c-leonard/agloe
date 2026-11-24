@@ -19,9 +19,11 @@ from agloe.reference import (
     Broken,
     Constraint,
     Step,
+    Unknown,
     best_case,
     broken_as_listed,
     unknowns,
+    with_these_at_best,
     worst_case,
 )
 from tests.stories import (
@@ -416,6 +418,31 @@ def test_a_service_with_nobody_in_it_needs_the_right_for_what_it_carries() -> No
     assert "  service-booking: a BOOKING for service covers bags\n" in words
     needs = "    service needs a right for bags. Just before it starts: at hotel."
     assert f"{needs} service-booking covers bags.\n" in words
+
+
+def test_another_transfer_does_not_cover_an_object_that_the_option_takes_along() -> None:
+    """The ferry requires the car and carries it, so the car goes along whenever the ferry
+    sails. The ferry needs a right for the car, and nothing covers it. The FILE does not say
+    that it states every transfer of the car. Another transfer can put the car anywhere,
+    and that changes nothing: the ferry still takes the car, with no right. So the trip
+    works only if a right is found."""
+    options = [moves("ferry", "milwaukee", "muskegon")]
+    facts = [*at("ferry", 6, 0, "PT2H30M"), starts_from("alex", "milwaukee")]
+    facts += [lies_at("car", "milwaukee"), carries("ferry", "car"), requires_object("ferry", "car")]
+    facts += [every_use("car"), needs_right_for("ferry", "car"), every_right_for("car")]
+    places, locks = ["milwaukee", "muskegon"], [lock("ferry", "alex")]
+    file = trip(["alex"], places, options, facts, locks, objects=["car"], object_rights=True)
+    world = with_these_at_best(file, [Unknown("another transfer", about="car")])
+    assert world.brought == {"car"} and world.uncovered == {("ferry", "car")}
+    assert not reference.any_works(file, world)
+    assert not compiler.works(file, world)
+    sailing = Step("ferry", "milwaukee", "muskegon", ("alex",), seconds(6), seconds(8, 30))
+    lacks = Broken(Constraint.COVERED, "ferry", ("alex",), object="car")
+    assert broken_as_listed(file, world, (sailing,)) == [lacks]
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    asked = [[each.unknown.what for each in group] for group in found.missing]
+    assert asked == [["another right for"]]
 
 
 def with_rights(rng: Random, file: File) -> File:
