@@ -191,34 +191,40 @@ def test_each_purchase_is_an_item_of_its_own(tmp_path: Path) -> None:
     assert listed["says"] == "2 things are open. Times are on the clocks of America/Chicago."
 
 
-def changed(tmp_path: Path, example: str, change: Any) -> tuple[Open, str]:
-    """What the page lists as open about an example that a test changes, and the report."""
+def asked_of(tmp_path: Path, example: str, change: Any) -> tuple[Trip, dict[str, Any], str]:
+    """An example that a test changes: what is sent of it, and the report as JSON and in words."""
     document = json.loads((EXAMPLES / f"{example}.json").read_text())
     change(document)
     path = tmp_path / "trip.json"
     path.write_text(json.dumps(document))
-    sent, found, text = in_words(path)
+    return in_words(path)
+
+
+def changed(tmp_path: Path, example: str, change: Any) -> tuple[Open, str]:
+    """What the page lists as open about an example that a test changes, and the report."""
+    sent, found, text = asked_of(tmp_path, example, change)
     (listed,) = all_open([sent], [found], [text])
     return listed, text
+
+
+def no_tickets(document: dict[str, Any]) -> None:
+    """Nobody has a ticket for the flight yet: an OFFER has two places, at a price."""
+    money = {"id": "trip-money", "name": "the trip money", "persons": ["alex", "sam"]}
+    document["budgets"] = [{**money, "currencies": ["USD"]}]
+    seats = {
+        "option": "flight",
+        "places": 2,
+        "prices": [{"amount": "120.00", "currency": "USD"}],
+    }
+    document["facts"] = [
+        {"id": "flight-seats", "offer": seats} if fact["id"] == "flight-tickets" else fact
+        for fact in document["facts"]
+    ]
 
 
 def test_a_plan_with_both_kinds_of_warning_says_what_each_means(tmp_path: Path) -> None:
     """The train to the flight can take 20 min longer, and nobody has a ticket for the flight
     yet. The report says of its lines marked "!" which are of which kind."""
-
-    def no_tickets(document: dict[str, Any]) -> None:
-        money = {"id": "trip-money", "name": "the trip money", "persons": ["alex", "sam"]}
-        document["budgets"] = [{**money, "currencies": ["USD"]}]
-        seats = {
-            "option": "flight",
-            "places": 2,
-            "prices": [{"amount": "120.00", "currency": "USD"}],
-        }
-        document["facts"] = [
-            {"id": "flight-seats", "offer": seats} if fact["id"] == "flight-tickets" else fact
-            for fact in document["facts"]
-        ]
-
     listed, text = changed(tmp_path, "flight-home/works-but-risky", no_tickets)
     warnings, choices = listed["groups"]
     # Both lines of the report are over the warnings, in the report's order.
@@ -420,10 +426,17 @@ def test_a_trip_with_no_report_lists_nothing() -> None:
     assert all_open([cast("Trip", sent)], [{"answer": "MAYBE"}]) == [nothing]
 
 
-def test_a_report_whose_words_and_json_disagree_lists_nothing() -> None:
+def test_a_report_whose_words_and_json_disagree_lists_nothing(tmp_path: Path) -> None:
     """The list says what the report in words says of what the report as JSON names. Where
     the two do not fit together, it says nothing: half a list would read as the whole."""
     nothing: Open = {"says": "", "count": 0, "clash": False, "asked": False, "groups": []}
+    # Of two lines that the report marks with "!", one is under no step. The other one
+    # alone would be half a list.
+    sent, found, text = asked_of(tmp_path, "flight-home/works-but-risky", no_tickets)
+    late = "    ! Alex and Sam would be 5 min too late for this."
+    assert late in text
+    assert all_open([sent], [found], [text.replace(late, f"\n{late}")]) == [nothing]
+    assert all_open([sent], [found], [text])[0]["count"] == 3
     for name, old, new in [
         # The words name one record fewer than the JSON.
         ("flight-home/cannot-work", "  lock-flight: ", "  another: "),
