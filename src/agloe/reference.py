@@ -1349,13 +1349,20 @@ def taking_a_place(file: File, world: World, itinerary: Itinerary) -> dict[str, 
     might be in the OPTION: nobody knows where it is, or whether the OPTION takes it along.
     It has the place either way, and a report says that it might have to be bought.
     """
+    return places_taken(file, world, itinerary)[0]
+
+
+def places_taken(
+    file: File, world: World, itinerary: Itinerary
+) -> tuple[dict[str, dict[str, bool]], dict[str, frozenset[frozenset[str]]]]:
+    """What ``taking_a_place`` and ``taken_together`` give, from one walk through the plan."""
     order = {thing.id: number for number, thing in enumerate(file.objects)}
-    _, followed, _ = _objects(file, world, list(enumerate(itinerary)))
+    _, followed, together = _objects(file, world, list(enumerate(itinerary)))
     _, moved = _where_a_transfer_brings_it(file, world, itinerary)
     taking: dict[str, dict[str, bool]] = {}
     for option, thing, _, sure in sorted([*followed, *moved], key=lambda each: order[each[1]]):
         taking.setdefault(option, {})[thing] = sure
-    return taking
+    return taking, together
 
 
 def taken_together(
@@ -1372,7 +1379,7 @@ def taken_together(
     An OBJECT that another transfer might bring is left out: it can take every place that
     ``taking_a_place`` gives for it.
     """
-    return _objects(file, world, list(enumerate(itinerary)))[2]
+    return places_taken(file, world, itinerary)[1]
 
 
 def _with_no_place(

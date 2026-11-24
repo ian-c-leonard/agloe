@@ -63,4 +63,4 @@ The money of this plan, by currency:
   USD: 38.00 paid; 90.00 still to buy (car-deck); up to 10.00 more, depending on which OPTIONs need a right and on where each OBJECT is (bike-rack and afternoon-bike-rack)
 
 The caps:
-  trip-money-cap: at most 140.00 USD from the trip money: 38.00 paid; 90.00 still to buy; up to 10.00 more to buy, depending on which OPTIONs need a right and on where each OBJECT is; 2.00 left
+  trip-money-cap: at most 140.00 USD from the trip money: 38.00 paid; 90.00 still to buy; up to 10.00 more to buy, depending on which OPTIONs need a right and on where each OBJECT is; at least 2.00 left

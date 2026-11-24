@@ -286,6 +286,19 @@ export function togetherIn(report) {
   return Array.isArray(stated) && stated.every(isOne) ? stated : [];
 }
 
+/**
+ * The OBJECTs that take places in one set of OPTIONs or in another in the one plan that a
+ * report gives for each case in which the trip works: a list of their ids for each case, at
+ * the place of the case. Only a report with one plan for each of its cases holds any.
+ */
+export function togetherInPlans(report) {
+  const cases = casesIn(report);
+  const plans = cases.length && Array.isArray(report.plans) && report.plans.length === cases.length ? report.plans : [];
+  const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
+  const named = (plan) => (isRecord(plan) && Array.isArray(plan.places_together) && plan.places_together.every((each) => isRecord(each) && typeof each.object === "string") ? plan.places_together : []);
+  return plans.map((plan) => named(plan).map((each) => each.object));
+}
+
 /** The cases that need something for which `about` says yes, as their places among the cases. */
 export function casesAbout(needed, about) {
   return needed.flatMap((needs, at) => (needs.some(about) ? [at] : []));

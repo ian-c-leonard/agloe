@@ -355,6 +355,21 @@ def _cap_as_json(file: File, row: CapRow) -> dict[str, object]:
         "to_buy": _amount(row.to_buy, places),
         "to_buy_at_most_if_needed": _amount(row.if_needed, places),
         "left": _amount(row.left, places),
+        **(
+            {
+                "left_for_places": [
+                    {
+                        "option": option,
+                        "offer": offer,
+                        "object": thing,
+                        "left": _amount(units, places),
+                    }
+                    for option, offer, thing, units in row.left_for
+                ]
+            }
+            if row.left_for
+            else {}
+        ),
     }
 
 
@@ -784,6 +799,8 @@ def as_text(file: File, report: Report) -> str:
                 " a BOOKING paid from its BUDGET in its currency, and each place that its BUDGET"
                 " pays for. All of it has to fit in what the cap has left.",
             ]
+            if any(row.left_for for plan in report.plans for row in plan.caps):
+                lines[-1] += " A place of which a line above says what it can cost has that much."
         if _turns_on_who_pays(report):
             one_way = "Who buys which place is from one plan that works in that case. "
             lines += ["", *_budgets(file, one_way)]
@@ -1676,7 +1693,9 @@ def _cap_in_words(file: File, row: CapRow, rights: Sequence[Cover] = ()) -> str:
         where = " and on where each OBJECT is" if there else ""
         parts.append(f"up to {more} more to buy, depending on which OPTIONs need a right{where}")
     # A BOOKING that might have charged the cap is counted in full, so more may be left.
-    parts.append(f"{'at least ' if known else ''}{_amount(row.left, places)} left")
+    # So is a place that an OBJECT only might take: more is left if it is not there.
+    least = known or (there and row.if_needed)
+    parts.append(f"{'at least ' if least else ''}{_amount(row.left, places)} left")
     pot = _names(file.budgets)[cap.budget]
     return f"{cap.id}: at most {cap.limit} from {pot}: {'; '.join(parts)}"
 
@@ -1729,14 +1748,17 @@ def _plan_in_words(file: File, plan: Plan) -> list[str]:
         ]
         if row.to_buy:
             terms.append(f"{_amount(row.to_buy, places)} still to buy")
+        # A place for an OBJECT that only might be in its OPTION is bought if it is there.
+        # It is counted, so more is left if the OBJECT is not there.
+        there = bool(row.if_needed) and any(
+            _charged_to(cap, cover) and cover.might for cover in plan.buys
+        )
         if row.if_needed:
-            # A place for an OBJECT that only might be in its OPTION is bought if it is there.
-            there = any(_charged_to(cap, cover) and cover.might for cover in plan.buys)
             or_there = " or an OBJECT is there" if there else ""
             more = _amount(row.if_needed, places)
             terms.append(f"up to {more} more if OPTIONs need a right{or_there}")
         counted = "; ".join(terms) or "nothing so far"
-        left = f"{_amount(row.left, places)} {cap.limit.currency}"
+        left = f"{'at least ' if there else ''}{_amount(row.left, places)} {cap.limit.currency}"
         open_ended = [booking for booking, units in row.might if units and booking not in row.asked]
         names = _listed(open_ended, "or")
         more = f", and more once the FILE says that {names} charged it less"
@@ -1744,6 +1766,14 @@ def _plan_in_words(file: File, plan: Plan) -> list[str]:
             f"{cap.id}, on {pots[cap.budget]}: {counted}, of at most {cap.limit}."
             f" That leaves {left} for whatever else is charged to it{more if open_ended else ''}."
         )
+        # A place with no price yet, for an OBJECT whose places are not all bought together,
+        # can cost more than that: it is never bought with every place counted here.
+        for _, offer, thing, units in row.left_for:
+            lines[-1] += (
+                f" A place from {offer} can cost up to {_amount(units, places)}"
+                f" {cap.limit.currency}: the places for {shown[thing]} are not all bought"
+                " together."
+            )
     return lines
 
 

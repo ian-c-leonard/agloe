@@ -58,7 +58,7 @@ from agloe.reference import (
     longest_case,
     no_better_than,
     one_way_each,
-    taken_together,
+    places_taken,
     taking_a_place,
     unknowns,
     way_to_pay,
@@ -149,6 +149,11 @@ class CapRow:
     allows after all of that, with each BOOKING in ``might`` counted in full unless the set
     asks about it. Whatever else comes to be charged to the cap has to fit in it. The
     amounts are whole ten-thousandths of the cap's currency.
+
+    ``left_for`` is for a place with no price yet that covers an OBJECT: the OPTION, the
+    OFFER, the OBJECT, and what the cap allows for that place, where that is more than
+    ``left``. The cap counts the set of the OBJECT's places that costs the most, and the
+    place is bought only with the others of its own sets.
     """
 
     cap: str
@@ -158,6 +163,7 @@ class CapRow:
     to_buy: int
     if_needed: int
     left: int
+    left_for: tuple[tuple[str, str, str, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -437,8 +443,7 @@ def _covers(file: File, world: World, itinerary: Itinerary) -> tuple[Cover, ...]
     """
     order = {person.id: number for number, person in enumerate(file.persons)}
     taking_part = {step.option: step.persons for step in itinerary if step.option is not None}
-    taking = taking_a_place(file, world, itinerary)
-    together = taken_together(file, world, itinerary)
+    taking, together = places_taken(file, world, itinerary)
     paying = way_to_pay(file, world, taking_part, taking, together)
     if paying is None:
         raise AssertionError("a plan that works has no way to pay")
@@ -1101,8 +1106,36 @@ def _cap_rows(file: File, covers: Sequence[Cover], asked: Sequence[str]) -> tupl
         named = tuple(booking for booking, _ in might if booking in asked)
         besides = sum(units or 0 for booking, units in might if booking not in named)
         left = cap.limit.units - paid - besides - sure - most
-        rows.append(CapRow(cap.id, paid, might, named, sure, most, left))
+        pot = next(each for each in file.budgets if each.id == cap.budget)
+        left_for = tuple(
+            (cover.option, cover.by, cover.object, left + spared)
+            for cover in covers
+            if cover.to_buy and cover.price is None and cover.object is not None
+            if cover.object in pot.objects and (spared := _spared_for(mine, cover))
+        )
+        rows.append(CapRow(cap.id, paid, might, named, sure, most, left, left_for))
     return tuple(rows)
+
+
+def _spared_for(priced: Sequence[Cover], place: Cover) -> int:
+    """What a cap counts for the places of an OBJECT and would not need beside one place.
+
+    ``priced`` are the purchases that the cap counts. Of an OBJECT that takes places in one
+    set of OPTIONs or in another, it counts the set that costs the most. ``place`` has no
+    price yet, and it is bought only with the other places of the sets that hold its
+    OPTION. So what the dearest set costs beyond the dearest of those is room for it.
+    """
+    if not place.together:
+        return 0
+    theirs = [cover for cover in priced if cover.object == place.object]
+    costs = [
+        sum(c.price.units for c in theirs if c.price and c.option in some)
+        for some in place.together
+    ]
+    with_it = [
+        cost for cost, some in zip(costs, place.together, strict=True) if place.option in some
+    ]
+    return max(costs) - max(with_it)
 
 
 def bought_if_needed(file: File, covers: Sequence[Cover]) -> list[Cover]:

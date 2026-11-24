@@ -13,7 +13,7 @@
 //
 // Nothing here judges a TRIP. It finds what the report already says, line by line.
 
-import { boughtIn, cappedIn, casesIn, listed, notAtHandIn, objectsIn, requirementsIn, takenIn, toBuyIn, togetherIn } from "./named.js";
+import { boughtIn, cappedIn, casesIn, listed, notAtHandIn, objectsIn, requirementsIn, takenIn, toBuyIn, togetherIn, togetherInPlans } from "./named.js";
 
 /**
  * A line that shows one step of a plan: "  2:00 pm to 3:00 pm: Museum visit, Alex and Sam". A
@@ -40,6 +40,17 @@ const TO_BUY = /^ {4}! .+ still ha(?:s|ve) to buy a right to this( if it needs o
 const TO_COVER = /^ {4}! A right to this (might )?still ha(?:s|ve) to be bought for .+, from .+\.$/;
 /** How the line starts that gives one plan for a case: who buys which place. */
 const ONE_PLAN = "One plan that works then: ";
+/** How the line starts that says which places of an OBJECT are bought together at most. */
+const TOGETHER = "Of the places for ";
+
+/**
+ * The OFFER that a warning about a purchase names: the id after the first ", from " that is in
+ * no name. A name with a comma in it is in quotation marks, and an id has none.
+ */
+function offerIn(text) {
+  const found = /, from ([a-z0-9]+(?:-[a-z0-9]+)*)(?:, |\.$)/.exec(text.replace(/"(?:[^"\\]|\\.)*"/g, '""'));
+  return found === null ? null : found[1];
+}
 /** The line above the sums of a plan in each currency. */
 const SUMS = "The money of this plan, by currency:";
 /** The line above what a plan charges to each cap. */
@@ -125,8 +136,8 @@ export function lines(text, report, trip) {
   // BUDGET, each have their own line. Where the warnings under a step and the purchases of
   // the report as JSON do not agree one by one, none of them is tied: in the OFFER, in
   // whether the place is for OBJECTs, and in whether the right only might be needed. A
-  // name in the line can hold ", from " itself, so the line is not cut there: it has to
-  // hold ", from " and the id of the OFFER, and then end or go on with a comma.
+  // name in the line can hold ", from " itself: `offerIn` reads the OFFER outside every
+  // name.
   const known = new Set((trip === null ? [] : trip.objects).map((each) => each.id));
   const places = new Map();
   for (const line of found) {
@@ -140,7 +151,7 @@ export function lines(text, report, trip) {
     const buys = toBuyIn(report).filter((buy) => buy.option === trip.steps[step].option);
     const things = (buy) => (Array.isArray(buy.objects) ? buy.objects : null);
     const agrees = (each, buy) => {
-      const named = each.line.text.endsWith(`, from ${buy.offer}.`) || each.line.text.includes(`, from ${buy.offer}, `);
+      const named = offerIn(each.line.text) === buy.offer;
       const covered = things(buy);
       if (!named || (covered !== null) !== each.covers || (buy.only_if_needed === true) !== each.might) return false;
       return covered === null || covered.every((id) => known.has(id));
@@ -178,22 +189,30 @@ export function lines(text, report, trip) {
   // The one plan that the report gives for a case is under the line of the case, further in.
   // It is tied to the OFFERs that somebody buys a place of in that plan. Under it, the report
   // states each cap with what that plan charges to it, on a line that starts with the id of
-  // the cap. Each of those is tied to its cap.
+  // the cap. Each of those is tied to its cap. Between the two, one line for each OBJECT of
+  // which the report as JSON says in which OPTIONs it takes places together says which of
+  // its places are bought together at most. Those are tied to their OBJECTs, where the
+  // words hold as many of them as that.
   const bought = boughtIn(report);
   const capped = cappedIn(report);
+  const inSeveral = togetherInPlans(report);
   found.forEach((line, at) => {
     if (line.case === null) return;
     const offers = bought[line.case] ?? [];
     const caps = capped[line.case] ?? [];
+    const things = inSeveral[line.case] ?? [];
+    const together = [];
     const inset = (text) => text.length - text.trimStart().length;
     for (let next = at + 1; next < found.length && found[next].text.trim() !== "" && inset(found[next].text) > inset(line.text); next += 1) {
       found[next].under = line.case;
       if (!free(found[next])) continue;
       const words = found[next].text.trimStart();
       if (words.startsWith(ONE_PLAN)) found[next].about = offers.map((offer) => `offer:${offer}`);
+      if (words.startsWith(TOGETHER)) together.push(found[next]);
       const cap = caps.find((id) => words.startsWith(`${id}, on `));
       if (cap !== undefined) found[next].about = [`cap:${cap}`];
     }
+    if (together.length === things.length && things.every((id) => known.has(id))) together.forEach((each, n) => (each.about = [`object:${things[n]}`]));
   });
   // The money of a plan. One line names the BOOKINGs that state no payment: it is about each
   // of them. Under their heading, one line for each currency sums what the plan pays in it:

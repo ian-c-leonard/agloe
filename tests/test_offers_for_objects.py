@@ -83,7 +83,10 @@ from tests.stories import (
     starts_at,
     starts_from,
     stays,
+    takes,
     trip,
+    trip_starts,
+    way,
 )
 from tests.test_object_rights import checked, without
 from tests.test_objects import (
@@ -96,6 +99,7 @@ from tests.test_objects import (
     at,
     every_chain,
     smallest_sets,
+    whenever,
     worlds_to_try,
 )
 from tests.test_where_a_path_ends import has_no_record_to_spare
@@ -1349,7 +1353,7 @@ def test_a_place_that_an_object_only_might_need_reads_as_one_that_might_be_bough
     assert (
         "  money-cap: at most 30.00 USD from money: 0.00 paid; 0.00 still to buy; up to 10.00"
         " more to buy, depending on which OPTIONs need a right and on where each OBJECT is;"
-        " 20.00 left" in in_words(capped)
+        " at least 20.00 left" in in_words(capped)
     )
     # Where Alex has the bike, the place is sure.
     sure = a_train(has_object("alex", "bike"), caps=locked)
@@ -1524,7 +1528,7 @@ def test_a_bike_that_one_of_two_travelers_has_takes_a_place_on_one_train() -> No
         " OBJECT is (north-rack and south-rack)",
         "  money-cap: at most 10.00 USD from money: 0.00 paid; 0.00 still to buy; up to 10.00"
         " more to buy, depending on which OPTIONs need a right and on where each OBJECT is;"
-        " 0.00 left",
+        " at least 0.00 left",
         'WARNING: not everything is booked yet. A line marked "!" that names an OFFER says'
         " which OBJECT might still need a right. Only a BOOKING secures one.",
     ):
@@ -1599,7 +1603,8 @@ def test_a_plan_for_a_case_says_which_places_are_never_both_bought() -> None:
     assert lines[start + 2 : start + 4] == [
         "     Of the places for bike, at most one has to be bought: for north or south.",
         "     money-cap, on money: up to 10.00 more if OPTIONs need a right or an OBJECT is"
-        " there, of at most 30.00 USD. That leaves 20.00 USD for whatever else is charged to it.",
+        " there, of at most 30.00 USD. That leaves at least 20.00 USD for whatever else is"
+        " charged to it.",
     ]
     plans = cast("list[dict[str, object]]", report.as_json(file, checked(file))["plans"])
     together = [{"object": "bike", "options": [["north"], ["south"]]}]
@@ -1643,6 +1648,54 @@ def test_the_plan_shown_has_no_step_that_only_a_wrong_count_asks_for() -> None:
     found = checked(file)
     assert found.answer is Answer.FEASIBLE and found.robust
     assert [step.option for step in found.itinerary] == ["north", "south"]
+
+
+def test_the_plan_shown_is_the_first_though_the_model_counts_less() -> None:
+    """Bea has to be at a show with the bag, and two trains go there. Either hands the bag
+    to its rider. The first charges 10 dollars for the bag and for the bike, the show
+    charges 10 for the bike, and the money may spend 20. Nobody knows where the bike is.
+    Cy has to run a courier that can carry the bag, and gets to it by one slow WAY or by
+    two quick ones.
+
+    On the first train, Bea pays for the bag and might pay for the bike, and again at the
+    show: 30 dollars. The model counts 20, and takes that train with the slow WAY. The
+    rules make a plan of that choice with the two quick WAYs, so that the courier brings
+    the bag. That plan works, and it takes part five times. The second train needs four,
+    and that is the plan shown."""
+    options = [moves("first", "p", "d"), moves("second", "p", "d")]
+    options += [stays("show", "d"), moves("courier", "p", "d")]
+    stated = [*at("first", 9), *at("second", 9), *at("show", 10), *whenever("courier", "PT30M")]
+    stated += [starts_from("bea", "p"), starts_from("cy", "q"), lies_at("bag", "p")]
+    stated += [requires_object("show", "bag"), every_use("bag"), every_use("bike")]
+    stated += [hands_over("first", "bag"), hands_over("second", "bag"), carries("courier", "bag")]
+    stated += [
+        each(thing) for thing in ("bag", "bike") for each in (every_transfer, every_right_for)
+    ]
+    stated += [needs_right_for("first", "bike"), needs_right_for("first", "bag")]
+    stated += [needs_right_for("show", "bike"), offer("show", 2, "show-places", objects=["bike"])]
+    stated.append(offer("first", 2, "first-places", objects=["bike", "bag"]))
+    stated += [takes("direct", "PT3H"), takes("hop", "PT10M"), takes("skip", "PT10M")]
+    ways = [way("direct", "q", "p"), way("hop", "q", "r"), way("skip", "r", "p")]
+    decisions = [trip_starts(8), lock("show", "bea"), lock("courier", "cy")]
+    file = trip(
+        ["bea", "cy"],
+        ["p", "q", "r", "d"],
+        options,
+        stated,
+        [*decisions, cap("money", "20.00 USD")],
+        ways=ways,
+        budgets=[budget("money", "bea", "cy", objects=["bike", "bag"])],
+        objects=["bag", "bike"],
+        object_rights=True,
+    )
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [(step.option or step.way, step.persons) for step in found.itinerary] == [
+        ("direct", ("cy",)),
+        ("second", ("bea",)),
+        ("show", ("bea",)),
+        ("courier", ("cy",)),
+    ]
 
 
 def refusals_of_the_rules(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
@@ -1692,6 +1745,53 @@ def test_the_model_counts_each_place_that_an_object_is_sure_to_take(
     enough = trains("20.00", rides, known, *locker, options=[stays("locker", "c")], transfers=False)
     assert compiler.shown(enough, worst_case(enough)) is not None
     assert refusals == [False]
+
+
+def test_a_place_with_no_price_can_cost_what_the_places_it_is_never_bought_with_cost() -> None:
+    """Alex and Jo take different trains, and the money may spend 10 dollars. The south rack
+    costs 10, and nobody knows what the north rack costs. The bike is on one train at
+    most. So the north rack can cost 10 dollars too, though the cap has nothing left once
+    the south rack is counted. The report says so, and both checkers agree with it."""
+
+    def with_the_north_rack_at(price: Money | None) -> File:
+        file = two_trains("10.00")
+        facts = tuple(
+            replace(fact, price=price)
+            if isinstance(fact, Offer) and fact.id == "north-rack"
+            else fact
+            for fact in file.facts
+        )
+        return replace(file, facts=facts)
+
+    unknown = with_the_north_rack_at(None)
+    found = checked(unknown)
+    assert found.answer is Answer.UNDETERMINED
+    assert [needed.unknown for needed in found.missing[0]] == [
+        Unknown("price", "north", about="north-rack")
+    ]
+    (row,) = found.plans[0].caps
+    assert (row.if_needed, row.left) == (100000, 0)
+    assert row.left_for == (("north", "north-rack", "bike", 100000),)
+    lines = in_words(unknown)
+    assert (
+        "     money-cap, on money: up to 10.00 more if OPTIONs need a right or an OBJECT is"
+        " there, of at most 10.00 USD. That leaves at least 0.00 USD for whatever else is"
+        " charged to it. A place from north-rack can cost up to 10.00 USD: the places for bike"
+        " are not all bought together." in lines
+    )
+    assert any(
+        line.endswith(" A place of which a line above says what it can cost has that much.")
+        for line in lines
+    )
+    said = cast("list[dict[str, Any]]", report.as_json(unknown, found)["plans"])
+    assert said[0]["caps"][0]["left_for_places"] == [
+        {"option": "north", "offer": "north-rack", "object": "bike", "left": "10.00"}
+    ]
+    # The other cases of the report have no such place, and say nothing of one.
+    assert all("left_for_places" not in plan["caps"][0] for plan in said[1:])
+    assert checked(with_the_north_rack_at(Money(Decimal("10.00"), "USD"))).answer is Answer.FEASIBLE
+    dearer = with_the_north_rack_at(Money(Decimal("10.01"), "USD"))
+    assert checked(dearer).answer is Answer.UNDETERMINED
 
 
 PLACES = [

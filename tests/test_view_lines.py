@@ -23,7 +23,7 @@ from agloe import compiler, report
 from agloe.file import File, parse, read
 from agloe.view.trip import shown
 from tests.stories import EXAMPLES, budget, needs_right, offer
-from tests.test_offers_for_objects import a_crossing, car_deck
+from tests.test_offers_for_objects import a_crossing, car_deck, two_trains
 
 FILES = sorted(
     path for path in EXAMPLES.rglob("*.json") if not path.name.endswith(".expected.json")
@@ -369,6 +369,12 @@ def test_a_line_about_a_place_is_tied_whatever_the_name_of_the_budget_that_pays(
     unlike = {**asked["report"], "to_buy": [{**seats, "only_if_needed": True}, deck]}
     (other,) = lines_of([{**asked, "report": unlike}])
     assert all(line["about"] == [] for line in other if line["warns"])
+    # A word of the name is no OFFER, though ", from " comes before it and a comma after it.
+    named_so = {**asked["report"], "to_buy": [seats, {**deck, "offer": "savings"}]}
+    asked["text"] = asked["text"].replace("from savings", "from savings, for rail")
+    (other,) = lines_of([{**asked, "report": named_so}])
+    assert any('"Travel fund, from savings, for rail"' in line["text"] for line in other)
+    assert all(line["about"] == [] for line in other if line["warns"])
 
 
 def test_the_line_about_places_that_are_bought_together_is_tied_to_its_object() -> None:
@@ -385,6 +391,28 @@ def test_the_line_about_places_that_are_bought_together_is_tied_to_its_object() 
     (other,) = lines_of([{**asked, "report": said}])
     under = other[[line["text"] for line in other].index("Where each OBJECT is:") + 1 :]
     assert all(line["about"] == [] for line in under if line["text"].startswith("  the "))
+
+
+def test_the_line_about_places_under_a_case_is_tied_to_its_object() -> None:
+    """Nobody knows the price of a seat, and the plan for each case has a place for the
+    bike on two trains. Under each case, the line that says that one of them is bought at
+    most is about the bike."""
+    seats = [needs_right("north"), offer("north", 5, "seats", None)]
+    seats.append({"id": "south-open", "option": "south", "needs_right": False})
+    asked = asked_about(two_trains("30.00", *seats, rights=True))
+    assert asked["report"]["answer"] == "UNDETERMINED"
+    (found,) = lines_of([asked])
+    said = [line for line in found if line["text"].lstrip().startswith("Of the places for ")]
+    assert len(said) == len(asked["report"]["plans"]) > 1
+    assert all(line["about"] == ["object:bike"] and line["under"] is not None for line in said)
+    # Where the report as JSON names no such OBJECT for a plan, the line is tied to nothing.
+    plans = [
+        {key: value for key, value in plan.items() if key != "places_together"}
+        for plan in asked["report"]["plans"]
+    ]
+    (other,) = lines_of([{**asked, "report": {**asked["report"], "plans": plans}}])
+    said = [line for line in other if line["text"].lstrip().startswith("Of the places for ")]
+    assert said and all(line["about"] == [] for line in said)
 
 
 def test_the_plan_that_a_report_gives_for_a_case_is_tied_to_the_offers_it_buys_from() -> None:

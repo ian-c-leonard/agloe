@@ -53,9 +53,11 @@ type _Falls = dict[tuple[int, int, int], int]
 type _InOrder = tuple[int, ...]
 type _Empty = frozenset[int]  # the OPTIONs that happen with nobody in them
 type _Choice = tuple[_Who, _Orders, _By | None, _Falls | None, _InOrder | None, _Empty]
-# A choice that the rules refuse: the OPTIONs each PERSON does, in order, the OPTIONs that
-# happen with nobody in them, and the open pairs that the solver chose to hold.
-type _Refused = tuple[_Orders, _Empty, frozenset[tuple[str, str]]]
+# What the rules said of a choice of the solver: the OPTIONs each PERSON does, in order, the
+# OPTIONs that happen with nobody in them, and the open pairs that the solver chose to hold.
+# Then None where the rules refuse the choice, or what rules 4 and 5 count for the first
+# ITINERARY that the rules make of it, where that is more than the model thought.
+type _Learned = tuple[_Orders, _Empty, frozenset[tuple[str, str]], int | None]
 # What the solver answered for each model it was asked about, by the digest of the model.
 type _Asked = dict[bytes, tuple[cp_model.CpSolver, object]]
 type _Amount = cp_model.LinearExpr | int  # seconds: a plain number, or one the solver works out
@@ -113,16 +115,33 @@ def shown(file: File, world: World) -> Itinerary | None:
         return None
     if _locked_twice_at_once(file, world) or _has_to_take_two_apart(file, world):
         return None
-    refused: list[_Refused] = []
+    learned: list[_Learned] = []
     while True:
-        search = _Search(file, world, refused=refused)
+        search = _Search(file, world, learned=learned)
         choice = search.first_in_file_order()
         if choice is None:
             return None
         itinerary = _checked(file, world, choice, search.known, counts_less=search.counts_less)
-        if itinerary is not None:
+        counted = None if itinerary is None else _counted(file, itinerary)
+        if itinerary is not None and counted == search.fewest:
             return itinerary
-        refused.append((choice[1], choice[5], search.turned_out))
+        if counted is not None and (search.fewest is None or counted < search.fewest):
+            raise AssertionError("the rules made a plan that the model says takes more")
+        # The rules refuse the choice, or their plan for it takes part more often than the
+        # model thought. The next model knows that, and the choice comes where it belongs.
+        learned.append((choice[1], choice[5], search.turned_out, counted))
+
+
+def _counted(file: File, itinerary: Itinerary) -> int:
+    """What rules 4 and 5 of "Which ITINERARY is shown" count for a plan, as one number.
+
+    How often PERSONs take part comes first: once for each PERSON in each OPTION, and once
+    for each time a PERSON takes a WAY. Then come the OPTIONs that happen. ``_Search`` makes
+    the same number least.
+    """
+    taking_part = sum(len(step.persons) for step in itinerary)
+    happening = sum(step.option is not None for step in itinerary)
+    return taking_part * (len(file.options) + 1) + happening
 
 
 def works(file: File, world: World, asked: _Asked | None = None) -> bool:
@@ -132,16 +151,16 @@ def works(file: File, world: World, asked: _Asked | None = None) -> bool:
         return False
     if _locked_twice_at_once(file, world) or _has_to_take_two_apart(file, world):
         return False
-    refused: list[_Refused] = []
+    refused: list[_Learned] = []
     while True:
-        search = _Search(file, world, plain=True, refused=refused)
+        search = _Search(file, world, plain=True, learned=refused)
         choice = _plan(search, asked)
         if choice is None:
             return False
         loose = search.counts_less
         if _checked(file, world, choice, any_will_do=True, counts_less=loose) is not None:
             return True
-        refused.append((choice[1], choice[5], search.turned_out))
+        refused.append((choice[1], choice[5], search.turned_out, None))
 
 
 def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
@@ -166,9 +185,9 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
         return False
     if _locked_twice_at_once(file, world) or _has_to_take_two_apart(file, world, open_pairs):
         return False
-    refused: list[_Refused] = []
+    refused: list[_Learned] = []
     while True:
-        search = _Search(file, world, open_pairs, plain=True, refused=refused)
+        search = _Search(file, world, open_pairs, plain=True, learned=refused)
         choice = _plan(search, asked)
         if choice is None:
             return False
@@ -179,7 +198,7 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
         loose = search.counts_less
         if _checked(file, chosen, choice, any_will_do=True, counts_less=loose) is not None:
             return True
-        refused.append((choice[1], choice[5], search.turned_out))
+        refused.append((choice[1], choice[5], search.turned_out, None))
 
 
 def _with_the_ways_that_can_start(file: File, world: World) -> World:
@@ -431,7 +450,7 @@ class _Search:
         world: World,
         open_pairs: Sequence[tuple[str, str]] = (),
         plain: bool = False,
-        refused: Sequence[_Refused] = (),
+        learned: Sequence[_Learned] = (),
     ) -> None:
         """Build the model of this world.
 
@@ -443,12 +462,21 @@ class _Search:
         The model says what the rules say, with one exception: ``_place_the_objects`` can
         count less against a cap than the rules do, and then ``counts_less`` says so. A
         choice of the solver that the rules refuse is then no mistake. It goes into
-        ``refused``, and the next model leaves out each choice in there. So the first
-        choice that the rules accept is the first that works, and where the solver finds
-        none, none works.
+        ``learned``, and the next model leaves out each choice in there. So where the
+        solver finds no choice, none works.
+
+        A choice that the rules accept can be one that the model ranks too well. The model
+        thought that it works with fewer WAYs than the rules need for it: its own plan for
+        the choice passes a cap by the rules' count. Then ``learned`` holds what rules 4
+        and 5 count for the plan that the rules make of the choice, and the next model
+        gives the choice no less. So the first choice whose plan counts what the model
+        thought is the first by the rules.
         """
         self.file, self.world, self.plain = file, world, plain
         self.counts_less = False
+        # The least that rules 4 and 5 count in this model, once ``first_in_file_order``
+        # has worked it out.
+        self.fewest: int | None = None
         self.model = cp_model.CpModel()
         # The choice for each open pair, and the pairs that held in the last answer.
         self.does = {
@@ -487,34 +515,53 @@ class _Search:
         if world.offered:
             self._place_the_objects()
             self._hold_to_the_caps()
-        for orders, empty, held in refused:
-            self._leave_out(orders, empty, held)
+        for orders, empty, held, counted in learned:
+            self._learn(orders, empty, held, counted)
 
-    def _leave_out(self, orders: _Orders, empty: _Empty, held: Set[tuple[str, str]]) -> None:
-        """No answer has each PERSON do these OPTIONs in this order, with these empty ones.
+    def _counted(self) -> cp_model.LinearExprT:
+        """What rules 4 and 5 make least, as one number: ``_counted`` says what it is."""
+        ways_taken = sum(route * length for route, length in self.legs)
+        taking_part = sum(each for row in self.takes for each in row) + ways_taken
+        return taking_part * (len(self.file.options) + 1) + sum(self.used)
 
-        Every other choice stays. A PERSON's order is the arcs of their path, and an OPTION
-        that nobody does happens or not. The rules refused the choice in the world where
-        the open pairs in ``held`` hold and the others do not, so only the choice with
-        those pairs is left out.
+    def _learn(
+        self, orders: _Orders, empty: _Empty, held: Set[tuple[str, str]], counted: int | None
+    ) -> None:
+        """What the rules said of one choice: each PERSON does these OPTIONs in this order,
+        and these OPTIONs happen with nobody in them.
+
+        With no number, the rules refuse the choice, and no answer has it. With a number,
+        rules 4 and 5 count that much for the choice, and no answer has it with less.
+        Every other choice stays as it was. A PERSON's order is the arcs of their path,
+        and an OPTION that nobody does happens or not. The rules spoke of the world where
+        the open pairs in ``held`` hold and the others do not, so this is about the choice
+        with those pairs only.
         """
         count = len(self.file.options)
+        same: list[cp_model.LiteralT] = []
         differs: list[cp_model.LiteralT] = []
+
+        def holds(choice: cp_model.IntVar, yes: bool = True) -> None:
+            same.append(choice if yes else choice.negated())
+            differs.append(choice.negated() if yes else choice)
+
         for number, order in enumerate(orders):
             follows = self.follows[number]
             if not order:
-                differs.append(self.nothing[number].negated())
+                holds(self.nothing[number])
                 continue
             for here, there in pairwise((count, *order, count)):
-                differs.append(follows[here, there].negated())
+                holds(follows[here, there])
         attended = {index for order in orders for index in order}
         for index in range(count):
             if index not in attended:
-                happens = self.used[index]
-                differs.append(happens.negated() if index in empty else happens)
+                holds(self.used[index], index in empty)
         for pair, does in self.does.items():
-            differs.append(does.negated() if pair in held else does)
-        self.model.add_bool_or(differs)
+            holds(does, pair in held)
+        if counted is None:
+            self.model.add_bool_or(differs)
+        else:
+            _when(self.model.add(self._counted() >= counted), *same)
 
     def _read_the_world(self) -> None:
         """What the world says about each OPTION and WAY."""
@@ -2097,12 +2144,11 @@ class _Search:
         """The choice of PERSONs and orders that "Which ITINERARY is shown" puts first."""
         model, file = self.model, self.file
         count = len(file.options)
-        ways_taken = sum(route * length for route, length in self.legs)
-        taking_part = sum(each for row in self.takes for each in row) + ways_taken
-        fewest = self._least(taking_part * (count + 1) + sum(self.used))
+        fewest = self._least(self._counted())
         if fewest is None:
             return None
-        model.add(taking_part * (count + 1) + sum(self.used) == fewest)
+        self.fewest = fewest
+        model.add(self._counted() == fewest)
         # An OPTION that somebody has to take part in happens: that is not left to choose.
         happens = {index for theirs in self.have_to.values() for index in theirs}
         open_to_choice = [index for index in range(count) if index not in happens]
