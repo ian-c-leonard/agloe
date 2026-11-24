@@ -580,6 +580,12 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
         assert found["cut"] > 3
         assert page.locator("#contents .to").first.evaluate(whole)
         assert page.evaluate(arrows) == [False, True]
+        # The reader moves the row with a wheel, and the arrows say where there is more now.
+        page.locator("#contents .to").first.hover()
+        page.mouse.wheel(120, 0)
+        page.wait_for_function(f"() => ({arrows})().join() === 'true,true'")
+        page.mouse.wheel(-120, 0)
+        page.wait_for_function(f"() => ({arrows})().join() === 'false,true'")
         # Tab goes through the links, and the row follows: each link is whole in view, and
         # clear of the arrows, when the keyboard is on it.
         reached: list[list[Any]] = []
