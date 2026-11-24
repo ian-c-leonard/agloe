@@ -385,3 +385,185 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
   .parts { gap: 34px; }
   h1 { font-size: clamp(2.5rem, 11vw, 3.4rem); }
 }
+
+/* How a rule is built: a page that follows one rule along a road of four stops. */
+.built .wrap { display: grid; gap: clamp(30px, 4vw, 46px); }
+.built .lead { max-width: 39em; }
+/* The stops, as four towns on one road. */
+.route { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); position: relative; }
+.route::before { content: ""; position: absolute; left: 14px; right: calc(25% - 14px); top: 10px; height: 8px; border-radius: 4px; background: var(--vermilion); box-shadow: inset 0 1px 1px rgba(60, 20, 0, 0.35), 0 1px 0 rgba(255, 253, 246, 0.8); }
+.route li { position: relative; padding: 40px 24px 0 0; }
+.route .town { position: absolute; left: 0; top: 0; width: 28px; height: 28px; fill: var(--ink); background: var(--ground); border-radius: 50%; }
+.route .step { display: grid; gap: 3px; text-decoration: none; }
+.route strong { font: italic 400 1.45rem/1.15 var(--display); text-shadow: var(--pressed); }
+.route .step span { font-size: 0.93rem; line-height: 1.45; color: var(--ink2); }
+.route a.step:hover strong, .preview:hover strong { color: var(--accent); }
+.top-aligned { align-items: start; }
+/* A column never grows past its share, so a long line of code scrolls inside its own box. */
+.stop .stack { grid-template-columns: minmax(0, 1fr); }
+.stop .split.code-side { grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr); }
+.stop h3 { font-size: 1.3rem; }
+.stop .stack > h3:not(:first-child) { margin-top: 10px; }
+/* The idea, as a sentence set in the display face. */
+.saying { font: italic 400 clamp(1.5rem, 2.6vw, 1.95rem)/1.25 var(--display); color: var(--ink); padding-left: 18px; border-left: 4px solid var(--vermilion); text-wrap: balance; }
+/* The sketch of the drive, in the map's own marks, and the three travelers under it. */
+.sketch .car rect { fill: var(--ink); }
+.sketch .car circle { fill: var(--ink); stroke: var(--ground); stroke-width: 2; }
+.travelers { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.travelers li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; font-size: 0.84rem; line-height: 1.35; color: var(--ink2); }
+.travelers i { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font: 600 0.9rem var(--text); font-style: normal; color: var(--ink); border: 2px solid var(--ink); }
+.travelers .can i { background: var(--ink); color: var(--surface); box-shadow: 0 0 0 3px var(--brass); }
+.travelers b { display: block; font: italic 400 1.2rem/1.1 var(--display); color: var(--ink); }
+/* The rule, as a card from the rules page. */
+.rule { margin: 0; padding: 20px 22px 22px; display: grid; gap: 10px; }
+.rule figcaption { font: 500 0.72rem/1.4 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.rule p { font-size: 1.14rem; line-height: 1.5; }
+.rule strong { font: italic 400 1.32rem/1.2 var(--display); display: block; margin-bottom: 6px; }
+/* The story's words on the left, the terms that stand for them on the right, joined by a dotted road. */
+.terms { margin: 0; display: grid; gap: 10px; }
+.terms div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: baseline; gap: 0 14px; }
+.terms dt { font: italic 400 1.18rem/1.3 var(--display); display: flex; align-items: baseline; gap: 14px; }
+.terms dt::after { content: ""; flex: 1; min-width: 24px; border-bottom: 3px dotted var(--vermilion); transform: translateY(-5px); }
+.terms dd { margin: 0; font: 500 0.86rem/1.4 var(--mono); letter-spacing: 0.04em; }
+/* A record of a FILE, and the same record in the report's words. */
+.lines { margin: 0; padding: 10px 14px; font: 0.7rem/1.7 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 10px; background: rgba(255, 253, 247, 0.72); box-shadow: inset 0 1px 2px rgba(59, 42, 20, 0.12); }
+.record { display: grid; gap: 6px; }
+.record p { font: 400 0.8rem/1.5 var(--mono); color: var(--ink2); padding-left: 14px; border-left: 3px solid var(--rim); }
+/* A few lines of the code, as the terminal shows them. */
+.code { padding: 16px 18px; font-size: 0.68rem; }
+.code pre { margin: 0; font: inherit; white-space: pre; overflow-x: auto; scrollbar-color: #3a3e43 transparent; }
+.code .command { margin-bottom: 8px; }
+.gloss { margin: 0; padding-left: 1.3em; display: grid; gap: 8px; font-size: 0.95rem; line-height: 1.5; color: var(--ink2); }
+.gloss li::marker { font: 500 0.8rem var(--mono); color: var(--accent); }
+/* A figure of the page: a sheet with a heading, a drawing and what follows from it. */
+.figure { margin: clamp(34px, 5vw, 56px) 0 0; padding: clamp(18px, 2.6vw, 30px); display: grid; gap: 20px; border: 1px solid var(--rim); border-radius: 14px;
+  background: linear-gradient(rgba(255, 253, 247, 0.62), rgba(255, 253, 247, 0.62)), var(--ground) var(--paper) 0 0 / var(--grain);
+  box-shadow: 0 5px 0 -1px var(--under), 0 6px 0 -1px var(--rim-deep), 0 34px 54px -30px rgba(59, 42, 20, 0.5); }
+.figure figcaption { display: grid; gap: 8px; max-width: 46em; }
+.figure figcaption h3 { font-size: clamp(1.5rem, 2.4vw, 1.9rem); }
+.figure figcaption p, .after-figure p { font-size: 0.98rem; line-height: 1.55; color: var(--ink2); }
+.after-figure { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px clamp(24px, 4vw, 48px); }
+/* Every plan: eight small sheets, one for each way to say who is in the car. */
+.plans { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.plan { display: grid; gap: 5px; align-content: start; padding: 13px 14px 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(250, 242, 227, 0.6); font-size: 0.84rem; line-height: 1.4; color: var(--ink2); }
+.plan .who { display: flex; gap: 6px; margin-bottom: 3px; }
+/* A traveler: a ring when they stay out, a disc of ink when they are in the car. Brass marks the one who can drive. */
+.plan .who i { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font: 600 0.82rem var(--text); font-style: normal; color: var(--muted); border: 1.5px dashed var(--muted); }
+.plan .who i.in { background: var(--ink); color: var(--surface); border: 1.5px solid var(--ink); }
+.plan .who i.can { box-shadow: 0 0 0 2.5px var(--brass); }
+.plan .names { font-weight: 600; color: var(--ink); }
+.plan .check b { font: 500 0.68rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-right: 4px; }
+.plan .check.broken { color: var(--stop); font-weight: 600; }
+.plan strong { margin-top: 5px; padding-top: 7px; border-top: 1px solid var(--line); font: 500 0.78rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--stop); }
+.plan.works { border-color: var(--ink); background: var(--surface); box-shadow: inset 0 3px 0 var(--ink); }
+.plan.works strong { color: var(--ink); }
+/* While the page checks the plans one after another, a plan not yet reached shows no result. */
+.plans.checking .plan:not(.checked) .check, .plans.checking .plan:not(.checked) strong { visibility: hidden; }
+.plans.checking .plan.now { outline: 2px solid var(--accent); outline-offset: 2px; }
+.figure .again { justify-self: start; padding: 8px 15px; font-size: 0.9rem; }
+/* The switchboard: what a FILE says, the sentences that follow, and the switches they are about. */
+.which { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.which legend { margin-bottom: 8px; }
+.board { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr) minmax(0, 0.92fr); gap: 18px clamp(18px, 2.4vw, 30px); align-items: start; }
+.board .col { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.board h4 { margin: 0; font: 500 0.72rem/1.4 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.sentences { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.sentences li { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 2px 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(250, 242, 227, 0.6); }
+.sentences p { font-size: 0.98rem; line-height: 1.4; color: var(--ink); font-weight: 500; }
+.sentences small { grid-column: 2; font-size: 0.8rem; line-height: 1.45; color: var(--muted); }
+/* A lamp says whether its sentence is true with the switches as they are. */
+.lamp { grid-row: 1 / span 2; align-self: start; margin-top: 1px; padding: 3px 0; border-radius: 999px; text-align: center; font: 500 0.7rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; background: var(--ink); color: var(--surface); }
+.sentences li.false { border-color: var(--stop); background: rgba(213, 80, 30, 0.1); }
+.sentences li.false .lamp { background: var(--surface); color: var(--stop); box-shadow: inset 0 0 0 1.5px var(--stop); }
+.switches { display: grid; gap: 8px; }
+/* A switch: a name, the model's own name for it, and a knob that is on the right when it is on. */
+.switches button { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px 12px; align-items: center; text-align: left; padding: 9px 12px; border: 1px solid var(--rim-deep); border-radius: 10px; background: rgba(255, 253, 247, 0.7); color: var(--ink); font: 500 0.95rem var(--text);
+  box-shadow: 0 1.5px 0 rgba(138, 109, 34, 0.3), 0 2.5px 0 rgba(255, 253, 246, 0.7); }
+.switches code { grid-column: 1; font-size: 0.68rem; color: var(--muted); }
+.switches b { grid-column: 2; grid-row: 1 / span 2; position: relative; width: 62px; padding: 5px 10px; border-radius: 999px; font: 500 0.7rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; text-align: right; color: var(--muted); box-shadow: inset 0 0 0 1.5px var(--muted); }
+.switches b::after { content: ""; position: absolute; top: 4px; right: 42px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: right 0.18s var(--ease); }
+.switches button[aria-checked="true"] b { background: var(--ink); color: var(--surface); box-shadow: none; text-align: left; }
+.switches button[aria-checked="true"] b::after { right: 4px; background: var(--surface); }
+.figure.alive .switches button { cursor: pointer; }
+.figure.alive .switches button:hover { border-color: var(--ink); }
+.outcome { font: 500 0.82rem/1.5 var(--mono); color: var(--ink); padding-left: 20px; position: relative; }
+.outcome::before { content: ""; position: absolute; left: 0; top: 0.3em; width: 11px; height: 11px; border-radius: 50%; background: var(--ink); }
+.outcome.no { color: var(--stop); }
+.outcome.no::before { background: var(--stop); }
+.board .solver { justify-self: start; padding: 8px 15px; font-size: 0.9rem; }
+.board .solver[hidden], .board .tried[hidden], .figure .again[hidden] { display: none; }
+.board .says { grid-column: 1 / -1; display: grid; gap: 5px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: rgba(250, 242, 227, 0.6); box-shadow: inset 0 1px 2px rgba(59, 42, 20, 0.1); }
+.says .answer-line { font: 500 0.98rem/1.5 var(--mono); }
+.says .answer-line.stop { color: var(--stop); }
+.says .plan-line { font: 400 0.86rem/1.5 var(--mono); color: var(--ink2); }
+/* Where the browser can tell which FILE is chosen, it shows that one's board. */
+@supports selector(:has(*)) {
+  .figure:has(input[value="a-driver/cannot-work"]:checked) .board[data-file="a-driver/the-driver-comes-along"],
+  .figure:has(input[value="a-driver/the-driver-comes-along"]:checked) .board[data-file="a-driver/cannot-work"] { display: none; }
+}
+/* The two checkers side by side: one FILE in, two reports out, and the two must be the same. */
+.both { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto auto auto; gap: 12px 34px; align-items: center; font-size: 0.92rem; }
+.both .sheet { grid-row: 1 / span 3; padding: 16px 14px; border: 1px solid var(--rim); border-radius: 8px; background: var(--surface); font: 500 0.74rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; text-align: center; box-shadow: 0 3px 0 -1px var(--rim-deep); position: relative; }
+.both .sheet:first-child { align-self: stretch; display: grid; place-items: center; }
+.both .sheet.out { grid-column: 3; }
+.both .sheet.out.one { grid-row: 1; }
+.both .sheet.out.two { grid-row: 3; }
+.both .machine { grid-column: 2; display: grid; gap: 1px; padding: 13px 16px; border-radius: 10px; background: var(--ink); color: var(--surface); position: relative;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 2px 0 rgba(28, 26, 23, 0.28), 0 3px 0 rgba(255, 253, 246, 0.7); }
+.both .machine.slow { grid-row: 1; }
+.both .machine.fast { grid-row: 3; }
+.both .machine b { font: italic 400 1.25rem/1.2 var(--display); }
+.both .machine i { font: 400 0.76rem var(--mono); font-style: normal; color: var(--night-dim); }
+/* The roads between them. */
+.both .machine::before, .both .machine::after { content: ""; position: absolute; top: 50%; width: 34px; height: 6px; margin-top: -3px; background: var(--vermilion); }
+.both .machine::before { right: 100%; }
+.both .machine::after { left: 100%; }
+.both .hand { grid-column: 2; grid-row: 2; justify-self: center; text-align: center; font: 400 0.76rem/1.4 var(--mono); color: var(--accent); padding: 2px 0 2px 16px; border-left: 3px dotted var(--vermilion); }
+.both .same { grid-column: 3; grid-row: 2; justify-self: center; max-width: 9em; text-align: center; font: 500 0.72rem/1.35 var(--mono); letter-spacing: 0.04em; color: var(--accent); }
+/* The three ways the two are tied, and the saying the method comes from. */
+.ties { list-style: none; margin: clamp(34px, 5vw, 52px) 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 26px clamp(26px, 4vw, 48px); }
+.ties li { display: grid; gap: 8px; align-content: start; padding-top: 16px; border-top: 4px solid var(--ink); }
+.ties p { font-size: 0.98rem; line-height: 1.55; color: var(--ink2); }
+.quote { margin: clamp(34px, 5vw, 52px) 0 0; padding-left: 22px; border-left: 4px solid var(--vermilion); display: grid; gap: 8px; max-width: 44em; }
+.quote p { font: italic 400 clamp(1.3rem, 2.2vw, 1.6rem)/1.3 var(--display); }
+.quote .from { font: 400 0.9rem/1.5 var(--text); color: var(--muted); }
+/* The report at the end is always shown: it is the only one in its box. */
+.report.shown { display: block; }
+.night .terminal { box-shadow: 0 5px 0 -1px #050506, 0 0 0 1px #2b2d30; }
+.night .button { background: var(--night-ink); color: var(--night); border-color: var(--night-ink); box-shadow: none; }
+.night .button:hover { background: var(--night-accent); border-color: var(--night-accent); color: var(--night); }
+.night .button.quiet { background: transparent; color: var(--night-ink); border-color: var(--night-dim); }
+.night .button.quiet:hover { background: transparent; border-color: var(--night-ink); color: var(--night-ink); }
+.night .small { font-size: 0.93rem; color: var(--night-dim); }
+.night .command { font-size: inherit; line-height: inherit; color: var(--night-dim); }
+/* On the home page: the four stops as a small picture that leads to the page. */
+.preview { display: grid; gap: 18px; padding: clamp(20px, 3vw, 32px); text-decoration: none; }
+.preview:hover { color: inherit; border-color: var(--ink); }
+.preview .route { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.preview .route::before { left: 10px; right: auto; top: 14px; bottom: 30px; width: 8px; height: auto; }
+.preview .route li { padding: 0 0 0 44px; }
+.preview .route strong { font-size: 1.28rem; }
+
+@media (max-width: 900px) {
+  .route { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .route::before { left: 10px; right: auto; top: 14px; bottom: 30px; width: 8px; height: auto; }
+  .route li { padding: 0 0 0 44px; }
+  .after-figure, .board, .ties, .which, .stop .split.code-side { grid-template-columns: minmax(0, 1fr); }
+  .travelers li { grid-template-columns: minmax(0, 1fr); gap: 6px; align-items: start; }
+  .plans { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* On a narrow screen the FILE is on top, the two checkers side by side under it, and the reports under those. */
+  .both { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: none; gap: 22px 14px; }
+  .both .sheet:first-child { grid-column: 1 / -1; grid-row: 1; }
+  .both .machine.slow { grid-column: 1; grid-row: 2; }
+  .both .machine.fast { grid-column: 2; grid-row: 2; }
+  .both .machine::before, .both .machine::after { left: 50%; right: auto; top: auto; width: 6px; height: 22px; margin: 0 0 0 -3px; }
+  .both .machine::before { bottom: 100%; }
+  .both .machine::after { top: 100%; }
+  .both .sheet.out.one { grid-column: 1; grid-row: 3; }
+  .both .sheet.out.two { grid-column: 2; grid-row: 3; }
+  .both .same { grid-column: 1 / -1; grid-row: 4; max-width: none; }
+  .both .hand { grid-column: 1 / -1; grid-row: 5; border-left: 0; padding: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .switches b::after { transition: none; }
+}

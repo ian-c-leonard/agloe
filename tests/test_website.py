@@ -18,6 +18,11 @@ examples their expected reports where the solver is missing, as it is in a brows
 ``pages/trip-file.js`` is the page's own code for reading and changing a FILE. Node runs it here,
 through ``website_gestures.mjs``: each change a reader can make must write a FILE that the format
 accepts, and the page must be able to read the report on it.
+
+The page on how a rule is built has two figures. One shows eight small plans, each marked with
+the CONSTRAINTs it breaks: the reference checker must mark them the same. The other shows
+variables of the COMPILER and statements about them: Node runs its code through
+``website_statements.mjs``, and what it shows must agree with the expected report of each example.
 """
 
 import json
@@ -26,6 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from functools import cache
 from html.parser import HTMLParser
 from pathlib import Path
@@ -33,10 +39,10 @@ from typing import Any
 
 import pytest
 
-from agloe import answers
+from agloe import answers, reference
 from agloe import report as reports_in
-from agloe.file import load
-from agloe.reference import Constraint
+from agloe.file import load, read
+from agloe.reference import Constraint, worst_case
 
 ROOT = Path(__file__).parent.parent
 PAGES = ROOT / "pages"
@@ -252,15 +258,17 @@ def test_each_thing_a_reader_can_add_gives_a_report() -> None:
         assert report["answer"] in {"FEASIBLE", "INFEASIBLE", "UNDETERMINED"}, names
 
 
-def page_code(mode: str, given: object) -> list[dict[str, Any]]:
-    """What the page's own code for changing a FILE makes of this, run by Node."""
+def page_code(
+    mode: str, given: object, script: str = "website_gestures.mjs"
+) -> list[dict[str, Any]]:
+    """What a page's own code makes of this. Node runs it, through a script beside this file."""
     node = shutil.which("node")
     if node is None:
         if os.environ.get("CI"):
             pytest.fail("the tests of the home page need Node")
         pytest.skip("needs Node")
     ran = subprocess.run(
-        [node, str(Path(__file__).parent / "website_gestures.mjs"), mode],
+        [node, str(Path(__file__).parent / script), mode],
         input=json.dumps(given),
         capture_output=True,
         text=True,
@@ -380,6 +388,116 @@ def test_the_day_shows_what_the_report_says() -> None:
         ("art-institute", "ohare"): 13 * 60 + 30,
         ("ohare", "art-institute"): 14 * 60,
     }
+
+
+RULE_PAGE = (PAGES / "how-a-rule-is-built" / "index.html").read_text()
+
+
+def test_the_small_plans_are_marked_as_the_reference_checker_marks_them() -> None:
+    """The figure of eight plans says, for each, which CONSTRAINTs it breaks.
+
+    Each plan has some of the three PERSONs in both drives of the example, at the times of the
+    plan that the report shows. The reference checker says what each one breaks.
+    """
+    file = read(ROOT / "examples" / "a-driver" / "the-driver-comes-along.json")
+    shown = answers.check(file).itinerary
+    words = {Constraint.LOCK: "lock", Constraint.REQUIRED: "required"}
+    cards = re.findall(
+        r'<li class="plan( works)?" data-in="([^"]*)" data-breaks="([^"]*)">', RULE_PAGE
+    )
+    people = [person.id for person in file.persons]
+    assert len({who for _, who, _ in cards}) == len(cards) == 2 ** len(people)
+    for works, who, breaks in cards:
+        persons = tuple(person for person in people if person in who.split())
+        assert len(persons) == len(who.split()), who
+        plan = tuple(replace(step, persons=persons) for step in shown) if persons else ()
+        found = {each.constraint for each in reference.broken(file, worst_case(file), plan)}
+        assert {words[constraint] for constraint in found} == set(breaks.split()), who
+        assert bool(works) == (not found), who
+    # The plan that the report shows is one of those that work.
+    in_the_report = {" ".join(step.persons) for step in shown}
+    assert in_the_report <= {who for works, who, _ in cards if works}
+
+
+def test_the_page_gives_the_constraint_its_number_on_the_rules_page() -> None:
+    rules = (ROOT / "spec" / "rules.md").read_text()
+    number = re.search(r"^(\d+)\. \*\*Each requirement of an OPTION is met\.\*\*", rules, re.M)
+    assert number is not None
+    named = set(re.findall(r"(?:CONSTRAINT|[Rr]ule) (\d+)", RULE_PAGE))
+    assert named == {number.group(1)}
+
+
+def boards() -> list[dict[str, Any]]:
+    """Each board of the figure of variables and statements, as the page states it."""
+    found: list[dict[str, Any]] = []
+    for part in RULE_PAGE.split('<div class="board" ')[1:]:
+        file, solver = re.match(r'data-file="([^"]+)" data-solver="([^"]*)"', part).groups()  # type: ignore[union-attr]
+        found.append(
+            {
+                "file": file,
+                "solver": set(solver.split()),
+                "statements": re.findall(r'<li(?: class="false")? data-says="([^"]+)">', part),
+                "false": [
+                    bool(marked) for marked in re.findall(r'<li( class="false")? data-says=', part)
+                ],
+                "lamps": re.findall(r'<span class="lamp">(\w+)</span>', part),
+                "variables": re.findall(r'data-switch="(\w+)"', part),
+                "yes": re.findall(r'aria-checked="true" data-switch="(\w+)"', part),
+            }
+        )
+    return found
+
+
+def test_the_variables_and_statements_agree_with_the_reports_of_the_examples() -> None:
+    """A setting that makes every statement of a board true is a plan.
+
+    Where the example is FEASIBLE, the setting that the board calls the solver's is such a
+    setting, and it has in the drive the PERSONs that the expected report has there. Where the
+    example is INFEASIBLE, there is no such setting. Before a reader sets anything, each
+    statement is marked true or false as it is with the variables as the board shows them.
+    """
+    shown = boards()
+    assert {board["file"] for board in shown} == set(
+        re.findall(r'name="file" value="([^"]+)"', RULE_PAGE)
+    )
+    worked = page_code("", shown_as_given(shown), "website_statements.mjs")
+    answers_seen: set[str] = set()
+    for board, found in zip(shown, worked, strict=True):
+        expected = json.loads((ROOT / "examples" / f"{board['file']}.expected.json").read_text())
+        settings = [set(setting) for setting in found["settings"]]
+        answers_seen.add(expected["answer"])
+        if expected["answer"] == "FEASIBLE":
+            drive = next(step for step in expected["itinerary"] if step["option"] == "drive-out")
+            assert board["solver"] == {"used", *drive["persons"]}, board["file"]
+            assert board["solver"] in settings, board["file"]
+            assert set(board["yes"]) == board["solver"], board["file"]
+        else:
+            assert expected["answer"] == "INFEASIBLE", board["file"]
+            assert settings == [] and not board["solver"], board["file"]
+        assert found["holds"] == [not false for false in board["false"]], board["file"]
+        assert board["lamps"] == ["true" if true else "false" for true in found["holds"]]
+    assert answers_seen == {"FEASIBLE", "INFEASIBLE"}
+
+
+def shown_as_given(shown: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """What the Node script needs of each board."""
+    return [
+        {"statements": board["statements"], "variables": board["variables"], "yes": board["yes"]}
+        for board in shown
+    ]
+
+
+def test_the_pages_have_the_same_header_and_footer() -> None:
+    """The header and the footer are written out in each page, and they must stay the same."""
+
+    def part(name: str, start: str, end: str) -> str:
+        page = (PAGES / name).read_text()
+        up = "../" * name.count("/")
+        found = page[page.rindex(start) : page.rindex(end) + len(end)]
+        return found.replace(f'href="{up}"', 'href="./"').replace(f'src="{up}', 'src="')
+
+    for start, end in (('<header class="top">', "</header>"), ("<footer>", "</footer>")):
+        assert len({part(name, start, end) for name in SITE_PAGES}) == 1, start
 
 
 def links_of(name: str) -> list[tuple[Path, str]]:
