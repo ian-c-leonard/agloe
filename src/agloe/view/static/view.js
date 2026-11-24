@@ -385,21 +385,25 @@ function drawOpen(shown) {
     const list = made("ul", "card-options");
     for (const item of group.items) {
       // An OPTION that nobody has decided is drawn like what the FILE does not state.
-      const row = made("li", `entry ${item.mark || "not"}`);
+      const row = made("div", `entry ${item.mark || "not"}`);
       row.title = [item.name, item.says, item.when].filter(Boolean).join("\n");
       if (item.of.length) row.dataset.of = item.of.join(" ");
       if (item.records.length) row.dataset.records = item.records.join(" ");
       if (item.name) row.append(made("b", "entry-name", item.name));
       row.append(made("span", "entry-says", item.says));
       if (item.when) row.append(made("span", "entry-takes", item.when));
-      list.append(row);
-      // What the report sets under the line of the item is under the item, and no part of
-      // it: pointing at such a line lights up what that line is about, as in the report.
+      // One thing of the list for each item, so that the list holds as many as it counts.
+      const whole = made("li", "open-item");
+      whole.append(row);
+      // What the report sets under the line of the item is under the item's own words, and
+      // no part of them: pointing at such a line lights up what that line is about, as in
+      // the report.
       if (item.more.length) {
-        const under = made("li", "open-more");
+        const under = made("div", "open-more");
         for (const line of item.more) under.append(further(line));
-        list.append(under);
+        whole.append(under);
       }
+      list.append(whole);
     }
     box.append(list);
     // What the report says after these, a paragraph for each of its own.

@@ -2797,10 +2797,23 @@ def test_the_page_lists_what_is_open_above_everything_that_it_draws(
         )
         stops: list[str] = []
         for _ in range(5):
-            stops.append(page.evaluate("() => document.activeElement.className.split(' ')[0]"))
+            # What the keyboard is on: the case, or the thing that a line is a drawing of.
+            stops.append(
+                page.evaluate(
+                    "() => (({ records, of }) => records ?? of)(document.activeElement.dataset)"
+                )
+            )
             page.keyboard.press("ArrowDown")
-        assert stops == ["entry", "open-under", "open-under", "open-under", "open-under"]
+        assert stops == [
+            "case:0",
+            "offer:skydeck-tickets",
+            "cap:trip-cap",
+            "budget:trip-money",
+            "budget:trip-money",
+        ]
         lit(page, budgets=["the trip money"])
+        # The list holds one thing for the one case, however many lines are under it.
+        assert page.locator("#open li").count() == 1
     # A line under a case that is about nothing lights up nothing, as in the report. With a
     # cap on the trip money, the report gives a plan for each case, and in the first one
     # nobody buys a place.
@@ -2814,6 +2827,9 @@ def test_the_page_lists_what_is_open_above_everything_that_it_draws(
         assert first.text_content() == (
             "One plan that works then: nobody buys a place from an OFFER of this FILE."
         )
+        # Two cases, and two things in the list: the lines under a case are part of its one.
+        assert page.locator("#open li").count() == 2
+        assert page.text_content("#contents .to") == "To do and to decide2"
         page.locator("#open .entry").first.hover()
         page.wait_for_function("() => document.querySelectorAll('.lit').length > 1")
         first.hover()
@@ -2826,6 +2842,15 @@ def test_the_page_lists_what_is_open_above_everything_that_it_draws(
         (ticket,) = page.evaluate(rows)
         assert ticket["mark"] == "warned"
         assert ticket["says"][0] == "Skydeck visit"
+        # The warning has the mark that the report gives it, and is under the name of its
+        # step: the report speaks of a line marked "!" and of the step above it.
+        assert ticket["says"][1].startswith("! Sam still has to buy a right to this, from ")
+        below = """() => {
+          const name = document.querySelector("#open .entry-name").getBoundingClientRect();
+          const says = document.querySelector("#open .entry-says").getBoundingClientRect();
+          return says.top >= name.bottom - 1;
+        }"""
+        assert page.evaluate(below)
         # Over the warnings is what the report says of them, in its own words.
         assert page.text_content("#open .open-kind") == (
             'WARNING: not everything is booked yet. A line marked "!" that names an OFFER says'

@@ -269,9 +269,9 @@ export function lines(text, report, trip) {
  * plan, in `charged`: what the report says is charged to each cap and what it has left, by
  * the id of the cap. In `records`: what the report says of each record that it lists by its
  * id, in the first line that does so. In `conflict`: the line over the records that rule out
- * every plan, or null. In `warnings`: what it warns of at each step. In `explains`: each
- * line with which the report says what its warnings mean, and under which condition they
- * come true.
+ * every plan, or null. In `warnings`: what it warns of at each step, each line with the "!"
+ * that the report marks it with. In `explains`: each line with which the report says what
+ * its lines marked "!" mean, and under which condition they come true.
  *
  * A report that shows no plan says nothing after its cases, or after the records that rule
  * out every plan, that is not about them. `also` holds all of that: each paragraph up to the
@@ -295,7 +295,8 @@ export function statedIn(tied) {
     if (line.case !== null) cases[line.case] = line.text.trim();
     if (line.under !== null) (under[line.under] ??= []).push(said(line));
     if (line.case !== null || line.under !== null) last = at;
-    if (line.warns) (warnings[line.step] ??= []).push({ says: line.text.replace(WARNING, ""), about: line.about });
+    // A warning keeps its mark: the report says what its lines marked "!" mean.
+    if (line.warns) (warnings[line.step] ??= []).push({ says: line.text.trim(), about: line.about });
     // A line that lists a record starts with its id, set in.
     if (line.record !== null && !Object.hasOwn(records, line.record) && line.text.startsWith(`  ${line.record}: `)) records[line.record] = line.text.slice(line.record.length + 4);
     // Under "The caps:", and nowhere else, a line states the cap with its limit and its

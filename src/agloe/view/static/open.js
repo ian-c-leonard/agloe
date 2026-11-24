@@ -39,7 +39,9 @@ function whenOf(step) {
  *   report says the trip works, with its line.
  * - `warnings`, for a plan: each thing that the report warns of at a step, with the step.
  *   The heading is what the report says of its warnings, in its own lines: what they mean,
- *   and under which condition they come true.
+ *   and under which condition they come true. Those lines speak of each line marked "!" and
+ *   of the step above it. So an item keeps the "!" of its line, and the page puts the line
+ *   under the name of its step.
  * - `choices`, for a plan: each OPTION of the plan with the PERSONs in it whom no LOCK names
  *   for it. The COMPILER chose it for them, and nobody has decided it.
  *

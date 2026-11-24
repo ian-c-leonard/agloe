@@ -137,8 +137,9 @@ def test_a_plan_lists_what_the_report_warns_of() -> None:
         "warned",
         [],
     )
+    # The line keeps the mark that the report gives it: the report speaks of that mark.
     assert ticket["says"] == (
-        "Sam still has to buy a right to this, from skydeck-tickets, for 32.00 USD from the"
+        "! Sam still has to buy a right to this, from skydeck-tickets, for 32.00 USD from the"
         " trip money."
     )
     assert ticket["when"] == "Saturday 15 May 2027, 10:00 am to 11:30 am"
@@ -150,7 +151,7 @@ def test_a_plan_lists_what_the_report_warns_of() -> None:
     (walk,) = listed["groups"][0]["items"]
     assert (walk["name"], walk["says"], walk["of"]) == (
         "the walk between the hotel and Willis Tower",
-        "Alex would still be busy for 1 h 15 min when this starts.",
+        "! Alex would still be busy for 1 h 15 min when this starts.",
         ["4"],
     )
     assert walk["when"] == "Saturday 15 May 2027, 8:45 am to 9:00 am"
@@ -173,13 +174,13 @@ def test_each_purchase_is_an_item_of_its_own(tmp_path: Path) -> None:
     assert [(item["name"], item["says"], item["of"]) for item in group["items"]] == [
         (
             "Skydeck visit",
-            "Alex still has to buy a right to this, from skydeck-tickets, for 32.00 USD from"
+            "! Alex still has to buy a right to this, from skydeck-tickets, for 32.00 USD from"
             " Alex's money.",
             ["0", "offer:skydeck-tickets"],
         ),
         (
             "Skydeck visit",
-            "Sam still has to buy a right to this, from skydeck-tickets, for 32.00 USD from"
+            "! Sam still has to buy a right to this, from skydeck-tickets, for 32.00 USD from"
             " Sam's money.",
             ["0", "offer:skydeck-tickets"],
         ),
@@ -188,6 +189,85 @@ def test_each_purchase_is_an_item_of_its_own(tmp_path: Path) -> None:
     assert all(set(item) == set(group["items"][0]) for item in group["items"])
     assert set(group["items"][0]) == {"name", "says", "when", "of", "records", "mark", "more"}
     assert listed["says"] == "2 things are open. Times are on the clocks of America/Chicago."
+
+
+def changed(tmp_path: Path, example: str, change: Any) -> tuple[Open, str]:
+    """What the page lists as open about an example that a test changes, and the report."""
+    document = json.loads((EXAMPLES / f"{example}.json").read_text())
+    change(document)
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(document))
+    sent, found, text = in_words(path)
+    (listed,) = all_open([sent], [found], [text])
+    return listed, text
+
+
+def test_a_plan_with_both_kinds_of_warning_says_what_each_means(tmp_path: Path) -> None:
+    """The train to the flight can take 20 min longer, and nobody has a ticket for the flight
+    yet. The report says of its lines marked "!" which are of which kind."""
+
+    def no_tickets(document: dict[str, Any]) -> None:
+        money = {"id": "trip-money", "name": "the trip money", "persons": ["alex", "sam"]}
+        document["budgets"] = [{**money, "currencies": ["USD"]}]
+        seats = {
+            "option": "flight",
+            "places": 2,
+            "prices": [{"amount": "120.00", "currency": "USD"}],
+        }
+        document["facts"] = [
+            {"id": "flight-seats", "offer": seats} if fact["id"] == "flight-tickets" else fact
+            for fact in document["facts"]
+        ]
+
+    listed, text = changed(tmp_path, "flight-home/works-but-risky", no_tickets)
+    warnings, choices = listed["groups"]
+    # Both lines of the report are over the warnings, in the report's order.
+    assert warnings["says"].split("\n") == [
+        "WARNING: no plan is sure to hold if the uncertain parts take their longest. Each line"
+        ' marked "!" that names no OFFER says what would go wrong at the step above it.',
+        NOT_BOOKED,
+    ]
+    # Each warning is under the name of its step, with its mark, so that a reader can tell
+    # which line names an OFFER.
+    assert [(item["name"], item["says"], item["of"]) for item in warnings["items"]] == [
+        (
+            "Flight home",
+            "! Alex and Sam still have to buy a right to this, from flight-seats, for 120.00"
+            " USD each from the trip money.",
+            ["2", "offer:flight-seats"],
+        ),
+        ("Flight home", "! Alex and Sam would be 5 min too late for this.", ["2"]),
+    ]
+    assert [line.strip() for line in text.split("\n") if line.startswith("    ! ")] == [
+        item["says"] for item in warnings["items"]
+    ]
+    assert choices["kind"] == "choices"
+    assert listed["says"] == "3 things are open. Times are on the clocks of America/Chicago."
+
+
+def test_a_plan_that_holds_however_long_things_take_warns_of_nothing(tmp_path: Path) -> None:
+    """The train can take 20 min longer, and the bags can be dropped 30 min before the
+    flight. The report says that the plan holds, and warns of nothing."""
+
+    def later_bag_drop(document: dict[str, Any]) -> None:
+        for fact in document["facts"]:
+            if fact["id"] == "bag-drop":
+                fact["arrive_before_start"] = "PT30M"
+
+    listed, text = changed(tmp_path, "flight-home/works-but-risky", later_bag_drop)
+    assert "This plan holds however long the uncertain parts take" in text
+    # Only the train is open: no LOCK names anybody for it.
+    assert said(listed) == [(CHOICES, [("Blue Line to O'Hare", "Alex and Sam")])]
+    assert (listed["count"], listed["asked"]) == (1, False)
+
+    def decided(document: dict[str, Any]) -> None:
+        later_bag_drop(document)
+        document["decisions"].append(
+            {"id": "lock-train", "lock": "blue-line", "persons": ["alex", "sam"]}
+        )
+
+    listed, _ = changed(tmp_path, "flight-home/works-but-risky", decided)
+    assert (listed["says"], listed["groups"]) == (NOTHING, [])
 
 
 def test_a_trip_that_depends_on_something_lists_each_case() -> None:
@@ -406,9 +486,7 @@ def test_every_example_lists_what_its_report_says() -> None:
         assert [item["records"] for item in groups.get("cases", [])] == [
             [f"case:{n}"] for n in range(len(found.get("missing", [])))
         ], name
-        warned = [
-            line.removeprefix("    ! ") for line in text.split("\n") if line.startswith("    ! ")
-        ]
+        warned = [line.strip() for line in text.split("\n") if line.startswith("    ! ")]
         assert [item["says"] for item in groups.get("warnings", [])] == warned, name
         # Over them is each line with which the report says what they mean.
         explained = "\n".join(line for line in text.split("\n") if line.startswith("WARNING: "))

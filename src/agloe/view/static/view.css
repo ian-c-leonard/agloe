@@ -231,6 +231,9 @@ html { scroll-padding-top: calc(var(--row-of-links, 0px) + 12px); }
 .open { display: grid; gap: 6px; max-width: 720px; }
 .open-kind, .open-also { color: var(--ink2); font-size: 13px; }
 .open .entry-says { flex: 1 1 60%; font-family: var(--text); font-size: 12.5px; }
+.open-item { display: grid; gap: 4px; }
+/* What the report warns of at a step is under the name of the step, with the mark that the report gives it. */
+.open .entry.warned .entry-name { flex: 1 0 100%; }
 /* Words of the report keep their spaces, as the report beside the drawings shows them. A long word breaks where the list ends. */
 .open-kind, .open-also, .open-more, .open .entry-says { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 /* What the report sets under the line of an item, and what it says after a list: a line for
