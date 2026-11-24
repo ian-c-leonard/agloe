@@ -41,6 +41,10 @@ const OBJECTS = "Where each OBJECT is:";
 const BUDGETS = " The BUDGETs of this FILE:";
 /** The line above who meets what the OPTIONs of a plan require. */
 const MEETS = "Who meets the requirements:";
+/** How the line starts that is above the records that rule out every plan. */
+const CONFLICT = /^These .+ rule out every plan/;
+/** How a line starts that says what the lines marked "!" under the steps of a plan mean. */
+const EXPLAINS = "WARNING: ";
 
 /**
  * The lists of ids that a report as JSON names one after another in its words, each with what
@@ -54,7 +58,7 @@ function listsOf(report) {
   const caps = report?.answer === "FEASIBLE" && Array.isArray(report.caps) ? report.caps.map((each) => each?.cap) : null;
   const lists = [
     [report?.relies_on, (text) => /^The plan relies on these .+:$/.test(text)],
-    [report?.conflict, (text) => /^These .+ rule out every plan/.test(text)],
+    [report?.conflict, (text) => CONFLICT.test(text)],
     [paid, (text) => text === "What the BOOKINGs state that they paid:"],
     [caps, (text) => text === CAPS],
   ];
@@ -64,8 +68,10 @@ function listsOf(report) {
 /**
  * Each line of a report in words: its text, the step of the TRIP that it shows or is about,
  * the record that it names, and the case that it states, as its place in `missing` of the
- * report as JSON. `step`, `record` and `case` are null where a line has none. `warns` says
- * that the line is a warning under its step. `meets` is null, or the place in `requirements`
+ * report as JSON. `step`, `record` and `case` are null where a line has none. `under` is the
+ * case that the line says more of, where the report sets it under the line of that case, and
+ * null otherwise. `warns` says that the line is a warning under its step. `meets` is null, or
+ * the place in `requirements`
  * of the report as JSON of the requirement that the line says somebody meets. `about` holds
  * what else the line is about, each as the page names a thing: `offer:ID` for an OFFER that
  * the line says somebody buys a place of, `budget:ID` for a BUDGET that the line states,
@@ -91,7 +97,7 @@ export function lines(text, report, trip) {
   const tied = trip !== null && trip.itinerary && plan === trip.steps.length;
   let step = -1;
   let under = false; // whether this line can still be a warning under the step above it
-  const one = (text, at = null, warns = false) => ({ text, step: at, warns, record: null, case: null, meets: null, about: [] });
+  const one = (text, at = null, warns = false) => ({ text, step: at, warns, record: null, case: null, under: null, meets: null, about: [] });
   const found = all.map((line) => {
     if (tied && STEP.test(line)) {
       step += 1;
@@ -150,6 +156,7 @@ export function lines(text, report, trip) {
     const caps = capped[line.case] ?? [];
     const inset = (text) => text.length - text.trimStart().length;
     for (let next = at + 1; next < found.length && found[next].text.trim() !== "" && inset(found[next].text) > inset(line.text); next += 1) {
+      found[next].under = line.case;
       if (!free(found[next])) continue;
       const words = found[next].text.trimStart();
       if (words.startsWith(ONE_PLAN)) found[next].about = offers.map((offer) => `offer:${offer}`);
@@ -257,16 +264,41 @@ export function lines(text, report, trip) {
 /**
  * What the report states, in its own words, for the parts of the page that say it again, from
  * its lines. For the cases in which the trip works: the line of each case, at the place of the
- * case, and the heading over them where the report lists several. For the caps of a plan, in
- * `charged`: what the report says is charged to each cap and what it has left, by the id of
- * the cap.
+ * case, and the heading over them where the report lists several. In `under`, at the place of
+ * each case: the lines that the report sets under the line of that case. For the caps of a
+ * plan, in `charged`: what the report says is charged to each cap and what it has left, by
+ * the id of the cap. In `records`: what the report says of each record that it lists by its
+ * id, in the first line that does so. In `conflict`: the line over the records that rule out
+ * every plan, or null. In `warnings`: what it warns of at each step, each line with the "!"
+ * that the report marks it with. In `explains`: each line with which the report says what
+ * its lines marked "!" mean, and under which condition they come true.
+ *
+ * A report that shows no plan says nothing after its cases, or after the records that rule
+ * out every plan, that is not about them. `also` holds all of that: each paragraph up to the
+ * end of the report, as the list of its lines.
+ *
+ * A line that is said again is `says`, its words without the space around them, `about`,
+ * what the line is about as the page names things, and `inset`, whether the report sets it
+ * in. `whole` says that every line which looks like a warning is tied to its step. Where it
+ * is false, the warnings here are not all of them.
  */
 export function statedIn(tied) {
   const cases = [];
+  const under = [];
   const charged = {};
+  const records = {};
+  const warnings = [];
+  const said = (line) => ({ says: line.text.trim(), about: [...(line.step === null ? [] : [String(line.step)]), ...line.about], inset: line.text.startsWith(" ") });
   let capped = false;
-  for (const line of tied) {
+  let last = -1; // the last line of the cases, or of the records that rule out every plan
+  for (const [at, line] of tied.entries()) {
     if (line.case !== null) cases[line.case] = line.text.trim();
+    if (line.under !== null) (under[line.under] ??= []).push(said(line));
+    if (line.case !== null || line.under !== null) last = at;
+    // A warning keeps its mark: the report says what its lines marked "!" mean.
+    if (line.warns) (warnings[line.step] ??= []).push({ says: line.text.trim(), about: line.about });
+    // A line that lists a record starts with its id, set in.
+    if (line.record !== null && !Object.hasOwn(records, line.record) && line.text.startsWith(`  ${line.record}: `)) records[line.record] = line.text.slice(line.record.length + 4);
     // Under "The caps:", and nowhere else, a line states the cap with its limit and its
     // BUDGET, and after the last colon what is charged to it. A line that is not set in ends
     // what is under a heading.
@@ -274,7 +306,19 @@ export function statedIn(tied) {
     else if (capped && line.record !== null && line.text.startsWith(`  ${line.record}: at most `)) charged[line.record] = line.text.slice(line.text.lastIndexOf(": ") + 2);
   }
   const heading = tied.find((line) => CASES.test(line.text));
-  return { heading: cases.length > 1 && heading !== undefined ? heading.text : null, cases, charged };
+  // The line over the records that rule out every plan: the lines under it name them.
+  const over = tied.findIndex((line, at) => CONFLICT.test(line.text) && at + 1 < tied.length && tied[at + 1].record !== null);
+  if (over >= 0) for (last = over; last + 1 < tied.length && tied[last + 1].record !== null; last += 1);
+  const also = [];
+  let more = false; // whether the line before this one is of the same paragraph
+  for (const line of last < 0 ? [] : tied.slice(last + 1)) {
+    if (line.text.trim() !== "" && !more) also.push([]);
+    more = line.text.trim() !== "";
+    if (more) also[also.length - 1].push(said(line));
+  }
+  const whole = tied.every((line) => line.warns || !WARNING.test(line.text));
+  const explains = tied.flatMap((line) => (line.text.startsWith(EXPLAINS) ? [line.text] : []));
+  return { heading: cases.length > 1 && heading !== undefined ? heading.text : null, cases, under, also, charged, records, conflict: over < 0 ? null : tied[over].text, warnings, explains, whole };
 }
 
 /**
@@ -284,7 +328,7 @@ export function statedIn(tied) {
 export function warningsOf(tied) {
   const warnings = [];
   for (const line of tied) {
-    if (line.warns) (warnings[line.step] ??= []).push(line.text.replace(/^ {4}! /, ""));
+    if (line.warns) (warnings[line.step] ??= []).push(line.text.replace(WARNING, ""));
   }
   return warnings;
 }
