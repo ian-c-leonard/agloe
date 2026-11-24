@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>How an answer is decided: Agloe</title>
-<meta name="description" content="A FILE can leave things out. The COMPILER checks a trip in the worst case and in the best case, and the two checks give one of three answers.">
+<meta name="description" content="A FILE can leave things out. The COMPILER looks for a plan that works in the worst case and, if it finds none, in the best case. That gives one of three answers.">
 <meta name="theme-color" content="#FAF2E3">
 <link rel="icon" href="../favicon.ico" sizes="48x48">
 <link rel="icon" type="image/png" sizes="32x32" href="../favicon-32.png">
@@ -16,7 +16,7 @@
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="Agloe">
 <meta property="og:title" content="How an answer is decided: Agloe">
-<meta property="og:description" content="A FILE can leave things out. The COMPILER checks a trip in the worst case and in the best case, and the two checks give one of three answers.">
+<meta property="og:description" content="A FILE can leave things out. The COMPILER looks for a plan that works in the worst case and, if it finds none, in the best case. That gives one of three answers.">
 <meta property="og:url" content="https://agloe.ai/how-an-answer-is-decided/">
 <meta property="og:image" content="https://agloe.ai/img/social-preview.jpg">
 <meta property="og:image:width" content="1200">
@@ -49,9 +49,8 @@
   <section class="hero built">
     <div class="wrap">
       <div class="stack">
-        <span class="label">Method</span>
         <h1>How an answer is decided</h1>
-        <p class="lead">A FILE can leave things out. The COMPILER checks a trip twice: in the worst case and in the best case. The two checks give one of three answers.</p>
+        <p class="lead">A FILE can leave things out. The COMPILER first looks for a plan that works in the worst case. If it finds none, it looks in the best case.</p>
       </div>
     </div>
   </section>
@@ -64,12 +63,12 @@
         <p class="small" data-from="spec/rules.md">A possible world is one way that all the unknown FACTs could turn out.</p>
       </div>
       <div class="stack">
-        <h3>Two of the unknowns on the rules page</h3>
+        <h3>What can be missing</h3>
         <ul class="plain">
           <li data-from="spec/rules.md">With no stated duration, an OPTION or a WAY might take any length of time.</li>
           <li data-from="spec/rules.md">Travel that the FILE does not list might exist between any two PLACEs, and take any length of time.</li>
         </ul>
-        <p class="small">The <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">rules page</a> lists every kind.</p>
+        <p class="small"><a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md#what-is-unknown">Every kind of unknown FACT</a></p>
       </div>
     </div>
   </section>
@@ -85,11 +84,11 @@
         </ul>
       </div>
       <div class="stack">
-        <h3>Two cases are enough</h3>
-        <p>There are too many possible worlds to check each one. The COMPILER checks two.</p>
+        <h3>Two cases settle the answer</h3>
+        <p>There are too many possible worlds to try each one.</p>
         <dl class="cases-two">
           <div><dt>The worst case</dt><dd><span data-from="spec/rules.md">An unknown duration has no limit</span>. <span data-from="spec/rules.md">No unlisted WAY exists.</span></dd></div>
-          <div><dt>The best case</dt><dd><span data-from="spec/rules.md">Every unknown start is free, and every unknown duration and access cutoff is zero.</span> <span data-from="spec/rules.md">An unlisted WAY joins any two PLACEs, takes no time</span>.</dd></div>
+          <div><dt>The best case</dt><dd><span data-from="spec/rules.md">Every unknown start is free, and every unknown duration and access cutoff is zero.</span> <span data-from="spec/rules.md">An unlisted WAY joins any two PLACEs</span> and takes no time, <span data-from="spec/rules.md">except where a COMPLETE set of travel says there is none.</span></dd></div>
         </dl>
         <p class="small">A plan that works keeps working when a ride takes less time, or when more ways exist. So a plan that works in the worst case works in every possible world. If no plan works in the best case, none works in any.</p>
         <table class="decides">
@@ -110,7 +109,6 @@
         <figcaption>
           <h2 id="example-title">One trip, four FILEs</h2>
           <p data-from="spec/rules.md">Alex and Sam spend their last afternoon in Chicago at the Art Institute, then fly home from O'Hare. The flight leaves at 5:00 pm, and bag drop closes 45 minutes earlier. The Blue Line takes an hour from the museum to the terminal.</p>
-          <p class="small">The dashed mark is 4:15 pm, when they must be at O'Hare.</p>
         </figcaption>
         <fieldset class="versions which four">
           <legend class="label">FILE</legend>
@@ -120,15 +118,15 @@
           <label><input type="radio" name="case" value="flight-home/depends-on-another-way"><span data-from="spec/rules.md">They leave at 3:30 pm, and no FACT says the Blue Line is the only way.</span></label>
         </fieldset>
         <div class="worlds" data-file="flight-home/works" data-worst="plan" data-best="plan">
-          <p class="unknown">Nothing that matters is unknown, so the two cases are the same.</p>
+          <p class="unknown">The Blue Line gets them to O'Hare at 4:00 pm in both cases.</p>
           <div class="world">
             <h4>The worst case</h4>
-            <div class="clock"><div class="hours" aria-hidden="true"><i>2 pm</i><i>3 pm</i><i>4 pm</i><i>5 pm</i></div><p class="row" style="--from: 0; --to: 33.33"><span>Museum visit, 2:00 pm to 3:00 pm</span><b class="bar visit"></b></p><p class="row" style="--from: 33.33; --to: 66.67"><span>Blue Line, 1 h: at O'Hare at 4:00 pm</span><b class="bar ride"></b></p></div>
+            <div class="clock"><div class="hours" aria-hidden="true"><i>2 pm</i><i>3 pm</i><i>4 pm</i><i>5 pm</i></div><p class="row" style="--from: 0; --to: 33.33"><span>Museum visit, 2:00 pm to 3:00 pm</span><b class="bar visit"></b></p><p class="row" style="--from: 33.33; --to: 66.67"><span>Blue Line, 1 h: at O'Hare at 4:00 pm</span><b class="bar ride"></b></p><p class="due">Bag drop closes at 4:15 pm</p></div>
             <p class="yes">A plan works: they are at O'Hare 15 minutes early.</p>
           </div>
           <div class="world">
             <h4>The best case</h4>
-            <div class="clock"><div class="hours" aria-hidden="true"><i>2 pm</i><i>3 pm</i><i>4 pm</i><i>5 pm</i></div><p class="row" style="--from: 0; --to: 33.33"><span>Museum visit, 2:00 pm to 3:00 pm</span><b class="bar visit"></b></p><p class="row" style="--from: 33.33; --to: 66.67"><span>Blue Line, 1 h: at O'Hare at 4:00 pm</span><b class="bar ride"></b></p></div>
+            <div class="clock"><div class="hours" aria-hidden="true"><i>2 pm</i><i>3 pm</i><i>4 pm</i><i>5 pm</i></div><p class="row" style="--from: 0; --to: 33.33"><span>Museum visit, 2:00 pm to 3:00 pm</span><b class="bar visit"></b></p><p class="row" style="--from: 33.33; --to: 66.67"><span>Blue Line, 1 h: at O'Hare at 4:00 pm</span><b class="bar ride"></b></p><p class="due">Bag drop closes at 4:15 pm</p></div>
             <p class="yes">A plan works.</p>
           </div>
           <div class="says">
@@ -138,15 +136,15 @@
           </div>
         </div>
         <div class="worlds" data-file="flight-home/cannot-work" data-worst="none" data-best="none">
-          <p class="unknown">Nothing that matters is unknown. A FACT says the Blue Line is the only way to O'Hare.</p>
+          <p class="unknown">A FACT says the Blue Line is the only way to O'Hare, so no other way exists in either case.</p>
           <div class="world">
             <h4>The worst case</h4>
-            <div class="clock"><div class="hours" aria-hidden="true"><i>2 pm</i><i>3 pm</i><i>4 pm</i><i>5 pm</i></div><p class="row" style="--from: 16.67; --to: 50"><span>Museum visit, 2:30 pm to 3:30 pm</span><b class="bar visit"></b></p><p class="row" style="--from: 50; --to: 83.33"><span>Blue Line, 1 h: at O'Hare at 4:30 pm</span><b class="bar ride late"></b></p></div>
+            <div class="clock"><div class="hours" aria-hidden="true"><i>2 pm</i><i>3 pm</i><i>4 pm</i><i>5 pm</i></div><p class="row" style="--from: 16.67; --to: 50"><span>Museum visit, 2:30 pm to 3:30 pm</span><b class="bar visit"></b></p><p class="row" style="--from: 50; --to: 83.33"><span>Blue Line, 1 h: at O'Hare at 4:30 pm</span><b class="bar ride late"></b></p><p class="due">Bag drop closes at 4:15 pm</p></div>
             <p class="no">No plan works: the Blue Line is 15 minutes late, and there is no other way.</p>
           </div>
           <div class="world">
             <h4>The best case</h4>
-            <div class="clock"><div class="hours" aria-hidden="true"><i>2 pm</i><i>3 pm</i><i>4 pm</i><i>5 pm</i></div><p class="row" style="--from: 16.67; --to: 50"><span>Museum visit, 2:30 pm to 3:30 pm</span><b class="bar visit"></b></p><p class="row" style="--from: 50; --to: 83.33"><span>Blue Line, 1 h: at O'Hare at 4:30 pm</span><b class="bar ride late"></b></p></div>
+            <div class="clock"><div class="hours" aria-hidden="true"><i>2 pm</i><i>3 pm</i><i>4 pm</i><i>5 pm</i></div><p class="row" style="--from: 16.67; --to: 50"><span>Museum visit, 2:30 pm to 3:30 pm</span><b class="bar visit"></b></p><p class="row" style="--from: 50; --to: 83.33"><span>Blue Line, 1 h: at O'Hare at 4:30 pm</span><b class="bar ride late"></b></p><p class="due">Bag drop closes at 4:15 pm</p></div>
             <p class="no">No plan works.</p>
           </div>
           <div class="says">
@@ -159,12 +157,12 @@
           <p class="unknown">Unknown: how long the cab takes.</p>
           <div class="world">
             <h4>The worst case</h4>
-            <div class="clock"><div class="hours" aria-hidden="true"><i>2 pm</i><i>3 pm</i><i>4 pm</i><i>5 pm</i></div><p class="row" style="--from: 16.67; --to: 50"><span>Museum visit, 2:30 pm to 3:30 pm</span><b class="bar visit"></b></p><p class="row" style="--from: 50; --to: 83.33"><span>Blue Line, 1 h: at O'Hare at 4:30 pm</span><b class="bar ride late"></b></p><p class="row" style="--from: 50; --to: 100"><span>Cab: it may take any length of time</span><b class="bar ride endless"></b></p></div>
+            <div class="clock"><div class="hours" aria-hidden="true"><i>2 pm</i><i>3 pm</i><i>4 pm</i><i>5 pm</i></div><p class="row" style="--from: 16.67; --to: 50"><span>Museum visit, 2:30 pm to 3:30 pm</span><b class="bar visit"></b></p><p class="row" style="--from: 50; --to: 83.33"><span>Blue Line, 1 h: at O'Hare at 4:30 pm</span><b class="bar ride late"></b></p><p class="row" style="--from: 50; --to: 100"><span>Cab: no known arrival time</span><b class="bar ride endless"></b></p><p class="due">Bag drop closes at 4:15 pm</p></div>
             <p class="no">No plan works: the Blue Line is late, and nobody can count on the cab.</p>
           </div>
           <div class="world">
             <h4>The best case</h4>
-            <div class="clock"><div class="hours" aria-hidden="true"><i>2 pm</i><i>3 pm</i><i>4 pm</i><i>5 pm</i></div><p class="row" style="--from: 16.67; --to: 50"><span>Museum visit, 2:30 pm to 3:30 pm</span><b class="bar visit"></b></p><p class="row" style="--from: 50; --to: 83.33"><span>Blue Line, 1 h: at O'Hare at 4:30 pm</span><b class="bar ride late"></b></p><p class="row" style="--from: 50; --to: 50"><span>Cab: it takes no time</span><b class="bar ride instant"></b></p></div>
+            <div class="clock"><div class="hours" aria-hidden="true"><i>2 pm</i><i>3 pm</i><i>4 pm</i><i>5 pm</i></div><p class="row" style="--from: 16.67; --to: 50"><span>Museum visit, 2:30 pm to 3:30 pm</span><b class="bar visit"></b></p><p class="row" style="--from: 50; --to: 83.33"><span>Blue Line, 1 h: at O'Hare at 4:30 pm</span><b class="bar ride late"></b></p><p class="row" style="--from: 50; --to: 50"><span>Cab: it takes no time</span><b class="bar ride instant"></b></p><p class="due">Bag drop closes at 4:15 pm</p></div>
             <p class="yes">A plan works: the cab is at O'Hare at 3:30 pm.</p>
           </div>
           <div class="says">
@@ -177,18 +175,19 @@
           <p class="unknown">Unknown: whether there is another way to O'Hare. No FACT says the Blue Line is the only one.</p>
           <div class="world">
             <h4>The worst case</h4>
-            <div class="clock"><div class="hours" aria-hidden="true"><i>2 pm</i><i>3 pm</i><i>4 pm</i><i>5 pm</i></div><p class="row" style="--from: 16.67; --to: 50"><span>Museum visit, 2:30 pm to 3:30 pm</span><b class="bar visit"></b></p><p class="row" style="--from: 50; --to: 83.33"><span>Blue Line, 1 h: at O'Hare at 4:30 pm</span><b class="bar ride late"></b></p></div>
+            <div class="clock"><div class="hours" aria-hidden="true"><i>2 pm</i><i>3 pm</i><i>4 pm</i><i>5 pm</i></div><p class="row" style="--from: 16.67; --to: 50"><span>Museum visit, 2:30 pm to 3:30 pm</span><b class="bar visit"></b></p><p class="row" style="--from: 50; --to: 83.33"><span>Blue Line, 1 h: at O'Hare at 4:30 pm</span><b class="bar ride late"></b></p><p class="due">Bag drop closes at 4:15 pm</p></div>
             <p class="no">No plan works: the Blue Line is late, and no other way exists.</p>
           </div>
           <div class="world">
             <h4>The best case</h4>
-            <div class="clock"><div class="hours" aria-hidden="true"><i>2 pm</i><i>3 pm</i><i>4 pm</i><i>5 pm</i></div><p class="row" style="--from: 16.67; --to: 50"><span>Museum visit, 2:30 pm to 3:30 pm</span><b class="bar visit"></b></p><p class="row" style="--from: 50; --to: 83.33"><span>Blue Line, 1 h: at O'Hare at 4:30 pm</span><b class="bar ride late"></b></p><p class="row" style="--from: 50; --to: 50"><span>Another way: it takes no time</span><b class="bar ride instant"></b></p></div>
+            <div class="clock"><div class="hours" aria-hidden="true"><i>2 pm</i><i>3 pm</i><i>4 pm</i><i>5 pm</i></div><p class="row" style="--from: 16.67; --to: 50"><span>Museum visit, 2:30 pm to 3:30 pm</span><b class="bar visit"></b></p><p class="row" style="--from: 50; --to: 83.33"><span>Blue Line, 1 h: at O'Hare at 4:30 pm</span><b class="bar ride late"></b></p><p class="row" style="--from: 50; --to: 50"><span>Another way: it takes no time</span><b class="bar ride instant"></b></p><p class="due">Bag drop closes at 4:15 pm</p></div>
             <p class="yes">A plan works: another way gets them to O'Hare at 3:30 pm.</p>
           </div>
           <div class="says">
             <span class="label">The COMPILER's answer for this FILE</span>
             <p class="answer-line unsure" data-lines-from="examples/flight-home/depends-on-another-way.expected.txt">UNDETERMINED: the FILE does not say enough to tell.</p>
             <p class="plan-line" data-lines-from="examples/flight-home/depends-on-another-way.expected.txt">The trip works if there are other WAYs from the Art Institute to O'Hare that take 45 min or less.</p>
+            <p class="plan-line" data-lines-from="examples/flight-home/depends-on-another-way.expected.txt">Other WAYs help only if they can be taken when the plan needs them, with a right where they need one.</p>
           </div>
         </div>
       </figure>
@@ -199,8 +198,8 @@
     <div class="wrap split top-aligned">
       <div class="stack">
         <h2 id="asks-title">What an UNDETERMINED report asks for</h2>
-        <p>The report names the unknown FACTs that would make the trip work. <span data-from="spec/rules.md">A set of unknown FACTs is enough when the TRIP is FEASIBLE with those FACTs turned out well and every other unknown FACT as in the worst case.</span> <span data-from="spec/rules.md">The report lists the sets that are enough and have the fewest FACTs.</span></p>
-        <p class="small">The best case is loose in one place. <span data-from="spec/rules.md">It lets the OBJECT be at hand wherever a plan needs it</span>. <span data-from="spec/rules.md">So UNDETERMINED can be said of a TRIP that no transfer could save. FEASIBLE and INFEASIBLE are never said wrongly.</span></p>
+        <p>The report names the unknown FACTs that would make the trip work. <span data-from="spec/rules.md">A set of unknown FACTs is enough when the TRIP is FEASIBLE with those FACTs turned out well and every other unknown FACT as in the worst case.</span> Of the sets that are enough, the report lists those that ask for the least.</p>
+        <p class="small">A bag or another OBJECT might be moved by a transfer that the FILE does not list. The COMPILER does not work out whether such a transfer could bring it in time. <span data-from="spec/rules.md">So UNDETERMINED can be said of a TRIP that no transfer could save. FEASIBLE and INFEASIBLE are never said wrongly.</span></p>
         <p class="actions">
           <a class="button" href="/examples/">See the examples</a>
           <a class="button quiet" href="/how-a-rule-is-built/">How a rule is built</a>

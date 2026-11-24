@@ -545,7 +545,6 @@ The plan relies on these FACTs and DECISIONs:
   <section class="band tint" id="what" aria-labelledby="what-title">
     <div class="wrap split">
       <div class="stack">
-        <span class="label">The compiler</span>
         <h2 id="what-title">One of three answers, each with its evidence.</h2>
         <ul class="key">
           <li class="feasible" data-from="README.md"><strong>FEASIBLE:</strong> the trip works. The report shows a plan, and warns when the plan holds only if uncertain durations stay short.</li>
@@ -580,7 +579,7 @@ The plan relies on these FACTs and DECISIONs:
         <li>
           <a class="card preview" href="/how-an-answer-is-decided/">
             <strong>How an answer is decided</strong>
-            <span>A FILE can leave things out. The COMPILER checks a trip in the worst case and in the best case.</span>
+            <span>A FILE can leave things out. The COMPILER looks for a plan that works in the worst case and, if it finds none, in the best case.</span>
             <table class="decides">
               <thead><tr><th>The worst case</th><th>The best case</th><th>The answer</th></tr></thead>
               <tbody>
@@ -598,7 +597,6 @@ The plan relies on these FACTs and DECISIONs:
   <section class="band tint" id="run" aria-labelledby="run-title">
     <div class="wrap split">
       <div class="stack">
-        <span class="label">Try it</span>
         <h2 id="run-title">Check a trip yourself.</h2>
         <p>You can run the COMPILER from a copy of the repository. You need git and <a href="https://docs.astral.sh/uv/">uv</a>.</p>
         <p class="small">Every example is on the <a href="/examples/">examples page</a>, with its report.</p>

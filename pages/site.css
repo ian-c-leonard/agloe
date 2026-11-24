@@ -648,8 +648,10 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
 .clock .row span { font-size: 0.8rem; line-height: 1.35; color: var(--ink2); }
 .clock .bar { display: block; height: 11px; border-radius: 6px; margin-left: calc(var(--from) * 1%); width: calc((var(--to) - var(--from)) * 1%); background: var(--vermilion); }
 .clock .bar.visit { background: var(--ink); }
-/* Brass is for what nobody knows: a ride with no limit runs off the edge, and one that takes no time is a dot. */
-.clock .bar.endless { background: linear-gradient(90deg, var(--brass), rgba(154, 131, 48, 0)); border-radius: 6px 0 0 6px; }
+/* The mark is named under the bars: the words end at the mark, and the dashed line runs down beside them. */
+.clock .due { margin: 0; width: 75%; padding: 2px 7px 0 0; border-right: 1.5px dashed var(--ink); text-align: right; font: 500 0.64rem/1.5 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+/* Brass is for what nobody knows: a ride with no limit is in pieces as far as the edge, and one that takes no time is a dot. */
+.clock .bar.endless { background: repeating-linear-gradient(90deg, var(--brass) 0 9px, transparent 9px 15px); border-radius: 6px 0 0 6px; }
 .clock .bar.instant { width: 11px; margin-left: calc(var(--from) * 1% - 5px); background: var(--brass); }
 @supports selector(:has(*)) {
   #two-cases .worlds { display: none; }

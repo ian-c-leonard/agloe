@@ -691,6 +691,14 @@ def links_of(name: str) -> list[tuple[Path, str]]:
     return found
 
 
+def headings_of(document: Path) -> set[str]:
+    """The headings of a document, each as GitHub names it in a link."""
+    return {
+        re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
+        for heading in re.findall(r"^#+ (.+)$", document.read_text(), flags=re.MULTILINE)
+    }
+
+
 @pytest.mark.parametrize("name", SITE_PAGES)
 def test_every_link_leads_somewhere(name: str) -> None:
     page = SITE_PAGES[name]
@@ -702,7 +710,10 @@ def test_every_link_leads_somewhere(name: str) -> None:
             continue
         for start in (f"{REPOSITORY}/blob/main/", f"{REPOSITORY}/tree/main/"):
             if link.startswith(start):
-                assert (ROOT / link.removeprefix(start)).exists(), link
+                path, _, mark = link.removeprefix(start).partition("#")
+                assert (ROOT / path).exists(), link
+                if mark:
+                    assert mark in headings_of(ROOT / path), link
                 break
         else:
             if "://" in link and not link.startswith(SITE):
