@@ -92,6 +92,7 @@
     "cloakroom-returns-the-bags",
     "every-use-of-the-bags",
     "everything-that-moves-the-bags",
+    "every-ticket-for-the-bags",
     "trip-start",
     "lock-visit",
     "lock-flight"
@@ -150,7 +151,8 @@
             }
           ]
         }
-      ]
+      ],
+      "covered_in": []
     }
   ]
 }

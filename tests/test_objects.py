@@ -15,6 +15,7 @@ from agloe import answers, compiler, reference, report
 from agloe.answers import Answer, Carried, Report, Stay, Use
 from agloe.file import (
     Capability,
+    CompleteNeedsRightFor,
     CompleteRequires,
     CompleteRequiresObject,
     CompleteTransfers,
@@ -73,6 +74,7 @@ from tests.stories import (
     every,
     every_requirement,
     every_right,
+    every_right_for,
     every_transfer,
     every_use,
     hands_over,
@@ -88,6 +90,7 @@ from tests.stories import (
     must_not,
     needs_no_right,
     needs_right,
+    needs_right_for,
     offer,
     refuses_object,
     requires,
@@ -341,14 +344,25 @@ def test_only_an_object_that_some_option_might_require_or_refuse_is_asked_for() 
         requires_object("check-in", "passport", False),
         refuses_object("check-in", "passport", False),
     ]
+    no_right = every_right_for("passport")
     for settled in ([every_use("passport")], neither):
-        assert load(a_document(*settled)).objects_asked_for() == ()
+        assert load(a_document(*settled, no_right)).objects_asked_for() == ()
     # One of the two FACTs leaves the other thing open.
     for one in neither:
-        assert [thing.id for thing in load(a_document(one)).objects_asked_for()] == ["passport"]
+        asked = load(a_document(one, no_right)).objects_asked_for()
+        assert [thing.id for thing in asked] == ["passport"]
     # An OBJECT that an OPTION refuses is asked for, though none requires it.
-    refused = load(a_document(every_use("passport"), refuses_object("check-in", "passport")))
+    refused = load(
+        a_document(every_use("passport"), refuses_object("check-in", "passport"), no_right)
+    )
     assert [thing.id for thing in refused.objects_asked_for()] == ["passport"]
+    # So is an OBJECT that an OPTION needs a right for, or might, though none requires it.
+    unsaid = load(a_document(every_use("passport")))
+    assert [thing.id for thing in unsaid.objects_asked_for()] == ["passport"]
+    needed = load(a_document(every_use("passport"), needs_right_for("check-in", "passport")))
+    assert [thing.id for thing in needed.objects_asked_for()] == ["passport"]
+    none = needs_right_for("check-in", "passport", False)
+    assert load(a_document(every_use("passport"), none)).objects_asked_for() == ()
 
 
 # The CONSTRAINT, on ITINERARIES written by hand.
@@ -396,13 +410,14 @@ def test_an_object_is_at_hand_with_a_person_who_takes_part() -> None:
 
 
 def replace_silence(file: File) -> File:
-    """The same FILE with both sets of each OBJECT COMPLETE, so that nothing else is unknown."""
+    """The same FILE with each set of each OBJECT COMPLETE, so that nothing else is unknown."""
     whole = [
         fact
         for thing in file.objects
         for fact in (
             CompleteRequiresObject(f"every-use-of-{thing.id}", thing.id),
             CompleteTransfers(f"every-transfer-of-{thing.id}", thing.id),
+            CompleteNeedsRightFor(f"every-right-for-{thing.id}", thing.id),
         )
         if fact.id not in {each.id for each in file.facts}
     ]
@@ -1701,6 +1716,7 @@ def test_listing_an_object_that_nothing_requires_changes_no_answer() -> None:
         facts = (
             *plain.facts,
             CompleteRequiresObject("every-use-of-bags", "bags"),
+            CompleteNeedsRightFor("every-right-for-bags", "bags"),
             ObjectStarts("bags-start", "bags", person=plain.persons[0].id),
         )
         listed = replace(plain, objects=(Object("bags", "bags"),), facts=facts)
@@ -1727,9 +1743,16 @@ def test_the_answer_comes_first_for_a_file_with_objects() -> None:
 
 
 def relied_on(found: Report) -> list[str]:
-    """The FACTs about OBJECTs that a plan relies on."""
+    """The FACTs about OBJECTs that a plan relies on: where the OBJECT is, what the OPTIONs
+    require of it and what they do with it. Each of these plans also relies on the FACT that
+    no OPTION needs a right for the OBJECT. That FACT is left out here, and
+    ``tests/test_object_rights.py`` is about it."""
     about = ("passport", "use-of", "transfer-of")
-    return [record for record in found.relies_on if any(word in record for word in about)]
+    return [
+        record
+        for record in found.relies_on
+        if any(word in record for word in about) and "right-for" not in record
+    ]
 
 
 def locked_desk(*facts: Document, into: Sequence[str] = ("first", "second", "third")) -> File:
@@ -1879,6 +1902,7 @@ def test_a_plan_relies_on_the_facts_about_a_keep_and_a_hand_over_it_goes_through
             ],
             "required_by": [{"option": "third", "stated": True, "where": [{"person": "alex"}]}],
             "refused_by": [],
+            "covered_in": [],
         }
     ]
     words = report.as_text(file, found)
@@ -1926,6 +1950,7 @@ def test_a_plan_says_where_the_file_leaves_a_refusal_open() -> None:
             "path": [{"where": [{"place": "desk"}], "since": None, "how": None}],
             "required_by": [],
             "refused_by": [{"option": "first", "stated": False, "where": [{"place": "desk"}]}],
+            "covered_in": [],
         }
     ]
     # With Alex carrying it, the plan does not hold if the appointment refuses it.
@@ -2063,7 +2088,12 @@ def test_where_nobody_knows_who_has_an_object_everybody_stops_where_it_is_kept()
     )
     assert bags.uses == (Use("visit", True, elsewhere, "refuses"),)
     relied = [record for record in found.relies_on if "bags" in record]
-    assert relied == ["cloakroom-with-bags", "visit-refuses-bags", "every-use-of-bags"]
+    assert relied == [
+        "cloakroom-with-bags",
+        "visit-refuses-bags",
+        "every-use-of-bags",
+        "every-right-for-bags",
+    ]
     words = report.as_text(file, found)
     there = "at museum, at hotel or somewhere the FILE does not name"
     assert f"  bags: nobody knows where when the TRIP starts; {there} from " in words
@@ -2797,7 +2827,7 @@ def with_objects(rng: Random, file: File, most: int = 2) -> File:
     """The same FILE with one or two OBJECTs and FACTs about them, chosen at random."""
     names = THINGS[: rng.choice([1, 1, 1, 2][: 2 * most])]
     facts: list[ObjectStarts | RequiresObject | RefusesObject | WithObject] = []
-    whole: list[CompleteRequiresObject | CompleteTransfers] = []
+    whole: list[CompleteRequiresObject | CompleteTransfers | CompleteNeedsRightFor] = []
     people = [person.id for person in file.persons]
     for name in names:
         start = rng.choice(["with", "with", "at", "at", None])
@@ -2823,6 +2853,8 @@ def with_objects(rng: Random, file: File, most: int = 2) -> File:
             whole.append(CompleteRequiresObject(f"every-use-of-{name}", name))
         if rng.random() < 0.6:
             whole.append(CompleteTransfers(f"every-transfer-of-{name}", name))
+        # No OPTION needs a right for the OBJECT: these trips are about where it is.
+        whole.append(CompleteNeedsRightFor(f"every-right-for-{name}", name))
     listed = tuple(Object(name, name) for name in names)
     return replace(file, objects=listed, facts=(*file.facts, *facts, *whole))
 
@@ -6875,6 +6907,7 @@ def four_on_a_shuttle_with_a_key(key_at: str) -> File:
         RequiresObject("alex-3-requires-key", "alex-3", "key", True),
         WithObject("shuttle-with-key", "shuttle", "key", "hands_over"),
         CompleteRequiresObject("every-use-of-key", "key"),
+        CompleteNeedsRightFor("every-right-for-key", "key"),
     ]
     listed = (*file.objects, Object("key", "key"))
     return replace(file, objects=listed, facts=(*file.facts, *key))

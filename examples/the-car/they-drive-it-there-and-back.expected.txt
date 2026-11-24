@@ -23,6 +23,7 @@ The plan relies on these FACTs and DECISIONs:
   drive-back-needs-the-car: Drive back to the hotel requires the car
   drive-back-carries-the-car: Drive back to the hotel can carry the car
   every-use-of-the-car: of the OPTIONs in this FILE, only Drive to the dunes and Drive back to the hotel require the car, and none refuses the car
+  every-ticket-for-the-car: no OPTION in this FILE needs a right for the car
   lock-drive-out: Alex and Sam take part in Drive to the dunes
   lock-drive-back: Alex and Sam take part in Drive back to the hotel
 

@@ -17,6 +17,7 @@ from agloe.file import (
     Cap,
     Complete,
     CompleteFor,
+    CompleteNeedsRightFor,
     CompleteRequires,
     CompleteRequiresObject,
     CompleteRights,
@@ -26,6 +27,7 @@ from agloe.file import (
     Has,
     Lock,
     Money,
+    NeedsRightFor,
     ObjectStarts,
     Offer,
     RefusesObject,
@@ -188,12 +190,17 @@ class Use:
     ``where`` holds each place the OBJECT might be just before the OPTION starts. Each is at
     hand where the OPTION requires the OBJECT. None is a PERSON who takes part where the
     OPTION refuses it.
+
+    ``check`` is "needs a right for" where the OPTION needs a right for the OBJECT, or
+    might, and a PERSON who takes part has the OBJECT, or it is handed over or carried
+    there. ``by`` is then the BOOKING that covers the OBJECT.
     """
 
     option: str
     stated: bool
     where: tuple[Where, ...]
     check: str = "requires"
+    by: str | None = None
 
 
 @dataclass(frozen=True)
@@ -378,9 +385,11 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> 
         return fact.id in used
     if isinstance(fact, CompleteRequiresObject | CompleteTransfers):
         return fact.id in used
+    if isinstance(fact, NeedsRightFor | CompleteNeedsRightFor):
+        return fact.id in used
     if isinstance(fact, CompleteFor):
         return _settles(file, itinerary, fact)
-    if isinstance(fact, Booking) and file.caps:
+    if isinstance(fact, Booking) and (file.caps or fact.id in used):
         return True
     if isinstance(fact, Booking | Offer):
         return fact.id in used
@@ -483,6 +492,13 @@ def _carried(
     the OBJECT alone. Where the FILE has neither, the report says each place where the
     OBJECT might be from then on.
 
+    For each OPTION in the plan and each OBJECT, the plan also relies on the FACT about
+    whether the OPTION needs a right for the OBJECT, where the FILE states one. Where it
+    states none and a FACT says that the FILE states every OPTION that needs a right for
+    the OBJECT, it relies on that FACT. Where the OPTION needs the right, or might, and a
+    PERSON who takes part has the OBJECT, or it is handed over or carried there, the plan
+    relies on the BOOKING that covers the OBJECT, and the report names it.
+
     An OBJECT that is carried is in the OPTION from its start, and lies at the PLACE where
     the OPTION ends from its end, as the plan shows that end. That is said whether or not a
     later step uses the OBJECT, and whether the travelers chose the carry or the OBJECT
@@ -546,7 +562,13 @@ def _carried(
                     relied.add(stated.id)
                 elif every is not None:
                     relied.add(every.id)
-        checked = world.needs | world.refuses
+            ticket = file.object_right(step.option or "", thing.id)
+            listed = file.object_rights_complete(thing.id)
+            if ticket is not None:
+                relied.add(ticket.id)
+            elif listed is not None:
+                relied.add(listed.id)
+        checked = world.needs | world.refuses | world.ticketed
         if thing.id not in trails or not any((step.option, thing.id) in checked for step in steps):
             continue
         trail, seen = trails[thing.id], found_at[thing.id]
@@ -587,6 +609,12 @@ def _carried(
                 }
                 stated = file.refuses_object(option, thing.id) is True
                 uses.append(Use(option, stated, in_order(before | landed), "refuses"))
+            covering = file.booking_for(option, thing.id)
+            in_it = taker is not None or held or aboard in after
+            if (option, thing.id) in world.ticketed and in_it and covering is not None:
+                relied.add(covering.id)
+                stated = file.needs_right_for(option, thing.id) is True
+                uses.append(Use(option, stated, in_order(before), "needs a right for", covering.id))
             if after != before:
                 # It is kept for sure where whoever might have it takes part.
                 sure = all(each.person in step.persons for each in before)
@@ -849,8 +877,10 @@ def _to_bring(
     They are read off the ITINERARY shown in the world where the set turns out well and every
     other unknown FACT badly, in the order of its steps. Each OPTION that requires the
     OBJECT there is a check, "requires": the OBJECT has to be at hand. Each OPTION that
-    refuses it there is a check, "refuses": no PERSON may have the OBJECT in it. With each
-    comes whether a FACT says that the OPTION requires or refuses the OBJECT, and whether
+    refuses it there is a check, "refuses": no PERSON may have the OBJECT in it. So is each
+    OPTION that needs a right for the OBJECT where nothing covers it, "needs a right for".
+    With each comes whether a FACT says that the OPTION requires or refuses the OBJECT, or
+    needs the right, and whether
     the check holds in the same plan without another transfer: with what the FILE lists,
     and everything else as in that world. Any other FACT has none.
 
@@ -898,6 +928,12 @@ def _to_bring(
             stated = file.refuses_object(option, thing) is True
             holds = not brought_in(before, step.persons)
             checks.append((option, "refuses", stated, holds))
+        if (option, thing) in world.uncovered:
+            # Nothing covers the OBJECT there, so no PERSON who takes part may have it:
+            # another transfer has to leave it where it needs no right.
+            stated = file.needs_right_for(option, thing) is True
+            holds = not brought_in(before, step.persons)
+            checks.append((option, "needs a right for", stated, holds))
     return tuple(checks)
 
 
@@ -1132,6 +1168,11 @@ def _asked_of_objects(
     the OBJECT, it might keep it and no more. That asks less of a plan than any set that
     leaves both unknown, so nothing that such a set allows is lost.
 
+    A fourth thing can be unknown about an OPTION and an OBJECT: whether a right is needed
+    there and something covers the OBJECT. Its unknown FACT is that the OPTION needs no
+    right for the OBJECT, or that another right covers it, whichever the FILE leaves open.
+    A set that holds neither leaves the OBJECT with no right there.
+
     Some of those things are tested together in the upper bound of ``no_better_than``,
     where every unknown FACT helps whoever needs it: there each of them is put at its
     worst. Where nothing works then, no set without a FACT of theirs is enough. Such a set
@@ -1152,6 +1193,7 @@ def _asked_of_objects(
     kinds = {"does not require": "requires", "does not refuse": "refuses"}
     about_doing = ("keeps", "does not keep", "does not carry", "does not keep or carry")
     kinds.update(dict.fromkeys((*about_doing, "hands over", "carries"), "does"))
+    kinds.update(dict.fromkeys(("needs no right for", "another right for"), "right"))
     # Each thing that is unknown, with its unknown FACTs: an OPTION, an OBJECT and a kind.
     facts: dict[tuple[str, str, str], list[Unknown]] = {}
     for unknown in unknowns(file):
@@ -1164,6 +1206,7 @@ def _asked_of_objects(
         needs = {(option, about) for option, about, kind in group if kind == "requires"}
         refuses = {(option, about) for option, about, kind in group if kind == "refuses"}
         open_to_do = {(option, about) for option, about, kind in group if kind == "does"}
+        no_right = {(option, about) for option, about, kind in group if kind == "right"}
         required = bound.needs | needs
         # At its worst, an OPTION that requires the OBJECT might keep it or take it along.
         # Whether anything works does not turn on how sure the requirement is: a plan can
@@ -1174,6 +1217,8 @@ def _asked_of_objects(
             needs=required,
             refuses=bound.refuses | refuses,
             does={**bound.does, **worst},
+            ticketed=bound.ticketed | no_right,
+            uncovered=bound.uncovered | no_right,
         )
         return not works(file, harder)
 
@@ -1229,6 +1274,7 @@ def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
     no_length += ("does not keep", "does not carry", "does not keep or carry", "carries")
     no_length += ("hands over", "starts with", "starts at", "another transfer")
     about_rights = ("needs no right", "another right", "price", "funding", "charged")
+    about_rights += ("needs no right for", "another right for")
     if unknown.what in (*no_length, *about_rights):
         return None
 

@@ -58,6 +58,7 @@
     "collection-needs-the-bags",
     "every-use-of-the-bags",
     "everything-that-moves-the-bags",
+    "every-ticket-for-the-bags",
     "trip-start",
     "lock-flight",
     "lock-collection"
@@ -125,7 +126,8 @@
             }
           ]
         }
-      ]
+      ],
+      "covered_in": []
     }
   ],
   "at_worst": [

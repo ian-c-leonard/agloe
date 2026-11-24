@@ -273,6 +273,18 @@ def every_use(thing: str) -> Document:
     return {"id": f"every-use-of-{thing}", "complete": {"requires_object": thing}}
 
 
+def needs_right_for(option: str, thing: str, needed: bool = True) -> Document:
+    """A FACT that an OPTION needs a right for an OBJECT, or with ``needed`` False that it
+    needs none."""
+    asked = {"object": thing, "needed": needed}
+    return {"id": f"{option}-right-for-{thing}", "option": option, "needs_right_for": asked}
+
+
+def every_right_for(thing: str) -> Document:
+    """A FACT that the FILE states every OPTION that needs a right for this OBJECT."""
+    return {"id": f"every-right-for-{thing}", "complete": {"needs_right_for": thing}}
+
+
 def every_transfer(thing: str) -> Document:
     """A FACT that the FILE states every OPTION that hands this OBJECT over, keeps or carries it."""
     return {"id": f"every-transfer-of-{thing}", "complete": {"transfers": thing}}
@@ -290,6 +302,7 @@ def trip(
     budgets: Sequence[Document] | None = None,
     capabilities: Sequence[str] = (),
     objects: Sequence[str] = (),
+    object_rights: bool = False,
 ) -> File:
     """A FILE. None of its OPTIONs needs a right, unless the story is about rights.
 
@@ -299,10 +312,17 @@ def trip(
     Unless the story is about money, one BUDGET called money pays for everybody, in USD.
     ``budgets`` are the BUDGETs of a story that is. ``capabilities`` are the CAPABILITIES of a
     story about what the PERSONs can do, and ``objects`` the OBJECTs of a story about things.
+
+    No OPTION needs a right for an OBJECT, unless the story is about that: after the FACTs
+    given, one more for each OBJECT says that the FILE states every OPTION that needs a
+    right for it. With ``object_rights``, the FILE says about those rights only what
+    ``facts`` says.
     """
     if budgets is None:
         budgets = [budget("money", *persons)]
     stated = facts if rights else [*facts, *(needs_no_right(option["id"]) for option in options)]
+    if not object_rights:
+        stated = [*stated, *(every_right_for(thing) for thing in objects)]
     return load(
         {
             "persons": named(*persons),

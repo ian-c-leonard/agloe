@@ -49,7 +49,8 @@
     { "id": "cabin-refuses-the-bags", "option": "flight", "refuses": { "object": "bags", "refused": true } },
     { "id": "claim-returns-the-bags", "option": "baggage-claim", "with_object": { "object": "bags", "does": "hands_over" } },
     { "id": "unpacking-needs-the-bags", "option": "unpacking", "requires": { "object": "bags", "needed": true } },
-    { "id": "every-use-of-the-bags", "complete": { "requires_object": "bags" } }
+    { "id": "every-use-of-the-bags", "complete": { "requires_object": "bags" } },
+    { "id": "every-ticket-for-the-bags", "complete": { "needs_right_for": "bags" } }
   ],
   "decisions": [
     { "id": "trip-start", "trip_starts_at": "2027-05-15T15:30:00-05:00[America/Chicago]" },

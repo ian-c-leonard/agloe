@@ -26,6 +26,7 @@ from agloe.file import (
     Capability,
     Complete,
     CompleteFor,
+    CompleteNeedsRightFor,
     CompleteRequires,
     CompleteRequiresObject,
     CompleteRights,
@@ -37,6 +38,7 @@ from agloe.file import (
     Lock,
     Money,
     NeedsRight,
+    NeedsRightFor,
     Object,
     ObjectStarts,
     Offer,
@@ -169,6 +171,16 @@ def as_json(file: File, report: Report) -> dict[str, object]:
                         ]
                         for key, check in (("required_by", "requires"), ("refused_by", "refuses"))
                     },
+                    "covered_in": [
+                        {
+                            "option": use.option,
+                            "stated": use.stated,
+                            "where": [_where_as_json(each) for each in use.where],
+                            "booking": use.by,
+                        }
+                        for use in carried.uses
+                        if use.by is not None
+                    ],
                 }
                 for carried in report.objects
             ]
@@ -500,6 +512,8 @@ _ABOUT_AN_OBJECT = (
     "carries",
     "starts with",
     "starts at",
+    "needs no right for",
+    "another right for",
     "another transfer",
 )
 
@@ -652,6 +666,20 @@ def as_text(file: File, report: Report) -> str:
             ]
             if file.caps:
                 lines[-1] = lines[-1][:-1] + ", if what those BOOKINGs paid fits the caps."
+        # A BOOKING that covers the OBJECT can stand in for the answer that an OPTION needs
+        # no right for it.
+        about_a_right = [unknown for unknown in asked if unknown.what == "needs no right for"]
+        might_be_covered = list(dict.fromkeys(about_a_right))  # each OPTION and OBJECT once
+        if might_be_covered:
+            things = _names(file.objects)
+            fits = ", if what it paid fits the caps" if file.caps else ""
+            lines.append("")
+            for unknown in might_be_covered:
+                name, thing = _name(file, unknown.option), things[unknown.about or ""]
+                lines.append(
+                    f"If {name} does need a right for {thing}, a BOOKING for it that covers"
+                    f" {thing} is enough instead{fits}."
+                )
         if "other ways" in kinds:
             helps = (
                 "Other WAYs help only if they can be taken when the plan needs them, with a"
@@ -773,12 +801,24 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
             # A BOOKING can cover more PERSONs than the plan credits to it.
             found = next((fact for fact in file.facts if fact.id == record), None)
             credited = tuple(cover.person for cover in report.rights if cover.by == record)
+            # The OBJECTs that the plan uses the BOOKING for.
+            things = [
+                carried.object
+                for carried in report.objects
+                if any(use.by == record for use in carried.uses)
+            ]
             used_for = ""
-            if isinstance(found, Booking) and not credited:
+            if isinstance(found, Booking) and not credited and not things:
                 # In a FILE with a cap, a plan relies on a BOOKING whose right nobody uses.
                 used_for = "; this plan counts what it paid, and nobody uses its right"
-            elif isinstance(found, Booking) and set(credited) != set(found.covers):
-                used_for = f"; this plan uses it for {_people(file, credited)}"
+            elif isinstance(found, Booking) and (
+                set(credited) != set(found.covers) or set(things) != set(found.objects)
+            ):
+                # One list of PERSONs and OBJECTs: no two of them show the same name.
+                shown = _names([*file.persons, *file.objects], "and")
+                users = [shown[person.id] for person in file.persons if person.id in credited]
+                users += [shown[thing.id] for thing in file.objects if thing.id in things]
+                used_for = f"; this plan uses it for {_listed(users)}"
             lines.append(f"  {record}: {_record(file, clock, record)}{used_for}")
     if report.supplies:
         lines += ["", "Who meets the requirements:"]
@@ -870,7 +910,14 @@ def _carried_in_words(
     lines = [f"  {thing}: {'; '.join(stays)}"]
     for use in carried.uses:
         name, where = _name(file, use.option), _where(file, use.where)
-        if use.stated:
+        if use.by is not None and use.stated:
+            before = f"Just before it starts: {where}. {use.by} covers {thing}"
+            lines.append(f"    {name} {use.check} {thing}. {before}.")
+        elif use.by is not None:
+            silent = f"The FILE does not say whether {name} {use.check} {thing}"
+            holds = f"{use.by} covers {thing}, so the plan holds if it does"
+            lines.append(f"    {silent}. Just before it starts: {where}. {holds}.")
+        elif use.stated:
             lines.append(f"    {name} {use.check} {thing}. Just before it starts: {where}.")
         else:
             silent = f"The FILE does not say whether {name} {use.check} {thing}"
@@ -1036,12 +1083,14 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
     PERSONs who need another OPTION for the same WANT are named together, as "each of". The
     condition is one for each PERSON: whether one OPTION or several meet it is left open. The
     OPTIONs that have to need no right are named together where they follow one another in the
-    set. So are the PERSONs who need a right to one OPTION. Nothing else changes the order.
+    set. So are the PERSONs who need a right to one OPTION. The OPTIONs that need a right for
+    one OBJECT, or have to need none for it, are named together wherever they come in the
+    set, at the place of the first. Nothing else changes the order.
     """
     parts: list[str] = []
     for_whom: dict[str | None, list[str]] = {}
     transfers: list[str] = []  # they come last, as in the fixed order
-    for _, run in groupby(enough, key=_named_with):
+    for _, run in groupby(_side_by_side(enough), key=_named_with):
         group = list(run)
         unknown = group[0].unknown
         if unknown.what == "another option":
@@ -1060,6 +1109,17 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
             who = _people(file, tuple(needed.unknown.person or "" for needed in group))
             right = f"a right to {_name(file, unknown.option)} is found for {each}{who}{more}"
             parts.append(_OwnWords(right))
+        elif unknown.what in ("needs no right for", "another right for"):
+            # One OBJECT in several OPTIONs: the OPTIONs are named together.
+            names = [_name(file, needed.unknown.option, "and") for needed in group]
+            thing = _names(file.objects)[unknown.about or ""]
+            if unknown.what == "needs no right for":
+                needs = "needs" if len(names) == 1 else "need"
+                parts.append(f"{_listed(names)} {needs} no right for {thing}")
+            else:
+                each = "each of " if len(names) > 1 else ""
+                found = f"a right to {each}{_listed(names)} is found that covers {thing}"
+                parts.append(_OwnWords(found))
         else:
             parts.append(_wanted(file, group[0], len(enough) == 1))
     for want, persons in for_whom.items():
@@ -1078,13 +1138,16 @@ def _another_transfer(file: File, needed: Missing) -> str:
     It names the OPTIONs for which another transfer has to put the OBJECT at hand in one
     plan, and then those for which what the FILE lists already does: another transfer has
     to leave it at hand there. Then come the OPTIONs that it has to keep the OBJECT out of,
-    and those that it has to leave it out of. An OPTION that only might require or refuse
-    the OBJECT is named so. An OPTION that a FACT says requires the OBJECT and another says
-    refuses it comes last: the OBJECT has to lie where it starts.
+    and those that it has to leave it out of: the ones that refuse it, and then the ones
+    that need a right for it where nothing covers it. An OPTION that only might require or
+    refuse the OBJECT is named so. An OPTION that a FACT says requires the OBJECT, and that
+    a FACT says refuses it or needs a right for it, comes last: the OBJECT has to lie where
+    it starts, and with no PERSON who takes part.
     """
     thing = _names(file.objects)[needed.unknown.about or ""]
     said = {(option, check) for option, check, stated, _ in needed.at_hand_for if stated}
-    both = {option for option, check in said if check == "requires" and (option, "refuses") in said}
+    barred = {option for option, check in said if check in ("refuses", "needs a right for")}
+    both = {option for option, check in said if check == "requires" and option in barred}
 
     def those(check: str, covered: bool, link: str) -> str:
         mine = [
@@ -1096,7 +1159,8 @@ def _another_transfer(file: File, needed: Missing) -> str:
         might = [_name(file, option, "and") for option, stated in mine if not stated]
         named = [f"{link} {_listed(stated)}"] if stated else []
         if might:
-            they = f"it {check}" if len(might) == 1 else f"they {check[:-1]}"
+            several = "need a right for" if check == "needs a right for" else check[:-1]
+            they = f"it {check}" if len(might) == 1 else f"they {several}"
             named.append(f"{link} {_listed(might)} if {they} {thing}")
         return ", and ".join(named)
 
@@ -1116,6 +1180,8 @@ def _another_transfer(file: File, needed: Missing) -> str:
         (f"leaves {thing} at hand", those("requires", True, "for")),
         (f"keeps {thing}", those("refuses", False, "out of")),
         (f"leaves {thing}", those("refuses", True, "out of")),
+        (f"keeps {thing}", those("needs a right for", False, "away from whoever is in")),
+        (f"leaves {thing}", those("needs a right for", True, "away from whoever is in")),
         (f"puts {thing}", lies_there(False)),
         (f"leaves {thing}", lies_there(True)),
     ]
@@ -1127,6 +1193,24 @@ def _places(count: int) -> str:
     return "1 place" if count == 1 else f"{count} places"
 
 
+def _side_by_side(enough: Sequence[Missing]) -> list[Missing]:
+    """A set of unknown FACTs with those about a right for one OBJECT next to each other.
+
+    The fixed order puts the FACTs of one OPTION together. So with two OBJECTs, the OPTIONs
+    that need a right for the first are apart. Each such FACT moves up to the others of its
+    kind about its OBJECT, and nothing else moves.
+    """
+    placed: list[Missing] = []
+    for needed in enough:
+        at = len(placed)
+        if needed.unknown.what in ("needs no right for", "another right for"):
+            key = _named_with(needed)
+            alike = [n for n, other in enumerate(placed) if _named_with(other) == key]
+            at = alike[-1] + 1 if alike else at
+        placed.insert(at, needed)
+    return placed
+
+
 def _named_with(needed: Missing) -> object:
     """What an unknown FACT shares with those a report names it with. Otherwise it stands alone."""
     unknown = needed.unknown
@@ -1134,6 +1218,8 @@ def _named_with(needed: Missing) -> object:
         return unknown.what
     if unknown.what == "another right":
         return (unknown.what, unknown.option)
+    if unknown.what in ("needs no right for", "another right for"):
+        return (unknown.what, unknown.about)
     return needed
 
 
@@ -1175,6 +1261,8 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
             "does not keep or carry": f"{name} neither keeps nor carries {thing}",
             "hands over": f"{thing} can be handed over in {name}",
             "carries": f"{name} can carry {thing}",
+            "needs no right for": f"{name} needs no right for {thing}",
+            "another right for": _OwnWords(f"a right to {name} is found that covers {thing}"),
         }[unknown.what]
     if unknown.what == "price":
         buyers = tuple(cover.person for cover in needed.buys)
@@ -1341,7 +1429,21 @@ def _record(file: File, clock: Clock, record: str) -> str:
         thing = _names(file.objects)[found.object]
         said = _listed(which) if which else "there is none"
         return f"the FILE states every OPTION that hands over, keeps or carries {thing}: {said}"
+    if isinstance(found, CompleteNeedsRightFor):
+        which = [
+            _name(file, fact.option, "and")
+            for fact in file.facts
+            if isinstance(fact, NeedsRightFor) and fact.object == found.object and fact.needed
+        ]
+        thing = _names(file.objects)[found.object]
+        if not which:
+            return f"no OPTION in this FILE needs a right for {thing}"
+        needs = "needs" if len(which) == 1 else "need"
+        return f"of the OPTIONs in this FILE, only {_listed(which)} {needs} a right for {thing}"
     name = _name(file, found.option)
+    if isinstance(found, NeedsRightFor):
+        needs = "needs a right" if found.needed else "needs no right"
+        return f"{name} {needs} for {_names(file.objects)[found.object]}"
     if isinstance(found, Lock):
         verb = "takes" if len(found.persons) == 1 else "take"
         return f"{_people(file, found.persons)} {verb} part in {name}"
@@ -1361,7 +1463,11 @@ def _record(file: File, clock: Clock, record: str) -> str:
         who = "people need" if found.needed else "nobody needs"
         return f"{who} a right to take part in {name}"
     if isinstance(found, Booking):
-        covers = f"a BOOKING for {name} covers {_people(file, found.covers)}"
+        # One list of PERSONs and OBJECTs: no two of them show the same name.
+        shown = _names([*file.persons, *file.objects], "and")
+        covered = [shown[person.id] for person in file.persons if person.id in found.covers]
+        covered += [shown[thing.id] for thing in file.objects if thing.id in found.objects]
+        covers = f"a BOOKING for {name} covers {_listed(covered)}"
         if not file.caps:
             return covers
         if found.paid is None:
@@ -1376,6 +1482,17 @@ def _record(file: File, clock: Clock, record: str) -> str:
         closed = "nobody on the trip holds another or can get one"
         if found.offers:
             closed += f", except from {_listed(found.offers)}"
+        # That is about the PERSONs who take part. Where the OPTION needs a right for an
+        # OBJECT, or might, the line says that this FACT leaves that right open.
+        things = _names(file.objects, "or")
+        left_open = [
+            things[thing.id]
+            for thing in file.objects
+            if file.needs_right_for(found.option, thing.id) is not False
+        ]
+        if left_open:
+            about = "that is about the PERSONs who take part"
+            closed += f"; {about}, and it says nothing of a right for {_listed(left_open, 'or')}"
         return f"the FILE lists every right to {name}: {closed}"
     return _cutoff(file, name, found)
 

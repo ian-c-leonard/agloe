@@ -32,6 +32,7 @@ RED = " A red edge marks what the report names among what rules out every plan."
 YELLOW = " A yellow edge marks what the report names in what the FILE does not say."
 ALL_REQUIRE = "The FILE states every one of its OPTIONs that requires it or refuses it."
 ALL_MOVE = "The FILE states every OPTION that hands it over, keeps it or carries it."
+NO_TICKET = "The FILE states every one of its OPTIONs that needs a right for it, and it names none."
 NONE = ", and it names none."
 MAY_MOVE = (
     "Another OPTION may hand it over, keep it or carry it: "
@@ -109,19 +110,21 @@ def test_an_object_says_where_it_starts_what_requires_it_and_what_moves_it() -> 
         True,
     )
     assert collect["plan"] is None
-    assert bags["whole"] == [ALL_REQUIRE, ALL_MOVE]
+    assert bags["whole"] == [ALL_REQUIRE, ALL_MOVE, NO_TICKET]
     # Where the report says the OBJECT is in its plan, worded as the report words it.
     assert bags["plan"] == (
         "In the plan: at the hotel when the TRIP starts; with Alex from 2:45 pm (handed over in"
         " Collect the bags)."
     )
     assert bags["might"] == []
-    # Its own records: where it starts, and the two FACTs that the FILE states every OPTION.
+    # Its own records: where it starts, and the three FACTs that the FILE states every OPTION.
     assert bags["records"] == [
         "where-the-bags-start",
         "every-use-of-the-bags",
         "everything-that-moves-the-bags",
+        "every-ticket-for-the-bags",
     ]
+    assert bags["rights"] == []
 
 
 def test_an_object_says_where_it_is_in_a_plan_only_where_the_report_says_so() -> None:
@@ -172,6 +175,7 @@ def test_where_an_object_is_in_a_plan_has_the_names_that_the_page_shows(tmp_path
         "flight-needs-the-bags",
         "every-use-of-the-bags",
         "everything-that-moves-the-bags",
+        "every-ticket-for-the-bags",
     )
     others = [fact for fact in story["facts"] if fact["id"] not in about_the_bags]
     path = tmp_path / "trip.json"
@@ -185,6 +189,8 @@ def test_where_an_object_is_in_a_plan_has_the_names_that_the_page_shows(tmp_path
             {"id": "needs-two", "option": "flight", "requires": {"object": second, "needed": True}},
             {"id": "all-that-move-one", "complete": {"transfers": first}},
             {"id": "all-that-move-two", "complete": {"transfers": second}},
+            {"id": "no-ticket-for-one", "complete": {"needs_right_for": first}},
+            {"id": "no-ticket-for-two", "complete": {"needs_right_for": second}},
         ]
 
     # Alex and Sam have a bag each. The two names differ by a space, and a page shows them
@@ -291,7 +297,7 @@ def test_an_option_that_refuses_an_object_is_under_it(tmp_path: Path) -> None:
         }
     ]
     assert [each["name"] for each in bags["requires"]] == ["Flight home"]
-    assert bags["whole"] == [ALL_REQUIRE, ALL_MOVE]
+    assert bags["whole"] == [ALL_REQUIRE, ALL_MOVE, NO_TICKET]
     # An OPTION of which a FACT says that it does not refuse the OBJECT says so, and the plan
     # has no word on it.
     content = json.loads((STORY / "they-carry-them.json").read_text())
@@ -773,6 +779,7 @@ def test_an_object_says_whether_its_options_are_all_there_are() -> None:
         "Other OPTIONs of the FILE may require it too: the FILE does not say that these are all.",
         no_refusal,
         MAY_MOVE,
+        NO_TICKET,
     ]
     assert whole(
         requires=[{**needs, "needed": False}], transfers=[{**moves, "does": "nothing"}]
@@ -780,13 +787,15 @@ def test_an_object_says_whether_its_options_are_all_there_are() -> None:
         "The FILE states every one of its OPTIONs that requires it or refuses it, and it names"
         " none.",
         ALL_MOVE[:-1] + NONE,
+        NO_TICKET,
     ]
     # An OPTION that refuses the OBJECT is one that the FILE names.
-    assert whole(requires=[], refuses=[bars]) == [ALL_REQUIRE, ALL_MOVE]
+    assert whole(requires=[], refuses=[bars]) == [ALL_REQUIRE, ALL_MOVE, NO_TICKET]
     assert whole(requires=[], requires_complete=None) == [
         "The FILE says of no OPTION whether it requires this OBJECT.",
         no_refusal,
         ALL_MOVE,
+        NO_TICKET,
     ]
     assert whole(requires=[{**needs, "needed": False}], requires_complete=None)[0] == (
         "The FILE leaves open whether another of its OPTIONs requires this OBJECT."
@@ -813,7 +822,33 @@ def test_an_object_says_whether_its_options_are_all_there_are() -> None:
     walk: Trip = {**sent, "options": [], "steps": [], "rights": [], "wants": [], "capabilities": []}
     lone: Trip = {**bags, "requires": [], "requires_complete": None, "transfers": []}
     (shown,) = all_objects([{**walk, "objects": [lone]}])
-    assert shown["objects"][0]["whole"] == ["The FILE lists no OPTION.", ALL_MOVE[:-1] + NONE]
+    assert shown["objects"][0]["whole"] == [
+        "The FILE lists no OPTION.",
+        ALL_MOVE[:-1] + NONE,
+        NO_TICKET,
+    ]
+    # An OPTION that needs a right for the OBJECT is one that the FILE names. Without the
+    # FACT that these are all, another OPTION of the FILE may need one too.
+    ticket = {"option": needs["option"], "name": needs["name"], "needed": True, "record": "t"}
+    assert whole(rights=[ticket])[-1] == NO_TICKET.removesuffix(", and it names none.") + "."
+    assert whole(rights=[ticket], rights_complete=None)[-1] == (
+        "Other OPTIONs of the FILE may need a right for it too: the FILE does not say that"
+        " these are all."
+    )
+    assert whole(rights_complete=None)[-1] == (
+        "The FILE says of no OPTION whether it needs a right for this OBJECT."
+    )
+    # A FACT for each OPTION of the FILE leaves nothing open.
+    all_ticketed = [
+        {**ticket, "option": option["id"], "name": option["name"], "needed": option["id"] == "x"}
+        for option in sent["options"]
+    ]
+    assert whole(rights=all_ticketed, rights_complete=None)[-1] == (
+        "The FILE says of each of its OPTIONs whether it needs a right for this OBJECT."
+    )
+    assert whole(rights=[{**ticket, "needed": False}], rights_complete=None)[-1] == (
+        "The FILE leaves open whether another of its OPTIONs needs a right for this OBJECT."
+    )
 
 
 def test_an_option_that_leaves_an_object_alone_or_does_not_require_it_says_so() -> None:
@@ -858,13 +893,20 @@ def test_every_example_shows_its_objects_in_the_words_of_the_report() -> None:
         for thing in each["objects"]:
             if thing["plan"] is not None:
                 again.append(f"  {thing['name']}: {thing['plan'][len('In the plan: ') : -1]}")
-            for check in ("requires", "refuses"):
-                for option in thing[check]:
+            for check, listed in (
+                ("requires", "requires"),
+                ("refuses", "refuses"),
+                ("needs a right for", "rights"),
+            ):
+                for option in thing[listed]:
                     if option["plan"] is not None:
                         said = f"{option['name']} {check} {thing['name']}"
                         again.append(f"    {said}. {option['plan']}")
             for option in thing["might"]:
-                check = "refuses" if option["says"].endswith("refuses it") else "requires"
+                check = "requires"
+                for other in ("refuses", "needs a right for"):
+                    if option["says"].endswith(f"{other} it"):
+                        check = other
                 silent = f"The FILE does not say whether {option['name']} {check} {thing['name']}"
                 again.append(f"    {silent}. {option['plan']}")
         if under:

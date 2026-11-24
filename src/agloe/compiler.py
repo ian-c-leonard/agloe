@@ -453,6 +453,17 @@ class _Search:
         self.no_time = reference.NoTimeBetween(file, world)
         self.have_to = _have_to_take(file, world, self.does)
         self.usable = [each.fixed_start is not None or each.free_start for each in self.terms]
+        # Where another transfer brings an OBJECT, the model does not follow it. An OPTION
+        # that takes it along with no choice, or might, cannot happen where it needs a right
+        # for the OBJECT and nothing covers it: the transfer puts the OBJECT at hand, and
+        # no transfer covers it. That holds with PERSONs in the OPTION and with nobody.
+        self.cannot_happen = {
+            index
+            for index, option in enumerate(file.options)
+            if any(
+                reference.taken_with_no_right(world, option.id, thing.id) for thing in file.objects
+            )
+        }
         self.endless = [each.longest is None for each in self.terms]
         self.moves = [option.origin != option.destination for option in file.options]
         self.lasts = [each.shortest for each in self.terms]
@@ -469,7 +480,11 @@ class _Search:
         # refuse it or do something with it, by position in the FILE. Where an OBJECT is
         # turns on nothing else.
         self.matters: dict[str, list[int]] = {}
-        checked = world.needs | world.refuses
+        # Where an OPTION needs a right for an OBJECT and nothing covers the OBJECT, nobody
+        # who takes part has it and it is not handed over there, as where the OPTION
+        # refuses it. It is not carried there either.
+        self.barred = world.refuses | world.uncovered
+        checked = world.needs | self.barred
         for thing in file.objects:
             touched = [
                 index
@@ -534,6 +549,8 @@ class _Search:
                     model.add_implication(row[index], self.used[index])
             else:
                 model.add_max_equality(self.used[index], [0, *(row[index] for row in self.takes)])
+            if index in self.cannot_happen:
+                model.add(self.used[index] == 0)
             for number, person in enumerate(file.persons):
                 takes = self.takes[number][index]
                 asked = any(
@@ -585,7 +602,7 @@ class _Search:
             for index in matter:
                 option = file.options[index].id
                 does = world.does.get((option, thing), "nothing")
-                if (option, thing) in world.refuses:
+                if (option, thing) in self.barred:
                     continue
                 if does in ("hands_over", "any"):
                     holders |= {n for n in everybody if not self._shut_out(n, index)}
@@ -742,7 +759,7 @@ class _Search:
                 required = (options[index].id, thing) in world.needs
                 if required and start.place != options[index].origin:
                     model.add_bool_or([self.used[index].negated(), *(row[index] for row in holder)])
-                if (options[index].id, thing) in world.refuses:
+                if (options[index].id, thing) in self.barred:
                     for row in might_have:
                         model.add(row[index] == 0)
             return
@@ -898,7 +915,7 @@ class _Search:
             early, late = fixed[first], fixed[then]
             return early is None or late is None or early <= late
 
-        refusing = [index for index in matter if (options[index].id, thing) in world.refuses]
+        refusing = [index for index in matter if (options[index].id, thing) in self.barred]
         keeping = [
             index
             for index in matter
@@ -1168,7 +1185,8 @@ class _Search:
         takes = [row[index] for row in self.takes]
         persons = range(len(takes))
         here = next(n for n, spot in enumerate(spots) if spot.place == option.origin)
-        refused = (option.id, thing) in world.refuses
+        refused = (option.id, thing) in self.barred
+        uncovered = (option.id, thing) in world.uncovered
 
         def at_hand(*when: cp_model.LiteralT) -> None:
             """Under these conditions, each place where the OBJECT might be is at hand."""
@@ -1187,6 +1205,8 @@ class _Search:
             # hand, and then it is in the OPTION and nowhere else.
             loads = model.new_bool_var(f"{thing} carried in {option.id}")
             model.add_implication(loads, used)
+            if uncovered:
+                model.add(loads == 0)  # nothing covers the OBJECT here, so it is not carried
             at_hand(loads)
             aboard = spots.index(Where(option=option.id))
             for n in range(len(spots)):
@@ -1208,6 +1228,9 @@ class _Search:
             # might take along what lies there.
             for n in persons:
                 model.add_bool_or([before[n].negated(), takes[n].negated()])
+            if uncovered and might_take:
+                # It might take along what lies where it starts, with nothing to cover it.
+                _when(model.add(before[here] == 0), used)
             left: list[cp_model.LiteralT] = [used] if loads is None else [used, loads.negated()]
             for n in range(len(spots)):
                 _when(model.add(after[n] == before[here if n == in_it else n]), *left)

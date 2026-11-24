@@ -47,6 +47,7 @@ class Constraint(Enum):
     REQUIRED = "Each requirement of an OPTION is met"
     AT_HAND = "Each OBJECT is at hand where it is required, handed over or carried"
     REFUSED = "No PERSON has an OBJECT in an OPTION that refuses it"
+    COVERED = "Each OBJECT is covered where an OPTION needs a right for it"
 
 
 @dataclass(frozen=True)
@@ -216,6 +217,10 @@ class World:
     fifteenth CONSTRAINT ask nothing of: another transfer might put it at hand wherever a
     plan needs it, and take it out of an OPTION that refuses it. That is an upper bound, and
     no possible world.
+
+    ``ticketed`` holds each OPTION and OBJECT where the OPTION needs a right for the
+    OBJECT. ``uncovered`` holds those of them where nothing covers the OBJECT: no BOOKING
+    of the FILE, and no other right. The sixteenth CONSTRAINT asks about those pairs only.
     """
 
     terms: Mapping[str, Terms]
@@ -243,6 +248,8 @@ class World:
     starts: Mapping[str, Where] = field(default_factory=dict[str, Where])
     starts_anywhere: frozenset[str] = frozenset()
     brought: frozenset[str] = frozenset()
+    ticketed: frozenset[tuple[str, str]] = frozenset()
+    uncovered: frozenset[tuple[str, str]] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -293,7 +300,11 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
     A price and who pays can help only where somebody might have to pay for a place. So a
     price is listed only for an OFFER that ``for_sale`` gives, and who pays only for a PERSON
     with no BOOKING for the OPTION of one of those. A FACT about an OBJECT can help only where
-    some OPTION requires the OBJECT or refuses it, or might.
+    some OPTION requires the OBJECT or refuses it, or needs a right for it, or might. That
+    an OPTION needs no right for an OBJECT is unknown where no FACT and no COMPLETE set
+    says. Another right for the OBJECT can be found where a FACT says that the OPTION needs
+    one. Neither can help where a BOOKING for the OPTION covers the OBJECT, so neither is
+    listed there.
     """
     sold = for_sale(file)
     to_pay = {offer.id for offer in sold}
@@ -335,6 +346,16 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
                     for what in _ACTIONS
                     if might_take or what not in _ABOUT_GOING_ALONG
                 ]
+        for thing in file.objects_asked_for():
+            # A BOOKING that covers the OBJECT settles the pair: whether or not the OPTION
+            # needs the right, the OBJECT has one.
+            if file.booking_for(option.id, thing.id) is not None:
+                continue
+            needed = file.needs_right_for(option.id, thing.id)
+            if needed is None:
+                out.append(Unknown("needs no right for", option.id, about=thing.id))
+            elif needed:
+                out.append(Unknown("another right for", option.id, about=thing.id))
         if file.needs_right(option.id) is True and file.rights_complete(option.id) is None:
             for person in file.persons:
                 if file.booking(option.id, person.id) is None:
@@ -868,12 +889,27 @@ def _world(
         for each in kind or ()
         if each.what in (*_ACTIONS, *_STARTS)
     }
+    # Whether an OPTION needs a right for an OBJECT, and whether something covers the
+    # OBJECT there. A FACT settles the first, and so does a COMPLETE set for an OPTION with
+    # no FACT: it needs none. Otherwise the FILE does not say: at best it needs none, at
+    # worst it needs one. A BOOKING for the OPTION covers the OBJECTs it names. Another
+    # right for the OBJECT can be found at best, and at worst there is none.
+    ticketed: set[tuple[str, str]] = set()
+    uncovered: set[tuple[str, str]] = set()
     for thing in file.objects:
         another = Unknown("another transfer", about=thing.id)
         if file.transfers_complete(thing.id) is None and well(another):
             brought.add(thing.id)
         for option in file.options:
             pair = (option.id, thing.id)
+            ticket = file.needs_right_for(*pair)
+            if ticket is None:
+                ticket = not well(Unknown("needs no right for", option.id, about=thing.id))
+            found_one = well(Unknown("another right for", option.id, about=thing.id))
+            if ticket:
+                ticketed.add(pair)
+                if file.booking_for(*pair) is None and not found_one:
+                    uncovered.add(pair)
             required = file.requires_object(*pair)
             if required is None:
                 required = not well(Unknown("does not require", option.id, about=thing.id))
@@ -933,6 +969,8 @@ def _world(
         begins,
         frozenset(begins_anywhere),
         frozenset(brought),
+        frozenset(ticketed),
+        frozenset(uncovered),
     )
 
 
@@ -1021,7 +1059,53 @@ def _each_alone(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
         *_requirements(file, world, taking_part),
         *_within(file, itinerary),
         *_rights(file, world, taking_part),
+        *_taken_along(file, world, itinerary),
     ]
+
+
+def taken_with_no_right(world: World, option: str, thing: str) -> bool:
+    """Whether an OPTION takes an OBJECT along that another transfer brings, with no right.
+
+    The transfer puts the OBJECT at hand where a plan needs it, and nothing follows the
+    OBJECT through the plan. An OPTION that requires the OBJECT and carries it takes it
+    along whenever it happens. One of which nobody knows whether it requires the OBJECT
+    might, and so might one that requires it, or might, of which nobody knows what it does
+    with it. Where such an OPTION needs a right for the OBJECT and nothing covers the OBJECT
+    there, it cannot happen: no transfer cures that.
+    """
+    pair = (option, thing)
+    if thing not in world.brought or pair not in world.uncovered:
+        return False
+    unknown_action = world.does.get(pair) in ("might_take", "might_carry")
+    return unknown_action or goes_along(world, option, thing) is not None
+
+
+def _taken_along(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
+    """The sixteenth CONSTRAINT for an OBJECT that another transfer might bring.
+
+    Nothing follows such an OBJECT through a plan: the transfer puts it at hand where the
+    plan needs it, and takes it from a PERSON before an OPTION that needs a right for it.
+    Two things no transfer cures. An OPTION that takes the OBJECT along with no choice, or
+    might, cannot happen where nothing covers the OBJECT there: ``taken_with_no_right``
+    says when. And a plan that hands the OBJECT over there, or carries it there by choice,
+    does so with no right. The Broken names whoever is to have the OBJECT, or else
+    everybody who takes part.
+    """
+    out: list[Broken] = []
+    for step in itinerary:
+        if step.option is None:
+            continue
+        takers = dict(step.handed)
+        for thing in file.objects:
+            pair = (step.option, thing.id)
+            if thing.id not in world.brought or pair not in world.uncovered:
+                continue
+            chosen = thing.id in takers or thing.id in step.carried
+            if chosen or taken_with_no_right(world, *pair):
+                who = (takers[thing.id],) if thing.id in takers else step.persons
+                named = _in_file_order_of_persons(file, who)
+                out.append(Broken(Constraint.COVERED, step.option, named, object=thing.id))
+    return out
 
 
 def _rights(file: File, world: World, taking_part: Mapping[str, tuple[str, ...]]) -> list[Broken]:
@@ -1920,6 +2004,7 @@ def _least_broken(
     for position, (option, persons, origin, over) in enumerate(visits):
         action = world.does.get((option, thing), "nothing")
         refused = (option, thing) in world.refuses
+        uncovered = (option, thing) in world.uncovered
         taker = handed.get(option)
         loaded = option in carried
         along = goes_along(world, option, thing)
@@ -1963,6 +2048,16 @@ def _least_broken(
                     after = _moved(after, persons, origin, refused, Where(option=option))
                 elif along == "might":
                     after = _left("might_carry", after, persons, origin, option, refused)
+                # A right is needed where a PERSON who takes part has the OBJECT, where it
+                # is handed over and where it is carried. That is one requirement, so one
+                # finding: for whoever has it, or else for whoever takes it, or else for
+                # the carry. A hand-over or a carry that does not happen needs none.
+                if uncovered and held:
+                    found = (*found, (position, Constraint.COVERED, None))
+                elif uncovered and taker is not None and Where(person=taker) in after:
+                    found = (*found, (position, Constraint.COVERED, taker))
+                elif uncovered and Where(option=option) in after:
+                    found = (*found, (position, Constraint.COVERED, _CARRY))
                 known = following.get(after)
                 if known is None or (len(found), (*picks, pick)) < (len(known[1]), known[0]):
                     following[after] = ((*picks, pick), found, (*trail, after), (*seen, places))
@@ -2046,6 +2141,9 @@ def _one_further(
     """
     option, persons, origin, _ = visit
     refused = (option, thing) in world.refuses
+    # Where the OPTION needs a right for the OBJECT and nothing covers it, no PERSON who
+    # takes part has it, and it is not handed over or carried there, by choice or with none.
+    uncovered = (option, thing) in world.uncovered
     action = world.does.get((option, thing), "nothing")
     kept: dict[frozenset[Where], dict[tuple[tuple[str, str], ...], _Ranked]] = {}
 
@@ -2083,26 +2181,31 @@ def _one_further(
             if in_use is None or not within_reach(in_use[0], persons, origin):
                 continue
             places, arrivals = in_use
-        if refused and brought_in(places, persons):
+        if (refused or uncovered) and brought_in(places, persons):
             continue
         at_hand = in_use is not None and within_reach(in_use[0], persons, origin)
         for does in ("nothing", "keeps", "hands_over", "carries") if action == "any" else (action,):
             if does not in ("hands_over", "carries"):
                 # It takes the OBJECT from no PERSON where it refuses it.
-                keep(_left(does, places, persons, origin, option, refused), arrivals, taken)
+                left = _left(does, places, persons, origin, option, refused)
+                if not (uncovered and Where(option=option) in left):
+                    keep(left, arrivals, taken)
                 continue
             along = goes_along(world, option, thing)
             if along == "sure":
                 # It goes along with no choice: the OPTION requires it, so it is at hand.
-                keep(frozenset({Where(option=option)}), arrivals, taken)
+                if not uncovered:
+                    keep(frozenset({Where(option=option)}), arrivals, taken)
                 continue
             if along == "might":
                 # A plan that does not choose the carry has to hold with both.
                 gone = _left("might_carry", places, persons, origin, option, refused)
+                if uncovered and Where(option=option) in gone:
+                    continue
                 keep(gone, arrivals, taken)
             elif action != "any":  # with "any" that is "nothing"
                 keep(places, arrivals, taken)
-            if in_use is None or not at_hand:
+            if in_use is None or not at_hand or uncovered:
                 continue
             if does == "carries":
                 keep(frozenset({Where(option=option)}), in_use[1], (*taken, rank(option, None)))
@@ -2200,7 +2303,9 @@ def _objects(file: File, world: World, order: list[_Placed]) -> list[Broken]:
             sooner: int | None = None
             if taker is not None and taker != _CARRY:
                 who: tuple[str, ...] = (taker,)
-            elif constraint is Constraint.REFUSED:
+            elif constraint is Constraint.REFUSED or (
+                constraint is Constraint.COVERED and taker is None
+            ):
                 have = [each for each in persons if Where(person=each) in seen[position]]
                 who = _in_file_order_of_persons(file, have)
             else:
@@ -2268,13 +2373,16 @@ type _Ordered = tuple[
 def _asked_about(
     file: File, world: World, who: tuple[tuple[str, ...], ...], empty: Set[int] = frozenset()
 ) -> tuple[list[int], list[str]]:
-    """The OPTIONs of a plan that happen, and the OBJECTs that one of them requires or refuses.
+    """The OPTIONs of a plan that happen, and the OBJECTs that one of them asks about.
 
-    The OPTIONs are by position in the FILE. ``who`` names the PERSONs in each, and ``empty``
-    holds the OPTIONs that happen with nobody in them.
+    An OPTION asks about an OBJECT where it requires it or refuses it, and where it needs a
+    right for it that nothing gives: a PERSON who has the OBJECT hands it on first, or
+    leaves it where an OPTION keeps it. The OPTIONs are by position in the FILE. ``who``
+    names the PERSONs in each, and ``empty`` holds the OPTIONs that happen with nobody in
+    them.
     """
     happening = [index for index, persons in enumerate(who) if persons or index in empty]
-    checked = world.needs | world.refuses
+    checked = world.needs | world.refuses | world.uncovered
     asked = [
         thing.id
         for thing in file.objects
@@ -2368,8 +2476,10 @@ def _can_have(
 
     The OPTIONs are by position in the FILE. A PERSON can have the OBJECT in an OPTION who
     has it when the TRIP starts, or might, or who takes part before that in an OPTION of
-    the plan that hands it over and does not refuse it. ``orders`` says what comes before
-    what for each PERSON. An OPTION that only might hand it over counts as one that does.
+    the plan that hands it over and does not refuse it. An OPTION that needs a right for
+    the OBJECT that nothing gives is like one that refuses it here: nobody takes the
+    OBJECT in it. ``orders`` says what comes before what for each PERSON. An OPTION that
+    only might hand it over counts as one that does.
     Nobody else has the OBJECT just before the OPTION starts: nobody comes to have it by a
     carry.
     """
@@ -2382,7 +2492,8 @@ def _can_have(
             if can:
                 holders.setdefault(index, set()).add(person.id)
             pair = (options[index].id, thing)
-            if world.does.get(pair) in ("hands_over", "any") and pair not in world.refuses:
+            barred = pair in world.refuses or pair in world.uncovered
+            if world.does.get(pair) in ("hands_over", "any") and not barred:
                 can = True
     return holders
 
@@ -2403,7 +2514,8 @@ def _can_move(
     takes part, and nobody takes it there. An OPTION that carries it can move it also where
     no PERSON can ever have it: then it lies at the PLACE where the OPTION starts. An
     OPTION with nobody in it can move it only by carrying it too: an OBJECT is handed over
-    to a PERSON who takes part.
+    to a PERSON who takes part. An OPTION that needs a right for the OBJECT that nothing
+    gives does not move it: in a plan that works, the OBJECT is never in it.
     """
     options = file.options
     holders = _can_have(file, world, orders, thing)
@@ -2412,6 +2524,8 @@ def _can_move(
     for index in happening:
         pair = (options[index].id, thing)
         action = world.does.get(pair)
+        if pair in world.uncovered:
+            continue
         if action in ("carries", "any", "might_take", "might_carry"):
             moving.add(index)
         elif pair in world.refuses or index not in attended:
@@ -2434,7 +2548,8 @@ def _ordered_by(
     in order. An OPTION checks the OBJECT where it requires it, or where it refuses it and a
     PERSON who takes part can have it by then, as ``_can_have`` says. Nobody else has the
     OBJECT then, so a refusal asks nothing of an OPTION with nobody else in it, wherever
-    that OPTION comes.
+    that OPTION comes. An OPTION that needs a right for the OBJECT that nothing gives
+    checks it in the same way: no PERSON who takes part has it.
 
     The second are the OPTIONs that check the OBJECT or can move it. An OBJECT that no
     OPTION of the plan can move stays where it starts. So the order of the OPTIONs that
@@ -2447,6 +2562,7 @@ def _ordered_by(
         for index in happening
         if (options[index].id, thing) in world.needs
         or ((options[index].id, thing) in world.refuses and index in holders)
+        or ((options[index].id, thing) in world.uncovered and index in holders)
     )
     can_move = _can_move(file, world, orders, happening, thing)
     if not can_move:
@@ -2926,13 +3042,17 @@ def could_run_alone(
     With ``who``, they are OPTIONs that this choice of PERSONs leaves out. Such an OPTION
     has a start it can take. It requires no CAPABILITY: a requirement is about the PERSONs
     in the OPTION. And it can move an OBJECT that some OPTION of the FILE requires or
-    refuses: it carries
-    it, or might. An OPTION with nobody in it keeps nothing and hands nothing over, and it
-    meets no must. So any other one changes nothing for anybody: a plan that works with it
-    works without it, and rules 4 and 5 put the plan without it first.
+    refuses: it carries it, or might. An OPTION with nobody in it keeps nothing and hands
+    nothing over, and it meets no must. So any other one changes nothing for anybody: a
+    plan that works with it works without it, and rules 4 and 5 put the plan without it
+    first.
+
+    An OBJECT that an OPTION only needs a right for gives it no purpose. Such an OBJECT is
+    in the way only while a PERSON who takes part has it: it is handed over or carried
+    there only by a choice of the plan, and it goes along with no choice only where the
+    OPTION requires it. An OPTION with nobody in it takes nothing from a PERSON.
     """
-    checked = world.needs | world.refuses
-    asked = {thing for _, thing in checked} - world.brought
+    asked = {thing for _, thing in world.needs | world.refuses} - world.brought
     carrying = ("carries", "any", "might_take", "might_carry")
     alone: list[int] = []
     for index, option in enumerate(file.options):

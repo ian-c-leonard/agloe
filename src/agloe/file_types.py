@@ -304,6 +304,26 @@ class RefusesObject(TypedDict):
     refuses: ObjectRefusal
 
 
+class ObjectRight(TypedDict):
+    object: Id
+    needed: bool
+
+
+class NeedsRightForObject(TypedDict):
+    id: Id
+    option: Id
+    needs_right_for: ObjectRight
+
+
+class NeedingARightForAnObject(TypedDict):
+    needs_right_for: Id
+
+
+class CompleteRightsNeededForAnObject(TypedDict):
+    id: Id
+    complete: NeedingARightForAnObject
+
+
 class Action(TypedDict):
     object: Id
     does: Literal["hands_over", "keeps", "carries", "nothing"]
@@ -390,5 +410,7 @@ class File(TypedDict):
         | WithObject
         | CompleteForAnObject
         | CompleteTransfers
+        | NeedsRightForObject
+        | CompleteRightsNeededForAnObject
     ]
     decisions: list[Lock | TripStart | TripEnd | Cap]

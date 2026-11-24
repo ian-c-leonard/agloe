@@ -56,14 +56,15 @@ A newer FACT that contradicts an older one about the same thing: the 15:55 saili
 
 ### COMPLETE
 
-Describes a set that a FACT states the FILE holds in full: a set of OPTIONs and WAYs, or the rights to an OPTION. There are six kinds of set.
+Describes a set that a FACT states the FILE holds in full: a set of OPTIONs and WAYs, or the rights to an OPTION. There are seven kinds of set.
 
 - Everything that goes straight from one PLACE to another and starts within a stated time span. Nothing unlisted does. The FACT can name both PLACEs, one of them, or neither, and a PLACE it does not name stands for every PLACE.
 - Every OPTION that SATISFIES a stated WANT. Each one is in the FILE, with a FACT that it SATISFIES the WANT. Nothing else does.
-- Every right to a stated OPTION that anybody on the TRIP holds or can get. The BOOKINGs in the FILE secure those that are held. Nobody on the TRIP can get another, except by a place of an OFFER that the FACT names.
+- Every right anybody on the TRIP holds or can get for a PERSON to take part in a stated OPTION. The BOOKINGs in the FILE secure those that are held. Nobody on the TRIP can get another, except by a place of an OFFER that the FACT names.
 - Every OPTION of the FILE that requires a stated CAPABILITY. Each one has a FACT that says so. An OPTION of the FILE with no such FACT does not require it.
 - Every OPTION of the FILE that requires or refuses a stated OBJECT. Each one has a FACT that says so. An OPTION of the FILE with no such FACT does neither.
 - Every OPTION that hands a stated OBJECT over, keeps it or carries it. Each one is in the FILE, with a FACT that says so. Nothing else transfers the OBJECT.
+- Every OPTION of the FILE that needs a right for a stated OBJECT. Each such OPTION has a FACT saying it needs that right. Every other OPTION of the FILE needs no right for that OBJECT.
 
 A COMPLETE set that is empty means "we looked, and there is nothing". A FACT that one set is COMPLETE says nothing about any other set. So a FACT about travel between two PLACEs says nothing about travel through a third PLACE as a whole: each leg of that travel is straight travel by itself, and only a FACT that covers the leg rules it out.
 

@@ -50,7 +50,8 @@
     { "id": "collecting-allows-the-bags", "option": "collect-bags", "refuses": { "object": "bags", "refused": false } },
     { "id": "flight-allows-the-bags", "option": "flight", "refuses": { "object": "bags", "refused": false } },
     { "id": "hotel-releases-the-bags", "option": "collect-bags", "with_object": { "object": "bags", "does": "hands_over" } },
-    { "id": "everything-that-moves-the-bags", "complete": { "transfers": "bags" } }
+    { "id": "everything-that-moves-the-bags", "complete": { "transfers": "bags" } },
+    { "id": "every-ticket-for-the-bags", "complete": { "needs_right_for": "bags" } }
   ],
   "decisions": [
     { "id": "trip-start", "trip_starts_at": "2027-05-15T13:00:00-05:00[America/Chicago]" },

@@ -82,6 +82,7 @@
     "unpacking-needs-the-bags",
     "every-use-of-the-bags",
     "everything-that-moves-the-bags",
+    "every-ticket-for-the-bags",
     "trip-start",
     "lock-flight",
     "lock-unpacking"
@@ -158,7 +159,8 @@
             }
           ]
         }
-      ]
+      ],
+      "covered_in": []
     }
   ]
 }

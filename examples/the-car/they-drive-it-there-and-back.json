@@ -35,7 +35,8 @@
     { "id": "drive-back-needs-the-car", "option": "drive-back", "requires": { "object": "car", "needed": true } },
     { "id": "drive-back-carries-the-car", "option": "drive-back", "with_object": { "object": "car", "does": "carries" } },
     { "id": "every-use-of-the-car", "complete": { "requires_object": "car" } },
-    { "id": "everything-that-moves-the-car", "complete": { "transfers": "car" } }
+    { "id": "everything-that-moves-the-car", "complete": { "transfers": "car" } },
+    { "id": "every-ticket-for-the-car", "complete": { "needs_right_for": "car" } }
   ],
   "decisions": [
     { "id": "lock-drive-out", "lock": "drive-out", "persons": ["alex", "sam"] },

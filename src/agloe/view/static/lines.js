@@ -231,9 +231,10 @@ export function lines(text, report, trip) {
   if (things.length && above.length === 1) {
     const under = [];
     for (let at = above[0] + 1; at < found.length && found[at].text.startsWith("  "); at += 1) under.push(found[at]);
-    const ties = things.flatMap(({ object, options }) => [
+    // A line about a right for the OBJECT is also about the BOOKING that it names.
+    const ties = things.flatMap(({ object, options, bookings }) => [
       [`object:${object}`],
-      ...options.map((option) => [...(stepOf(option) < 0 ? [] : [String(stepOf(option))]), `object:${object}`]),
+      ...options.map((option, n) => [...(stepOf(option) < 0 ? [] : [String(stepOf(option))]), `object:${object}`, ...(bookings[n] === null ? [] : [`booking:${bookings[n]}`])]),
     ]);
     if (under.length === ties.length && under.every(free)) under.forEach((line, n) => (line.about = ties[n]));
   }

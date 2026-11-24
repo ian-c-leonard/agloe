@@ -471,6 +471,7 @@ function drawRights(shown) {
     const card = Object.assign(made("article", `card${edges(rights)}`), { title: marks(rights).join("\n") });
     Object.assign(card.dataset, { of: `rights:${rights.option}`, records: tiesOf(rights).join(" ") });
     card.append(made("h3", "card-name", rights.name), made("p", "card-holds", rights.needs));
+    if (rights.things !== null) card.append(made("p", "card-holds", rights.things));
     const entries = made("ul", "card-options");
     for (const booking of rights.bookings) entries.append(entry(booking, `booking:${booking.id}`, true, booking.uses));
     for (const offer of rights.offers) entries.append(entry(offer, `offer:${offer.id}`, false, offer.uses));
@@ -585,7 +586,7 @@ function drawObjects(shown) {
     card.append(made("h3", "card-name", thing.name), made("p", "card-holds", thing.starts));
     if (thing.plan) card.append(made("p", "card-plan", thing.plan));
     const options = made("ul", "card-options");
-    for (const option of [...thing.requires, ...thing.refuses, ...thing.might, ...thing.transfers]) options.append(entry(option, drawingOf(option, option.option), option.does, option.takes, option.plan));
+    for (const option of [...thing.requires, ...thing.refuses, ...thing.rights, ...thing.might, ...thing.transfers]) options.append(entry(option, drawingOf(option, option.option), option.does, option.takes, option.plan));
     if (options.children.length) card.append(options);
     for (const words of thing.whole) card.append(made("p", "card-whole", words));
     box.append(card);

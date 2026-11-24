@@ -1,0 +1,5 @@
+UNDETERMINED: the FILE does not say enough to tell.
+
+The trip works if Car ferry to Muskegon needs no right for the car.
+
+If Car ferry to Muskegon does need a right for the car, a BOOKING for it that covers the car is enough instead.

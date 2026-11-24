@@ -1,0 +1,31 @@
+FEASIBLE: this trip works.
+
+Sunday 18 July 2027 (times in America/Chicago)
+  6:00 am to 8:30 am: Car ferry to Muskegon, Alex and Sam
+  9:00 am to 10:00 am: Drive along the shore, Alex and Sam
+
+The plan relies on these FACTs and DECISIONs:
+  alex-start: Alex starts from the ferry terminal in Milwaukee
+  sam-start: Sam starts from the ferry terminal in Milwaukee
+  ferry-time: Car ferry to Muskegon starts at 6:00 am on Sunday 18 July 2027
+  ferry-length: Car ferry to Muskegon takes 2 h 30 min
+  ferry-arrival: nobody has to be at the ferry terminal in Milwaukee before Car ferry to Muskegon starts
+  ferry-needs-a-ticket: people need a right to take part in Car ferry to Muskegon
+  drive-time: Drive along the shore starts at 9:00 am on Sunday 18 July 2027
+  drive-length: Drive along the shore takes 1 h
+  drive-arrival: nobody has to be at Muskegon before Drive along the shore starts
+  drive-is-open: nobody needs a right to take part in Drive along the shore
+  alex-has-the-car: Alex has the car when the TRIP starts
+  drive-needs-the-car: Drive along the shore requires the car
+  every-use-of-the-car: of the OPTIONs in this FILE, only Drive along the shore requires the car, and none refuses the car
+  everything-that-moves-the-car: the FILE states every OPTION that hands over, keeps or carries the car: there is none
+  ferry-needs-a-car-ticket: Car ferry to Muskegon needs a right for the car
+  every-ticket-for-the-car: of the OPTIONs in this FILE, only Car ferry to Muskegon needs a right for the car
+  ferry-tickets: a BOOKING for Car ferry to Muskegon covers Alex, Sam and the car
+  lock-ferry: Alex and Sam take part in Car ferry to Muskegon
+  lock-drive: Alex and Sam take part in Drive along the shore
+
+Where each OBJECT is:
+  the car: with Alex when the TRIP starts
+    Car ferry to Muskegon needs a right for the car. Just before it starts: with Alex. ferry-tickets covers the car.
+    Drive along the shore requires the car. Just before it starts: with Alex.

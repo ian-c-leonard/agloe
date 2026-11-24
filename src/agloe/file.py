@@ -294,13 +294,15 @@ class Payment:
 class Booking:
     """A FACT: a BOOKING. It secures a right to one OPTION for each PERSON it covers.
 
-    ``paid`` is what it paid. None: nobody knows.
+    ``paid`` is what it paid. None: nobody knows. ``objects`` are the OBJECTs it covers: it
+    gives a right for each of them where the OPTION needs one.
     """
 
     id: str
     option: str
     covers: tuple[str, ...]
     paid: Payment | None = None
+    objects: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -320,9 +322,10 @@ class Offer:
 class CompleteRights:
     """A FACT: the rights to an OPTION are COMPLETE.
 
-    The BOOKINGs in the FILE secure every right to it that anybody on the TRIP holds. Nobody
-    on the TRIP can get another, except by a place of an OFFER that the FACT names in
-    ``offers``. Those are all the OFFERs the FILE has for the OPTION.
+    The BOOKINGs in the FILE secure every right for a PERSON to take part in it that anybody
+    on the TRIP holds. Nobody on the TRIP can get another, except by a place of an OFFER
+    that the FACT names in ``offers``. Those are all the OFFERs the FILE has for the OPTION.
+    The FACT says nothing of a right for an OBJECT.
     """
 
     id: str
@@ -426,6 +429,33 @@ class WithObject:
 
 
 @dataclass(frozen=True)
+class NeedsRightFor:
+    """A FACT: whether an OPTION needs a right for an OBJECT.
+
+    Where it does, a right that covers the OBJECT is needed if a PERSON who takes part has
+    the OBJECT just before the OPTION starts, if it is handed over in the OPTION, or if it
+    is carried in the OPTION.
+    """
+
+    id: str
+    option: str
+    object: str
+    needed: bool
+
+
+@dataclass(frozen=True)
+class CompleteNeedsRightFor:
+    """A FACT: the FILE states every one of its OPTIONs that needs a right for this OBJECT.
+
+    Each has a FACT that it does. So an OPTION of the FILE with no FACT about that needs no
+    right for it.
+    """
+
+    id: str
+    object: str
+
+
+@dataclass(frozen=True)
 class CompleteRequiresObject:
     """A FACT: the FILE states every one of its OPTIONs that requires this OBJECT.
 
@@ -470,6 +500,8 @@ type Fact = (
     | WithObject
     | CompleteRequiresObject
     | CompleteTransfers
+    | NeedsRightFor
+    | CompleteNeedsRightFor
 )
 type Decision = Lock | TripStart | TripEnd | Cap
 
@@ -811,8 +843,35 @@ class File:
         """The FACT that the FILE states every transfer of this OBJECT, if any."""
         return self._transfers_complete.get(object)
 
+    def object_right(self, option: str, object: str) -> NeedsRightFor | None:
+        """The FACT about whether this OPTION needs a right for this OBJECT, if there is one."""
+        return self._object_rights.get((option, object))
+
+    def needs_right_for(self, option: str, object: str) -> bool | None:
+        """Whether this OPTION needs a right for this OBJECT, as far as the FILE says.
+
+        None where the FILE does not say. A FACT about the two settles it. Without one, a FACT
+        that the FILE states every OPTION that needs a right for the OBJECT settles it too:
+        the OPTION needs none. That FACT is about the OPTIONs of the FILE only.
+        """
+        stated = self._object_rights.get((option, object))
+        if stated is not None:
+            return stated.needed
+        listed = option in self._options_listed
+        whole = listed and self.object_rights_complete(object) is not None
+        return False if whole else None
+
+    def object_rights_complete(self, object: str) -> CompleteNeedsRightFor | None:
+        """The FACT that the FILE states every OPTION that needs a right for this OBJECT."""
+        return self._object_rights_complete.get(object)
+
+    def booking_for(self, option: str, object: str) -> Booking | None:
+        """The BOOKING that covers this OBJECT for this OPTION: the first one the FILE lists."""
+        return self._bookings_for_objects.get((option, object))
+
     def objects_asked_for(self) -> tuple[Object, ...]:
-        """The OBJECTs that some OPTION of the FILE requires or refuses, or might.
+        """The OBJECTs that some OPTION of the FILE requires or refuses, or might, and those
+        that some OPTION needs a right for, or might.
 
         They are in the FILE's order. Nothing turns on any other OBJECT: no OPTION of the
         FILE asks where it is.
@@ -823,9 +882,31 @@ class File:
             if any(
                 self.requires_object(option.id, each.id) is not False
                 or self.refuses_object(option.id, each.id) is not False
+                or self.needs_right_for(option.id, each.id) is not False
                 for option in self.options
             )
         )
+
+    @cached_property
+    def _object_rights(self) -> dict[tuple[str, str], NeedsRightFor]:
+        return {
+            (fact.option, fact.object): fact
+            for fact in self.facts
+            if isinstance(fact, NeedsRightFor)
+        }
+
+    @cached_property
+    def _object_rights_complete(self) -> dict[str, CompleteNeedsRightFor]:
+        return {fact.object: fact for fact in self.facts if isinstance(fact, CompleteNeedsRightFor)}
+
+    @cached_property
+    def _bookings_for_objects(self) -> dict[tuple[str, str], Booking]:
+        first: dict[tuple[str, str], Booking] = {}
+        for fact in self.facts:
+            if isinstance(fact, Booking):
+                for thing in fact.objects:
+                    first.setdefault((fact.option, thing), fact)
+        return first
 
     @cached_property
     def _object_starts(self) -> dict[str, ObjectStarts]:
@@ -1200,6 +1281,7 @@ def load(document: object) -> File:
     needed: set[tuple[str, str]] = set()  # each OPTION and OBJECT with a FACT about a requirement
     refused: set[tuple[str, str]] = set()  # each OPTION and OBJECT with a FACT about a refusal
     acted: set[tuple[str, str]] = set()  # each OPTION and OBJECT with a FACT about what it does
+    ticketed: set[tuple[str, str]] = set()  # each OPTION and OBJECT with a FACT about a right
     offered: list[tuple[str, str, str]] = []  # where an OFFER is, its id and its OPTION
     closures: list[tuple[str, str, tuple[str, ...]]] = []  # the same for a COMPLETE set of rights
     for index, fact in enumerate(raw["facts"]):
@@ -1225,9 +1307,11 @@ def load(document: object) -> File:
                 stated.add((about, CompleteRequires))
                 facts.append(CompleteRequires(fact["id"], about))
                 continue
-            if "requires_object" in whole or "transfers" in whole:
+            if "requires_object" in whole or "transfers" in whole or "needs_right_for" in whole:
                 if "requires_object" in whole:
                     about, kind = whole["requires_object"], CompleteRequiresObject
+                elif "needs_right_for" in whole:
+                    about, kind = whole["needs_right_for"], CompleteNeedsRightFor
                 else:
                     about, kind = whole["transfers"], CompleteTransfers
                 known(where, about, "OBJECT", object_ids)
@@ -1266,11 +1350,15 @@ def load(document: object) -> File:
         if "booking" in fact:
             agreed = fact["booking"]
             known(where, agreed["option"], "OPTION", option_ids)
-            covers = list(agreed["covers"])
+            covered = list(agreed["covers"])
+            # A BOOKING covers PERSONs and OBJECTs. Every id is unique in the FILE, so each
+            # one says which it is.
+            covers = [each for each in covered if each not in object_ids]
+            things = [each for each in covered if each in object_ids]
             for person in covers:
-                known(where, person, "PERSON", person_ids)
-            for person in sorted({person for person in covers if covers.count(person) > 1}):
-                problems.append(f"{where}: {person} is covered more than once")
+                known(where, person, "PERSON or OBJECT" if object_ids else "PERSON", person_ids)
+            for each in sorted({each for each in covered if covered.count(each) > 1}):
+                problems.append(f"{where}: {each} is covered more than once")
             paid = None
             if "paid" in agreed:
                 receipt = agreed["paid"]
@@ -1282,7 +1370,7 @@ def load(document: object) -> File:
                 if payer is not None:
                     known(where, payer, "PERSON", person_ids)
                 paid = Payment(money, source, payer)
-            facts.append(Booking(fact["id"], agreed["option"], tuple(covers), paid))
+            facts.append(Booking(fact["id"], agreed["option"], tuple(covers), paid, tuple(things)))
             continue
         if "offer" in fact:
             known(where, fact["offer"]["option"], "OPTION", option_ids)
@@ -1382,6 +1470,17 @@ def load(document: object) -> File:
             refused.add((fact["option"], asked["object"]))
             facts.append(
                 RefusesObject(fact["id"], fact["option"], asked["object"], asked["refused"])
+            )
+            continue
+        if "needs_right_for" in fact:
+            asked = fact["needs_right_for"]
+            known(where, asked["object"], "OBJECT", object_ids)
+            if (fact["option"], asked["object"]) in ticketed:
+                both = f"{fact['option']} and {asked['object']}"
+                problems.append(f"{where}: another FACT already states this about {both}")
+            ticketed.add((fact["option"], asked["object"]))
+            facts.append(
+                NeedsRightFor(fact["id"], fact["option"], asked["object"], asked["needed"])
             )
             continue
         if "with_object" in fact:

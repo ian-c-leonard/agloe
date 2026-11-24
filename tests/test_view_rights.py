@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from agloe.file import read
+from agloe.view.trip import holds
 from tests.stories import EXAMPLES
 from tests.test_view_calendar import drawn, in_words, parts, with_its_report
 
@@ -198,6 +199,134 @@ def test_who_uses_a_right_is_said_only_where_the_report_names_them() -> None:
         ] * 2
 
 
+def test_a_booking_names_the_objects_that_it_covers(tmp_path: Path) -> None:
+    """One BOOKING for the car ferry covers Alex, Sam and the car, and the plan uses it for
+    all three. A second BOOKING that covers the car alone is drawn too, and nobody uses it:
+    the report names the first one for the car."""
+    shown = rights_of("a-car-ferry/booked")
+    (ferry,) = shown["rights"]
+    (tickets,) = ferry["bookings"]
+    assert tickets["says"] == "a BOOKING that covers Alex, Sam and the car"
+    assert tickets["uses"] == "In the plan: Alex, Sam and the car use it."
+    content = json.loads((EXAMPLES / "a-car-ferry" / "booked.json").read_text())
+    alone = {"id": "car-ticket", "booking": {"option": "ferry", "covers": ["car"]}}
+    content["facts"].append(alone)
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    assert holds(sent)
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    assert [(booking["says"], booking["uses"]) for booking in ferry["bookings"]] == [
+        (
+            "a BOOKING that covers Alex, Sam and the car",
+            "In the plan: Alex, Sam and the car use it.",
+        ),
+        ("a BOOKING that covers the car", "In the plan: nobody uses it."),
+    ]
+
+
+def test_the_rights_card_says_what_it_does_not_cover_for_an_object(tmp_path: Path) -> None:
+    """The ferry needs a right for the car, and no BOOKING covers the car. A FACT says that
+    the FILE lists every right to the ferry. That is about the PERSONs who take part, and
+    the card says so: the report still asks for a right for the car. An OPTION that only
+    needs a right for an OBJECT has a card too."""
+    content = json.loads((EXAMPLES / "a-car-ferry" / "the-car-has-no-ticket.json").read_text())
+    content["facts"].append({"id": "sold-out", "complete": {"rights_to": "ferry"}})
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    assert "works if a right to Car ferry to Muskegon is found that covers the car." in text
+    whole = all_rights([sent], [found], [text])[0]
+    (ferry,) = whole["rights"]
+    assert ferry["things"] == "It needs a right for the car."
+    scope = "; that is about the PERSONs who take part, and it says nothing of a right for the car."
+    assert ferry["whole"] == f"{ALL}{scope}"
+    assert "ferry-needs-a-car-ticket" in ferry["records"]
+    # The right for the car is the one case of the report, and the card is marked with it.
+    assert (ferry["cases"], whole["asked"]) == ([0], True)
+    # Where no FACT says whether the ferry needs a right for the car, it might, and the
+    # card says the same of the FACT that the FILE lists every right.
+    silent = json.loads(json.dumps(content))
+    kept = ("ferry-needs-a-car-ticket", "every-ticket-for-the-car")
+    silent["facts"] = [fact for fact in silent["facts"] if fact["id"] not in kept]
+    path.write_text(json.dumps(silent))
+    sent, found, text = in_words(path)
+    assert "a BOOKING for it that covers the car is enough instead." in text
+    (ferry, *_) = all_rights([sent], [found], [text])[0]["rights"]
+    assert (ferry["things"], ferry["whole"]) == (None, f"{ALL}{scope}")
+    # Where a FACT says that the ferry needs no right for the car, the card adds nothing.
+    for fact in content["facts"]:
+        if fact["id"] == "ferry-needs-a-car-ticket":
+            fact["needs_right_for"]["needed"] = False
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    assert ferry["whole"] == f"{ALL}."
+    for fact in content["facts"]:
+        if fact["id"] == "ferry-needs-a-car-ticket":
+            fact["needs_right_for"]["needed"] = True
+    # Nobody needs a right to take part in the ferry, and it has no BOOKING: it still needs
+    # a right for the car, so it has a card.
+    for fact in content["facts"]:
+        if fact["id"] == "ferry-needs-a-ticket":
+            fact["needs_right"] = False
+    content["facts"] = [
+        fact for fact in content["facts"] if fact["id"] not in ("sold-out", "ferry-tickets")
+    ]
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    assert (ferry["things"], ferry["bookings"]) == ("It needs a right for the car.", [])
+    # A PERSON and an OBJECT that show one name show their ids, as in the report.
+    content = json.loads((EXAMPLES / "a-car-ferry" / "booked.json").read_text())
+    content["persons"][0]["name"] = "Scout"
+    content["objects"][0]["name"] = "Scout"
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    (tickets,) = ferry["bookings"]
+    assert tickets["says"] == "a BOOKING that covers Scout (alex), Sam and Scout (car)"
+    assert "covers Scout (alex), Sam and Scout (car)" in text
+    assert tickets["uses"] == "In the plan: Scout (alex), Sam and Scout (car) use it."
+    # With a BOOKING of its own for the car, each of the two still shows its id.
+    for fact in content["facts"]:
+        if fact["id"] == "ferry-tickets":
+            fact["booking"]["covers"] = ["alex", "sam"]
+    content["facts"].append({"id": "car-ticket", "booking": {"option": "ferry", "covers": ["car"]}})
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    assert [(booking["says"], booking["uses"]) for booking in ferry["bookings"]] == [
+        ("a BOOKING that covers Scout (alex) and Sam", "In the plan: Scout (alex) and Sam use it."),
+        ("a BOOKING that covers Scout (car)", "In the plan: Scout (car) uses it."),
+    ]
+    assert "covers Scout (alex) and Sam" in text and "covers Scout (car)" in text
+    # Sam is called Scout too. Two PERSONs show their ids wherever they are named, and the
+    # car still shows its own on its receipt.
+    content["persons"][1]["name"] = "Scout"
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    assert [(booking["says"], booking["uses"]) for booking in ferry["bookings"]] == [
+        (
+            "a BOOKING that covers Scout (alex) and Scout (sam)",
+            "In the plan: Scout (alex) and Scout (sam) use it.",
+        ),
+        ("a BOOKING that covers Scout (car)", "In the plan: Scout (car) uses it."),
+    ]
+    assert "  car-ticket: a BOOKING for Car ferry to Muskegon covers Scout (car)\n" in text
+    # Two spellings that a page shows alike count as one name.
+    content["persons"][0]["name"], content["persons"][1]["name"] = "Zoe\u0308", "Sam"
+    content["objects"][0]["name"] = "Zo\u00eb"
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    assert [booking["says"] for booking in ferry["bookings"]] == [
+        "a BOOKING that covers Zoe\u0308 (alex) and Sam",
+        "a BOOKING that covers Zo\u00eb (car)",
+    ]
+
+
 def test_a_booking_says_what_it_paid_as_far_as_the_file_says() -> None:
     def said(name: str) -> list[str]:
         (skydeck,) = rights_of(f"a-ticket/{name}")["rights"]
@@ -267,23 +396,67 @@ def test_an_option_that_needs_a_right_is_shown_though_the_file_has_none_for_it()
     assert all_rights([sent, nothing, None]) == [empty] * 3
 
 
-def test_every_example_shows_its_rights_in_the_words_of_the_report() -> None:
-    """Each BOOKING and each OFFER of each FILE is shown, worded as the report words it."""
-    asked = [in_words(path) for path in FILES]
+def a_ferry_with(tmp_path: Path, name: str, change: Any) -> Path:
+    """The booked car ferry with a change made to its content, as a FILE of its own."""
+    content = json.loads((EXAMPLES / "a-car-ferry" / "booked.json").read_text())
+    change(content)
+    path = tmp_path / name / "trip.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps(content))
+    return path
+
+
+def test_every_example_shows_its_rights_in_the_words_of_the_report(tmp_path: Path) -> None:
+    """Each BOOKING and each OFFER of each FILE is shown, worded as the report words it.
+
+    Two more FILEs come with the examples. On one car ferry nobody needs a right to take
+    part, and the ferry needs a right for the car that no BOOKING covers. On the other the
+    car has a BOOKING of its own."""
+
+    def free_entry(content: Any) -> None:
+        for fact in content["facts"]:
+            if fact["id"] == "ferry-needs-a-ticket":
+                fact["needs_right"] = False
+        content["facts"] = [fact for fact in content["facts"] if fact["id"] != "ferry-tickets"]
+
+    def two_receipts(content: Any) -> None:
+        for fact in content["facts"]:
+            if fact["id"] == "ferry-tickets":
+                fact["booking"]["covers"] = ["alex", "sam"]
+        receipt = {"id": "car-ticket", "booking": {"option": "ferry", "covers": ["car"]}}
+        content["facts"].append(receipt)
+
+    def a_name_with_nobody_in_it(content: Any) -> None:
+        content["objects"][0]["name"] = "the car nobody washed"
+
+    more = [
+        a_ferry_with(tmp_path, "free-entry", free_entry),
+        a_ferry_with(tmp_path, "two-receipts", two_receipts),
+        a_ferry_with(tmp_path, "a-name", a_name_with_nobody_in_it),
+    ]
+    files = [*FILES, *more]
+    asked = [in_words(path) for path in files]
     shown = all_rights(
         [sent for sent, _, _ in asked],
         [found for _, found, _ in asked],
         [words for _, _, words in asked],
     )
     bookings = offers = sets = uses = payments = 0
-    for path, (sent, found, words), each in zip(FILES, asked, shown, strict=True):
+    cards: dict[str, list[str]] = {}
+    for path, (sent, found, words), each in zip(files, asked, shown, strict=True):
         file = read(path)
         name = f"{path.parent.name}/{path.stem}"
         by_option = {rights["option"]: rights for rights in each["rights"]}
+        cards[path.parent.name] = sorted(by_option)
+        # A right is used by a PERSON who takes part, or it covers an OBJECT there.
         used = {
             (step["option"], by)
             for step in found.get("itinerary", [])
             for by in step.get("rights", {}).values()
+        } | {
+            (use["option"], use["booking"])
+            for thing in found.get("objects", [])
+            for use in thing.get("covered_in", [])
         }
         for option in file.options:
             listed = [*file.bookings(option.id), *file.offers(option.id)]
@@ -291,6 +464,7 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report() -> None:
                 not listed
                 and not file.needs_right(option.id)
                 and not file.rights_complete(option.id)
+                and not any(file.needs_right_for(option.id, thing.id) for thing in file.objects)
             ):
                 assert option.id not in by_option, name
                 continue
@@ -309,7 +483,8 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report() -> None:
                     said = booking["says"][len("a BOOKING that covers ") :]
                     covered, _, payment = said.partition("; ")
                     stated = f"  {booking['id']}: a BOOKING for {called} covers {covered}"
-                    assert stated in words, name
+                    # The list of who is covered ends there: the line ends, or says more.
+                    assert f"{stated}\n" in words or f"{stated}; " in words, name
                     # A report on a FILE with a cap says what the BOOKING paid on that line.
                     if file.caps:
                         assert f"{stated}; {payment}" in words, name
@@ -328,9 +503,11 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report() -> None:
                 # Somebody uses it in the plan exactly where the report says so.
                 if sent["itinerary"]:
                     uses += (option.id, right["id"]) in used
-                    assert ("nobody" in right["uses"]) is ((option.id, right["id"]) not in used), (
-                        name
+                    unused = (
+                        "In the plan: nobody uses it.",
+                        "In the plan: nobody takes a place of it.",
                     )
+                    assert (right["uses"] in unused) is ((option.id, right["id"]) not in used), name
                 else:
                     assert right["uses"] is None, name
             complete = file.rights_complete(option.id)
@@ -341,5 +518,6 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report() -> None:
         assert set(by_option) <= {option.id for option in file.options}, name
     assert min(bookings, uses) > 5
     assert payments > 2
+    assert (cards["free-entry"], cards["two-receipts"]) == (["ferry"], ["ferry"])
     # Few examples have an OFFER, or a FACT that the FILE lists every right.
     assert min(offers, sets) > 1

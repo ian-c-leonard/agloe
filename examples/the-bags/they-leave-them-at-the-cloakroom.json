@@ -55,7 +55,8 @@
     { "id": "cloakroom-keeps-the-bags", "option": "drop-off", "with_object": { "object": "bags", "does": "keeps" } },
     { "id": "cloakroom-returns-the-bags", "option": "pick-up", "with_object": { "object": "bags", "does": "hands_over" } },
     { "id": "every-use-of-the-bags", "complete": { "requires_object": "bags" } },
-    { "id": "everything-that-moves-the-bags", "complete": { "transfers": "bags" } }
+    { "id": "everything-that-moves-the-bags", "complete": { "transfers": "bags" } },
+    { "id": "every-ticket-for-the-bags", "complete": { "needs_right_for": "bags" } }
   ],
   "decisions": [
     { "id": "trip-start", "trip_starts_at": "2027-05-15T12:30:00-05:00[America/Chicago]" },

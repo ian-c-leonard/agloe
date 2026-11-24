@@ -32,7 +32,8 @@
     { "id": "where-the-car-starts", "object": "car", "starts_at": "hotel" },
     { "id": "drive-out-needs-the-car", "option": "drive-out", "requires": { "object": "car", "needed": true } },
     { "id": "errand-needs-the-car", "option": "errand", "requires": { "object": "car", "needed": true } },
-    { "id": "every-use-of-the-car", "complete": { "requires_object": "car" } }
+    { "id": "every-use-of-the-car", "complete": { "requires_object": "car" } },
+    { "id": "every-ticket-for-the-car", "complete": { "needs_right_for": "car" } }
   ],
   "decisions": [
     { "id": "lock-drive-out", "lock": "drive-out", "persons": ["alex", "sam"] },
