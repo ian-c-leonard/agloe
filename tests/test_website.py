@@ -494,16 +494,50 @@ def shown_as_given(shown: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def test_the_pages_have_the_same_header_and_footer() -> None:
-    """The header and the footer are written out in each page, and they must stay the same."""
+    """The header and the footer are written out in each page, and they must stay the same.
+
+    They name their targets from the root of the site, so the text is the same on every page.
+    """
 
     def part(name: str, start: str, end: str) -> str:
         page = (PAGES / name).read_text()
-        up = "../" * name.count("/")
-        found = page[page.rindex(start) : page.rindex(end) + len(end)]
-        return found.replace(f'href="{up}"', 'href="./"').replace(f'src="{up}', 'src="')
+        return page[page.rindex(start) : page.rindex(end) + len(end)]
 
     for start, end in (('<header class="top">', "</header>"), ("<footer>", "</footer>")):
         assert len({part(name, start, end) for name in SITE_PAGES}) == 1, start
+
+
+def test_the_sitemap_lists_every_page_under_its_own_address() -> None:
+    """The page for a wrong address is no page of the site, and it asks not to be listed."""
+    listed = re.findall(r"<loc>([^<]+)</loc>", (PAGES / "sitemap.xml").read_text())
+    pages = {name: SITE + name.removesuffix("index.html") for name in SITE_PAGES}
+    assert '<meta name="robots" content="noindex">' in (PAGES / "404.html").read_text()
+    del pages["404.html"]
+    assert sorted(listed) == sorted(pages.values())
+    assert f"Sitemap: {SITE}sitemap.xml" in (PAGES / "robots.txt").read_text()
+    for name, address in pages.items():
+        assert f'<link rel="canonical" href="{address}">' in (PAGES / name).read_text(), name
+
+
+def test_the_page_for_a_wrong_address_names_everything_from_the_root() -> None:
+    """A wrong address can be any number of folders deep, so nothing on its page is relative."""
+    page = SITE_PAGES["404.html"]
+    assert page.links
+    for link in [*page.links, *page.sheets]:
+        assert link.startswith(("/", "#", "https://")), link
+    # The map on it is the map of the home page.
+    start, end = '<svg class="map" viewBox', "</svg>"
+    home, lost = ((PAGES / name).read_text() for name in ("index.html", "404.html"))
+    assert lost[lost.index(start) : lost.index(end, lost.index(start))] in home
+
+
+def target_of(folder: Path, link: str) -> Path:
+    """The file or folder of the site that a link leads to, read from this folder."""
+    if link.startswith(SITE):
+        return (PAGES / link.removeprefix(SITE)).resolve()
+    if link.startswith("/"):
+        return (PAGES / link.lstrip("/")).resolve()
+    return (folder / link).resolve()
 
 
 def links_of(name: str) -> list[tuple[Path, str]]:
@@ -511,7 +545,7 @@ def links_of(name: str) -> list[tuple[Path, str]]:
     folder = (PAGES / name).parent
     found = [(folder, link) for link in SITE_PAGES[name].links]
     for sheet in SITE_PAGES[name].sheets:
-        styles = folder / sheet
+        styles = target_of(folder, sheet)
         found += [
             (styles.parent, link) for link in re.findall(r'url\("([^"]+)"\)', styles.read_text())
         ]
@@ -536,8 +570,7 @@ def test_every_link_leads_somewhere(name: str) -> None:
                 continue
             # A link inside the site: to a file, or to a folder that holds a page.
             path, _, mark = link.partition("#")
-            target = PAGES / path.removeprefix(SITE) if path.startswith(SITE) else folder / path
-            target = target.resolve()
+            target = target_of(folder, path)
             assert PAGES.resolve() in (target, *target.parents), f"{link} leaves the site"
             if target.is_dir():
                 target = target / "index.html"
@@ -549,5 +582,5 @@ def test_every_link_leads_somewhere(name: str) -> None:
 
 def test_the_pages_share_one_style_sheet() -> None:
     for name, page in SITE_PAGES.items():
-        sheets = {((PAGES / name).parent / sheet).resolve() for sheet in page.sheets}
+        sheets = {target_of((PAGES / name).parent, sheet) for sheet in page.sheets}
         assert sheets == {(PAGES / "site.css").resolve()}, name

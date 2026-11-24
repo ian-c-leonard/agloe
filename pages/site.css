@@ -386,6 +386,9 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
   h1 { font-size: clamp(2.5rem, 11vw, 3.4rem); }
 }
 
+/* A wrong address: the map with the town that was not there, on paper. */
+.lost .map { box-shadow: 0 5px 0 -1px var(--under), 0 6px 0 -1px var(--rim-deep), 0 30px 50px -28px rgba(59, 42, 20, 0.5); }
+
 /* How a rule is built: a page that follows one rule along a road of four stops. */
 .built .wrap { display: grid; gap: clamp(30px, 4vw, 46px); }
 .built .lead { max-width: 39em; }
