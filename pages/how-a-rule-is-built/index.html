@@ -55,7 +55,7 @@
       <ol class="route" aria-label="The steps">
         <li><svg class="town" viewBox="0 0 24 24" aria-hidden="true"><circle cx="20.40" cy="12.00" r="1.7"/><circle cx="19.27" cy="16.20" r="1.7"/><circle cx="16.20" cy="19.27" r="1.7"/><circle cx="12.00" cy="20.40" r="1.7"/><circle cx="7.80" cy="19.27" r="1.7"/><circle cx="4.73" cy="16.20" r="1.7"/><circle cx="3.60" cy="12.00" r="1.7"/><circle cx="4.73" cy="7.80" r="1.7"/><circle cx="7.80" cy="4.73" r="1.7"/><circle cx="12.00" cy="3.60" r="1.7"/><circle cx="16.20" cy="4.73" r="1.7"/><circle cx="19.27" cy="7.80" r="1.7"/></svg><a class="step" href="#idea"><strong>The idea</strong><span>A sentence in everyday words.</span></a></li>
         <li><svg class="town" viewBox="0 0 24 24" aria-hidden="true"><circle cx="20.40" cy="12.00" r="1.7"/><circle cx="19.27" cy="16.20" r="1.7"/><circle cx="16.20" cy="19.27" r="1.7"/><circle cx="12.00" cy="20.40" r="1.7"/><circle cx="7.80" cy="19.27" r="1.7"/><circle cx="4.73" cy="16.20" r="1.7"/><circle cx="3.60" cy="12.00" r="1.7"/><circle cx="4.73" cy="7.80" r="1.7"/><circle cx="7.80" cy="4.73" r="1.7"/><circle cx="12.00" cy="3.60" r="1.7"/><circle cx="16.20" cy="4.73" r="1.7"/><circle cx="19.27" cy="7.80" r="1.7"/></svg><a class="step" href="#words"><strong>The words</strong><span>The same sentence on the rules page, in defined terms.</span></a></li>
-        <li><svg class="town" viewBox="0 0 24 24" aria-hidden="true"><circle cx="20.40" cy="12.00" r="1.7"/><circle cx="19.27" cy="16.20" r="1.7"/><circle cx="16.20" cy="19.27" r="1.7"/><circle cx="12.00" cy="20.40" r="1.7"/><circle cx="7.80" cy="19.27" r="1.7"/><circle cx="4.73" cy="16.20" r="1.7"/><circle cx="3.60" cy="12.00" r="1.7"/><circle cx="4.73" cy="7.80" r="1.7"/><circle cx="7.80" cy="4.73" r="1.7"/><circle cx="12.00" cy="3.60" r="1.7"/><circle cx="16.20" cy="4.73" r="1.7"/><circle cx="19.27" cy="7.80" r="1.7"/></svg><a class="step" href="#slow"><strong>The slow checker</strong><span>Checks every possible plan against the sentence.</span></a></li>
+        <li><svg class="town" viewBox="0 0 24 24" aria-hidden="true"><circle cx="20.40" cy="12.00" r="1.7"/><circle cx="19.27" cy="16.20" r="1.7"/><circle cx="16.20" cy="19.27" r="1.7"/><circle cx="12.00" cy="20.40" r="1.7"/><circle cx="7.80" cy="19.27" r="1.7"/><circle cx="4.73" cy="16.20" r="1.7"/><circle cx="3.60" cy="12.00" r="1.7"/><circle cx="4.73" cy="7.80" r="1.7"/><circle cx="7.80" cy="4.73" r="1.7"/><circle cx="12.00" cy="3.60" r="1.7"/><circle cx="16.20" cy="4.73" r="1.7"/><circle cx="19.27" cy="7.80" r="1.7"/></svg><a class="step" href="#slow"><strong>The slow checker</strong><span>Tries every possibility, and checks each against the sentence.</span></a></li>
         <li><svg class="town" viewBox="0 0 24 24" aria-hidden="true"><circle cx="20.40" cy="12.00" r="1.7"/><circle cx="19.27" cy="16.20" r="1.7"/><circle cx="16.20" cy="19.27" r="1.7"/><circle cx="12.00" cy="20.40" r="1.7"/><circle cx="7.80" cy="19.27" r="1.7"/><circle cx="4.73" cy="16.20" r="1.7"/><circle cx="3.60" cy="12.00" r="1.7"/><circle cx="4.73" cy="7.80" r="1.7"/><circle cx="7.80" cy="4.73" r="1.7"/><circle cx="12.00" cy="3.60" r="1.7"/><circle cx="16.20" cy="4.73" r="1.7"/><circle cx="19.27" cy="7.80" r="1.7"/></svg><a class="step" href="#fast"><strong>The fast checker</strong><span>States the sentence as logic and gives it to a solver.</span></a></li>
       </ol>
     </div>
@@ -68,8 +68,7 @@
         <h2 id="idea-title">The idea</h2>
         <p>A rule starts as a sentence in everyday words.</p>
         <p class="saying">A manual car needs somebody in it who can drive one.</p>
-        <p>The example trip is from the rules page.</p>
-        <p class="small"><span data-from="spec/rules.md">On Saturday morning Alex and Sam drive to the Indiana Dunes and back in a hire car with a manual gearbox. The drive there leaves the hotel at 8:00 am, the drive back leaves the dunes at 11:00 am, and each takes an hour.</span> <span data-from="spec/rules.md">Sam can drive a manual car, and Alex and Jo cannot.</span></p>
+        <p class="small"><span data-from="spec/rules.md">On Saturday morning Alex and Sam drive to the Indiana Dunes and back in a hire car with a manual gearbox. The drive there leaves the hotel at 8:00 am, the drive back leaves the dunes at 11:00 am, and each takes an hour.</span> <span data-from="spec/rules.md">Sam can drive a manual car, and Alex and Jo cannot.</span> The trip is from the <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">rules page</a>.</p>
       </div>
       <div class="stack">
         <svg class="map sketch" viewBox="0 0 560 290" role="img" aria-labelledby="sketch-title sketch-desc">
@@ -120,13 +119,17 @@
           <div><dt>somebody in the car</dt><dd>a PERSON who takes part</dd></div>
         </dl>
         <h3>The example in a FILE</h3>
-        <p>A FILE states each fact of a trip as a record. Each record is followed by the same fact in the report's words.</p>
+        <p>The FILE records what the drive requires and what Sam can do.</p>
         <div class="record">
+          <span class="tag">In the FILE</span>
           <pre class="lines" tabindex="0" data-lines-from="examples/a-driver/the-driver-comes-along.json">{ "id": "drive-out-needs-a-driver", "option": "drive-out", "requires": { "capability": "drive-manual", "of": "one" } },</pre>
+          <span class="tag">In the report</span>
           <p data-lines-from="examples/a-driver/the-driver-comes-along.expected.txt">drive-out-needs-a-driver: Drive to the dunes requires driving a manual car of one PERSON who takes part</p>
         </div>
         <div class="record">
+          <span class="tag">In the FILE</span>
           <pre class="lines" tabindex="0" data-lines-from="examples/a-driver/the-driver-comes-along.json">{ "id": "sam-drives-manual", "person": "sam", "capability": "drive-manual", "has": true },</pre>
+          <span class="tag">In the report</span>
           <p data-lines-from="examples/a-driver/the-driver-comes-along.expected.txt">sam-drives-manual: Sam has the CAPABILITY driving a manual car</p>
         </div>
       </div>
@@ -161,22 +164,22 @@ if not persons or (lacking and (of == "each" or len(lacking) == len(persons))):
 
       <figure class="figure" id="every-plan">
         <figcaption>
-          <h3>It checks every possible plan</h3>
-          <p>To answer for a trip, the slow checker builds every possible plan and checks each one. For the drive to the dunes there are eight choices of who is in the car. A LOCK says that Alex takes part.</p>
+          <h3>What it says about each choice</h3>
+          <p>To answer for a trip, the slow checker tries the choices of who takes part in each OPTION, with the fewest PERSONs first. For the drive to the dunes there are eight. A LOCK names Alex, so it tries the four with Alex in the car.</p>
           <p class="small">A filled disc is a traveler in the car. The brass ring marks Sam, who can drive a manual car.</p>
         </figcaption>
         <ol class="plans">
-          <li class="plan" data-in="" data-breaks="lock"><span class="who" aria-hidden="true"><i>A</i><i class="can">S</i><i>J</i></span><span class="names">Nobody</span><span class="check broken"><b>The LOCK</b> broken</span><span class="check"><b>Rule 13</b> holds</span><strong>does not work</strong></li>
-          <li class="plan" data-in="alex" data-breaks="required"><span class="who" aria-hidden="true"><i class="in">A</i><i class="can">S</i><i>J</i></span><span class="names">Alex</span><span class="check"><b>The LOCK</b> holds</span><span class="check broken"><b>Rule 13</b> broken</span><strong>does not work</strong></li>
-          <li class="plan" data-in="sam" data-breaks="lock"><span class="who" aria-hidden="true"><i>A</i><i class="in can">S</i><i>J</i></span><span class="names">Sam</span><span class="check broken"><b>The LOCK</b> broken</span><span class="check"><b>Rule 13</b> holds</span><strong>does not work</strong></li>
-          <li class="plan" data-in="jo" data-breaks="lock required"><span class="who" aria-hidden="true"><i>A</i><i class="can">S</i><i class="in">J</i></span><span class="names">Jo</span><span class="check broken"><b>The LOCK</b> broken</span><span class="check broken"><b>Rule 13</b> broken</span><strong>does not work</strong></li>
-          <li class="plan works" data-in="alex sam" data-breaks=""><span class="who" aria-hidden="true"><i class="in">A</i><i class="in can">S</i><i>J</i></span><span class="names">Alex and Sam</span><span class="check"><b>The LOCK</b> holds</span><span class="check"><b>Rule 13</b> holds</span><strong>works</strong></li>
-          <li class="plan" data-in="alex jo" data-breaks="required"><span class="who" aria-hidden="true"><i class="in">A</i><i class="can">S</i><i class="in">J</i></span><span class="names">Alex and Jo</span><span class="check"><b>The LOCK</b> holds</span><span class="check broken"><b>Rule 13</b> broken</span><strong>does not work</strong></li>
-          <li class="plan" data-in="sam jo" data-breaks="lock"><span class="who" aria-hidden="true"><i>A</i><i class="in can">S</i><i class="in">J</i></span><span class="names">Sam and Jo</span><span class="check broken"><b>The LOCK</b> broken</span><span class="check"><b>Rule 13</b> holds</span><strong>does not work</strong></li>
-          <li class="plan works" data-in="alex sam jo" data-breaks=""><span class="who" aria-hidden="true"><i class="in">A</i><i class="in can">S</i><i class="in">J</i></span><span class="names">Alex, Sam and Jo</span><span class="check"><b>The LOCK</b> holds</span><span class="check"><b>Rule 13</b> holds</span><strong>works</strong></li>
+          <li class="plan skipped" data-in="" data-breaks="lock"><span class="who" aria-hidden="true"><i>A</i><i class="can">S</i><i>J</i></span><span class="names">Nobody: the drive does not happen</span><span class="check">Not tried. The LOCK names Alex.</span></li>
+          <li class="plan skipped" data-in="sam" data-breaks="lock"><span class="who" aria-hidden="true"><i>A</i><i class="in can">S</i><i>J</i></span><span class="names">Sam</span><span class="check">Not tried. The LOCK names Alex.</span></li>
+          <li class="plan skipped" data-in="jo" data-breaks="lock required"><span class="who" aria-hidden="true"><i>A</i><i class="can">S</i><i class="in">J</i></span><span class="names">Jo</span><span class="check">Not tried. The LOCK names Alex.</span></li>
+          <li class="plan skipped" data-in="sam jo" data-breaks="lock"><span class="who" aria-hidden="true"><i>A</i><i class="in can">S</i><i class="in">J</i></span><span class="names">Sam and Jo</span><span class="check">Not tried. The LOCK names Alex.</span></li>
+          <li class="plan" data-in="alex" data-breaks="required"><span class="who" aria-hidden="true"><i class="in">A</i><i class="can">S</i><i>J</i></span><span class="names">Alex</span><span class="check broken"><b>Rule 13</b> broken</span><strong>does not work</strong></li>
+          <li class="plan works" data-in="alex sam" data-breaks=""><span class="who" aria-hidden="true"><i class="in">A</i><i class="in can">S</i><i>J</i></span><span class="names">Alex and Sam</span><span class="check"><b>Rule 13</b> holds</span><strong>works</strong></li>
+          <li class="plan" data-in="alex jo" data-breaks="required"><span class="who" aria-hidden="true"><i class="in">A</i><i class="can">S</i><i class="in">J</i></span><span class="names">Alex and Jo</span><span class="check broken"><b>Rule 13</b> broken</span><strong>does not work</strong></li>
+          <li class="plan works" data-in="alex sam jo" data-breaks=""><span class="who" aria-hidden="true"><i class="in">A</i><i class="in can">S</i><i class="in">J</i></span><span class="names">Alex, Sam and Jo</span><span class="check"><b>Rule 13</b> holds</span><strong>works</strong></li>
         </ol>
         <div class="after-figure">
-          <p>Two plans work. The report shows the one with fewer people in the car: Alex and Sam.</p>
+          <p>Two of the four meet rule 13. The report shows the first of them, Alex and Sam.</p>
           <p>Three travelers and one OPTION give 8 choices of who takes part. Two OPTIONs give 64. Ten give 1,073,741,824. So the slow checker can only answer small trips. <a href="../#trip">The trip on the home page</a> runs it in your browser.</p>
         </div>
       </figure>
@@ -189,9 +192,9 @@ if not persons or (lacking and (of == "each" or len(lacking) == len(persons))):
         <div class="stack">
           <span class="label">Step 4</span>
           <h2 id="fast-title">The fast checker</h2>
-          <p>The fast checker is the COMPILER. It does not build plans.</p>
+          <p>The fast checker is the COMPILER. It does not go through the choices one by one.</p>
           <p>It makes a yes-or-no variable for each small question about the trip: does the drive happen, is Alex in it, is Sam, is Jo.</p>
-          <p>Each rule adds statements about those variables. Rule 13 adds one statement for each OPTION that requires a CAPABILITY of one PERSON.</p>
+          <p>Each rule adds statements about those variables. Rule 13 adds one statement for each CAPABILITY that an OPTION requires of one PERSON.</p>
         </div>
         <div class="stack">
           <div class="terminal code">
@@ -214,7 +217,7 @@ if of == "one":
       <figure class="figure" id="switchboard">
         <figcaption>
           <h3>The variables and statements for the drive to the dunes</h3>
-          <p>These are four of the COMPILER's variables for this drive, and its statements about them. Pick a FILE and set the variables. A setting that makes every statement true is a plan.</p>
+          <p>These are four of the COMPILER's variables for this drive, and its statements about them. The solver may only choose a setting that makes every statement true. Pick a FILE. <span class="with-script">Then set the variables to see which statements hold.</span></p>
         </figcaption>
         <fieldset class="versions which">
           <legend class="label">FILE</legend>
@@ -240,19 +243,19 @@ if of == "one":
           <div class="col">
             <h4>The variables</h4>
             <div class="switches">
-              <button type="button" role="switch" aria-checked="true" data-switch="used"><span>The drive happens</span><code>used drive-out</code><b>yes</b></button>
-              <button type="button" role="switch" aria-checked="true" data-switch="alex"><span>Alex is in it</span><code>takes alex drive-out</code><b>yes</b></button>
-              <button type="button" role="switch" aria-checked="true" data-switch="sam"><span>Sam is in it</span><code>takes sam drive-out</code><b>yes</b></button>
-              <button type="button" role="switch" aria-checked="false" data-switch="jo"><span>Jo is in it</span><code>takes jo drive-out</code><b>no</b></button>
+              <button type="button" disabled role="switch" aria-checked="true" data-switch="used"><span>The drive happens</span><code>used drive-out</code><b>yes</b></button>
+              <button type="button" disabled role="switch" aria-checked="true" data-switch="alex"><span>Alex is in it</span><code>takes alex drive-out</code><b>yes</b></button>
+              <button type="button" disabled role="switch" aria-checked="true" data-switch="sam"><span>Sam is in it</span><code>takes sam drive-out</code><b>yes</b></button>
+              <button type="button" disabled role="switch" aria-checked="false" data-switch="jo"><span>Jo is in it</span><code>takes jo drive-out</code><b>no</b></button>
             </div>
-            <p class="outcome" aria-live="polite">Every statement is true. This setting is a plan.</p>
+            <p class="outcome" aria-live="polite">Every statement is true. The solver may choose this setting.</p>
             <button type="button" class="button quiet solver" hidden>Show the solver's setting</button>
           </div>
           <div class="says">
             <span class="label">The COMPILER's answer for this FILE</span>
             <p class="answer-line" data-lines-from="examples/a-driver/the-driver-comes-along.expected.txt">FEASIBLE: this trip works.</p>
             <p class="plan-line" data-lines-from="examples/a-driver/the-driver-comes-along.expected.txt">8:00 am to 9:00 am: Drive to the dunes, Alex and Sam</p>
-            <p class="small">The first setting shown is the plan in the report. No LOCK names Sam. The statement from rule 13 is why Sam is in the car.</p>
+            <p class="small">The LOCK puts Alex in the drive. So the drive happens. So Sam is in it, though no LOCK names Sam. The first setting shown is the one in the report.</p>
           </div>
         </div>
 
@@ -277,24 +280,24 @@ if of == "one":
           <div class="col">
             <h4>The variables</h4>
             <div class="switches">
-              <button type="button" role="switch" aria-checked="true" data-switch="used"><span>The drive happens</span><code>used drive-out</code><b>yes</b></button>
-              <button type="button" role="switch" aria-checked="true" data-switch="alex"><span>Alex is in it</span><code>takes alex drive-out</code><b>yes</b></button>
-              <button type="button" role="switch" aria-checked="true" data-switch="sam"><span>Sam is in it</span><code>takes sam drive-out</code><b>yes</b></button>
-              <button type="button" role="switch" aria-checked="false" data-switch="jo"><span>Jo is in it</span><code>takes jo drive-out</code><b>no</b></button>
+              <button type="button" disabled role="switch" aria-checked="true" data-switch="used"><span>The drive happens</span><code>used drive-out</code><b>yes</b></button>
+              <button type="button" disabled role="switch" aria-checked="true" data-switch="alex"><span>Alex is in it</span><code>takes alex drive-out</code><b>yes</b></button>
+              <button type="button" disabled role="switch" aria-checked="true" data-switch="sam"><span>Sam is in it</span><code>takes sam drive-out</code><b>yes</b></button>
+              <button type="button" disabled role="switch" aria-checked="false" data-switch="jo"><span>Jo is in it</span><code>takes jo drive-out</code><b>no</b></button>
             </div>
-            <p class="outcome no" aria-live="polite">One statement is false. This setting is not a plan.</p>
+            <p class="outcome no" aria-live="polite">One statement is false. The solver may not choose this setting.</p>
             <p class="small tried" hidden></p>
           </div>
           <div class="says">
             <span class="label">The COMPILER's answer for this FILE</span>
             <p class="answer-line stop" data-lines-from="examples/a-driver/cannot-work.expected.txt">INFEASIBLE: this trip cannot work.</p>
             <p class="plan-line" data-from="spec/rules.md">Five records conflict: what the drive back requires, the three FACTs about who can drive, and the LOCK.</p>
-            <p class="small">No setting of these variables makes all four statements true. The report names the drive back, which has the same statements.</p>
+            <p class="small">The LOCK puts Alex and Sam in the drive. So the drive happens. The statement from rule 13 says that it does not. No setting makes both true. The report names the drive back, which has the same statements.</p>
           </div>
         </div>
 
         <div class="after-figure">
-          <p>A solver searches for values of all the variables that make every statement true. If it finds them, they are the plan. If none exist, it proves that.</p>
+          <p>A solver searches for values of all the variables that make every statement true. If it finds them, they say who takes part in what, and in what order. If none exist, it proves that.</p>
           <p>This method is constraint programming: the program states what must hold, and a solver searches. <span data-from="docs/PRINCIPLES.md">Google's CP-SAT solver is the engine</span>. The full model for this example has a few dozen variables and statements.</p>
         </div>
       </figure>
@@ -307,14 +310,14 @@ if of == "one":
         <div class="stack">
           <span class="label">Checks</span>
           <h2 id="agree-title">The two checkers must agree</h2>
-          <p>The two checkers are separate programs. If their answers differ, one of them has a bug.</p>
-          <p class="small"><strong data-from="docs/PRINCIPLES.md">Correct before fast</strong>. <span data-from="docs/PRINCIPLES.md">The COMPILER is exact first. When it cannot finish, it says UNDETERMINED; it never guesses to save time. Anything faster built later must give the same answers.</span></p>
+          <p>The two checkers search in different ways. The same code then works out the answer and the evidence from what each search finds. If the two reports differ, one of the searches has a bug.</p>
+          <p class="small">The first of the <a href="https://github.com/ian-c-leonard/agloe/blob/main/docs/PRINCIPLES.md">principles</a>: <strong data-from="docs/PRINCIPLES.md">Correct before fast</strong>. <span data-from="docs/PRINCIPLES.md">Anything faster built later must give the same answers.</span></p>
         </div>
-        <div class="both" role="img" aria-label="One FILE goes to the slow checker and to the fast checker. Each gives a report. The two reports must be identical. Each plan that the fast checker finds is also checked by the slow checker's code.">
+        <div class="both" role="img" aria-label="One FILE goes to the slow checker and to the fast checker. Each gives a report. The two reports must be identical. What the solver of the fast checker chooses is also checked by the slow checker's code.">
           <span class="sheet">One FILE</span>
-          <span class="machine slow"><b>The slow checker</b><i>checks every plan</i></span>
+          <span class="machine slow"><b>The slow checker</b><i>tries every possibility</i></span>
           <span class="machine fast"><b>The fast checker</b><i>statements and a solver</i></span>
-          <span class="hand">each plan it finds is checked by the slow checker's code</span>
+          <span class="hand">the slow checker's code checks what the solver chose</span>
           <span class="sheet out one">Report</span>
           <span class="sheet out two">Report</span>
           <span class="same">must be identical</span>
@@ -327,9 +330,9 @@ if of == "one":
           <p class="small">The <a href="https://github.com/ian-c-leonard/agloe/blob/main/tests/test_compiler.py">tests</a> compare whole reports: the answer, the plan shown and the evidence.</p>
         </li>
         <li>
-          <h3>The slow checker's code checks each plan the solver finds</h3>
-          <p>That code works out the times and checks the plan against every rule.</p>
-          <p class="small">A plan that breaks a rule stops the run. It does not reach a report.</p>
+          <h3>The slow checker's code checks what the solver chose</h3>
+          <p>The solver chooses who takes part, and in what order. The slow checker's code works out the times for those choices and checks the result against the rules.</p>
+          <p class="small">If it finds no valid plan for them, the COMPILER stops with an error.</p>
         </li>
         <li>
           <h3>The words and the code list the same rules</h3>
@@ -337,10 +340,7 @@ if of == "one":
           <p class="small">It fails too when the rules page leaves out an example.</p>
         </li>
       </ul>
-      <blockquote class="quote">
-        <p data-from="docs/decisions/0004-rules-in-words-with-a-reference-checker.md">This is how a proof checker stands beside a prover, and how the WebAssembly specification has a reference interpreter.</p>
-        <p class="from">From <a href="https://github.com/ian-c-leonard/agloe/blob/main/docs/decisions/0004-rules-in-words-with-a-reference-checker.md">the decision record</a></p>
-      </blockquote>
+      <p class="small method"><span data-from="docs/decisions/0004-rules-in-words-with-a-reference-checker.md">This is how a proof checker stands beside a prover, and how the WebAssembly specification has a reference interpreter.</span> The <a href="https://github.com/ian-c-leonard/agloe/blob/main/docs/decisions/0004-rules-in-words-with-a-reference-checker.md">decision record</a> gives the reasons.</p>
     </div>
   </section>
 

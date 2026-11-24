@@ -19,10 +19,11 @@ examples their expected reports where the solver is missing, as it is in a brows
 through ``website_gestures.mjs``: each change a reader can make must write a FILE that the format
 accepts, and the page must be able to read the report on it.
 
-The page on how a rule is built has two figures. One shows eight small plans, each marked with
-the CONSTRAINTs it breaks: the reference checker must mark them the same. The other shows
-variables of the COMPILER and statements about them: Node runs its code through
-``website_statements.mjs``, and what it shows must agree with the expected report of each example.
+The page on how a rule is built has two figures. One shows the eight choices of who is in a
+drive, with those the reference checker tries and what each breaks: the reference checker must
+say the same. The other shows variables of the COMPILER and statements about them: Node runs its
+code through ``website_statements.mjs``, and what it shows must agree with the expected report of
+each example.
 """
 
 import json
@@ -393,30 +394,35 @@ def test_the_day_shows_what_the_report_says() -> None:
 RULE_PAGE = (PAGES / "how-a-rule-is-built" / "index.html").read_text()
 
 
-def test_the_small_plans_are_marked_as_the_reference_checker_marks_them() -> None:
-    """The figure of eight plans says, for each, which CONSTRAINTs it breaks.
+def test_the_choices_are_marked_as_the_reference_checker_marks_them() -> None:
+    """The figure of eight choices says which the reference checker tries, and what each breaks.
 
-    Each plan has some of the three PERSONs in both drives of the example, at the times of the
-    plan that the report shows. The reference checker says what each one breaks.
+    A choice has some of the three PERSONs in both drives of the example, at the times of the
+    plan that the report shows. The reference checker tries only the choices that honor the
+    LOCKs, so the figure marks the others as not tried. For each one that is tried, the
+    reference checker says whether it breaks the CONSTRAINT that the page is about.
     """
     file = read(ROOT / "examples" / "a-driver" / "the-driver-comes-along.json")
     shown = answers.check(file).itinerary
-    words = {Constraint.LOCK: "lock", Constraint.REQUIRED: "required"}
+    locked = {person for lock in file.locks for person in lock.persons}
     cards = re.findall(
-        r'<li class="plan( works)?" data-in="([^"]*)" data-breaks="([^"]*)">', RULE_PAGE
+        r'<li class="plan( skipped| works)?" data-in="([^"]*)" data-breaks="([^"]*)">', RULE_PAGE
     )
     people = [person.id for person in file.persons]
     assert len({who for _, who, _ in cards}) == len(cards) == 2 ** len(people)
-    for works, who, breaks in cards:
+    for kind, who, breaks in cards:
         persons = tuple(person for person in people if person in who.split())
         assert len(persons) == len(who.split()), who
         plan = tuple(replace(step, persons=persons) for step in shown) if persons else ()
         found = {each.constraint for each in reference.broken(file, worst_case(file), plan)}
+        words = {Constraint.LOCK: "lock", Constraint.REQUIRED: "required"}
         assert {words[constraint] for constraint in found} == set(breaks.split()), who
-        assert bool(works) == (not found), who
-    # The plan that the report shows is one of those that work.
-    in_the_report = {" ".join(step.persons) for step in shown}
-    assert in_the_report <= {who for works, who, _ in cards if works}
+        tried = locked <= set(persons)
+        assert tried == (Constraint.LOCK not in found), who
+        assert kind.strip() == ("skipped" if not tried else "" if found else "works"), who
+    # The plan that the report shows is the first of the choices that work.
+    working = [who for kind, who, _ in cards if kind.strip() == "works"]
+    assert [" ".join(step.persons) for step in shown] == [working[0]] * len(shown)
 
 
 def test_the_page_gives_the_constraint_its_number_on_the_rules_page() -> None:

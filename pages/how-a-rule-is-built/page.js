@@ -1,11 +1,11 @@
 // The page on how a rule is built: two figures that a reader can try.
 //
 // Without this script both figures are whole and still. With it, the reader can set the variables
-// of the second figure and see which statements hold, and the first figure can show its plans
-// being checked one after another.
+// of the second figure and see which statements hold, and the first figure goes through the
+// choices that the slow checker tries, one after another.
 import { holds } from "./statements.js";
 
-const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const still = matchMedia("(prefers-reduced-motion: reduce)");
 const COUNT = ["No", "One", "Two", "Three", "Four", "Five"];
 
 // ---------------------------------------------------------------- the variables and their statements
@@ -37,16 +37,17 @@ for (const board of document.querySelectorAll(".board")) {
     }
     outcome.classList.toggle("no", wrong > 0);
     outcome.textContent = wrong
-      ? `${COUNT[wrong] || wrong} statement${wrong === 1 ? " is" : "s are"} false. This setting is not a plan.`
-      : "Every statement is true. This setting is a plan.";
+      ? `${COUNT[wrong] || wrong} statement${wrong === 1 ? " is" : "s are"} false. The solver may not choose this setting.`
+      : "Every statement is true. The solver may choose this setting.";
     if (tried) {
       seen.add([...now].sort().join(" "));
       const all = 2 ** switches.length;
-      tried.textContent = seen.size < all ? `You have tried ${seen.size} of the ${all} settings.` : `You have tried all ${all} settings. None makes every statement true.`;
+      tried.textContent = seen.size < all ? `${seen.size} of the ${all} settings seen.` : `All ${all} settings seen. None makes every statement true.`;
     }
   }
 
   for (const each of switches) {
+    each.disabled = false;
     each.addEventListener("click", () => {
       set(each, each.getAttribute("aria-checked") !== "true");
       show();
@@ -64,17 +65,21 @@ for (const board of document.querySelectorAll(".board")) {
 }
 for (const figure of document.querySelectorAll("#switchboard")) figure.classList.add("alive");
 
-// ---------------------------------------------------------------- every plan, one after another
+// ---------------------------------------------------------------- the choices, one after another
 
 const plans = document.querySelector(".plans");
-if (plans && !still) {
-  const cards = [...plans.querySelectorAll(".plan")];
-  const again = Object.assign(document.createElement("button"), { type: "button", className: "button quiet again", textContent: "Check the plans again" });
+if (plans) {
+  // The choices that the slow checker tries, in the order it tries them.
+  const cards = [...plans.querySelectorAll(".plan:not(.skipped)")];
+  const again = Object.assign(document.createElement("button"), { type: "button", className: "button quiet again", textContent: "Go through them again" });
   let run = 0;
-  /** Show the result of each plan in turn, as the slow checker reaches it. */
+  /** Show the result of each choice in turn, as the slow checker reaches it. */
   const check = () => {
     const mine = ++run;
     for (const card of cards) card.classList.remove("checked", "now");
+    plans.classList.remove("checking");
+    // A reader who has asked for less movement sees every result at once.
+    if (still.matches) return;
     plans.classList.add("checking");
     cards.forEach((card, at) => {
       setTimeout(() => {
@@ -88,12 +93,12 @@ if (plans && !still) {
             plans.classList.remove("checking");
           }, 700);
         }
-      }, 450 * (at + 1));
+      }, 600 * (at + 1));
     });
   };
   plans.after(again);
   again.addEventListener("click", check);
-  // The first time the plans come into view, they are checked once.
+  // The first time the choices come into view, the page goes through them once.
   if ("IntersectionObserver" in window) {
     new IntersectionObserver((seen, watcher) => {
       if (seen.some((entry) => entry.isIntersecting)) {
