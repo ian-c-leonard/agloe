@@ -875,7 +875,8 @@ def test_offers_that_nobody_can_need_cost_the_search_nothing(booked: bool) -> No
 
 
 def test_a_budget_that_lists_nobody_is_shown_as_that() -> None:
-    """A PERSON can be called nobody. The words for an empty list are not a name."""
+    """A PERSON can be called nobody. The words for an empty list are not a name, and the
+    name is in quotes."""
     unpriced = [offer("tour", 1, price=None), every_right("tour", "tour-offer")]
     document = {
         "persons": [{"id": "p", "name": "nobody"}],
@@ -889,7 +890,7 @@ def test_a_budget_that_lists_nobody_is_shown_as_that() -> None:
     }
     file = load(document)
     assert in_words(file)[-2:] == [
-        "  pounds: for nobody; it holds GBP",
+        '  pounds: for "nobody"; it holds GBP',
         "  euros: it lists no PERSON; it holds EUR",
     ]
     # A name cannot copy the marks between the parts of a line either.

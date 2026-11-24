@@ -768,6 +768,35 @@ def test_no_two_records_are_shown_by_the_same_name() -> None:
     assert words[3] == '  9:00 am to 9:30 am: call, Alex (a), Alex (b) and "Alex (b)"'
 
 
+def test_a_name_that_the_report_uses_for_no_name_is_in_quotes() -> None:
+    """A traveler is called Nobody, and another is called people. "call, Nobody" would read
+    as a call with nobody in it, so each of those names is in quotes wherever it is shown."""
+    document = {
+        "persons": [{"id": "a", "name": "Nobody"}, {"id": "b", "name": "people"}],
+        "places": [{"id": "hotel", "name": "the hotel"}],
+        "options": [stays("call", "hotel")],
+        "ways": [],
+        "wants": [],
+        "facts": [starts_at("call", 9), lasts("call", "PT30M"), needs_no_right("call")],
+        "decisions": [lock("call", "a", "b")],
+    }
+    file = load(document)
+    words = report.as_text(file, compiler.check(file)).splitlines()
+    assert words[3] == '  9:00 am to 9:30 am: call, "Nobody" and "people"'
+    assert '  lock-call: "Nobody" and "people" take part in call' in words
+    # An OPTION and a WAY can have such a name too.
+    for name in ("there is none", "None", "another  WAY"):
+        document["options"] = [{**stays("call", "hotel"), "name": name}]
+        words = report.as_text(load(document), compiler.check(load(document))).splitlines()
+        assert words[3] == f'  9:00 am to 9:30 am: "{name}", "Nobody" and "people"'
+    document["options"] = [stays("call", "hotel")]
+    # A name that only holds such a word is no such word.
+    document["persons"] = [{"id": "a", "name": "Nobody Owens"}, {"id": "b", "name": "Sam"}]
+    file = load(document)
+    words = report.as_text(file, compiler.check(file)).splitlines()
+    assert words[3] == "  9:00 am to 9:30 am: call, Nobody Owens and Sam"
+
+
 def test_a_warning_falls_under_the_day_it_is_about() -> None:
     """Alex takes the same walk at 9:00 am on Saturday and on Sunday. Only Sunday's is at risk."""
 
