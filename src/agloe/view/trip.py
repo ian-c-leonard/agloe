@@ -108,6 +108,23 @@ _AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}")
 _DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _OFFSET = re.compile(r"UTC[+-][0-9]{1,2}(:[0-9]{2}(:[0-9]{2})?)?")
 _WITH_AN_ID = re.compile(r" \([a-z0-9]+(-[a-z0-9]+)*\)$")  # how a name ends when its id is shown
+# The words that a report uses in place of a name: "nobody takes part", "people need a
+# right", "there is none", "none refuses the bags", "another WAY". The page has one more,
+# for a step with nobody in it.
+_NO_NAMES = frozenset(
+    {
+        "nobody",
+        "everybody",
+        "somebody",
+        "anybody",
+        "whoever",
+        "people",
+        "none",
+        "there is none",
+        "another way",
+        "nobody of the trip",
+    }
+)
 # What a page shows nothing for: the characters that Unicode calls default ignorable. A soft
 # hyphen, a space of no width, a mark of direction, a character that joins two others, and one
 # that only says how the sign before it is drawn.
@@ -516,7 +533,8 @@ def _names(
     A record whose name another record has shows its id too. If two would still show the same,
     every record shows its id. A name is in quotes where it could be taken for something else:
     one with a comma, a colon, a semicolon or a quote mark, one that ends like a name with its
-    id, and one that holds the word ``joins``, which joins the list the names are for.
+    id, one that holds the word ``joins``, which joins the list the names are for, and one
+    that is a word the report uses in place of a name, like nobody, as a page shows it.
 
     This is the rule of the report in words. A test holds the two together. One thing is
     added for a page: two names count as the same where a page shows them alike, as
@@ -528,7 +546,8 @@ def _names(
         splits = any(mark in name for mark in ",:;") or (
             joins is not None and joins in name.casefold().split()
         )
-        if splits or '"' in name or _WITH_AN_ID.search(name):
+        stands_in = looks(name).casefold() in _NO_NAMES
+        if splits or stands_in or '"' in name or _WITH_AN_ID.search(name):
             return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
         return name
 
