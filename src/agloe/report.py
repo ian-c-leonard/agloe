@@ -666,6 +666,19 @@ def as_text(file: File, report: Report) -> str:
             ]
             if file.caps:
                 lines[-1] = lines[-1][:-1] + ", if what those BOOKINGs paid fits the caps."
+        # A BOOKING that covers the OBJECT can stand in for the answer that an OPTION needs
+        # no right for it.
+        might_be_covered = [unknown for unknown in asked if unknown.what == "needs no right for"]
+        if might_be_covered:
+            things = _names(file.objects)
+            fits = ", if what it paid fits the caps" if file.caps else ""
+            lines.append("")
+            for unknown in might_be_covered:
+                name, thing = _name(file, unknown.option), things[unknown.about or ""]
+                lines.append(
+                    f"If {name} does need a right for {thing}, a BOOKING for it that covers"
+                    f" {thing} is enough instead{fits}."
+                )
         if "other ways" in kinds:
             helps = (
                 "Other WAYs help only if they can be taken when the plan needs them, with a"
@@ -1089,6 +1102,17 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
             who = _people(file, tuple(needed.unknown.person or "" for needed in group))
             right = f"a right to {_name(file, unknown.option)} is found for {each}{who}{more}"
             parts.append(_OwnWords(right))
+        elif unknown.what in ("needs no right for", "another right for"):
+            # One OBJECT in several OPTIONs: the OPTIONs are named together.
+            names = [_name(file, needed.unknown.option, "and") for needed in group]
+            thing = _names(file.objects)[unknown.about or ""]
+            if unknown.what == "needs no right for":
+                needs = "needs" if len(names) == 1 else "need"
+                parts.append(f"{_listed(names)} {needs} no right for {thing}")
+            else:
+                each = "each of " if len(names) > 1 else ""
+                found = f"a right to {each}{_listed(names)} is found that covers {thing}"
+                parts.append(_OwnWords(found))
         else:
             parts.append(_wanted(file, group[0], len(enough) == 1))
     for want, persons in for_whom.items():
@@ -1169,6 +1193,8 @@ def _named_with(needed: Missing) -> object:
         return unknown.what
     if unknown.what == "another right":
         return (unknown.what, unknown.option)
+    if unknown.what in ("needs no right for", "another right for"):
+        return (unknown.what, unknown.about)
     return needed
 
 

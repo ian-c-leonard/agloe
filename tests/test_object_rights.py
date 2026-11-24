@@ -29,6 +29,7 @@ from agloe.reference import (
 from tests.stories import (
     Document,
     carries,
+    does_with,
     every_right_for,
     every_transfer,
     every_use,
@@ -306,7 +307,12 @@ def test_nobody_said_whether_the_car_needs_a_ticket() -> None:
     found = checked(file)
     assert found.answer is Answer.UNDETERMINED
     words = report.as_text(file, found)
-    assert "works if ferry needs no right for car and drive needs no right for car." in words
+    assert "The trip works if ferry and drive need no right for car.\n" in words
+    # A BOOKING that covers the car is enough too, whatever the ferry needs.
+    instead = (
+        "If ferry does need a right for car, a BOOKING for it that covers car is enough instead."
+    )
+    assert f"\n{instead}\n" in words
     # A BOOKING that covers the car on the ferry settles the ferry, whatever it needs.
     booked = a_ferry(booking("ferry", "car"), needs_right_for("drive", "car", False))
     found = checked(booked)
@@ -443,6 +449,133 @@ def test_another_transfer_does_not_cover_an_object_that_the_option_takes_along()
     assert found.answer is Answer.UNDETERMINED
     asked = [[each.unknown.what for each in group] for group in found.missing]
     assert asked == [["another right for"]]
+
+
+def a_quay(*facts: Document, bike_at: str = "town") -> File:
+    """A ferry goes from the quay to town at 9:00 am, and a LOCK puts Alex on it. The ferry
+    needs a right for the bike, and nothing covers the bike. The FILE does not say that it
+    states every transfer of the bike. The bike lies in town unless the story says otherwise."""
+    options = [moves("ferry", "quay", "town")]
+    stated = [*at("ferry", 9), starts_from("alex", "quay"), lies_at("bike", bike_at)]
+    stated += [every_use("bike"), needs_right_for("ferry", "bike"), every_right_for("bike"), *facts]
+    places, locks = ["quay", "town"], [lock("ferry", "alex")]
+    return trip(["alex"], places, options, stated, locks, objects=["bike"], object_rights=True)
+
+
+def cases_of(file: File, found: Report) -> list[str]:
+    """The cases that an UNDETERMINED report names, each in its words."""
+    lines = report.as_text(file, found).split("\n")
+    one = [
+        line.removeprefix("The trip might work if ") for line in lines if " might work if " in line
+    ]
+    return one or [line.strip()[3:] for line in lines if line.startswith("  ") and ". " in line[:5]]
+
+
+def test_another_transfer_and_an_option_of_which_nobody_knows_what_it_does() -> None:
+    """The ferry requires the bike, which lies in town. Another transfer can bring it to the
+    quay. Where nobody knows what the ferry does with the bike, it might take it along,
+    and then the bike needs its right. So the transfer is not enough by itself: the ferry
+    does not carry the bike, or a right is found. Where a FACT says that the ferry carries
+    it, only the right helps. Where a FACT says that it leaves the bike alone, the
+    transfer is enough, and it has to leave the bike on the quay and not with Alex."""
+    needs = requires_object("ferry", "bike")
+    unknown_action = a_quay(needs)
+    found = checked(unknown_action)
+    assert found.answer is Answer.UNDETERMINED
+    assert cases_of(unknown_action, found) == [
+        "ferry does not carry bike and another transfer puts bike where ferry starts.",
+        "A right to ferry is found that covers bike and another transfer puts bike at hand for ferry.",
+    ]
+    carried = a_quay(needs, carries("ferry", "bike"))
+    found = checked(carried)
+    assert cases_of(carried, found) == [
+        "a right to ferry is found that covers bike and another transfer puts bike at hand for ferry."
+    ]
+    left_alone = a_quay(needs, does_with("ferry", "bike", "nothing"))
+    found = checked(left_alone)
+    assert cases_of(left_alone, found) == ["another transfer puts bike where ferry starts."]
+    said = json.loads(json.dumps(report.as_json(left_alone, found)))
+    checks = [(each["option"], each["check"]) for each in said["missing"][0][0]["at_hand_for"]]
+    assert checks == [("ferry", "requires"), ("ferry", "needs a right for")]
+
+
+def test_an_option_that_cannot_happen_does_not_run_with_nobody_in_it() -> None:
+    """A van takes a bag from A to B with nobody in it, and Alex collects the bag. The van
+    also requires a bike and carries it. The bike lies at B, the van needs a right for it,
+    and nothing covers it. Where another transfer brings the bike, the van takes it along
+    with no right, so the van cannot run, with or without a PERSON."""
+    options = [moves("van", "a", "b"), stays("pickup", "b")]
+    facts = [*at("van", 9), *at("pickup", 11), lies_at("bag", "a"), carries("van", "bag")]
+    facts += [requires_object("pickup", "bag"), every_transfer("bag"), every_right_for("bag")]
+    facts += [lies_at("bike", "b"), requires_object("van", "bike"), carries("van", "bike")]
+    facts += [needs_right_for("van", "bike")]
+    locks = [lock("pickup", "alex")]
+    file = trip(
+        ["alex"], ["a", "b"], options, facts, locks, objects=["bag", "bike"], object_rights=True
+    )
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    world = with_these_at_best(file, [Unknown("another transfer", about="bike")])
+    assert reference.taken_with_no_right(world, "van", "bike")
+    assert not reference.any_works(file, world) and not compiler.works(file, world)
+
+
+def test_a_right_is_needed_only_where_the_hand_over_or_the_carry_happens() -> None:
+    """The bike lies in town, out of reach of the train at A. A plan that hands it over in
+    the train, or carries it there, breaks the fourteenth CONSTRAINT: the bike is not at
+    hand. It does not break the sixteenth as well: the bike never gets into the train."""
+    out_of_reach = Broken(Constraint.AT_HAND, "train", ("alex",), object="bike")
+    handing = a_train(lies_at("bike", "b"), hands_over("train", "bike"))
+    taken = ride("alex", handed=(("bike", "alex"),))
+    assert broken_as_listed(handing, worst_case(handing), (taken,)) == [out_of_reach]
+    carrying = a_train(lies_at("bike", "b"), carries("train", "bike"))
+    loaded = ride("alex", carried=("bike",))
+    assert broken_as_listed(carrying, worst_case(carrying), (loaded,)) == [out_of_reach]
+
+
+def test_another_transfer_does_not_undo_a_hand_over_or_a_carry_that_the_plan_chooses() -> None:
+    """The bike lies at A, and the FILE does not say that it states every transfer. Another
+    transfer can do much, and it cannot undo what the plan itself does: a plan that hands
+    the bike to Alex in the train, or carries it there, does so with no right."""
+    for does, step in (
+        (hands_over("train", "bike"), ride("alex", handed=(("bike", "alex"),))),
+        (carries("train", "bike"), ride("alex", carried=("bike",))),
+    ):
+        file = a_train(lies_at("bike", "a"), does)
+        world = with_these_at_best(file, [Unknown("another transfer", about="bike")])
+        assert world.brought == {"bike"}
+        assert broken_as_listed(file, world, (step,)) == [uncovered("alex")]
+        assert not reference.works_as_listed(file, world, (step,))
+        # The plan that leaves the bike alone works there.
+        assert reference.works_as_listed(file, world, (ride("alex"),))
+
+
+def test_the_report_names_every_right_for_one_object_at_once() -> None:
+    """Alex has the bike on four trains in a row, and each needs a right for it. The report
+    names the four together, and the search for them asks the checker a few times and not
+    thousands of times."""
+    places = [f"stop-{number}" for number in range(5)]
+    options = [moves(f"train-{n}", places[n], places[n + 1]) for n in range(4)]
+    facts = [starts_from("alex", "stop-0"), has_object("alex", "bike"), every_use("bike")]
+    facts += [every_transfer("bike"), every_right_for("bike")]
+    for number in range(4):
+        facts += [*at(f"train-{number}", 9 + number), needs_right_for(f"train-{number}", "bike")]
+    locks = [lock(f"train-{number}", "alex") for number in range(4)]
+    file = trip(["alex"], places, options, facts, locks, objects=["bike"], object_rights=True)
+    asked = 0
+
+    def counted(file: File, world: reference.World) -> bool:
+        nonlocal asked
+        asked += 1
+        return compiler.works(file, world)
+
+    found = answers.check(file, compiler.shown, counted, compiler.can_work)
+    assert found == checked(file)
+    assert asked < 30
+    trains = "train-0, train-1, train-2 and train-3"
+    assert f"The trip works if a right to each of {trains} is found that covers bike.\n" in (
+        report.as_text(file, found)
+    )
 
 
 def with_rights(rng: Random, file: File) -> File:

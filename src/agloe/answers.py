@@ -1168,6 +1168,11 @@ def _asked_of_objects(
     the OBJECT, it might keep it and no more. That asks less of a plan than any set that
     leaves both unknown, so nothing that such a set allows is lost.
 
+    A fourth thing can be unknown about an OPTION and an OBJECT: whether a right is needed
+    there and something covers the OBJECT. Its unknown FACT is that the OPTION needs no
+    right for the OBJECT, or that another right covers it, whichever the FILE leaves open.
+    A set that holds neither leaves the OBJECT with no right there.
+
     Some of those things are tested together in the upper bound of ``no_better_than``,
     where every unknown FACT helps whoever needs it: there each of them is put at its
     worst. Where nothing works then, no set without a FACT of theirs is enough. Such a set
@@ -1188,6 +1193,7 @@ def _asked_of_objects(
     kinds = {"does not require": "requires", "does not refuse": "refuses"}
     about_doing = ("keeps", "does not keep", "does not carry", "does not keep or carry")
     kinds.update(dict.fromkeys((*about_doing, "hands over", "carries"), "does"))
+    kinds.update(dict.fromkeys(("needs no right for", "another right for"), "right"))
     # Each thing that is unknown, with its unknown FACTs: an OPTION, an OBJECT and a kind.
     facts: dict[tuple[str, str, str], list[Unknown]] = {}
     for unknown in unknowns(file):
@@ -1200,6 +1206,7 @@ def _asked_of_objects(
         needs = {(option, about) for option, about, kind in group if kind == "requires"}
         refuses = {(option, about) for option, about, kind in group if kind == "refuses"}
         open_to_do = {(option, about) for option, about, kind in group if kind == "does"}
+        no_right = {(option, about) for option, about, kind in group if kind == "right"}
         required = bound.needs | needs
         # At its worst, an OPTION that requires the OBJECT might keep it or take it along.
         # Whether anything works does not turn on how sure the requirement is: a plan can
@@ -1210,6 +1217,8 @@ def _asked_of_objects(
             needs=required,
             refuses=bound.refuses | refuses,
             does={**bound.does, **worst},
+            ticketed=bound.ticketed | no_right,
+            uncovered=bound.uncovered | no_right,
         )
         return not works(file, harder)
 
