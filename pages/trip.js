@@ -581,7 +581,7 @@ function start() {
         const range = known && item.longest !== null && item.longest > item.length;
         if (range) {
           const [x3, y3] = point(item.leaves + item.longest, toEdge);
-          group.append(make("path", { class: "may-run-late", d: `M${x1} ${y1}L${x2} ${y2}L${x3} ${y3}Z` }));
+          group.append(make("path", { class: "may-run-late", fill: "url(#may-run-late)", d: `M${x1} ${y1}L${x2} ${y2}L${x3} ${y3}Z` }));
         }
         group.append(make("line", { class: "road-line", x1, y1, x2, y2 }));
         if (!tall && pairs.get(`${item.from} ${item.to}`).length === 1) {
@@ -659,7 +659,7 @@ function start() {
     }
     // How late people would be at worst, where the report says so: marked along the edge of the lane.
     for (const late of view.late || []) {
-      under.append(make("rect", { class: "late-at-worst", ...box(late.from, laneAt(late.place) - 5, late.minutes, 9), rx: 2 }));
+      under.append(make("rect", { class: "late-at-worst", fill: "url(#too-late)", ...box(late.from, laneAt(late.place) - 5, late.minutes, 9), rx: 2 }));
     }
     day.classList.toggle("tall", tall);
     // The day is drawn afresh each time, so whatever had the keyboard's focus is given it back.
