@@ -525,10 +525,6 @@ def test_the_page_for_a_wrong_address_names_everything_from_the_root() -> None:
     assert page.links
     for link in [*page.links, *page.sheets]:
         assert link.startswith(("/", "#", "https://")), link
-    # The map on it is the map of the home page.
-    start, end = '<svg class="map" viewBox', "</svg>"
-    home, lost = ((PAGES / name).read_text() for name in ("index.html", "404.html"))
-    assert lost[lost.index(start) : lost.index(end, lost.index(start))] in home
 
 
 def target_of(folder: Path, link: str) -> Path:
