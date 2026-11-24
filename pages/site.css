@@ -330,10 +330,6 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .part strong { display: block; font: italic 400 1.6rem/1.15 var(--display); margin-bottom: 8px; }
 .after { margin-top: 44px; max-width: 46em; display: grid; gap: 14px; color: var(--ink2); }
 
-/* What it must be */
-.musts { list-style: none; padding: 0; margin-top: 34px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px clamp(32px, 5vw, 64px); }
-.musts li { font-size: 0.98rem; line-height: 1.55; color: var(--ink2); }
-.musts strong { display: block; font: italic 400 1.3rem/1.2 var(--display); color: var(--ink); margin-bottom: 3px; }
 
 .two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 44px clamp(32px, 5vw, 64px); align-items: start; }
 .terminal.plain { overflow-x: auto; white-space: pre; margin: 0; }
@@ -381,7 +377,7 @@ footer { padding-block: 34px 46px; font-size: 0.93rem; color: var(--muted); bord
 footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 40px; }
 
 @media (max-width: 900px) {
-  .split, .hero .split, .two, .parts, .musts, footer .wrap { grid-template-columns: minmax(0, 1fr); }
+  .split, .hero .split, .two, .parts, footer .wrap { grid-template-columns: minmax(0, 1fr); }
   .parts { gap: 34px; }
   h1 { font-size: clamp(2.5rem, 11vw, 3.4rem); }
 }
