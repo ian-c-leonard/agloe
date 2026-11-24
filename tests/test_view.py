@@ -861,6 +861,8 @@ def test_the_view_answers_under_one_more_name_that_its_owner_gives(tmp_path: Pat
         "view.example.org:000000",
         "view.example.org:0065536",
         "vi\u00e9w.example.org",
+        # The sign for kelvin is no letter of a name, though its small form is the letter k.
+        "\u212aiew.example.org",
         "view.example.org\n",
     ],
 )
