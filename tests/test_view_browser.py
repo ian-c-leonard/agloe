@@ -2333,3 +2333,93 @@ def test_the_page_shows_what_it_can_without_a_part_that_cannot_load(chromium: Br
         assert page.locator("#report .row").count() == 0
         assert page.locator("#calendar .mark").count() > 3
         assert page.locator("#calendar .mark.warned").count() == 0
+
+
+def test_a_step_with_nobody_in_it_has_a_column_and_a_row_of_its_own(
+    chromium: Browser, tmp_path: Path
+) -> None:
+    """A luggage service carries the bags to O'Hare while Alex and Sam are at the museum."""
+    story = EXAMPLES / "the-bags" / "the-service-takes-them.json"
+    in_the_last_third = """(mark) => {
+      const day = mark.closest(".day-body").getBoundingClientRect();
+      const box = mark.getBoundingClientRect();
+      return box.left >= day.left + (day.width * 2) / 3 - 1 && box.right <= day.right + 1;
+    }"""
+    with opened(chromium, story) as page:
+        page.locator("#calendar .mark").first.wait_for()
+        page.locator("#report .row").first.wait_for()
+        page.locator("#options .item").first.wait_for()
+        # The day has a column for each PERSON, and one after them for nobody.
+        heads = page.locator("#calendar .day .people span")
+        assert heads.all_text_contents() == ["Alex", "Sam", "nobody"]
+        # That column is no drawing of a PERSON, and it has no colour of one.
+        nobody = page.locator("#calendar .people .nobody")
+        assert nobody.get_attribute("data-of") is None
+        hues = heads.evaluate_all(
+            "(all) => all.map((each) => getComputedStyle(each).borderBottomColor)"
+        )
+        assert len(set(hues)) == 3
+        # The service is in that column, and the visit is not.
+        service = page.locator("#calendar .mark", has_text="Luggage service")
+        assert service.count() == 1
+        assert service.evaluate(in_the_last_third)
+        assert not page.locator("#calendar .mark", has_text="Museum visit").first.evaluate(
+            in_the_last_third
+        )
+        stripes = service.locator(".stripe").evaluate_all(
+            "(all) => all.map((each) => each.className)"
+        )
+        assert stripes == ["stripe nobody"]
+        # The calendar says nothing more of it in words: the mark says it.
+        assert "obody" not in (page.text_content("#calendar-says") or "")
+        assert "nobody of the TRIP" in (service.get_attribute("title") or "")
+        # Pointing at the service lights up its line of the report and its row among the OPTIONs.
+        service.hover()
+        found = lit(page, marks=["Luggage service"], options=["Luggage service"])
+        assert any(
+            row.strip().startswith("2:00 pm to 3:30 pm: Luggage service") for row in found["rows"]
+        )
+        # The keyboard reaches it like any other mark of the calendar.
+        page.locator("#calendar").focus()
+        page.keyboard.press("Tab")
+        names: list[str] = []
+        for _ in range(6):
+            names.append(page.evaluate("() => document.activeElement.textContent"))
+            page.keyboard.press("ArrowDown")
+        assert any("Luggage service" in name for name in names)
+    # With breakfast in Denver the next morning, the plan has two days, and so a strip. The
+    # strip has a row for each PERSON and one for nobody, and the service is in that row.
+    content = json.loads(story.read_text())
+    content["options"].append({"id": "breakfast", "name": "Breakfast", "place": "denver"})
+    content["facts"] += [
+        {
+            "id": "breakfast-time",
+            "option": "breakfast",
+            "starts_at": "2027-05-16T09:00:00-05:00[America/Chicago]",
+        },
+        {"id": "breakfast-length", "option": "breakfast", "duration": "PT1H"},
+        {"id": "breakfast-arrival", "option": "breakfast", "arrive_before_start": "PT0S"},
+        {"id": "breakfast-needs-no-ticket", "option": "breakfast", "needs_right": False},
+    ]
+    content["decisions"].append(
+        {"id": "lock-breakfast", "lock": "breakfast", "persons": ["alex", "sam"]}
+    )
+    with opened(chromium, written(tmp_path, content)) as page:
+        page.locator("#strip .bar").first.wait_for()
+        assert (page.text_content("#line") or "").startswith("FEASIBLE")
+        rows = page.locator("#strip .strip-people span")
+        assert rows.all_text_contents() == ["Alex", "Sam", "nobody"]
+        assert "one for the steps with nobody of the TRIP in them" in (
+            page.text_content("#strip-says") or ""
+        )
+        in_the_last_row = """(bar) => {
+          const rows = bar.closest(".strip-rows").getBoundingClientRect();
+          const box = bar.getBoundingClientRect();
+          return box.top >= rows.top + (rows.height * 2) / 3 - 1 && box.bottom <= rows.bottom + 1;
+        }"""
+        bar = page.locator("#strip .bar", has_text="Luggage service")
+        assert bar.count() == 1
+        assert bar.evaluate(in_the_last_row)
+        # Pointing at it on the strip lights up the same step in the calendar.
+        bar.hover()
+        lit(page, marks=["Luggage service"], bars=["Luggage service"])

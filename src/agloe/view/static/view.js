@@ -107,6 +107,20 @@ function nameOf(person, n, kind) {
 }
 
 /**
+ * The name over the column of the calendar, or beside the row of the strip, that holds the
+ * steps with nobody of the TRIP in them. It has no colour of a PERSON, and it is set apart
+ * from their names: a PERSON can be called anything.
+ */
+function nobodyName(kind) {
+  return Object.assign(made("span", `${kind}nobody`, "nobody"), { title: "The steps of the plan with nobody of the TRIP in them." });
+}
+
+/** The colour of a column or a row: that of its PERSON, or none where it is the one for nobody. */
+function hueOf(mark, at) {
+  return mark.nobody ? "nobody" : `p${at % HUES}`;
+}
+
+/**
  * What a row or an entry for a WAY is a drawing of: each step of the TRIP in which somebody
  * takes it, by its number, or the WAY itself, by its id, where nobody takes it.
  */
@@ -138,7 +152,7 @@ function put(body, mark, index, people, open, ticks) {
   const block = made("div", "block");
   const stripes = made("div", "stripes");
   for (let column = mark.first; column <= mark.last; column += 1) {
-    const stripe = made("i", `stripe p${column % HUES}`);
+    const stripe = made("i", `stripe ${hueOf(mark, column)}`);
     if (mark.brief) {
       // Only the tick itself answers the pointer, so that what it sits on can be reached too.
       // Ticks that would lie on each other in one PERSON's column stand beside each other,
@@ -168,7 +182,8 @@ function put(body, mark, index, people, open, ticks) {
 }
 
 function draw(laid) {
-  const people = laid.persons.length;
+  // A column for each PERSON, and one after them for the steps with nobody of the TRIP in them.
+  const people = laid.persons.length + (laid.nobody ? 1 : 0);
   const tall = (laid.hours.to - laid.hours.from) * PER_MINUTE;
   const grid = part("calendar");
   grid.style.setProperty("--hour", `${60 * PER_MINUTE}px`);
@@ -192,6 +207,7 @@ function draw(laid) {
     column.style.setProperty("--people", Math.max(people, 1));
     const heads = made("div", "people");
     laid.persons.forEach((person, n) => heads.append(nameOf(person, n, "person ")));
+    if (laid.nobody) heads.append(nobodyName("person "));
     const body = made("div", "day-body");
     body.style.height = `${tall}px`;
     for (const shut of day.shut) {
@@ -269,10 +285,10 @@ function bar(mark, people) {
   // for a WAY, or a tick for a WAY that is too short to draw. Two ticks, one above the other,
   // for several marks. Only a tick itself answers the pointer, so that what it sits on can be
   // reached too.
-  if (several) box.append(Object.assign(made("i", `bar-several p${mark.first % HUES}`), { title: box.title }));
+  if (several) box.append(Object.assign(made("i", `bar-several ${hueOf(one, mark.first)}`), { title: box.title }));
   else if (one.kind === "option") box.append(made("i", "bar-block"), made("b", "bar-name", one.name));
-  else if (mark.small) box.append(Object.assign(made("i", `bar-tick p${mark.first % HUES}`), { title: box.title }));
-  else for (let row = mark.first; row <= mark.last; row += 1) box.append(made("i", `bar-line p${row % HUES}`));
+  else if (mark.small) box.append(Object.assign(made("i", `bar-tick ${hueOf(one, mark.first)}`), { title: box.title }));
+  else for (let row = mark.first; row <= mark.last; row += 1) box.append(made("i", `bar-line ${hueOf(one, row)}`));
   return box;
 }
 
@@ -292,11 +308,12 @@ function drawStrip(laid) {
   const strip = turn && laid && stripRoom - EDGES >= NARROWEST ? turn(laid, stripRoom - EDGES) : null;
   if (strip === null) return;
   box.hidden = part("strip-says").hidden = false;
-  const people = Math.max(strip.persons.length, 1);
+  const people = Math.max(strip.persons.length + (strip.nobody ? 1 : 0), 1);
   box.style.setProperty("--people", people);
   box.style.setProperty("--row", `${strip.row}px`);
   const names = made("div", "strip-people");
   strip.persons.forEach((person, n) => names.append(nameOf(person, n, "")));
+  if (strip.nobody) names.append(nobodyName(""));
   const days = made("div", "strip-days");
   const rows = made("div", "strip-rows");
   days.style.width = rows.style.width = `${strip.wide}px`;
