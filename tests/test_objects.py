@@ -15,6 +15,7 @@ from agloe import answers, compiler, reference, report
 from agloe.answers import Answer, Carried, Report, Stay, Use
 from agloe.file import (
     Capability,
+    CompleteNeedsRightFor,
     CompleteRequires,
     CompleteRequiresObject,
     CompleteTransfers,
@@ -396,13 +397,14 @@ def test_an_object_is_at_hand_with_a_person_who_takes_part() -> None:
 
 
 def replace_silence(file: File) -> File:
-    """The same FILE with both sets of each OBJECT COMPLETE, so that nothing else is unknown."""
+    """The same FILE with each set of each OBJECT COMPLETE, so that nothing else is unknown."""
     whole = [
         fact
         for thing in file.objects
         for fact in (
             CompleteRequiresObject(f"every-use-of-{thing.id}", thing.id),
             CompleteTransfers(f"every-transfer-of-{thing.id}", thing.id),
+            CompleteNeedsRightFor(f"every-right-for-{thing.id}", thing.id),
         )
         if fact.id not in {each.id for each in file.facts}
     ]
@@ -1701,6 +1703,7 @@ def test_listing_an_object_that_nothing_requires_changes_no_answer() -> None:
         facts = (
             *plain.facts,
             CompleteRequiresObject("every-use-of-bags", "bags"),
+            CompleteNeedsRightFor("every-right-for-bags", "bags"),
             ObjectStarts("bags-start", "bags", person=plain.persons[0].id),
         )
         listed = replace(plain, objects=(Object("bags", "bags"),), facts=facts)
@@ -2797,7 +2800,7 @@ def with_objects(rng: Random, file: File, most: int = 2) -> File:
     """The same FILE with one or two OBJECTs and FACTs about them, chosen at random."""
     names = THINGS[: rng.choice([1, 1, 1, 2][: 2 * most])]
     facts: list[ObjectStarts | RequiresObject | RefusesObject | WithObject] = []
-    whole: list[CompleteRequiresObject | CompleteTransfers] = []
+    whole: list[CompleteRequiresObject | CompleteTransfers | CompleteNeedsRightFor] = []
     people = [person.id for person in file.persons]
     for name in names:
         start = rng.choice(["with", "with", "at", "at", None])
@@ -2823,6 +2826,8 @@ def with_objects(rng: Random, file: File, most: int = 2) -> File:
             whole.append(CompleteRequiresObject(f"every-use-of-{name}", name))
         if rng.random() < 0.6:
             whole.append(CompleteTransfers(f"every-transfer-of-{name}", name))
+        # No OPTION needs a right for the OBJECT: these trips are about where it is.
+        whole.append(CompleteNeedsRightFor(f"every-right-for-{name}", name))
     listed = tuple(Object(name, name) for name in names)
     return replace(file, objects=listed, facts=(*file.facts, *facts, *whole))
 
@@ -6875,6 +6880,7 @@ def four_on_a_shuttle_with_a_key(key_at: str) -> File:
         RequiresObject("alex-3-requires-key", "alex-3", "key", True),
         WithObject("shuttle-with-key", "shuttle", "key", "hands_over"),
         CompleteRequiresObject("every-use-of-key", "key"),
+        CompleteNeedsRightFor("every-right-for-key", "key"),
     ]
     listed = (*file.objects, Object("key", "key"))
     return replace(file, objects=listed, facts=(*file.facts, *key))
