@@ -512,10 +512,81 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
       const part = document.getElementById(id).getBoundingClientRect();
       return { row: [row.top, row.bottom], part: part.top, at: scrollY };
     }"""
+    # How the row lies: how many lines its links take, from where to where it reaches, how
+    # many links it cuts off, and how wide the page is beside the window.
+    lies = """() => {
+      const row = document.getElementById("contents");
+      const at = row.getBoundingClientRect();
+      const links = [...row.querySelectorAll(".to")].map((each) => each.getBoundingClientRect());
+      return {
+        lines: new Set(links.map((each) => Math.round(each.top))).size,
+        sides: [at.left, at.right],
+        cut: links.filter((each) => each.left < at.left || each.right > at.right).length,
+        page: [document.documentElement.scrollWidth, document.documentElement.clientWidth],
+      };
+    }"""
     with opened(chromium, story / "they-collect-them.json", wide=700, tall=800) as page:
         page.locator("#objects .card").first.wait_for()
         page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 9")
-        assert page.evaluate(under_the_row, "options-part")["row"][1] > 50
+        found = page.evaluate(lies)
+        assert (found["lines"], found["cut"], found["sides"]) == (2, 0, [28, 672])
+        page.locator("#contents .to", has_text="OPTIONs").click()
+        page.wait_for_function("() => scrollY > 0")
+        page.wait_for_timeout(200)
+        found = page.evaluate(under_the_row, "options-part")
+        assert found["row"][0] == 0
+        assert found["row"][1] <= found["part"] < found["row"][1] + 30
+    # Whether what the keyboard is on is in the window, whole.
+    in_the_window = """() => {
+      const at = document.activeElement.getBoundingClientRect();
+      return at.left >= 0 && at.right <= innerWidth && at.top >= 0 && at.bottom <= innerHeight;
+    }"""
+    # In a narrow window, such as the browser beside an agent, the row takes more lines
+    # still. It does not stay at the top there, where it would take a good part of the
+    # window: it goes with the page. The page has less room at its sides.
+    for wide, lines in [(360, 4), (640, 2)]:
+        with opened(chromium, story / "they-collect-them.json", wide=wide, tall=700) as page:
+            page.locator("#objects .card").first.wait_for()
+            page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 9")
+            found = page.evaluate(lies)
+            # Every link is in the row whole, and the page is as wide as the window.
+            assert (found["lines"], found["cut"]) == (lines, 0)
+            assert (found["sides"], found["page"]) == ([14, wide - 14], [wide, wide])
+            # Tab goes through the links from the first one, and each is in the window,
+            # whole, when the keyboard is on it.
+            reached: list[str] = []
+            for _ in range(9):
+                page.keyboard.press("Tab")
+                assert page.evaluate(in_the_window)
+                reached.append(page.evaluate("() => document.activeElement.firstChild.textContent"))
+            assert reached[0] == "To do and to decide" and reached[-1] == "The COMPILER's report"
+            # A click brings the part to the top of the window, and the row has gone up
+            # with the page.
+            page.locator("#contents .to", has_text="OPTIONs").click()
+            page.wait_for_function("() => scrollY > 0 && location.hash === '#options-part'")
+            page.wait_for_timeout(200)
+            found = page.evaluate(under_the_row, "options-part")
+            assert found["row"][1] < 0
+            assert 0 <= found["part"] < 30
+    # The report is the last part of the page, and the report on a trip that cannot work is
+    # short. Its link brings it to the top of a narrow window all the same.
+    for wide in (320, 640):
+        with opened(chromium, story / "nobody-collects-them.json", wide=wide, tall=700) as page:
+            page.locator("#objects .card").first.wait_for()
+            page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 9")
+            page.locator("#contents .to").last.click()
+            page.wait_for_function("() => scrollY > 0 && location.hash === '#report-part'")
+            page.wait_for_timeout(200)
+            found = page.evaluate(under_the_row, "report-part")
+            assert 0 <= found["part"] < 30, (wide, found)
+            # The report itself is no taller for it.
+            tall = "() => document.getElementById('report').getBoundingClientRect().height"
+            assert page.evaluate(tall) < 500
+    # One pixel wider, and the row stays at the top as in any window of one column.
+    with opened(chromium, story / "they-collect-them.json", wide=641, tall=700) as page:
+        page.locator("#objects .card").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 9")
+        assert page.evaluate(lies)["sides"] == [28, 613]
         page.locator("#contents .to", has_text="OPTIONs").click()
         page.wait_for_function("() => scrollY > 0")
         page.wait_for_timeout(200)
