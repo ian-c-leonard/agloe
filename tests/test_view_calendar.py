@@ -374,6 +374,35 @@ def test_the_calendar_has_a_column_for_the_steps_with_nobody_in_them() -> None:
         ["visit", "first-van", "other-van"],
         ["last-van"],
     ]
+    # A van that runs after the days shown has no mark, so the calendar has no column for
+    # it. What the report warns of there is counted with the steps after the days shown.
+    far = (
+        plan[0],
+        Step("last-van", "hall", "port", (), seconds(14) + 99 * day, seconds(15, 30) + 99 * day),
+    )
+    later = sent_for(file, Report(Answer.FEASIBLE, itinerary=far))
+    assert [len(step["parts"]) for step in later["steps"]] == [1, 0]
+    words = "\n".join(
+        [
+            "FEASIBLE, with a WARNING: this trip works, but it is at risk.",
+            "",
+            "Saturday 15 May 2027 (times in America/Chicago)",
+            "  10:00 am to 11:00 am: visit, alex",
+            "",
+            "Sunday 22 August 2027 (times in America/Chicago)",
+            "  2:00 pm to 3:30 pm: last-van",
+            "    ! the permit would arrive 1 h after this starts.",
+            "",
+        ]
+    )
+    laid = calendar(later, {"answer": "FEASIBLE"}, words)
+    assert (laid["nobody"], laid["warned"]) == (False, False)
+    assert laid["says"] == (
+        f"The ITINERARY of the report.{CHICAGO} The calendar shows the first 62 columns. It"
+        " leaves out what comes after them, up to Sunday 22 August 2027."
+        " The report also warns of something at 1 step after the days shown."
+    )
+    assert warnings_are_those_of_the_report(later, words, laid, "a van after the days shown")
     # A plan with somebody in every step has no such column.
     everybody = sent_for(file, Report(Answer.FEASIBLE, itinerary=plan[:1]))
     assert calendar(everybody)["nobody"] is False
