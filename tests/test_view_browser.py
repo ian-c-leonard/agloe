@@ -1479,12 +1479,13 @@ def test_pointing_ties_an_object_to_the_calendar_and_the_report(
         # They come in the order of the report: under the step, among what the plan relies
         # on, and under "Where each OBJECT is:".
         assert said[0] == "Alex takes the bags here."
-        assert ids_of(said[1:4]) == [
+        assert ids_of(said[1:5]) == [
             "where-the-bags-start",
             "every-use-of-the-bags",
             "everything-that-moves-the-bags",
+            "every-ticket-for-the-bags",
         ]
-        assert said[4:] == [
+        assert said[5:] == [
             "the bags: at the hotel when the TRIP starts; with Alex from 2:45 pm (handed over in"
             " Collect the bags)",
             "Flight home requires the bags. Just before it starts: with Alex.",
