@@ -577,6 +577,11 @@ def test_another_transfer_does_not_undo_a_hand_over_or_a_carry_that_the_plan_cho
         assert not reference.works_as_listed(file, world, (step,))
         # The plan that leaves the bike alone works there.
         assert reference.works_as_listed(file, world, (ride("alex"),))
+    # Jo rides too, and the plan hands the bike to Alex: the finding names Alex.
+    file = a_train(lies_at("bike", "a"), hands_over("train", "bike"))
+    world = with_these_at_best(file, [Unknown("another transfer", about="bike")])
+    both = ride("alex", "jo", handed=(("bike", "alex"),))
+    assert broken_as_listed(file, world, (both,)) == [uncovered("alex")]
 
 
 def test_the_report_names_every_right_for_one_object_at_once() -> None:
