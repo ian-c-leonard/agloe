@@ -382,7 +382,7 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
   h1 { font-size: clamp(2.5rem, 11vw, 3.4rem); }
 }
 
-/* How a rule is built: a page that follows one rule along a road of four stops. */
+/* How a rule is built: a page that follows one rule along a road of four steps. */
 .built .wrap { display: grid; gap: clamp(30px, 4vw, 46px); }
 .built .lead { max-width: 39em; }
 /* The stops, as four towns on one road. */
@@ -570,4 +570,53 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
 @media (prefers-reduced-motion: reduce) {
   .switches b::after { transition: none; }
   .figure .again { display: none; }
+}
+
+/* The examples: each story of the rules page, with the answer and the report of each of its FILEs. */
+.examples .hero { padding-bottom: clamp(30px, 4vw, 48px); }
+/* Which answers to show. It needs a browser that can tell which one is chosen. */
+.show { border: 0; margin: 6px 0 0; padding: 0; min-width: 0; }
+.show legend { float: left; padding: 0; margin: 4px 12px 0 0; }
+.show b { font-weight: 500; margin-left: 3px; opacity: 0.65; }
+.folders { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 8px; }
+.folders a { display: block; padding: 3px 11px; border: 1px solid var(--line); border-radius: 999px; background: rgba(255, 253, 247, 0.6); font: 500 0.76rem/1.6 var(--mono); text-decoration: none; }
+.folders a:hover { border-color: var(--ink); color: var(--ink); }
+.story { display: grid; gap: 16px; scroll-margin-top: 18px; }
+.story + .story { margin-top: clamp(34px, 5vw, 54px); padding-top: clamp(34px, 5vw, 54px); border-top: 1px solid var(--line); }
+/* A story is named by its folder, as the command line names it. */
+.story h2 { font: 500 0.95rem/1.4 var(--mono); font-style: normal; letter-spacing: 0.02em; text-shadow: none; color: var(--muted); }
+.story h2 a { text-decoration: none; }
+.story h2 b { font-weight: 500; font-size: 1.3rem; color: var(--ink); }
+.story h2 a:hover b { color: var(--accent); }
+.part { display: grid; gap: 14px; }
+.part + .part { margin-top: 20px; }
+.told { max-width: 50em; line-height: 1.6; }
+.cases { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+/* One FILE: its name, what it says and the answer, with the colour of the answer at its edge. */
+.case { display: grid; grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.2fr) minmax(0, 1.45fr); gap: 4px 28px; padding: 13px 18px 12px; border: 1px solid var(--line); border-left: 5px solid var(--dot); border-radius: 10px; background: rgba(255, 253, 247, 0.66); font-size: 0.93rem; line-height: 1.5; }
+.case.feasible { --dot: var(--ink); }
+.case.infeasible { --dot: var(--stop); }
+.case.undetermined { --dot: var(--brass); }
+.case h4 { margin: 0; font: 600 0.95rem/1.5 var(--text); }
+.case-says { color: var(--ink2); }
+.case details { grid-column: 1 / -1; margin-top: 4px; }
+.case summary { width: max-content; cursor: pointer; font: 500 0.72rem/1.6 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); }
+.case details[open] summary { margin-bottom: 10px; }
+.case .terminal { padding: 16px 18px; font-size: 0.74rem; }
+.case .terminal pre { margin: 0; font: inherit; white-space: pre-wrap; overflow-wrap: break-word; }
+.case details .small { margin-top: 10px; font-size: 0.85rem; }
+.about { margin-top: clamp(34px, 5vw, 54px); max-width: 52em; font-size: 0.9rem; line-height: 1.55; color: var(--muted); }
+@supports selector(:has(*)) {
+  .examples:has(input[value="feasible"]:checked) .case:not(.feasible),
+  .examples:has(input[value="infeasible"]:checked) .case:not(.infeasible),
+  .examples:has(input[value="undetermined"]:checked) .case:not(.undetermined),
+  .examples:has(input[value="feasible"]:checked) .story:not(:has(.case.feasible)),
+  .examples:has(input[value="infeasible"]:checked) .story:not(:has(.case.infeasible)),
+  .examples:has(input[value="undetermined"]:checked) .story:not(:has(.case.undetermined)),
+  .examples:has(input[value="feasible"]:checked) .part:not(:has(.case.feasible)),
+  .examples:has(input[value="infeasible"]:checked) .part:not(:has(.case.infeasible)),
+  .examples:has(input[value="undetermined"]:checked) .part:not(:has(.case.undetermined)) { display: none; }
+}
+@media (max-width: 900px) {
+  .case { grid-template-columns: minmax(0, 1fr); }
 }

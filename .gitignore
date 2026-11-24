@@ -7,4 +7,5 @@ dist/
 *.egg-info/
 .DS_Store
 pages/vendor/
+pages/examples/
 .claude/settings.local.json
