@@ -30,6 +30,8 @@ import { whoIsIn } from "./who.js";
 const ABOUT_REQUIRING = new Set(["does not require"]);
 /** What a case of a report can need that is about whether an OPTION refuses an OBJECT. */
 const ABOUT_REFUSING = new Set(["does not refuse"]);
+/** What a case of a report can need that is about a right for an OBJECT in an OPTION. */
+const ABOUT_RIGHTS = new Set(["needs no right for", "another right for"]);
 /** What a case of a report can need that is about what an OPTION does with an OBJECT. */
 const ABOUT_MOVING = new Set(["hands over", "keeps", "does not keep", "does not carry", "does not keep or carry", "carries"]);
 
@@ -91,6 +93,17 @@ function movedBy(thing) {
   const some = thing.transfers.some((each) => each.does !== "nothing");
   if (thing.transfers_complete === null) return "Another OPTION may hand it over, keep it or carry it: the FILE does not say that these are all.";
   const all = "The FILE states every OPTION that hands it over, keeps it or carries it";
+  return some ? `${all}.` : `${all}, and it names none.`;
+}
+
+/**
+ * Whether the OPTIONs under an OBJECT are all that need a right for it, as far as the FILE
+ * says. Without a FACT that they are, another OPTION of the FILE may.
+ */
+function ticketedBy(thing) {
+  const some = thing.rights.some((each) => each.needed);
+  if (thing.rights_complete === null) return some ? "Other OPTIONs of the FILE may need a right for it too: the FILE does not say that these are all." : "The FILE does not say which of its OPTIONs need a right for it.";
+  const all = "The FILE states every one of its OPTIONs that needs a right for it";
   return some ? `${all}.` : `${all}, and it names none.`;
 }
 
@@ -174,16 +187,18 @@ export function objects(trip, report = null, stated = null) {
       if (how === undefined) return null;
       return `${where} from ${clock(startOf.get(stay.since), first)} (${how(named.get(stay.since), thing.name)})`;
     });
-    const usesOf = (list, check) => list.map((use) => ({ option: use.option, check, stated: use.stated, where: startOf.has(use.option) ? whereIs(use.where) : null }));
-    const all = said === null ? [] : [...usesOf(said.uses, "requires"), ...usesOf(said.refusals, "refuses")];
+    const usesOf = (list, check) => list.map((use) => ({ option: use.option, check, stated: use.stated, where: startOf.has(use.option) ? whereIs(use.where) : null, by: typeof use.booking === "string" ? use.booking : null }));
+    const all = said === null ? [] : [...usesOf(said.uses, "requires"), ...usesOf(said.refusals, "refuses"), ...usesOf(said.covers, "needs a right for")];
     const known = stays.length > 0 && !stays.includes(null) && all.every((use) => use.where !== null);
     const uses = known ? all : [];
     timed ||= known && said.stays.some((stay) => stay.since !== null);
     // Where the OBJECT is just before an OPTION starts, where the report says that a FACT
-    // has the OPTION require it, or refuse it.
+    // has the OPTION require it, or refuse it, or need a right for it. With a right comes
+    // the BOOKING that covers the OBJECT.
     const before = (option, check) => {
       const use = uses.find((each) => each.option === option && each.check === check && each.stated);
-      return use === undefined ? null : `Just before it starts: ${use.where}.`;
+      if (use === undefined) return null;
+      return use.by === null ? `Just before it starts: ${use.where}.` : `Just before it starts: ${use.where}. ${use.by} covers ${thing.name}.`;
     };
     // An OPTION under the OBJECT shows one thing of the three: whether it requires the
     // OBJECT, whether it refuses it, or what it does with it. A case marks it where the case
@@ -214,7 +229,7 @@ export function objects(trip, report = null, stated = null) {
       if (!barred) return under(each, each.does !== "nothing", DOES[each.does], ABOUT_MOVING, null);
       return under(each, each.does === "carries", REFUSED[each.does], ABOUT_MOVING, null, [each.record, refusal.get(each.option)]);
     };
-    const asked = { requires: new Set(thing.requires.map((each) => each.option)), refuses: new Set(thing.refuses.map((each) => each.option)) };
+    const asked = { requires: new Set(thing.requires.map((each) => each.option)), refuses: new Set(thing.refuses.map((each) => each.option)), "needs a right for": new Set(thing.rights.map((each) => each.option)) };
     // An OPTION of the plan of which the report says that the FILE does not say whether it
     // requires the OBJECT, or whether it refuses it. No FACT is about the two, and no case
     // names them: the plan holds either way.
@@ -222,7 +237,7 @@ export function objects(trip, report = null, stated = null) {
       .filter((use) => !use.stated && !asked[use.check].has(use.option))
       .map((use) => {
         const { step, takes } = who(use.option);
-        const plan = `Just before it starts: ${use.where}, so the plan holds if it does.`;
+        const plan = use.by === null ? `Just before it starts: ${use.where}, so the plan holds if it does.` : `Just before it starts: ${use.where}. ${use.by} covers ${thing.name}, so the plan holds if it does.`;
         return { option: use.option, name: named.get(use.option), does: false, says: `the FILE does not say whether this ${use.check} it`, takes, step, plan, ...marked([], () => false, "") };
       });
     const { starts } = thing;
@@ -236,6 +251,7 @@ export function objects(trip, report = null, stated = null) {
       plan: known ? `In the plan: ${stays.join("; ")}.` : null,
       requires: thing.requires.map((each) => under(each, each.needed, each.needed ? "requires it" : "does not require it", ABOUT_REQUIRING, "requires")),
       refuses: thing.refuses.map((each) => under(each, each.refused, each.refused ? "refuses it" : "does not refuse it", ABOUT_REFUSING, "refuses")),
+      rights: thing.rights.map((each) => under(each, each.needed, each.needed ? "needs a right for it" : "needs no right for it", ABOUT_RIGHTS, "needs a right for")),
       might,
       transfers: thing.transfers.map(moved),
       whole: [
@@ -244,18 +260,19 @@ export function objects(trip, report = null, stated = null) {
           refuses: trip.options.some((option) => !asked.refuses.has(option.id)),
         }),
         movedBy(thing),
+        ticketedBy(thing),
       ],
       // An OBJECT's own records: the FACT about where it is when the TRIP starts, and the FACTs
       // that the FILE states every OPTION that requires it or refuses it, and every one that
       // moves it.
       ...marked(
-        [...(starts === null ? [] : [starts.record]), ...[thing.requires_complete, thing.transfers_complete].filter((id) => id !== null)],
+        [...(starts === null ? [] : [starts.record]), ...[thing.requires_complete, thing.transfers_complete, thing.rights_complete].filter((id) => id !== null)],
         (need) => need.object === thing.id,
         "The report names this OBJECT in what the FILE does not say.",
       ),
     };
   });
-  const all = shown.flatMap((thing) => [thing, ...thing.requires, ...thing.refuses, ...thing.transfers]);
+  const all = shown.flatMap((thing) => [thing, ...thing.requires, ...thing.refuses, ...thing.rights, ...thing.transfers]);
   const clash = all.some((each) => each.clash.length > 0);
   const asked = all.some((each) => each.cases.length > 0);
   const says =

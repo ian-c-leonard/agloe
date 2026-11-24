@@ -317,8 +317,11 @@ def test_nobody_said_whether_the_car_needs_a_ticket() -> None:
     booked = a_ferry(booking("ferry", "car"), needs_right_for("drive", "car", False))
     found = checked(booked)
     assert found.answer is Answer.FEASIBLE
-    might = "    ferry might need a right for car. Just before it starts: with alex."
-    assert f"{might} ferry-booking covers car if it does.\n" in report.as_text(booked, found)
+    silent = "    The FILE does not say whether ferry needs a right for car."
+    holds = (
+        "Just before it starts: with alex. ferry-booking covers car, so the plan holds if it does."
+    )
+    assert f"{silent} {holds}\n" in report.as_text(booked, found)
     # One FACT says that nothing needs a right for the car.
     whole = a_ferry(NO_OTHER)
     found = checked(whole)

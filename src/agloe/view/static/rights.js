@@ -13,7 +13,7 @@
 // Nothing here judges a TRIP. Whether everybody who takes part has a right is for the
 // COMPILER to say: the page names who uses a right only where the report does.
 
-import { listed, marksBy, optionsOf, toBuyIn, usesIn } from "./named.js";
+import { carriedIn, listed, marksBy, optionsOf, toBuyIn, usesIn } from "./named.js";
 import { paidOf } from "./money.js";
 import { needsARight } from "./who.js";
 
@@ -75,6 +75,10 @@ export function rights(trip, report = null, stated = null) {
   const ifNeeded = (option, offer) => toBuyIn(report).some((buy) => buy.option === option && buy.offer === offer && buy.only_if_needed === true);
   // Those who use one right for one OPTION in the plan, in the FILE's order of PERSONs.
   const usersOf = (option, by) => trip.persons.filter(({ id }) => uses.some((use) => use.option === option && use.by === by && use.person === id)).map(({ name }) => name);
+  // The OBJECTs that one BOOKING covers for one OPTION in the plan, in the FILE's order.
+  const carried = carriedIn(report);
+  const thing = new Map(trip.objects.map((each) => [each.id, each.name]));
+  const coveredBy = (option, by) => trip.objects.filter(({ id }) => carried.some((each) => each.object === id && each.covers.some((use) => use.option === option && use.booking === by))).map(({ name }) => name);
   const shown = trip.rights
     .filter((each) => each.needs?.needed === true || each.bookings.length || each.offers.length || each.complete !== null)
     .map((each) => ({
@@ -82,11 +86,11 @@ export function rights(trip, report = null, stated = null) {
       name: each.name,
       needs: needs(each.option).says,
       bookings: each.bookings.map((booking) => {
-        const users = usersOf(each.option, booking.id);
+        const users = [...usersOf(each.option, booking.id), ...coveredBy(each.option, booking.id)];
         return {
           id: booking.id,
           name: booking.id,
-          says: `a BOOKING that covers ${listed(booking.covers.map((id) => person.get(id)))}${paymentOf(booking)}`,
+          says: `a BOOKING that covers ${listed([...booking.covers.map((id) => person.get(id)), ...booking.objects.map((id) => thing.get(id))])}${paymentOf(booking)}`,
           uses: !trip.itinerary ? null : users.length ? `In the plan: ${listed(users)} ${users.length === 1 ? "uses" : "use"} it.` : "In the plan: nobody uses it.",
           ...marked([booking.id], (need) => need.booking === booking.id, "The report names this BOOKING in what the FILE does not say."),
         };

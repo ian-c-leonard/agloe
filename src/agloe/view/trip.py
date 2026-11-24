@@ -187,7 +187,7 @@ _RIGHTS: _Shape = {
     "complete": (dict, _NONE),
 }
 _NEEDS: _Shape = {"needed": bool, "record": str}
-_BOOKING: _Shape = {"id": str, "covers": list, "paid": (dict, _NONE)}
+_BOOKING: _Shape = {"id": str, "covers": list, "objects": list, "paid": (dict, _NONE)}
 _PAID: _Shape = {"amount": str, "currency": str, "budget": (str, _NONE), "by": (str, _NONE)}
 _BUDGET: _Shape = {"id": str, "name": str, "persons": list, "currencies": list, "caps": list}
 _CAP: _Shape = {"id": str, "limit": dict}
@@ -204,6 +204,8 @@ _OBJECT: _Shape = {
     "requires_complete": (str, _NONE),
     "transfers": list,
     "transfers_complete": (str, _NONE),
+    "rights": list,
+    "rights_complete": (str, _NONE),
 }
 _OBJECT_STARTS: _Shape = {"person": (str, _NONE), "place": (str, _NONE), "record": str}
 _OBJECT_NEED: _Shape = {"option": str, "name": str, "needed": bool, "record": str}
@@ -598,6 +600,8 @@ def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
                         "id": booking.id,
                         # The PERSONs come in the order of the FILE, as they do in the report.
                         "covers": [each.id for each in file.persons if each.id in booking.covers],
+                        # The OBJECTs it covers, in the order of the FILE.
+                        "objects": [each.id for each in file.objects if each.id in booking.objects],
                         # What it paid, with the BUDGET that the money came from and the PERSON
                         # who paid, where it names them. None: the BOOKING states no payment.
                         "paid": None
@@ -637,7 +641,9 @@ def _objects(file: File, names: Mapping[str, str]) -> list[Trip]:
     order of OPTIONs, each with its FACT. ``requires_complete`` is the FACT that the FILE
     states every one of its OPTIONs that requires the OBJECT or refuses it, and
     ``transfers_complete`` the FACT that it states every OPTION that hands the OBJECT over,
-    keeps it or carries it.
+    keeps it or carries it. ``rights`` holds each OPTION of which a FACT says whether it
+    needs a right for the OBJECT, and ``rights_complete`` is the FACT that the FILE states
+    every one of its OPTIONs that does.
     """
     objects: list[Trip] = []
     called = _names(file.objects)
@@ -646,6 +652,8 @@ def _objects(file: File, names: Mapping[str, str]) -> list[Trip]:
         needs = [(option, file.object_requirement(option.id, thing.id)) for option in file.options]
         bars = [(option, file.object_refusal(option.id, thing.id)) for option in file.options]
         does = [(option, file.action(option.id, thing.id)) for option in file.options]
+        tickets = [(option, file.object_right(option.id, thing.id)) for option in file.options]
+        ticketed = file.object_rights_complete(thing.id)
         required, moved = (
             file.object_requirements_complete(thing.id),
             file.transfers_complete(thing.id),
@@ -689,6 +697,17 @@ def _objects(file: File, names: Mapping[str, str]) -> list[Trip]:
                     if fact is not None
                 ],
                 "transfers_complete": None if moved is None else moved.id,
+                "rights": [
+                    {
+                        "option": option.id,
+                        "name": names[option.id],
+                        "needed": fact.needed,
+                        "record": fact.id,
+                    }
+                    for option, fact in tickets
+                    if fact is not None
+                ],
+                "rights_complete": None if ticketed is None else ticketed.id,
             }
         )
     return objects
@@ -1034,7 +1053,7 @@ def holds(trip: object) -> bool:
         )
         and _are_wants(sent["wants"], persons, places, options)
         and budgets is not None
-        and _are_rights(sent["rights"], persons, options, budgets)
+        and _are_rights(sent["rights"], persons, options, budgets, _object_ids(sent["objects"]))
         and _are_capabilities(sent["capabilities"], persons, options)
         and _are_objects(sent["objects"], persons, places, options)
     )
@@ -1203,14 +1222,19 @@ def _is_a_payment(paid: object, persons: frozenset[str], budgets: frozenset[str]
 
 
 def _are_rights(
-    rights: object, persons: frozenset[str], options: frozenset[str], budgets: frozenset[str]
+    rights: object,
+    persons: frozenset[str],
+    options: frozenset[str],
+    budgets: frozenset[str],
+    objects: frozenset[str],
 ) -> bool:
     """Whether this is what such a TRIP says of the rights to its OPTIONs.
 
     Each OPTION of the TRIP is there once at most, and each BOOKING and each OFFER once. A
-    BOOKING covers PERSONs of the TRIP, each once, and what it paid names a BUDGET and a PERSON
-    of the TRIP, or none. An OFFER has one place at least, and a price that is an amount in a
-    currency. A FACT that the FILE lists every right to an OPTION names OFFERs for that OPTION.
+    BOOKING covers PERSONs and OBJECTs of the TRIP, each once and one at least, and what it
+    paid names a BUDGET and a PERSON of the TRIP, or none. An OFFER has one place at least,
+    and a price that is an amount in a currency. A FACT that the FILE lists every right to
+    an OPTION names OFFERs for that OPTION.
     """
     which: list[object] = []
     ids: list[object] = []
@@ -1230,8 +1254,10 @@ def _are_rights(
             if not _fits(booking, _BOOKING):
                 return False
             stated = cast("dict[str, object]", booking)
-            covered = _all_different(stated["covers"])
-            if not stated["id"] or covered is None or not covered or not covered <= persons:
+            covered, things = _all_different(stated["covers"]), _all_different(stated["objects"])
+            if not stated["id"] or covered is None or things is None:
+                return False
+            if not (covered or things) or not covered <= persons or not things <= objects:
                 return False
             if not _is_a_payment(stated["paid"], persons, budgets):
                 return False
@@ -1296,7 +1322,12 @@ def _are_objects(
                 return False
             if not (person is None or person in persons) or not (place is None or place in places):
                 return False
-        kinds = (("requires", _OBJECT_NEED), ("refuses", _OBJECT_REFUSAL), ("transfers", _TRANSFER))
+        kinds = (
+            ("requires", _OBJECT_NEED),
+            ("refuses", _OBJECT_REFUSAL),
+            ("transfers", _TRANSFER),
+            ("rights", _OBJECT_NEED),
+        )
         for kind, shape in kinds:
             named: list[object] = []
             for each in cast("list[object]", said[kind]):
@@ -1418,6 +1449,16 @@ def _fits(value: object, shape: _Shape) -> bool:
         if not isinstance(held, kinds):
             return False
     return True
+
+
+def _object_ids(objects: object) -> frozenset[str]:
+    """The ids that the OBJECTs of a TRIP give themselves. ``_are_objects`` checks the rest."""
+    ids: list[str] = []
+    for each in cast("list[object]", objects):
+        named = cast("dict[str, object]", each).get("id") if isinstance(each, dict) else None
+        if isinstance(named, str):
+            ids.append(named)
+    return frozenset(ids)
 
 
 def _ids(records: object) -> frozenset[str] | None:

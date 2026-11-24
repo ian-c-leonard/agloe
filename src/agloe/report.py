@@ -908,10 +908,13 @@ def _carried_in_words(
     lines = [f"  {thing}: {'; '.join(stays)}"]
     for use in carried.uses:
         name, where = _name(file, use.option), _where(file, use.where)
-        if use.by is not None:
-            needs = "needs a right for" if use.stated else "might need a right for"
-            covers = f"{use.by} covers {thing}" + ("" if use.stated else " if it does")
-            lines.append(f"    {name} {needs} {thing}. Just before it starts: {where}. {covers}.")
+        if use.by is not None and use.stated:
+            before = f"Just before it starts: {where}. {use.by} covers {thing}"
+            lines.append(f"    {name} {use.check} {thing}. {before}.")
+        elif use.by is not None:
+            silent = f"The FILE does not say whether {name} {use.check} {thing}"
+            holds = f"{use.by} covers {thing}, so the plan holds if it does"
+            lines.append(f"    {silent}. Just before it starts: {where}. {holds}.")
         elif use.stated:
             lines.append(f"    {name} {use.check} {thing}. Just before it starts: {where}.")
         else:

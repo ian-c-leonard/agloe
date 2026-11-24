@@ -193,6 +193,7 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
         expected += [f"object:{thing}" for _, thing in late]
         for thing in said.get("objects", []):
             checks = len(thing["required_by"]) + len(thing["refused_by"])
+            checks += len(thing["covered_in"])
             expected += [f"object:{thing['object']}"] * (1 + checks)
         assert sorted(about) == sorted(expected), name
         carried += bool(expected)

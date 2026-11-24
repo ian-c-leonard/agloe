@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from agloe.file import read
+from agloe.view.trip import holds
 from tests.stories import EXAMPLES
 from tests.test_view_calendar import drawn, in_words, parts, with_its_report
 
@@ -196,6 +197,32 @@ def test_who_uses_a_right_is_said_only_where_the_report_names_them() -> None:
         assert [booking["uses"] for booking in skydeck["bookings"]] == [
             "In the plan: nobody uses it."
         ] * 2
+
+
+def test_a_booking_names_the_objects_that_it_covers(tmp_path: Path) -> None:
+    """One BOOKING for the car ferry covers Alex, Sam and the car, and the plan uses it for
+    all three. A second BOOKING that covers the car alone is drawn too, and nobody uses it:
+    the report names the first one for the car."""
+    shown = rights_of("a-car-ferry/booked")
+    (ferry,) = shown["rights"]
+    (tickets,) = ferry["bookings"]
+    assert tickets["says"] == "a BOOKING that covers Alex, Sam and the car"
+    assert tickets["uses"] == "In the plan: Alex, Sam and the car use it."
+    content = json.loads((EXAMPLES / "a-car-ferry" / "booked.json").read_text())
+    alone = {"id": "car-ticket", "booking": {"option": "ferry", "covers": ["car"]}}
+    content["facts"].append(alone)
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    assert holds(sent)
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    assert [(booking["says"], booking["uses"]) for booking in ferry["bookings"]] == [
+        (
+            "a BOOKING that covers Alex, Sam and the car",
+            "In the plan: Alex, Sam and the car use it.",
+        ),
+        ("a BOOKING that covers the car", "In the plan: nobody uses it."),
+    ]
 
 
 def test_a_booking_says_what_it_paid_as_far_as_the_file_says() -> None:
