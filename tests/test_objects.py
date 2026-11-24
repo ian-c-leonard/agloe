@@ -74,6 +74,7 @@ from tests.stories import (
     every,
     every_requirement,
     every_right,
+    every_right_for,
     every_transfer,
     every_use,
     hands_over,
@@ -89,6 +90,7 @@ from tests.stories import (
     must_not,
     needs_no_right,
     needs_right,
+    needs_right_for,
     offer,
     refuses_object,
     requires,
@@ -342,14 +344,25 @@ def test_only_an_object_that_some_option_might_require_or_refuse_is_asked_for() 
         requires_object("check-in", "passport", False),
         refuses_object("check-in", "passport", False),
     ]
+    no_right = every_right_for("passport")
     for settled in ([every_use("passport")], neither):
-        assert load(a_document(*settled)).objects_asked_for() == ()
+        assert load(a_document(*settled, no_right)).objects_asked_for() == ()
     # One of the two FACTs leaves the other thing open.
     for one in neither:
-        assert [thing.id for thing in load(a_document(one)).objects_asked_for()] == ["passport"]
+        asked = load(a_document(one, no_right)).objects_asked_for()
+        assert [thing.id for thing in asked] == ["passport"]
     # An OBJECT that an OPTION refuses is asked for, though none requires it.
-    refused = load(a_document(every_use("passport"), refuses_object("check-in", "passport")))
+    refused = load(
+        a_document(every_use("passport"), refuses_object("check-in", "passport"), no_right)
+    )
     assert [thing.id for thing in refused.objects_asked_for()] == ["passport"]
+    # So is an OBJECT that an OPTION needs a right for, or might, though none requires it.
+    unsaid = load(a_document(every_use("passport")))
+    assert [thing.id for thing in unsaid.objects_asked_for()] == ["passport"]
+    needed = load(a_document(every_use("passport"), needs_right_for("check-in", "passport")))
+    assert [thing.id for thing in needed.objects_asked_for()] == ["passport"]
+    none = needs_right_for("check-in", "passport", False)
+    assert load(a_document(every_use("passport"), none)).objects_asked_for() == ()
 
 
 # The CONSTRAINT, on ITINERARIES written by hand.
@@ -1730,9 +1743,16 @@ def test_the_answer_comes_first_for_a_file_with_objects() -> None:
 
 
 def relied_on(found: Report) -> list[str]:
-    """The FACTs about OBJECTs that a plan relies on."""
+    """The FACTs about OBJECTs that a plan relies on: where the OBJECT is, what the OPTIONs
+    require of it and what they do with it. Each of these plans also relies on the FACT that
+    no OPTION needs a right for the OBJECT. That FACT is left out here, and
+    ``tests/test_object_rights.py`` is about it."""
     about = ("passport", "use-of", "transfer-of")
-    return [record for record in found.relies_on if any(word in record for word in about)]
+    return [
+        record
+        for record in found.relies_on
+        if any(word in record for word in about) and "right-for" not in record
+    ]
 
 
 def locked_desk(*facts: Document, into: Sequence[str] = ("first", "second", "third")) -> File:
@@ -1882,6 +1902,7 @@ def test_a_plan_relies_on_the_facts_about_a_keep_and_a_hand_over_it_goes_through
             ],
             "required_by": [{"option": "third", "stated": True, "where": [{"person": "alex"}]}],
             "refused_by": [],
+            "covered_in": [],
         }
     ]
     words = report.as_text(file, found)
@@ -1929,6 +1950,7 @@ def test_a_plan_says_where_the_file_leaves_a_refusal_open() -> None:
             "path": [{"where": [{"place": "desk"}], "since": None, "how": None}],
             "required_by": [],
             "refused_by": [{"option": "first", "stated": False, "where": [{"place": "desk"}]}],
+            "covered_in": [],
         }
     ]
     # With Alex carrying it, the plan does not hold if the appointment refuses it.
@@ -2066,7 +2088,12 @@ def test_where_nobody_knows_who_has_an_object_everybody_stops_where_it_is_kept()
     )
     assert bags.uses == (Use("visit", True, elsewhere, "refuses"),)
     relied = [record for record in found.relies_on if "bags" in record]
-    assert relied == ["cloakroom-with-bags", "visit-refuses-bags", "every-use-of-bags"]
+    assert relied == [
+        "cloakroom-with-bags",
+        "visit-refuses-bags",
+        "every-use-of-bags",
+        "every-right-for-bags",
+    ]
     words = report.as_text(file, found)
     there = "at museum, at hotel or somewhere the FILE does not name"
     assert f"  bags: nobody knows where when the TRIP starts; {there} from " in words
