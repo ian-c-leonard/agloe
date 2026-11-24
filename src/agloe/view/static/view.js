@@ -35,6 +35,8 @@ const GROUPS = "#strip, #calendar-steps, #drawings > .part, #report";
 /** What a drawing is known by while the page stays as it is: what it is of and what it is tied to. */
 const keyOf = (each) => [each.dataset.of, each.dataset.record, each.dataset.records].join("|");
 let byKeys = false; // whether the reader last used the keyboard, and not the pointer
+/** How far from an end of the row of links a link is clear of the arrow there, in pixels. */
+const CLEAR = 48;
 // The keys that only change what other keys do: the modifier keys of the standard for the
 // keys of a keyboard, which lists these and no others.
 const ALONE = new Set(["Alt", "AltGraph", "CapsLock", "Control", "Fn", "FnLock", "Hyper", "Meta", "NumLock", "ScrollLock", "Shift", "Super", "Symbol", "SymbolLock"]);
@@ -832,15 +834,16 @@ function drawContents() {
   row.hidden = parts.length < 2;
   // A link stays where it is while its part is on the page, so the keyboard keeps its place
   // on it when the page says more. The parts and the links are both in the order of the page.
-  const have = new Map([...row.children].map((link) => [link.getAttribute("href"), link]));
-  let last = null;
+  // The links are between the two arrows of the row.
+  const have = new Map([...row.querySelectorAll(".to")].map((link) => [link.getAttribute("href"), link]));
+  let last = part("contents-back");
   for (const each of parts) {
     const href = `#${each.id}`;
     let link = have.get(href);
     if (link === undefined) {
       link = Object.assign(made("a", "to"), { href });
       link.append(made("span", "", ""), made("span", "count", ""));
-      row.insertBefore(link, last === null ? row.firstChild : last.nextSibling);
+      row.insertBefore(link, last.nextSibling);
     }
     have.delete(href);
     last = link;
@@ -861,6 +864,10 @@ function drawContents() {
   }
   // A link whose part is gone goes too. The page puts the keyboard on no other link.
   for (const gone of have.values()) gone.remove();
+  // The row has other links now: the one that the keyboard is on stays in view, and the
+  // arrows say where there is more.
+  if (row.contains(document.activeElement)) inRow(document.activeElement);
+  ends();
   // A page that is opened at one of its parts goes to that part when the part is drawn. It
   // goes there again each time it draws more, since what is drawn above moves the part. That
   // ends with the report, once every file of the page has come, or as soon as the reader
@@ -896,9 +903,54 @@ function awaited(does) {
   };
 }
 
-// A part comes to rest under the row of links, however many lines the row takes.
+/**
+ * In a narrow window the row of links is one line that scrolls sideways. At each end that
+ * has more links beyond it, the row shows an arrow. Where the row shows all its links, it
+ * shows none.
+ */
+function ends() {
+  const row = part("contents");
+  const beyond = row.scrollWidth - row.clientWidth;
+  part("contents-back").hidden = row.scrollLeft < 1;
+  part("contents-on").hidden = row.scrollLeft > beyond - 1;
+}
+
+/**
+ * The link that the keyboard is on comes into view in the row, whole and clear of the arrows.
+ * A browser moves the row by itself only for a link that is out of view altogether.
+ */
+function inRow(link) {
+  const row = part("contents");
+  if (!link.classList.contains("to")) return;
+  const box = row.getBoundingClientRect();
+  const at = link.getBoundingClientRect();
+  if (at.left < box.left + CLEAR) row.scrollLeft -= box.left + CLEAR - at.left;
+  else if (at.right > box.right - CLEAR) row.scrollLeft += at.right - (box.right - CLEAR);
+  ends();
+}
+
+part("contents").addEventListener("scroll", ends, { passive: true });
+part("contents").addEventListener("focusin", (event) => inRow(event.target));
+for (const [arrow, way] of [
+  [part("contents-back"), -1],
+  [part("contents-on"), 1],
+]) {
+  // A click on an arrow brings into view the links beyond it. The arrow is for the pointer:
+  // the keyboard stays where it is, since Tab reaches every link and the row follows it.
+  arrow.addEventListener("mousedown", (event) => event.preventDefault());
+  arrow.addEventListener("click", () => {
+    part("contents").scrollBy({ left: way * (part("contents").clientWidth - 2 * CLEAR), behavior: "instant" });
+    ends();
+  });
+}
+
+// A part comes to rest under the row of links, however many lines the row takes. And the
+// arrows of the row say where there is more of it, however wide the window is.
 if (typeof ResizeObserver === "function") {
-  new ResizeObserver(() => document.documentElement.style.setProperty("--row-of-links", `${part("contents").offsetHeight}px`)).observe(part("contents"));
+  new ResizeObserver(() => {
+    document.documentElement.style.setProperty("--row-of-links", `${part("contents").offsetHeight}px`);
+    ends();
+  }).observe(part("contents"));
 }
 
 /** What the page shows now, with the row of links to its parts, and what the keyboard reaches. */

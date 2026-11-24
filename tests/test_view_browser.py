@@ -526,11 +526,17 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
         page: [document.documentElement.scrollWidth, document.documentElement.clientWidth],
       };
     }"""
+    # Which arrows the row shows: the one at its start, and the one at its end.
+    arrows = (
+        "() => ['contents-back', 'contents-on'].map((id) => !document.getElementById(id).hidden)"
+    )
     with opened(chromium, story / "they-collect-them.json", wide=700, tall=800) as page:
         page.locator("#objects .card").first.wait_for()
         page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 9")
         found = page.evaluate(one_line)
         assert (found["lines"], found["cut"], found["sides"]) == (2, 0, [28, 672])
+        # The row shows all its links, so it has no arrow.
+        assert page.evaluate(arrows) == [False, False]
         page.locator("#contents .to", has_text="OPTIONs").click()
         page.wait_for_function("() => scrollY > 0")
         page.wait_for_timeout(200)
@@ -545,20 +551,83 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
       const at = link.getBoundingClientRect();
       return at.left >= row.left && at.right <= row.right;
     }"""
+    # The link that the keyboard is on, and whether it is whole in the row and clear of each
+    # arrow that the row shows.
+    on_a_link = """() => {
+      const row = document.getElementById("contents");
+      const box = row.getBoundingClientRect();
+      const link = document.activeElement;
+      const at = link.getBoundingClientRect();
+      const left = box.left + (document.getElementById("contents-back").hidden ? 0 : 44);
+      const right = box.right - (document.getElementById("contents-on").hidden ? 0 : 44);
+      const clear = link.classList.contains("to") && at.left >= left && at.right <= right;
+      return [link.firstChild.textContent, clear];
+    }"""
+    # A press of the mouse on an arrow of the row: on the arrow itself, which is drawn beside
+    # the place that the arrow has in the row.
+    press = """(id) => {
+      const at = document.getElementById(id).getBoundingClientRect();
+      return [at.left + (id === "contents-on" ? -4 : 4), (at.top + at.bottom) / 2];
+    }"""
     with opened(chromium, story / "they-collect-them.json", wide=360, tall=700) as page:
         page.locator("#objects .card").first.wait_for()
         page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 9")
         found = page.evaluate(one_line)
         assert (found["lines"], found["sides"], found["page"]) == (1, [0, 360], [360, 360])
         assert found["tall"] < 45
-        # The row cuts off the links that do not fit, and the first one is in view.
+        # The row cuts off the links that do not fit, and the first one is in view. An arrow
+        # at the end of the row says that there is more, and none at its start.
         assert found["cut"] > 3
         assert page.locator("#contents .to").first.evaluate(whole)
-        # The keyboard brings a link into view that the row cuts off.
-        last = page.locator("#contents .to").last
-        assert not last.evaluate(whole)
-        last.focus()
-        page.wait_for_function(whole, arg=last.element_handle())
+        assert page.evaluate(arrows) == [False, True]
+        # Tab goes through the links, and the row follows: each link is whole in view, and
+        # clear of the arrows, when the keyboard is on it.
+        reached: list[list[Any]] = []
+        for _ in range(9):
+            page.keyboard.press("Tab")
+            reached.append(page.evaluate(on_a_link))
+        assert [name for name, _ in reached] == [
+            "To do and to decide",
+            "Calendar",
+            "PERSONs",
+            "PLACEs",
+            "OPTIONs",
+            "BOOKINGs and OFFERs",
+            "WAYs",
+            "OBJECTs",
+            "The COMPILER's report",
+        ]
+        assert all(clear for _, clear in reached), reached
+        assert page.evaluate(arrows) == [True, False]
+        # And back again.
+        back: list[list[Any]] = []
+        for _ in range(8):
+            page.keyboard.press("Shift+Tab")
+            back.append(page.evaluate(on_a_link))
+        assert [name for name, _ in back] == [name for name, _ in reached][-2::-1]
+        assert all(clear for _, clear in back), back
+        assert page.evaluate(arrows) == [False, True]
+        # A click on the arrow at the end brings more links into view, and so on up to the
+        # last one. The keyboard stays on the link that it is on.
+        moved = [0]
+        for _ in range(6):
+            if page.evaluate(arrows) == [True, False]:
+                break
+            page.mouse.click(*page.evaluate(press, "contents-on"))
+            page.wait_for_function(
+                "(was) => document.getElementById('contents').scrollLeft > was", arg=moved[-1]
+            )
+            moved.append(page.evaluate("() => document.getElementById('contents').scrollLeft"))
+        assert len(moved) > 2 and page.evaluate(arrows) == [True, False]
+        assert page.locator("#contents .to").last.evaluate(whole)
+        assert page.evaluate("() => document.activeElement.firstChild.textContent") == (
+            "To do and to decide"
+        )
+        # The arrow at the start brings the links before into view again.
+        page.mouse.click(*page.evaluate(press, "contents-back"))
+        page.wait_for_function(
+            "(was) => document.getElementById('contents').scrollLeft < was", arg=moved[-1]
+        )
         # A click brings the part into view under the row, and the row stays at the top.
         page.locator("#contents .to", has_text="OPTIONs").click()
         page.wait_for_function("() => scrollY > 0")
@@ -566,6 +635,22 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
         found = page.evaluate(under_the_row, "options-part")
         assert found["row"][0] == 0
         assert found["row"][1] <= found["part"] < found["row"][1] + 30
+    # The FILE gains a part while the keyboard is on the last link. The row has one more
+    # link then, and the link that the keyboard is on stays in view.
+    content = json.loads((story / "they-collect-them.json").read_text())
+    path = written(tmp_path, content)
+    with opened(chromium, path, wide=360, tall=700) as page:
+        page.locator("#objects .card").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 9")
+        page.locator("#contents .to").last.focus()
+        assert page.evaluate(on_a_link) == ["The COMPILER's report", True]
+        money = {"id": "trip-money", "name": "the trip money", "persons": ["alex", "sam"]}
+        content["budgets"] = [{**money, "currencies": ["USD"]}]
+        path.write_text(json.dumps(content))
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 10")
+        page.wait_for_function(f"() => ({on_a_link})()[1]")
+        assert page.evaluate(on_a_link) == ["The COMPILER's report", True]
+        assert page.evaluate(arrows) == [True, False]
     # A link has the yellow edge where the report names something in what the FILE does not say.
     with opened(chromium, EXAMPLES / "flight-home" / "depends-on-the-cab.json") as page:
         page.locator("#options .item.asked").first.wait_for()
