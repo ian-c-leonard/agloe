@@ -264,7 +264,7 @@ The ITINERARY that proved a TRIP FEASIBLE is not shown: it need not be the one t
 
 ## Examples
 
-In every story but the one about a ticket, each FILE says whether each of its OPTIONs needs a right. The museum, the boat tour, the Skydeck, the blues show, the night at the hotel, the flight and the kayak tour need one, and a BOOKING covers each PERSON the story has in them. The rest need none. The story about a ticket is about the rights themselves, and its FILEs leave some of this out.
+In every story but the one about a ticket, each FILE says whether each of its OPTIONs needs a right. The museum, the boat tour, the Skydeck, the blues show, the night at the hotel, the flight, the kayak tour, the luggage service and the car ferry need one. A BOOKING covers each PERSON the story has in them, unless a row says otherwise: the luggage service takes nobody. The rest need none. The story about a ticket is about the rights themselves, and its FILEs leave some of this out.
 
 Alex and Sam spend their last afternoon in Chicago at the Art Institute, then fly home from O'Hare. The flight leaves at 5:00 pm, and bag drop closes 45 minutes earlier. The Blue Line takes an hour from the museum to the terminal.
 
