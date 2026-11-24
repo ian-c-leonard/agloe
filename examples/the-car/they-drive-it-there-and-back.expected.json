@@ -43,6 +43,7 @@
     "drive-back-needs-the-car",
     "drive-back-carries-the-car",
     "every-use-of-the-car",
+    "every-ticket-for-the-car",
     "lock-drive-out",
     "lock-drive-back"
   ],
@@ -117,7 +118,8 @@
           ]
         }
       ],
-      "refused_by": []
+      "refused_by": [],
+      "covered_in": []
     }
   ]
 }

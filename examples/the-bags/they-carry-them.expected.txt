@@ -23,6 +23,7 @@ The plan relies on these FACTs and DECISIONs:
   flight-needs-the-bags: Flight home requires the bags
   every-use-of-the-bags: of the OPTIONs in this FILE, only Flight home requires the bags, and none refuses the bags
   everything-that-moves-the-bags: the FILE states every OPTION that hands over, keeps or carries the bags: there is none
+  every-ticket-for-the-bags: no OPTION in this FILE needs a right for the bags
   trip-start: the TRIP starts at 1:00 pm on Saturday 15 May 2027
   lock-visit: Alex and Sam take part in Museum visit
   lock-flight: Alex and Sam take part in Flight home
