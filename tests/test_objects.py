@@ -985,6 +985,17 @@ def test_a_carry_that_does_not_happen_needs_no_right_where_a_transfer_brings_the
     handed = (step("first", "desk", 9, "alex", handed=(("passport", "alex"),)),)
     brought = with_these_at_best(file, [Unknown("another transfer", about="passport")])
     assert Constraint.COVERED not in [found.constraint for found in broken(file, brought, handed)]
+    # An appointment that hands the passport over and refuses it: nobody takes it there, so
+    # the hand-over does not happen, and the finding is the refusal alone.
+    refusing = a_desk(
+        lies_at("passport", "desk"),
+        hands_over("first", "passport"),
+        refuses_object("first", "passport"),
+        needs_right_for("first", "passport"),
+    )
+    brought = with_these_at_best(refusing, [Unknown("another transfer", about="passport")])
+    assert ("first", "passport") in brought.uncovered
+    assert broken(refusing, brought, handed) == [refused("first", "alex")]
 
 
 def test_an_object_that_might_be_in_two_places_can_be_handed_over() -> None:
