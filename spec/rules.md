@@ -396,7 +396,7 @@ The last afternoon once more, with carry-on bags that the flight requires. The T
 | [nobody said whether they refuse them](../examples/the-bags/nobody-said-whether-they-refuse-them.json) | As "they carry them", and no FACT says that the FILE states every OPTION that requires the bags or refuses them. FACTs say that the visit does not require them, and that the flight does not refuse them. | UNDETERMINED. It works if the visit does not refuse the bags. |
 | [somebody might take them](../examples/the-bags/somebody-might-take-them.json) | As "the galleries refuse them", and no FACT says that the FILE states every transfer. | UNDETERMINED. It might work if another transfer leaves the bags at hand for the flight and keeps them out of the visit. The report says that this is not settled. |
 
-The same flight with checked bags. The TRIP starts at 3:30 pm at O'Hare, and Alex has the bags. A bag drop there takes 5 minutes, can start at any time and keeps the bags. The flight refuses the bags and can carry them: nobody takes them into the cabin, and the hold takes them. Both sets of the bags are COMPLETE unless a row says otherwise.
+The same flight with checked bags. The TRIP starts at 3:30 pm at O'Hare, and Alex has the bags. A bag drop there takes 5 minutes, can start at any time and keeps the bags. The flight refuses the bags and can carry them: nobody takes them into the cabin, and the hold takes them. Both sets of the bags are COMPLETE unless a row says otherwise, and no OPTION needs a right for the bags.
 
 | FILE | What it says | Answer |
 |---|---|---|
@@ -405,7 +405,7 @@ The same flight with checked bags. The TRIP starts at 3:30 pm at O'Hare, and Ale
 | [the bags come too late](../examples/the-bags/the-bags-come-too-late.json) | Jo is in Denver and is LOCKed into collecting the bags there at 7:00 pm, which requires them. The flight lands at 7:30 pm. | INFEASIBLE. Nine records conflict. The start and the duration of the flight and the time of the collection are among them, and so is the COMPLETE set of transfers. The FACT that the flight can carry the bags is not: without it the flight lands no sooner. |
 | [the flight might run late](../examples/the-bags/the-flight-might-run-late.json) | As above. The flight takes between 2 hours 30 minutes and 3 hours 15 minutes, and Jo collects the bags at 7:45 pm. | FEASIBLE, with a WARNING. If the flight runs longest, it lands at 8:15 pm, and the bags would arrive 30 minutes after the collection starts. |
 
-The last afternoon once more, with a luggage service. The bags lie at the hotel, and Alex and Sam are LOCKed into the museum visit and the flight as before. The service takes bags from the hotel to O'Hare, from 2:00 pm to 3:30 pm, and it can carry the bags. It takes no passengers: it needs a right, and the set of its rights is COMPLETE with none in it. Both sets of the bags are COMPLETE unless a row says otherwise.
+The last afternoon once more, with a luggage service. The bags lie at the hotel, and Alex and Sam are LOCKed into the museum visit and the flight as before. The service takes bags from the hotel to O'Hare, from 2:00 pm to 3:30 pm, and it can carry the bags. It takes no passengers: it needs a right, and the set of its rights is COMPLETE with none in it. Both sets of the bags are COMPLETE unless a row says otherwise, and no OPTION needs a right for the bags.
 
 | FILE | What it says | Answer |
 |---|---|---|
@@ -414,7 +414,7 @@ The last afternoon once more, with a luggage service. The bags lie at the hotel,
 | [nobody said that the service carries them](../examples/the-bags/nobody-said-that-the-service-carries-them.json) | No FACT about what the service does with the bags, and none that the FILE states every transfer. | UNDETERMINED. It works if the service can carry the bags. |
 | [the service might run late](../examples/the-bags/the-service-might-run-late.json) | The service takes between 1 hour 30 minutes and 3 hours 15 minutes. | FEASIBLE, with a WARNING. If the service runs longest, the bags would arrive 15 minutes after the flight starts. |
 
-The Saturday at the dunes once more, with the hire car as an OBJECT. The car stands at the hotel when the TRIP starts. The drive there requires the car and carries it, so the car goes where the drive goes. Alex and Sam are LOCKed into it. Both sets of the car are COMPLETE unless a row says otherwise.
+The Saturday at the dunes once more, with the hire car as an OBJECT. The car stands at the hotel when the TRIP starts. The drive there requires the car and carries it, so the car goes where the drive goes. Alex and Sam are LOCKed into it. Both sets of the car are COMPLETE unless a row says otherwise, and no OPTION needs a right for the car.
 
 | FILE | What it says | Answer |
 |---|---|---|
@@ -422,5 +422,13 @@ The Saturday at the dunes once more, with the hire car as an OBJECT. The car sta
 | [nobody said that the drive carries it](../examples/the-car/nobody-said-that-the-drive-carries-it.json) | As above, with no FACT about what the drive there does with the car, and none that the FILE states every transfer. | UNDETERMINED. It works if the drive there can carry the car, or if the car can be handed over in it. |
 | [Jo wants it while they are away](../examples/the-car/jo-wants-it-while-they-are-away.json) | Only the drive there. Jo is LOCKed into an errand at the hotel at 9:00 am, which requires the car. | INFEASIBLE. Eight records conflict. That the drive requires the car and that it carries the car are both among them. |
 | [nobody said what the drive does](../examples/the-car/nobody-said-what-the-drive-does.json) | As above, with no FACT about what the drive does with the car, and none that the FILE states every transfer. | UNDETERMINED. It works if the drive does not carry the car. |
+
+On Sunday morning Alex and Sam take the hire car across Lake Michigan on the car ferry from Milwaukee to Muskegon, from 6:00 am to 8:30 am, and drive along the shore at 9:00 am. They are LOCKed into both, and the drive requires the car. Alex has the car when the TRIP starts, and drives it on board: the ferry carries nothing. The ferry sells a ticket for each passenger and a ticket for each car, so it needs a right for each PERSON and a right for the car. One BOOKING covers Alex and Sam. Both sets of the car are COMPLETE.
+
+| FILE | What it says | Answer |
+|---|---|---|
+| [booked](../examples/a-car-ferry/booked.json) | The BOOKING covers the car too. A FACT says that the FILE states every OPTION that needs a right for the car. | FEASIBLE. The car is with Alex, so the ferry needs its right, and the BOOKING covers it. The plan relies on the FACT that the ferry needs the right, on the COMPLETE set and on the BOOKING. |
+| [the car has no ticket](../examples/a-car-ferry/the-car-has-no-ticket.json) | The BOOKING covers Alex and Sam only. | UNDETERMINED. It works if a right to the ferry is found that covers the car. |
+| [nobody said whether the car needs a ticket](../examples/a-car-ferry/nobody-said-whether-the-car-needs-a-ticket.json) | As above, with no FACT about whether the ferry needs a right for the car. A FACT says that the drive needs none. | UNDETERMINED. It works if the ferry needs no right for the car. |
 
 Each FILE has its expected result beside it, as JSON and in words, and the tests compare the reference checker's answer with it. The command `agloe check` prints the same result for any FILE. With `--answer-first` it prints the answer as soon as it is proved, and the result when the check is done. With `--json` as well, each of the two is one line of JSON, and the answer has `"unfinished": true` in it. Where the result cannot be written, the command ends with 2, also after it has printed the answer.

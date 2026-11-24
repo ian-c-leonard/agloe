@@ -800,8 +800,8 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
             elif isinstance(found, Booking) and (
                 set(credited) != set(found.covers) or set(things) != set(found.objects)
             ):
-                shown = _names(file.objects)
-                users = [_people(file, credited)] if credited else []
+                people, shown = _names(file.persons, "and"), _names(file.objects)
+                users = [people[person.id] for person in file.persons if person.id in credited]
                 users += [shown[thing.id] for thing in file.objects if thing.id in things]
                 used_for = f"; this plan uses it for {_listed(users)}"
             lines.append(f"  {record}: {_record(file, clock, record)}{used_for}")
@@ -1406,8 +1406,8 @@ def _record(file: File, clock: Clock, record: str) -> str:
         who = "people need" if found.needed else "nobody needs"
         return f"{who} a right to take part in {name}"
     if isinstance(found, Booking):
-        things = _names(file.objects)
-        covered = [_people(file, found.covers)] if found.covers else []
+        people, things = _names(file.persons, "and"), _names(file.objects)
+        covered = [people[person.id] for person in file.persons if person.id in found.covers]
         covered += [things[thing.id] for thing in file.objects if thing.id in found.objects]
         covers = f"a BOOKING for {name} covers {_listed(covered)}"
         if not file.caps:

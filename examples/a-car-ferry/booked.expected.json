@@ -1,0 +1,89 @@
+{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "ferry",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-07-18T06:00:00-05:00[America/Chicago]",
+      "end": "2027-07-18T08:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "ferry-tickets",
+        "sam": "ferry-tickets"
+      }
+    },
+    {
+      "option": "drive",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-07-18T09:00:00-05:00[America/Chicago]",
+      "end": "2027-07-18T10:00:00-05:00[America/Chicago]"
+    }
+  ],
+  "relies_on": [
+    "alex-start",
+    "sam-start",
+    "ferry-time",
+    "ferry-length",
+    "ferry-arrival",
+    "ferry-needs-a-ticket",
+    "drive-time",
+    "drive-length",
+    "drive-arrival",
+    "drive-is-open",
+    "alex-has-the-car",
+    "drive-needs-the-car",
+    "every-use-of-the-car",
+    "everything-that-moves-the-car",
+    "ferry-needs-a-car-ticket",
+    "every-ticket-for-the-car",
+    "ferry-tickets",
+    "lock-ferry",
+    "lock-drive"
+  ],
+  "robust": true,
+  "objects": [
+    {
+      "object": "car",
+      "path": [
+        {
+          "where": [
+            {
+              "person": "alex"
+            }
+          ],
+          "since": null,
+          "how": null
+        }
+      ],
+      "required_by": [
+        {
+          "option": "drive",
+          "stated": true,
+          "where": [
+            {
+              "person": "alex"
+            }
+          ]
+        }
+      ],
+      "refused_by": [],
+      "covered_in": [
+        {
+          "option": "ferry",
+          "stated": true,
+          "where": [
+            {
+              "person": "alex"
+            }
+          ],
+          "booking": "ferry-tickets"
+        }
+      ]
+    }
+  ]
+}

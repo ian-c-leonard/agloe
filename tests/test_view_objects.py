@@ -172,6 +172,7 @@ def test_where_an_object_is_in_a_plan_has_the_names_that_the_page_shows(tmp_path
         "flight-needs-the-bags",
         "every-use-of-the-bags",
         "everything-that-moves-the-bags",
+        "every-ticket-for-the-bags",
     )
     others = [fact for fact in story["facts"] if fact["id"] not in about_the_bags]
     path = tmp_path / "trip.json"
@@ -185,6 +186,8 @@ def test_where_an_object_is_in_a_plan_has_the_names_that_the_page_shows(tmp_path
             {"id": "needs-two", "option": "flight", "requires": {"object": second, "needed": True}},
             {"id": "all-that-move-one", "complete": {"transfers": first}},
             {"id": "all-that-move-two", "complete": {"transfers": second}},
+            {"id": "no-ticket-for-one", "complete": {"needs_right_for": first}},
+            {"id": "no-ticket-for-two", "complete": {"needs_right_for": second}},
         ]
 
     # Alex and Sam have a bag each. The two names differ by a space, and a page shows them
