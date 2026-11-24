@@ -2432,3 +2432,47 @@ def test_the_page_works_through_a_gateway_under_the_name_of_the_gateway(
             assert refused is not None and refused.status == 403
         finally:
             context.close()
+
+
+def test_a_link_on_another_site_opens_the_page_and_its_page_reads_nothing(
+    chromium: Browser, tmp_path: Path
+) -> None:
+    """A sign-in on another site sends its reader back to the view with a link. So a link on
+    another site opens the page. A page of that site can still read nothing of the view, and
+    cannot show the view inside itself."""
+    path = tmp_path / "trip.json"
+    path.write_bytes((EXAMPLES / "ending-in-denver" / "works.json").read_bytes())
+    with serving(path) as view:
+        elsewhere = f"""<!doctype html><title>elsewhere</title>
+          <a id="go" href="{view.address}">to the view</a>
+          <iframe id="inside" src="{view.address}"></iframe>
+          <script>
+            window.read = null;
+            fetch("{view.address}events").then(
+              () => {{ window.read = "read"; }},
+              () => {{ window.read = "refused"; }},
+            );
+          </script>"""
+        context = chromium.new_context()
+        try:
+            page = context.new_page()
+            page.route(
+                "http://elsewhere.example/**",
+                lambda route: route.fulfill(body=elsewhere, content_type="text/html"),
+            )
+            page.goto("http://elsewhere.example/")
+            # Its page cannot read what the view sends, and the view is not shown inside it.
+            page.wait_for_function("() => window.read !== null")
+            assert page.evaluate("() => window.read") == "refused"
+            page.wait_for_timeout(500)
+            inside = page.frame_locator("#inside")
+            assert inside.locator("#line").count() == 0
+            assert inside.locator("#report").count() == 0
+            # Its link opens the view's page, with the answer and the report.
+            page.click("#go")
+            page.wait_for_function(ANSWERED, timeout=60_000)
+            assert page.url == view.address
+            assert (page.text_content("#line") or "").startswith("FEASIBLE")
+            page.locator("#report .row").first.wait_for()
+        finally:
+            context.close()

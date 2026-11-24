@@ -71,8 +71,11 @@ def main(arguments: Sequence[str] | None = None) -> int:
         metavar="NAME",
         help=(
             "one more name that the view answers under, such as view.example.org: the name of "
-            "a gateway of your own that passes requests on to the view. Give the view a --port "
-            "for the gateway to pass them to. The view has no sign-in, so the gateway needs one"
+            "a gateway of your own that passes requests on to the view. It is the name of a "
+            "host, or an address of four numbers, with the port after a colon where the gateway "
+            "has one. The gateway has to pass each request on with the name that the browser "
+            "asked for, in its Host line. Give the view a --port for the gateway to pass "
+            "requests to. The view has no sign-in, so the gateway needs one"
         ),
     )
     chosen = parser.parse_args(arguments)
@@ -145,7 +148,8 @@ def _view(path: Path, port: int, in_a_browser: bool, allowed_host: str | None = 
         if view.allowed_host is not None:
             print(
                 f"It also answers under the name {view.allowed_host}, for a gateway of your own "
-                "that passes requests on to it. The view has no sign-in: the gateway needs one.",
+                "that passes requests on to it with the name that the browser asked for. "
+                "The view has no sign-in: the gateway needs one.",
                 flush=True,
             )
         if in_a_browser:

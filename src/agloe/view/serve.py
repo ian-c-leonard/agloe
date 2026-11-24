@@ -68,7 +68,7 @@ LONGEST = 1e9  # seconds: no check takes this long, and a page can still write t
 # and hyphens with dots between them, and no part that starts or ends with a hyphen. A name
 # can end in a dot, and a browser then sends it with the dot.
 _PART = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
-_HOST = re.compile(rf"({_PART}(?:\.{_PART})*)(\.?)(?::([0-9]{{1,5}}))?")
+_HOST = re.compile(rf"({_PART}(?:\.{_PART})*)(\.?)(?::0*([0-9]{{1,5}}))?")
 _LONGEST_NAME = 253  # letters and dots: the names of the internet are no longer
 # A name whose last part is a number is an address made of numbers to a browser. It rewrites
 # such an address, or refuses it. So the view takes one only as a browser writes it.
@@ -80,6 +80,13 @@ _USUAL = {"http": 80, "https": 443}
 REFUSED_BY_BROWSERS = frozenset(
     {1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566}
     | {6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080}
+)
+# The rest of those bad ports. The view never serves on a port below 1024. A gateway can.
+_REFUSED_FOR_A_GATEWAY = REFUSED_BY_BROWSERS | frozenset(
+    {1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95}
+    | {101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161}
+    | {179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563}
+    | {587, 601, 636, 989, 990, 993, 995}
 )
 ANSWERS = {"FEASIBLE", "INFEASIBLE", "UNDETERMINED"}
 # What a check can say, and what each of its events must hold. A check ends with one of ENDS.
@@ -196,25 +203,29 @@ def _named(name: str) -> tuple[str, int | None]:
     """One more name for the view, as a browser sends it: in small letters, and its port
     where it has one.
 
-    Raises NotAHost for anything but the name of a host, with a port or without. So nothing
-    that is given as a name can match a request that it was not meant for, and nothing is
-    taken that no browser would send.
+    The view takes the name of a host in letters, digits, hyphens and dots, or an address
+    of four numbers, with a port or without. It raises NotAHost for anything else, and for
+    a port that browsers refuse to open a page on. So nothing that is given as a name can
+    match a request that it was not meant for. An address of the newer kind, in brackets, is
+    not taken.
     """
     found = _HOST.fullmatch(name.lower()) if name.isascii() else None
     if found is not None and len(found[1]) <= _LONGEST_NAME:
         host, port = found[1] + found[2], None if found[3] is None else int(found[3])
+        whole = True
         if _A_NUMBER.fullmatch(found[1].rsplit(".", 1)[-1]):
             # An address made of numbers: four numbers up to 255, with no dot after them.
+            whole = False
             with contextlib.suppress(ValueError):
-                if str(ipaddress.IPv4Address(host)) == host and (
-                    port is None or 1 <= port <= 65535
-                ):
-                    return host, port
-        elif port is None or 1 <= port <= 65535:
+                whole = str(ipaddress.IPv4Address(host)) == host
+        if whole and port in _REFUSED_FOR_A_GATEWAY:
+            raise NotAHost(f"{name!r}: browsers refuse to open a page on port {port}")
+        if whole and (port is None or 1 <= port <= 65535):
             return host, port
     raise NotAHost(
-        f"{name!r} is no name of a host: give one like view.example.org, "
-        "with the port after a colon where the gateway has one"
+        f"{name!r} is no name that the view can answer under: give the name of a host, like "
+        "view.example.org, or an address of four numbers, like 10.0.0.5, with the port after "
+        "a colon where the gateway has one"
     )
 
 
@@ -503,16 +514,14 @@ class _Asked(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         view = self.server.view
         # A request that names two hosts, or says twice where it comes from, is no request.
-        said = {
-            name: self.headers.get_all(name) or [] for name in ("Host", "Origin", "Sec-Fetch-Site")
-        }
-        if any(len(values) > 1 for values in said.values()):
+        once = ("Host", "Origin", "Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest")
+        if any(len(self.headers.get_all(name) or []) > 1 for name in once):
             self.send_error(HTTPStatus.BAD_REQUEST)
             return
-        if not self._for_the_view(view):
+        path = self.path.split("?", 1)[0]
+        if not self._for_the_view(view, path):
             self.send_error(HTTPStatus.FORBIDDEN)
             return
-        path = self.path.split("?", 1)[0]
         if path == "/events":
             self._tell(view)
         elif path in view.static:
@@ -522,13 +531,17 @@ class _Asked(BaseHTTPRequestHandler):
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
 
-    def _for_the_view(self, view: View) -> bool:
-        """Whether the request is made to the view under one of its names, and by its own page.
+    def _for_the_view(self, view: View, path: str) -> bool:
+        """Whether the request is made to the view under one of its names, and does not say
+        that a page of another site makes it.
 
-        A page from elsewhere reaches this machine under a name of its own, or says in the
-        request that it comes from another site. Both are refused. The names of hosts count
-        whatever the case of their letters, and blanks around what a line says are no part
-        of it.
+        A page from elsewhere reaches this machine under a name of its own, or its browser
+        says in the request that it comes from another site. Both are refused. A request
+        that says nothing of where it comes from is taken. One thing is taken from another
+        site: a link that opens the page itself, in a window of its own. A sign-in at a
+        gateway sends its reader back to the page that way. What the page is to show, and
+        the page's own files, are for the page alone. The names of hosts count whatever the
+        case of their letters, and blanks around what a line says are no part of it.
         """
 
         def said(name: str) -> str | None:
@@ -541,7 +554,12 @@ class _Asked(BaseHTTPRequestHandler):
         origin = said("Origin")
         if origin is not None and origin.lower() not in sites:
             return False
-        return said("Sec-Fetch-Site") in {None, "same-origin", "none"}
+        if said("Sec-Fetch-Site") in {None, "same-origin", "none"}:
+            return True
+        return path == "/" and (said("Sec-Fetch-Mode"), said("Sec-Fetch-Dest")) == (
+            "navigate",
+            "document",
+        )
 
     def _begin(self, kind: str, length: int | None = None) -> None:
         self.send_response(HTTPStatus.OK)
@@ -550,6 +568,7 @@ class _Asked(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Security-Policy", POLICY)
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         if length is not None:
             self.send_header("Content-Length", str(length))
         self.end_headers()
