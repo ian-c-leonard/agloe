@@ -354,9 +354,8 @@ def test_a_missing_right_makes_a_trip_infeasible_where_the_rights_are_complete()
     assert found.conflict == conflict
     assert has_no_record_to_spare(file, conflict)
     whole = "nobody on the trip holds another or can get one"
-    assert (
-        in_words(file)[-2] == f"  every-right-to-tour: the FILE lists every right to tour: {whole}"
-    )
+    stated = "the FILE lists every right for a PERSON to take part in tour"
+    assert in_words(file)[-2] == f"  every-right-to-tour: {stated}: {whole}"
 
 
 def test_a_conflict_holds_every_booking_for_the_option() -> None:

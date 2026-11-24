@@ -14,7 +14,15 @@ import pytest
 
 from agloe import answers, compiler, reference, report
 from agloe.answers import Answer, Report
-from agloe.file import Booking, CompleteNeedsRightFor, Fact, File, FileError, NeedsRightFor
+from agloe.file import (
+    Booking,
+    CompleteNeedsRightFor,
+    CompleteRightsFor,
+    Fact,
+    File,
+    FileError,
+    NeedsRightFor,
+)
 from agloe.reference import (
     Broken,
     Constraint,
@@ -32,6 +40,7 @@ from agloe.reference import (
 from tests.stories import (
     Document,
     carries,
+    complete,
     does_with,
     every_right,
     every_right_for,
@@ -46,6 +55,7 @@ from tests.stories import (
     needs_no_right,
     needs_right,
     needs_right_for,
+    no_other_right_for,
     requires_object,
     seconds,
     starts_from,
@@ -63,6 +73,7 @@ from tests.test_objects import (
     smallest_sets,
     whenever,
 )
+from tests.test_where_a_path_ends import has_no_record_to_spare
 
 
 def checked(file: File) -> Report:
@@ -512,29 +523,223 @@ def test_the_report_names_a_booking_only_where_the_object_needs_its_right() -> N
     assert covered_in(a_ferry(*free, covers)) == [("drive", None)]
 
 
-def test_a_complete_set_of_rights_says_nothing_of_a_right_for_an_object() -> None:
+def test_a_complete_set_of_rights_for_the_persons_says_nothing_of_a_right_for_an_object() -> None:
     """The ferry needs a right for each PERSON, and a FACT says that the FILE lists every
-    right to it. No BOOKING covers Alex, so Alex cannot board. That FACT is about the
-    PERSONs who take part. Where the ferry needs a right for the car, or might, the line
-    of the report says that the FACT leaves that right open."""
+    right for a PERSON to take part in it. A BOOKING covers the car, and none covers
+    Alex, so Alex cannot board. The line of the report says what the FACT is about. The
+    conflict holds the BOOKING, which shows whom it covers, and no FACT about a right for
+    the car."""
     sold_out = [needs_right("ferry"), every_right("ferry"), needs_no_right("drive")]
+    file = a_ferry(*sold_out, TICKET, NO_OTHER, booking("ferry", "car"), rights=True)
+    found = checked(file)
+    assert found.answer is Answer.INFEASIBLE
+    assert found.conflict == (
+        "ferry-needs-right",
+        "every-right-to-ferry",
+        "ferry-booking",
+        "lock-ferry",
+    )
+    assert has_no_record_to_spare(file, found.conflict)
+    stated = "the FILE lists every right for a PERSON to take part in ferry"
+    said = f"  every-right-to-ferry: {stated}: nobody on the trip holds another or can get one"
+    assert said in report.as_text(file, found).split("\n")
+    # The car is not covered, and that FACT leaves its right open: another can be found.
+    uncovered_car = a_ferry(*sold_out, TICKET, NO_OTHER, booking("ferry", "alex"), rights=True)
+    found = checked(uncovered_car)
+    assert found.answer is Answer.UNDETERMINED
+    assert "The trip works if a right to ferry is found that covers car." in report.as_text(
+        uncovered_car, found
+    )
 
-    def line(*about_the_car: Document) -> str:
-        file = a_ferry(*sold_out, *about_the_car, rights=True)
-        found = checked(file)
-        assert found.answer is Answer.INFEASIBLE
-        words = report.as_text(file, found).split("\n")
-        (said,) = [each for each in words if each.startswith("  every-right-to-ferry: ")]
-        return said.removeprefix("  every-right-to-ferry: ")
 
-    whole = "the FILE lists every right to ferry: nobody on the trip holds another or can get one"
-    scope = "; that is about the PERSONs who take part, and it says nothing of a right for car"
-    assert line(TICKET, NO_OTHER) == f"{whole}{scope}"
-    # Nobody says whether the ferry needs a right for the car: it might.
-    assert line(needs_right_for("drive", "car", False)) == f"{whole}{scope}"
-    # A FACT says that it needs none, or that the FILE states every OPTION that does.
-    assert line(needs_right_for("ferry", "car", False)) == whole
-    assert line(NO_OTHER) == whole
+# The rights for one OBJECT are COMPLETE.
+
+FULL = no_other_right_for("ferry", "car")
+
+
+def test_a_file_says_that_it_lists_every_right_for_one_object() -> None:
+    file = a_ferry(TICKET, NO_OTHER, FULL)
+    assert file.rights_complete_for("ferry", "car") == CompleteRightsFor(
+        "every-right-to-ferry-for-car", "ferry", "car"
+    )
+    assert file.rights_complete_for("drive", "car") is None
+    # That is no FACT about the rights of the PERSONs, and an OPTION can have both.
+    assert file.rights_complete("ferry") is None
+    people = [needs_right("ferry"), every_right("ferry"), needs_no_right("drive")]
+    both = a_ferry(TICKET, NO_OTHER, FULL, *people, booking("ferry", "alex"), rights=True)
+    assert both.rights_complete("ferry") is not None
+    assert both.rights_complete_for("ferry", "car") is not None
+
+
+WITH_OFFERS: Document = {
+    "id": "full",
+    "complete": {"rights_to": "ferry", "for_object": "car", "offers": []},
+}
+
+
+@pytest.mark.parametrize(
+    ("facts", "problem"),
+    [
+        ([FULL, {**FULL, "id": "again"}], "another FACT already states this about ferry and car"),
+        ([no_other_right_for("ferry", "bike")], "bike is not an OBJECT in this FILE"),
+        ([no_other_right_for("train", "car")], "train is not an OPTION in this FILE"),
+        ([WITH_OFFERS], "/facts/"),
+    ],
+)
+def test_the_format_refuses_a_set_of_rights_for_an_object_that_cannot_be_meant(
+    facts: list[Document], problem: str
+) -> None:
+    """A set for an OBJECT names no OFFER: every OFFER has places for PERSONs."""
+    with pytest.raises(FileError) as refused:
+        a_ferry(TICKET, *facts)
+    assert problem in str(refused.value)
+
+
+def test_no_other_right_covers_the_object_where_its_rights_are_complete() -> None:
+    """With the FACT, the best case has no other right for the car on the ferry, and no
+    report asks for one. A BOOKING that covers the car still does. Where nobody says
+    whether the ferry needs the right, the best case is that it needs none."""
+    file = a_ferry(TICKET, NO_OTHER, FULL)
+    assert ("ferry", "car") in best_case(file).uncovered
+    assert ("ferry", "car") in worst_case(file).uncovered
+    assert not [unknown for unknown in unknowns(file) if unknown.what == "another right for"]
+    open_set = a_ferry(TICKET, NO_OTHER)
+    assert ("ferry", "car") not in best_case(open_set).uncovered
+    assert Unknown("another right for", "ferry", about="car") in unknowns(open_set)
+    booked = a_ferry(TICKET, NO_OTHER, FULL, booking("ferry", "car"))
+    assert ("ferry", "car") not in worst_case(booked).uncovered
+    silent = a_ferry(FULL, needs_right_for("drive", "car", False))
+    assert ("ferry", "car") not in best_case(silent).uncovered
+    assert ("ferry", "car") in worst_case(silent).uncovered
+    assert [unknown.what for unknown in unknowns(silent) if unknown.about == "car"] == [
+        "needs no right for"
+    ]
+
+
+def test_a_car_with_no_ticket_on_a_full_deck_cannot_cross() -> None:
+    """Alex has the car and is LOCKed onto the ferry. The ferry needs a right for the car, no
+    BOOKING covers it, and the FILE lists every right for the car. So the TRIP is
+    INFEASIBLE. The conflict holds what puts the car on the ferry, the two FACTs about
+    the right, and each BOOKING for the ferry: it shows what it covers. A seat that is on
+    OFFER is for a PERSON, and is not among them."""
+    file = a_ferry(TICKET, NO_OTHER, FULL)
+    found = checked(file)
+    assert found.answer is Answer.INFEASIBLE
+    alone = ("car-start", "every-transfer-of-car", "ferry-right-for-car")
+    assert found.conflict == (*alone, "every-right-to-ferry-for-car", "lock-ferry")
+    assert has_no_record_to_spare(file, found.conflict)
+    whole = "nobody on the trip holds another or can get one"
+    stated = "the FILE lists every right to ferry that covers car"
+    said = f"  every-right-to-ferry-for-car: {stated}: {whole}"
+    assert said in report.as_text(file, found).split("\n")
+    # Alex holds a seat, and a seat is still on OFFER.
+    people = [needs_right("ferry"), needs_no_right("drive"), booking("ferry", "alex")]
+    seats = {"id": "ferry-seats", "offer": {"option": "ferry", "places": 20}}
+    with_seats = a_ferry(TICKET, NO_OTHER, FULL, *people, seats, rights=True)
+    found = checked(with_seats)
+    assert found.answer is Answer.INFEASIBLE
+    assert found.conflict == (
+        *alone,
+        "every-right-to-ferry-for-car",
+        "ferry-booking",
+        "lock-ferry",
+    )
+    assert has_no_record_to_spare(with_seats, found.conflict)
+    # A BOOKING that covers the car settles it, and the plan relies on no COMPLETE set of rights.
+    booked = a_ferry(TICKET, NO_OTHER, FULL, booking("ferry", "car"))
+    found = checked(booked)
+    assert found.answer is Answer.FEASIBLE
+    assert "ferry-booking" in found.relies_on
+    assert "every-right-to-ferry-for-car" not in found.relies_on
+
+
+def test_a_full_deck_leaves_only_the_question_whether_the_right_is_needed() -> None:
+    """Nobody says whether the ferry needs a right for the car, and the FILE lists every
+    right for the car. The report asks that the ferry needs none, and it does not say
+    that a BOOKING is enough instead: none can be had. For the drive, one can."""
+    file = a_ferry(FULL)
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    words = report.as_text(file, found)
+    assert "The trip works if ferry and drive need no right for car.\n" in words
+    instead = "a BOOKING for it that covers car is enough instead."
+    assert f"If drive does need a right for car, {instead}" in words
+    assert f"If ferry does need a right for car, {instead}" not in words
+    assert words.count("is enough instead.") == 1
+
+
+def test_an_object_can_stay_behind_where_no_right_for_it_can_be_had() -> None:
+    """Alex has the bike. The train needs a right for it, and the FILE lists every right for
+    the bike on the train: there is none. A cloakroom keeps bikes, so Alex leaves the
+    bike there, and the TRIP works. Without the cloakroom it cannot."""
+    options = [stays("cloakroom", "a"), moves("train", "a", "b")]
+    facts = [*at("cloakroom", 8), *at("train", 9), starts_from("alex", "a")]
+    facts += [has_object("alex", "bike"), keeps("cloakroom", "bike"), every_use("bike")]
+    facts += [every_transfer("bike"), needs_right_for("train", "bike"), every_right_for("bike")]
+    facts += [no_other_right_for("train", "bike")]
+    locks = [lock("train", "alex")]
+    file = trip(["alex"], ["a", "b"], options, facts, locks, objects=["bike"], object_rights=True)
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [step.option for step in found.itinerary] == ["cloakroom", "train"]
+    kept_nowhere = without(file, "cloakroom-with-bike")
+    assert checked(kept_nowhere).answer is Answer.INFEASIBLE
+
+
+def test_a_transfer_does_not_cure_a_carry_with_no_choice_on_a_full_deck() -> None:
+    """The ferry requires the bike and carries it, so the bike goes along whenever the ferry
+    sails. The ferry needs a right for it, and the FILE lists every right for it: there
+    is none. The FILE does not say that it states every transfer of the bike, and no
+    transfer cures this. Alex is LOCKed onto the ferry, so the TRIP is INFEASIBLE. Where
+    Alex only has the bike, another transfer could take it first, and the TRIP might
+    work."""
+    full = no_other_right_for("ferry", "bike")
+    taken = a_quay(requires_object("ferry", "bike"), carries("ferry", "bike"), full)
+    found = checked(taken)
+    assert found.answer is Answer.INFEASIBLE
+    assert found.conflict == (
+        "ferry-right-for-bike",
+        "ferry-requires-bike",
+        "ferry-with-bike",
+        "every-right-to-ferry-for-bike",
+        "lock-ferry",
+    )
+    assert has_no_record_to_spare(taken, found.conflict)
+    held = without(a_ferry(TICKET, NO_OTHER, FULL), "every-transfer-of-car")
+    found = checked(held)
+    assert found.answer is Answer.UNDETERMINED
+    assert cases_of(held, found) == [
+        "another transfer puts car at hand for drive, and keeps car away from whoever is in ferry."
+    ]
+
+
+def test_two_sailings_that_are_both_full_rule_the_trip_out() -> None:
+    """Alex has the car, and a drive at Muskegon requires it. Two ferries cross, and the FILE
+    lists every way to get there on the day of the TRIP. Each ferry needs a right for the
+    car, and the FILE lists every right for the car on each: there is none. Neither ferry
+    is in every plan, and no plan works. With one of the two sets left open, a right for
+    that ferry is enough."""
+    options = [moves("early", "milwaukee", "muskegon"), moves("late", "milwaukee", "muskegon")]
+    options += [stays("drive", "muskegon")]
+    facts = [*at("early", 6, 0, "PT2H30M"), *at("late", 9, 0, "PT2H30M"), *at("drive", 13)]
+    facts += [starts_from("alex", "milwaukee"), has_object("alex", "car"), complete(None, None)]
+    facts += [requires_object("drive", "car"), every_use("car"), every_transfer("car")]
+    facts += [needs_right_for("early", "car"), needs_right_for("late", "car")]
+    facts += [every_right_for("car"), no_other_right_for("early", "car")]
+    facts += [no_other_right_for("late", "car")]
+    places, locks = ["milwaukee", "muskegon"], [lock("drive", "alex"), trip_starts(5)]
+    file = trip(["alex"], places, options, facts, locks, objects=["car"], object_rights=True)
+    found = checked(file)
+    assert found.answer is Answer.INFEASIBLE
+    for record in ("every-right-to-early-for-car", "every-right-to-late-for-car"):
+        assert record in found.conflict
+    assert has_no_record_to_spare(file, found.conflict)
+    one_open = without(file, "every-right-to-late-for-car")
+    found = checked(one_open)
+    assert found.answer is Answer.UNDETERMINED
+    assert "The trip works if a right to late is found that covers car." in report.as_text(
+        one_open, found
+    )
 
 
 def test_a_car_with_no_ticket_might_have_another() -> None:
@@ -980,7 +1185,8 @@ def test_two_cases_that_turn_on_one_right_say_once_that_a_booking_is_enough() ->
 def with_rights(rng: Random, file: File) -> File:
     """The same FILE, with FACTs about rights for its OBJECTs chosen at random: some OPTIONs
     need a right for an OBJECT, some need none, of some nobody says, and some BOOKINGs cover
-    an OBJECT. Some OBJECTs keep the FACT that the FILE states every OPTION that needs one."""
+    an OBJECT. Some OBJECTs keep the FACT that the FILE states every OPTION that needs one.
+    For some OPTIONs the FILE lists every right for an OBJECT."""
     facts: list[Fact] = [fact for fact in file.facts if not isinstance(fact, CompleteNeedsRightFor)]
     for thing in file.objects:
         if rng.random() < 0.4:
@@ -996,6 +1202,10 @@ def with_rights(rng: Random, file: File) -> File:
             if rng.random() < 0.3:
                 covers = f"{option.id}-covers-{thing.id}"
                 facts.append(Booking(covers, option.id, (), None, (thing.id,)))
+            # And the FILE can list every right for the OBJECT, with a BOOKING or with none.
+            if rng.random() < 0.3:
+                full = f"{option.id}-full-for-{thing.id}"
+                facts.append(CompleteRightsFor(full, option.id, thing.id))
     return replace(file, facts=tuple(facts))
 
 
@@ -1007,7 +1217,7 @@ def test_both_checkers_agree_on_trips_with_rights_for_objects() -> None:
     the worst case, and it relies on each BOOKING that it names."""
     rng = Random(16)
     seen: dict[Answer, int] = {}
-    covered = asked = 0
+    covered = asked = sold_out = 0
     for number in range(260):
         if number < 120:
             file = with_rights(rng, a_trip_with_services(rng))
@@ -1017,14 +1227,19 @@ def test_both_checkers_agree_on_trips_with_rights_for_objects() -> None:
         seen[found.answer] = seen.get(found.answer, 0) + 1
         if found.answer is Answer.FEASIBLE:
             assert reference.works_as_listed(file, worst_case(file), found.itinerary)
+        closed = [fact.id for fact in file.facts if isinstance(fact, CompleteRightsFor)]
+        if found.answer is Answer.INFEASIBLE and set(closed) & set(found.conflict):
+            # A conflict that turns on a full deck is enough, with no record to spare.
+            assert has_no_record_to_spare(file, found.conflict)
+            sold_out += 1
         named = [use.by for carried in found.objects for use in carried.uses if use.by is not None]
         assert set(named) <= set(found.relies_on)
         covered += bool(named)
         about = ("needs no right for", "another right for")
         asked += any(each.unknown.what in about for group in found.missing for each in group)
     assert seen[Answer.FEASIBLE] > 60 and seen[Answer.UNDETERMINED] > 90
-    assert seen[Answer.INFEASIBLE] > 40
-    assert covered > 5 and asked > 60
+    assert seen[Answer.INFEASIBLE] > 45
+    assert covered > 5 and asked > 45 and sold_out > 8
 
 
 def test_the_sets_named_for_rights_are_all_the_smallest_that_are_enough() -> None:
@@ -1051,4 +1266,4 @@ def test_the_sets_named_for_rights_are_all_the_smallest_that_are_enough() -> Non
             several += len(named_sets) > 1
             rights = ("needs no right for", "another right for")
             about_a_right += any(u.what in rights for named in named_sets for u in named)
-    assert compared > 40 and several > 10 and about_a_right > 20
+    assert compared > 40 and several > 8 and about_a_right > 20
