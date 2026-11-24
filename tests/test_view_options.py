@@ -13,9 +13,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+from agloe.answers import Answer, Report
 from agloe.file import read
-from tests.stories import EXAMPLES
-from tests.test_view_calendar import drawn, in_words, parts, with_its_report
+from agloe.reference import Step
+from tests.stories import EXAMPLES, lock, moves, seconds, starts_at, stays, trip
+from tests.test_view_calendar import drawn, in_words, parts, sent_for, with_its_report
 
 STORY = EXAMPLES / "flight-home"
 FILES = sorted(
@@ -122,6 +124,32 @@ def test_an_option_says_who_takes_part_in_it_in_the_plan() -> None:
     tavern = said["Dinner at the tavern"]
     assert (tavern["plan"], tavern["step"]) == ("Not in the plan.", None)
     assert said["Dinner at the deep-dish place"]["plan"] == "In the plan: Alex takes part."
+
+
+def test_a_person_called_nobody_is_told_from_nobody() -> None:
+    """One PERSON of the TRIP is called nobody, and a LOCK names them for the visit. A van of
+    the plan has nobody of the TRIP in it. The page writes the name in quotation marks, so
+    that the two read differently."""
+    file = trip(
+        ["nobody", "alex"],
+        ["hall", "port"],
+        [stays("visit", "hall"), stays("lunch", "hall"), moves("van", "hall", "port")],
+        [starts_at("visit", 10)],
+        [lock("visit", "nobody")],
+    )
+    plan = (
+        Step("visit", "hall", "hall", ("nobody",), seconds(10), seconds(11)),
+        Step("lunch", "hall", "hall", ("nobody", "alex"), seconds(12), seconds(13)),
+        Step("van", "hall", "port", (), seconds(14), seconds(15, 30)),
+    )
+    sent = sent_for(file, Report(Answer.FEASIBLE, itinerary=plan))
+    (shown,) = all_options([sent])
+    said = {option["name"]: (option["plan"], option["lock"]) for option in shown["options"]}
+    assert said == {
+        "visit": ('In the plan: "nobody" takes part.', '"nobody" is named by a LOCK.'),
+        "lunch": ('In the plan: "nobody" and alex take part.', "No LOCK names it."),
+        "van": ("In the plan, with nobody of the TRIP in it.", "No LOCK names it."),
+    }
 
 
 def test_an_option_has_the_words_for_each_kind_of_start_and_length() -> None:

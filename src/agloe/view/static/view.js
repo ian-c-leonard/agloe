@@ -243,6 +243,7 @@ function draw(laid) {
   part("calendar-key").classList.toggle("with-clash", laid.clash);
   part("calendar-key").classList.toggle("with-warnings", laid.warned);
   part("calendar-key").classList.toggle("with-asks", laid.asked);
+  part("calendar-key").classList.toggle("with-nobody", laid.nobody);
   part("calendar-says").textContent = laid.says;
   // The steps with no time, each marked where the report names what is about it.
   const untimed = laid.untimed.flatMap((step, n) => {

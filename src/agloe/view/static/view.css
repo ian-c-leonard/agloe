@@ -236,8 +236,8 @@ html { scroll-padding-top: calc(var(--row-of-links, 0px) + 12px); }
 .key { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 12px; }
 .key span { display: inline-flex; align-items: center; gap: 6px; }
 .key.only-locks .in-a-plan { display: none; }
-.key .in-a-clash, .key .in-a-warning, .key .in-an-ask { display: none; }
-.key.with-clash .in-a-clash, .key.with-warnings .in-a-warning, .key.with-asks .in-an-ask { display: inline-flex; }
+.key .in-a-clash, .key .in-a-warning, .key .in-an-ask, .key .for-nobody { display: none; }
+.key.with-clash .in-a-clash, .key.with-warnings .in-a-warning, .key.with-asks .in-an-ask, .key.with-nobody .for-nobody { display: inline-flex; }
 /* What a report warns of at a step has a yellow edge. So has a step that the report names in
    what the FILE does not say. Yellow is kept for what a report says. */
 .warned .block, .key-box.warned, .asked .block, .key-box.asked { border-color: var(--warn); box-shadow: 0 0 0 1.5px var(--warn); }

@@ -738,11 +738,21 @@ def test_the_strip_has_a_row_for_the_steps_with_nobody_in_them() -> None:
         for mark in narrow["marks"]
         if mark["small"]
     ]
-    assert all(first == last for _, first, last in small)
-    assert all(
-        (row == 1) is all(name.endswith("van") for name in names_of) for names_of, row, _ in small
-    )
     assert any(row == 1 for _, row, _ in small)
+    # Every step is on the strip once, wide or narrow, and each in its own row: a van in
+    # the row after Alex's, and a visit in Alex's.
+    for band_of in (band, narrow):
+        on_it = [
+            (each["name"], mark["first"], mark["last"])
+            for mark in band_of["marks"]
+            for each in mark["of"]
+        ]
+        assert sorted(on_it) == [
+            ("again", 0, 0),
+            ("other-van", 1, 1),
+            ("van", 1, 1),
+            ("visit", 0, 0),
+        ]
     # A plan with somebody in every step has no such row, and the strip says so.
     everybody = sent_for(file, Report(Answer.FEASIBLE, itinerary=(plan[0], plan[2])))
     plain = a_strip(everybody)

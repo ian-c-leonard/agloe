@@ -2370,6 +2370,10 @@ def test_a_step_with_nobody_in_it_has_a_column_and_a_row_of_its_own(
             "(all) => all.map((each) => each.className)"
         )
         assert stripes == ["stripe nobody"]
+        # The key under the calendar says what an outlined mark in that column is.
+        key = page.locator("#calendar-key .for-nobody")
+        assert key.is_visible()
+        assert key.text_content() == 'under "nobody": in the plan, with nobody of the TRIP in it'
         # The calendar says nothing more of it in words: the mark says it.
         assert "obody" not in (page.text_content("#calendar-says") or "")
         assert "nobody of the TRIP" in (service.get_attribute("title") or "")
@@ -2404,6 +2408,11 @@ def test_a_step_with_nobody_in_it_has_a_column_and_a_row_of_its_own(
     content["decisions"].append(
         {"id": "lock-breakfast", "lock": "breakfast", "persons": ["alex", "sam"]}
     )
+    # A plan with somebody in every step has no such column, and its key has no such line.
+    with opened(chromium, EXAMPLES / "flight-home" / "works.json") as page:
+        page.locator("#calendar .mark").first.wait_for()
+        assert page.locator("#calendar .people .nobody").count() == 0
+        assert page.locator("#calendar-key .for-nobody").is_hidden()
     with opened(chromium, written(tmp_path, content)) as page:
         page.locator("#strip .bar").first.wait_for()
         assert (page.text_content("#line") or "").startswith("FEASIBLE")

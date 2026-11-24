@@ -379,6 +379,36 @@ def test_the_calendar_has_a_column_for_the_steps_with_nobody_in_them() -> None:
     assert calendar(everybody)["nobody"] is False
 
 
+def test_the_calendar_tells_a_person_called_nobody_from_nobody() -> None:
+    """One PERSON of the TRIP is called nobody. A LOCK names them for the visit, and they go
+    to lunch with Alex. A van runs with nobody of the TRIP in it. The marks write the name of
+    the PERSON in quotation marks, so that it does not read as nobody at all."""
+    file = trip(
+        ["nobody", "alex"],
+        ["hall", "port"],
+        [stays("visit", "hall"), stays("lunch", "hall"), moves("van", "hall", "port")],
+        [starts_at("visit", 10)],
+        [lock("visit", "nobody")],
+    )
+    plan = (
+        Step("visit", "hall", "hall", ("nobody",), seconds(10), seconds(11)),
+        Step("lunch", "hall", "hall", ("nobody", "alex"), seconds(12), seconds(13)),
+        Step("van", "hall", "port", (), seconds(14), seconds(15, 30)),
+    )
+    laid = calendar(sent_for(file, Report(Answer.FEASIBLE, itinerary=plan)))
+    said = [
+        (mark["name"], mark["first"], mark["last"], mark["who"], mark["lock"], mark["nobody"])
+        for mark in laid["days"][0]["marks"]
+    ]
+    assert said == [
+        ("visit", 0, 0, '"nobody"', '"nobody" is named by a LOCK.', False),
+        ("lunch", 0, 1, '"nobody" and alex', 'No LOCK names "nobody" and alex.', False),
+        ("van", 2, 2, "nobody of the TRIP", "No LOCK names anybody for it.", True),
+    ]
+    # The names over the columns are the names of the PERSONs as they are.
+    assert laid["persons"] == [{"id": "nobody", "name": "nobody"}, {"id": "alex", "name": "alex"}]
+
+
 def test_the_calendar_of_the_flight_home() -> None:
     """Alex and Sam visit the museum, take the Blue Line and fly home, all on one Saturday."""
     laid = calendar(drawn(STORY / "works.json"))

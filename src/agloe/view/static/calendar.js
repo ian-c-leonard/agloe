@@ -20,7 +20,7 @@
 // moment is on: the view says. This lays out what it is sent: how far down its day a part
 // starts, how tall it is, whose columns it spans, and what its words are.
 
-import { casesAbout, casesIn, findsOf, listed, optionsOf, ruledOut, saidOf } from "./named.js";
+import { casesAbout, casesIn, findsOf, listed, optionsOf, ruledOut, saidOf, someone } from "./named.js";
 import { clock, clocksOf, dateName } from "./times.js";
 
 const DAY = 24 * 60 * 60; // seconds
@@ -141,7 +141,8 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
   const place = new Map(trip.places.map((each) => [each.id, each.name]));
   // The column after those of the PERSONs: for each OPTION of the plan with nobody in it.
   const alone = trip.persons.length;
-  const names = (columns) => (columns.includes(alone) ? "nobody of the TRIP" : listed(columns.map((n) => trip.persons[n].name)));
+  // A PERSON who is called nobody is told from nobody at all.
+  const names = (columns) => (columns.includes(alone) ? "nobody of the TRIP" : listed(columns.map((n) => someone(trip.persons[n].name))));
   // The FACTs, WANTs and DECISIONs that the report names as ruling out every plan.
   const ruled = ruledOut(report);
   // The cases in which the report says the trip works, where it depends on what the FILE does
