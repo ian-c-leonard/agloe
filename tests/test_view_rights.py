@@ -278,6 +278,12 @@ def test_the_rights_card_says_what_it_does_not_cover_for_an_object(tmp_path: Pat
         " nobody on the trip holds another or can get one."
     ]
     assert "that covers Alex (car): nobody on the trip" in text
+    content["objects"][0]["name"] = "car and trailer"
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    assert ferry["closed"][0].startswith('The FILE lists every right to it that covers "car and')
+    assert 'that covers "car and trailer": nobody on the trip' in text
     content["objects"][0]["name"] = "the car"
     content["facts"] = [fact for fact in content["facts"] if fact["id"] != "the-car-deck-is-full"]
     # Nobody needs a right to take part in the ferry, and it has no BOOKING: it still needs

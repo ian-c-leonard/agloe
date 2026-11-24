@@ -663,6 +663,11 @@ def test_a_car_with_no_ticket_on_a_full_deck_cannot_cross() -> None:
     stated = "the FILE lists every right to ferry that covers alex (car)"
     said = f"  every-right-to-ferry-for-car: {stated}: {whole}"
     assert said in report.as_text(named, checked(named)).split("\n")
+    # A name with "and" in it is in quotes there too, so that it is not read as two OBJECTs.
+    named = replace(file, objects=(replace(file.objects[0], name="car and trailer"),))
+    stated = 'the FILE lists every right to ferry that covers "car and trailer"'
+    said = f"  every-right-to-ferry-for-car: {stated}: {whole}"
+    assert said in report.as_text(named, checked(named)).split("\n")
     # Alex holds a seat, and a seat is still on OFFER.
     people = [needs_right("ferry"), needs_no_right("drive"), booking("ferry", "alex")]
     seats = {"id": "ferry-seats", "offer": {"option": "ferry", "places": 20}}

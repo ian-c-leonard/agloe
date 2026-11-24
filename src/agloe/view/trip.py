@@ -673,7 +673,7 @@ def _objects(file: File, names: Mapping[str, str]) -> list[Trip]:
     """
     objects: list[Trip] = []
     called = _names(file.objects)
-    among_all = _names([*file.persons, *file.objects])
+    among_all = _names([*file.persons, *file.objects], "and")
     for thing in file.objects:
         starts = file.object_starts(thing.id)
         needs = [(option, file.object_requirement(option.id, thing.id)) for option in file.options]
