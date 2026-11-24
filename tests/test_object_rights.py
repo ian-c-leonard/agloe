@@ -48,6 +48,7 @@ from tests.stories import (
     starts_from,
     stays,
     trip,
+    trip_starts,
 )
 from tests.test_objects import (
     NEW,
@@ -57,6 +58,7 @@ from tests.test_objects import (
     asked,
     at,
     smallest_sets,
+    whenever,
 )
 
 
@@ -399,6 +401,42 @@ def test_nobody_has_the_object_from_a_hand_over_in_an_option_with_no_right() -> 
     world = worst_case(free)
     assert reference._can_have(free, world, orders, "bike") == {1: {"alex"}}  # pyright: ignore[reportPrivateUsage]
     assert reference._can_move(free, world, orders, [0, 1], "bike") == {0}  # pyright: ignore[reportPrivateUsage]
+
+
+def test_an_option_with_no_right_for_the_object_is_not_in_its_order() -> None:
+    """The bags lie at A. Sam's ship at 9:00 am carries them to B, where Sam needs them.
+    Alex's boat can carry bags too, and it can start at any time. It needs a right for
+    the bags that nothing gives, so the bags are never in it, and it is not among the
+    OPTIONs that the bags put in an order. Nothing ties the boat to the ship then, and it
+    starts when the TRIP starts. With a BOOKING that covers the bags, the boat can move
+    them: it is in their order, and it is timed with the ship."""
+    options = [moves("ship", "a", "b"), moves("boat", "a", "b"), stays("use", "b")]
+    facts = [*at("ship", 9, 0, "PT15M"), *whenever("boat"), *at("use", 9, 30)]
+    facts += [starts_from("alex", "a"), starts_from("sam", "a"), lies_at("bags", "a")]
+    facts += [carries("ship", "bags"), carries("boat", "bags"), requires_object("use", "bags")]
+    facts += [every_use("bags"), every_transfer("bags"), needs_right_for("boat", "bags")]
+    decisions = [lock("ship", "sam"), lock("use", "sam"), lock("boat", "alex"), trip_starts(8)]
+
+    def start_of_the_boat(*more: Document) -> int:
+        stated = [*facts, every_right_for("bags"), *more]
+        file = trip(
+            ["alex", "sam"],
+            ["a", "b"],
+            options,
+            stated,
+            decisions,
+            objects=["bags"],
+            object_rights=True,
+        )
+        found = checked(file)
+        assert found.answer is Answer.FEASIBLE
+        carrying = [step.option for step in found.itinerary if step.carried]
+        assert carrying == ["ship"]
+        (boat,) = [step for step in found.itinerary if step.option == "boat"]
+        return boat.start
+
+    assert start_of_the_boat() == seconds(8)
+    assert start_of_the_boat(booking("boat", "bags")) == seconds(9)
 
 
 # Both checkers, and the report.
