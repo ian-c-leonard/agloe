@@ -68,6 +68,18 @@ const REFUSED = {
  * FILE has an OPTION with no FACT about whether it does that. It never says that an OPTION
  * requires or refuses the OBJECT where the FILE names none that does.
  */
+/**
+ * What a FILE leaves open about one thing that its OPTIONs can do with an OBJECT, where no
+ * FACT says that the OPTIONs it names are all. `stated` holds the OPTIONs with a FACT about
+ * it, `some` says that one of them does it, and `others` that the FILE has an OPTION with no
+ * FACT about it.
+ */
+function leftOpen(stated, some, others, does, verb) {
+  if (!others) return stated.length ? `The FILE says of each of its OPTIONs whether it ${does} this OBJECT.` : "The FILE lists no OPTION.";
+  if (some) return `Other OPTIONs of the FILE may ${verb} it too: the FILE does not say that these are all.`;
+  return stated.length ? `The FILE leaves open whether another of its OPTIONs ${does} this OBJECT.` : `The FILE says of no OPTION whether it ${does} this OBJECT.`;
+}
+
 function checkedBy(thing, silent) {
   const requires = thing.requires.some((each) => each.needed);
   const refuses = thing.refuses.some((each) => each.refused);
@@ -75,11 +87,7 @@ function checkedBy(thing, silent) {
     const all = "The FILE states every one of its OPTIONs that requires it or refuses it";
     return [requires || refuses ? `${all}.` : `${all}, and it names none.`];
   }
-  const one = (stated, some, others, does, verb) => {
-    if (!others) return stated.length ? `The FILE says of each of its OPTIONs whether it ${does} this OBJECT.` : "The FILE lists no OPTION.";
-    if (some) return `Other OPTIONs of the FILE may ${verb} it too: the FILE does not say that these are all.`;
-    return stated.length ? `The FILE leaves open whether another of its OPTIONs ${does} this OBJECT.` : `The FILE says of no OPTION whether it ${does} this OBJECT.`;
-  };
+  const one = leftOpen;
   const said = [one(thing.requires, requires, silent.requires, "requires", "require"), one(thing.refuses, refuses, silent.refuses, "refuses", "refuse")];
   // A FILE with no OPTION says so once.
   return said[0] === said[1] ? [said[0]] : said;
@@ -98,11 +106,12 @@ function movedBy(thing) {
 
 /**
  * Whether the OPTIONs under an OBJECT are all that need a right for it, as far as the FILE
- * says. Without a FACT that they are, another OPTION of the FILE may.
+ * says. Without a FACT that they are, the card says what the FILE leaves open: `silent`
+ * says that the FILE has an OPTION with no FACT about that.
  */
-function ticketedBy(thing) {
+function ticketedBy(thing, silent) {
   const some = thing.rights.some((each) => each.needed);
-  if (thing.rights_complete === null) return some ? "Other OPTIONs of the FILE may need a right for it too: the FILE does not say that these are all." : "The FILE does not say which of its OPTIONs need a right for it.";
+  if (thing.rights_complete === null) return leftOpen(thing.rights, some, silent, "needs a right for", "need a right for");
   const all = "The FILE states every one of its OPTIONs that needs a right for it";
   return some ? `${all}.` : `${all}, and it names none.`;
 }
@@ -260,7 +269,10 @@ export function objects(trip, report = null, stated = null) {
           refuses: trip.options.some((option) => !asked.refuses.has(option.id)),
         }),
         movedBy(thing),
-        ticketedBy(thing),
+        ticketedBy(
+          thing,
+          trip.options.some((option) => !asked["needs a right for"].has(option.id)),
+        ),
       ],
       // An OBJECT's own records: the FACT about where it is when the TRIP starts, and the FACTs
       // that the FILE states every OPTION that requires it or refuses it, and every one that

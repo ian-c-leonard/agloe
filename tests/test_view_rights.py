@@ -225,6 +225,49 @@ def test_a_booking_names_the_objects_that_it_covers(tmp_path: Path) -> None:
     ]
 
 
+def test_the_rights_card_says_what_it_does_not_cover_for_an_object(tmp_path: Path) -> None:
+    """The ferry needs a right for the car, and no BOOKING covers the car. A FACT says that
+    the FILE lists every right to the ferry. That is about the PERSONs who take part, and
+    the card says so: the report still asks for a right for the car. An OPTION that only
+    needs a right for an OBJECT has a card too."""
+    content = json.loads((EXAMPLES / "a-car-ferry" / "the-car-has-no-ticket.json").read_text())
+    content["facts"].append({"id": "sold-out", "complete": {"rights_to": "ferry"}})
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    assert "works if a right to Car ferry to Muskegon is found that covers the car." in text
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    assert ferry["things"] == "It needs a right for the car."
+    assert ferry["whole"] == (
+        "The FILE lists every right to it: nobody on the trip holds another or can get one."
+        " That is about the PERSONs who take part: it says nothing of a right for the car."
+    )
+    assert "ferry-needs-a-car-ticket" in ferry["records"]
+    # Nobody needs a right to take part in the ferry, and it has no BOOKING: it still needs
+    # a right for the car, so it has a card.
+    for fact in content["facts"]:
+        if fact["id"] == "ferry-needs-a-ticket":
+            fact["needs_right"] = False
+    content["facts"] = [
+        fact for fact in content["facts"] if fact["id"] not in ("sold-out", "ferry-tickets")
+    ]
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    assert (ferry["things"], ferry["bookings"]) == ("It needs a right for the car.", [])
+    # A PERSON and an OBJECT that show one name show their ids, as in the report.
+    content = json.loads((EXAMPLES / "a-car-ferry" / "booked.json").read_text())
+    content["persons"][0]["name"] = "Scout"
+    content["objects"][0]["name"] = "Scout"
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    (tickets,) = ferry["bookings"]
+    assert tickets["says"] == "a BOOKING that covers Scout (alex), Sam and Scout (car)"
+    assert "covers Scout (alex), Sam and Scout (car)" in text
+    assert tickets["uses"] == "In the plan: Scout (alex), Sam and Scout (car) use it."
+
+
 def test_a_booking_says_what_it_paid_as_far_as_the_file_says() -> None:
     def said(name: str) -> list[str]:
         (skydeck,) = rights_of(f"a-ticket/{name}")["rights"]

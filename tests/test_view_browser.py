@@ -1453,6 +1453,8 @@ def test_pointing_ties_an_object_to_the_calendar_and_the_report(
         assert card.locator(".card-whole").all_text_contents() == [
             "The FILE states every one of its OPTIONs that requires it or refuses it.",
             "The FILE states every OPTION that hands it over, keeps it or carries it.",
+            "The FILE states every one of its OPTIONs that needs a right for it, and it names"
+            " none.",
         ]
         # The card says where the report says the bags are in its plan, worded as the report
         # words it: throughout, and just before the OPTION that requires them starts.
@@ -1711,12 +1713,12 @@ def test_on_a_wide_window_the_report_stays_beside_the_drawings(chromium: Browser
         found = lit(page, persons=["Alex"])
         assert ids_of(found["rows"]) == ["alex-start"]
         page.wait_for_function(f"() => ({PLACED})().shown === 1")
-        # Pointing at the OBJECT lights up six lines. One is in view already, so nothing moves.
+        # Pointing at the OBJECT lights up seven lines. One is in view already, so nothing moves.
         before = page.evaluate(PLACED)["at"]
         page.locator("#objects .card-name").hover()
         lit(page, objects=["the bags"])
         placed = page.evaluate(PLACED)
-        assert (placed["lit"], placed["shown"] > 0, placed["at"]) == (6, True, before)
+        assert (placed["lit"], placed["shown"] > 0, placed["at"]) == (7, True, before)
         # A line of the report that is pointed at stays where it is.
         row = page.locator("#report .row[data-record='flight-needs-the-bags']")
         row.scroll_into_view_if_needed()

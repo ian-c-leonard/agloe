@@ -576,7 +576,8 @@ def _wants(file: File, names: Mapping[str, str]) -> list[Trip]:
 def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
     """What the FILE says of the rights to its OPTIONs, in its order of OPTIONs.
 
-    One for each OPTION of which the FILE says anything about rights. ``needs`` is the FACT
+    One for each OPTION of which the FILE says anything about rights, or that a FACT says
+    needs a right for an OBJECT. ``needs`` is the FACT
     about whether a PERSON needs a right to take part. ``bookings`` holds each BOOKING for the
     OPTION with the PERSONs it covers, and ``offers`` each OFFER with its places and the price
     of one place, each in the FILE's order. ``complete`` is the FACT that the FILE lists every
@@ -588,7 +589,9 @@ def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
     for option in file.options:
         need, complete = needs.get(option.id), file.rights_complete(option.id)
         bookings, offers = file.bookings(option.id), file.offers(option.id)
-        if need is None and complete is None and not bookings and not offers:
+        # An OPTION that needs a right for an OBJECT has rights to show too.
+        ticketed = any(file.needs_right_for(option.id, thing.id) is True for thing in file.objects)
+        if need is None and complete is None and not bookings and not offers and not ticketed:
             continue
         rights.append(
             {

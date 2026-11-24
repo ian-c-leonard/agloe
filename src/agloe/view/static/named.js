@@ -219,11 +219,12 @@ export function objectsIn(report) {
   const things = stated.map((each) => {
     // An OPTION that needs a right for the OBJECT, or might, has its line after those two.
     const covered = isBy(each.covered_in) ? each.covered_in : [];
-    const checks = [...each.required_by.map((by) => [steps.indexOf(by.option), 0, by.option]), ...each.refused_by.map((by) => [steps.indexOf(by.option), 1, by.option]), ...covered.map((by) => [steps.indexOf(by.option), 2, by.option])];
+    const booked = (by) => (typeof by.booking === "string" ? by.booking : null);
+    const checks = [...each.required_by.map((by) => [steps.indexOf(by.option), 0, by.option, null]), ...each.refused_by.map((by) => [steps.indexOf(by.option), 1, by.option, null]), ...covered.map((by) => [steps.indexOf(by.option), 2, by.option, booked(by)])];
     checks.sort((one, other) => one[0] - other[0] || one[1] - other[1]);
-    return { object: each.object, options: checks.map(([, , option]) => option), placed: checks.every(([at]) => at >= 0) };
+    return { object: each.object, options: checks.map(([, , option]) => option), bookings: checks.map(([, , , booking]) => booking), placed: checks.every(([at]) => at >= 0) };
   });
-  return things.every((each) => each.placed) ? things.map(({ object, options }) => ({ object, options })) : [];
+  return things.every((each) => each.placed) ? things.map(({ object, options, bookings }) => ({ object, options, bookings })) : [];
 }
 
 /**

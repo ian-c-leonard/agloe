@@ -13,7 +13,7 @@
 // Nothing here judges a TRIP. Whether everybody who takes part has a right is for the
 // COMPILER to say: the page names who uses a right only where the report does.
 
-import { carriedIn, listed, marksBy, optionsOf, toBuyIn, usesIn } from "./named.js";
+import { apart, carriedIn, listed, marksBy, optionsOf, toBuyIn, usesIn } from "./named.js";
 import { paidOf } from "./money.js";
 import { needsARight } from "./who.js";
 
@@ -28,9 +28,21 @@ function offerOf(offer) {
 }
 
 /** Whether the BOOKINGs and the OFFERs under an OPTION are all the rights to it, as the report words it. */
-function wholeOf(complete) {
+function wholeOf(complete, things) {
   if (complete === null) return "Another right to it may exist: the FILE does not say that these are all.";
-  return `The FILE lists every right to it: nobody on the trip holds another or can get one${complete.offers.length ? `, except from ${listed(complete.offers)}` : ""}.`;
+  const all = `The FILE lists every right to it: nobody on the trip holds another or can get one${complete.offers.length ? `, except from ${listed(complete.offers)}` : ""}.`;
+  // That FACT is about the PERSONs who take part. A right for an OBJECT is another matter.
+  return things.length ? `${all} That is about the PERSONs who take part: it says nothing of a right for ${listed(things, "or")}.` : all;
+}
+
+/**
+ * PERSONs and OBJECTs in one list, as a sentence joins them. Two that show the same name show
+ * their ids too, and a name with the word "and" in it is in quotation marks.
+ */
+function together(named) {
+  const seen = new Map();
+  for (const [, name] of named) seen.set(name, (seen.get(name) ?? 0) + 1);
+  return listed(named.map(([id, name]) => apart(seen.get(name) > 1 ? `${name} (${id})` : name, (words) => words.split(/\s+/).includes("and"))));
 }
 
 /**
@@ -74,29 +86,33 @@ export function rights(trip, report = null, stated = null) {
   // A place that the plan buys only if its OPTION turns out to need a right.
   const ifNeeded = (option, offer) => toBuyIn(report).some((buy) => buy.option === option && buy.offer === offer && buy.only_if_needed === true);
   // Those who use one right for one OPTION in the plan, in the FILE's order of PERSONs.
-  const usersOf = (option, by) => trip.persons.filter(({ id }) => uses.some((use) => use.option === option && use.by === by && use.person === id)).map(({ name }) => name);
+  const usersOf = (option, by) => trip.persons.filter(({ id }) => uses.some((use) => use.option === option && use.by === by && use.person === id)).map(({ id, name }) => [id, name]);
   // The OBJECTs that one BOOKING covers for one OPTION in the plan, in the FILE's order.
   const carried = carriedIn(report);
   const thing = new Map(trip.objects.map((each) => [each.id, each.name]));
-  const coveredBy = (option, by) => trip.objects.filter(({ id }) => carried.some((each) => each.object === id && each.covers.some((use) => use.option === option && use.booking === by))).map(({ name }) => name);
+  const coveredBy = (option, by) => trip.objects.filter(({ id }) => carried.some((each) => each.object === id && each.covers.some((use) => use.option === option && use.booking === by))).map(({ id, name }) => [id, name]);
+  // The OBJECTs that a FACT says an OPTION needs a right for, each with that FACT.
+  const needing = (option) => trip.objects.flatMap((each) => each.rights.filter((right) => right.option === option && right.needed).map((right) => ({ id: each.id, name: each.name, record: right.record })));
   const shown = trip.rights
-    .filter((each) => each.needs?.needed === true || each.bookings.length || each.offers.length || each.complete !== null)
+    .filter((each) => each.needs?.needed === true || each.bookings.length || each.offers.length || each.complete !== null || needing(each.option).length)
     .map((each) => ({
       option: each.option,
       name: each.name,
       needs: needs(each.option).says,
+      // The OBJECTs that it needs a right for, where a FACT says so.
+      things: needing(each.option).length ? `It needs a right for ${listed(needing(each.option).map((thing) => thing.name))}.` : null,
       bookings: each.bookings.map((booking) => {
         const users = [...usersOf(each.option, booking.id), ...coveredBy(each.option, booking.id)];
         return {
           id: booking.id,
           name: booking.id,
-          says: `a BOOKING that covers ${listed([...booking.covers.map((id) => person.get(id)), ...booking.objects.map((id) => thing.get(id))])}${paymentOf(booking)}`,
-          uses: !trip.itinerary ? null : users.length ? `In the plan: ${listed(users)} ${users.length === 1 ? "uses" : "use"} it.` : "In the plan: nobody uses it.",
+          says: `a BOOKING that covers ${together([...booking.covers.map((id) => [id, person.get(id)]), ...booking.objects.map((id) => [id, thing.get(id)])])}${paymentOf(booking)}`,
+          uses: !trip.itinerary ? null : users.length ? `In the plan: ${together(users)} ${users.length === 1 ? "uses" : "use"} it.` : "In the plan: nobody uses it.",
           ...marked([booking.id], (need) => need.booking === booking.id, "The report names this BOOKING in what the FILE does not say."),
         };
       }),
       offers: each.offers.map((offer) => {
-        const users = usersOf(each.option, offer.id);
+        const users = usersOf(each.option, offer.id).map(([, name]) => name);
         const takes = `In the plan: ${listed(users)} ${users.length === 1 ? "takes" : "each take"} a place of it${ifNeeded(each.option, offer.id) ? ", if the OPTION needs a right" : ""}.`;
         const buys = (need) => Array.isArray(need.buys) && need.buys.some((buy) => buy !== null && typeof buy === "object" && buy.offer === offer.id);
         return {
@@ -107,11 +123,14 @@ export function rights(trip, report = null, stated = null) {
           ...marked([offer.id], (need) => need.offer === offer.id || buys(need), "The report names this OFFER in what the FILE does not say."),
         };
       }),
-      whole: wholeOf(each.complete),
-      // Its own records: the FACT about whether people need a right, and the FACT that the
-      // FILE lists every right.
+      whole: wholeOf(
+        each.complete,
+        needing(each.option).map((thing) => thing.name),
+      ),
+      // Its own records: the FACT about whether people need a right, the FACT that the
+      // FILE lists every right, and each FACT that it needs a right for an OBJECT.
       ...marked(
-        [...(each.needs === null ? [] : [each.needs.record]), ...(each.complete === null ? [] : [each.complete.record])],
+        [...(each.needs === null ? [] : [each.needs.record]), ...(each.complete === null ? [] : [each.complete.record]), ...needing(each.option).map((thing) => thing.record)],
         (need) => ABOUT_RIGHTS.has(need.what) && optionsOf(need).includes(each.option),
         "The report names the rights to this OPTION in what the FILE does not say.",
       ),

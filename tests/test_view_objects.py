@@ -836,7 +836,18 @@ def test_an_object_says_whether_its_options_are_all_there_are() -> None:
         " these are all."
     )
     assert whole(rights_complete=None)[-1] == (
-        "The FILE does not say which of its OPTIONs need a right for it."
+        "The FILE says of no OPTION whether it needs a right for this OBJECT."
+    )
+    # A FACT for each OPTION of the FILE leaves nothing open.
+    all_ticketed = [
+        {**ticket, "option": option["id"], "name": option["name"], "needed": option["id"] == "x"}
+        for option in sent["options"]
+    ]
+    assert whole(rights=all_ticketed, rights_complete=None)[-1] == (
+        "The FILE says of each of its OPTIONs whether it needs a right for this OBJECT."
+    )
+    assert whole(rights=[{**ticket, "needed": False}], rights_complete=None)[-1] == (
+        "The FILE leaves open whether another of its OPTIONs needs a right for this OBJECT."
     )
 
 
