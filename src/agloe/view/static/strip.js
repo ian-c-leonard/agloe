@@ -1,4 +1,5 @@
 // All the days of the calendar on one strip: a row for each PERSON, and time from left to right.
+// Where the plan has a step with nobody of the TRIP in it, one more row holds those steps.
 // There is no page in here, so the tests run this as it is.
 //
 // The strip is the calendar on its side. It takes the calendar as calendar.js lays it out, and
@@ -78,7 +79,8 @@ function clear(mark, groups) {
  * to draw or in too thin a lane, with every mark of that row that would lie on it or under it.
  *
  * A bound is where the TRIP starts or ends, with its `x`, on its own day. `row` is the height
- * of a row, in pixels.
+ * of a row, in pixels. `nobody` says that the strip has a row after those of the PERSONs, for
+ * the steps with nobody of the TRIP in them.
  */
 export function strip(laid, wide = 800) {
   const open = laid.days.map((day) => ({ from: day.open.top, to: Math.max(day.open.bottom, day.open.top) }));
@@ -120,7 +122,8 @@ export function strip(laid, wide = 800) {
   // How far along the strip a time of a day is: never outside the room of its day.
   const along = (n, top) => days[n].x + Math.min(Math.max(top - open[n].from, 0), room(n)) * days[n].per;
   let whole = [];
-  const pieces = laid.persons.map(() => []);
+  // A row for each PERSON, and one after them for the steps with nobody of the TRIP in them.
+  const pieces = Array.from({ length: laid.persons.length + (laid.nobody ? 1 : 0) }, () => []);
   laid.days.forEach((day, n) => {
     day.marks.forEach(({ top, height, ...rest }, index) => {
       const mark = { ...rest, day: n, index };
@@ -153,6 +156,7 @@ export function strip(laid, wide = 800) {
     day.bounds.map(({ top, ...bound }) => ({ ...bound, day: n, x: stub[n] ? days[n].x + STUB / 2 : Math.max(Math.min(along(n, top), days[n].x + days[n].w - LINE), days[n].x) })),
   );
   const cut = days.some((day) => day.gap);
-  const says = `All the days of the calendar on one strip, a row for each PERSON.${cut ? " It leaves out the hours that the calendar does not show." : ""} Click a step to see it in the calendar.`;
-  return { says, persons: laid.persons, wide: across, row: ROW, cut, days, marks: [...whole, ...groups.flat()], bounds };
+  const rows = laid.nobody ? "a row for each PERSON and one for the steps with nobody of the TRIP in them" : "a row for each PERSON";
+  const says = `All the days of the calendar on one strip, ${rows}.${cut ? " It leaves out the hours that the calendar does not show." : ""} Click a step to see it in the calendar.`;
+  return { says, persons: laid.persons, nobody: laid.nobody, wide: across, row: ROW, cut, days, marks: [...whole, ...groups.flat()], bounds };
 }

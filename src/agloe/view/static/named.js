@@ -41,6 +41,14 @@ export function apart(name, misleads) {
   return `"${bare.replace(/\\/g, "\\\\")}"${id === null ? "" : id[0]}`;
 }
 
+/**
+ * The name of a PERSON in a sentence about who takes part: in quotation marks where it is the
+ * word that the page has for no PERSON at all. A PERSON can be called nobody.
+ */
+export function someone(name) {
+  return apart(name, (seen) => seen === "nobody");
+}
+
 /** Names as a sentence joins them: Alex, Sam and Jo. `last` is the word before the last one. */
 export function listed(names, last = "and") {
   return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} ${last} ${names[names.length - 1]}`;
