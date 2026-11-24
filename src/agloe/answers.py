@@ -144,7 +144,8 @@ class CapRow:
     might have charged it besides, with the amount where the FILE states one, and None where
     the BOOKING states no payment. ``asked`` holds those among them whose charge a set of
     unknown FACTs asks about. ``to_buy`` is what the plan buys from it, and ``if_needed`` the
-    most it buys besides, if OPTIONs turn out to need a right. ``left`` is what the cap still
+    most it buys besides, if OPTIONs turn out to need a right or an OBJECT turns out to be
+    there: ``bought_if_needed`` says which purchases that counts. ``left`` is what the cap still
     allows after all of that, with each BOOKING in ``might`` counted in full unless the set
     asks about it. Whatever else comes to be charged to the cap has to fit in it. The
     amounts are whole ten-thousandths of the cap's currency.

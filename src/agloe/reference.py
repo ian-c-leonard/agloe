@@ -1347,7 +1347,7 @@ def taking_a_place(file: File, world: World, itinerary: Itinerary) -> dict[str, 
 
     With each comes whether it is sure to take the place. It is not where the OBJECT only
     might be in the OPTION: nobody knows where it is, or whether the OPTION takes it along.
-    The place is counted either way, and a report says that it might have to be bought.
+    It has the place either way, and a report says that it might have to be bought.
     """
     order = {thing.id: number for number, thing in enumerate(file.objects)}
     _, followed, _ = _objects(file, world, list(enumerate(itinerary)))
