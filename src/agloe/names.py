@@ -79,7 +79,8 @@ def to_show(records: Sequence[Named], joins: str | None = None) -> dict[str, str
     a colon, a semicolon or a quote mark, one that ends like a name with its id, one that
     holds the word ``joins``, which joins the list the names are for, and one that is a
     word the report uses in place of a name. A PERSON can be called nobody, and "visit,
-    nobody" would read as a visit with nobody in it. The quotes go on before the id.
+    nobody" would read as a visit with nobody in it. A name holds a word where a page shows
+    it so. The quotes go on before the id.
     """
     shared = Counter(seen_as(record.name) for record in records)
     shown = {
@@ -95,9 +96,10 @@ def to_show(records: Sequence[Named], joins: str | None = None) -> dict[str, str
 
 def _quoted(name: str, joins: str | None) -> str:
     """A name, in quotes where it could be taken for something else."""
+    looks = seen_as(name)  # a word of the name is a word that a page shows
     marks = any(mark in name for mark in ",:;")  # what a report puts between its own parts
-    splits = marks or (joins is not None and joins in name.casefold().split())
-    stands_in = seen_as(name).casefold() in _NO_NAMES
-    if splits or stands_in or '"' in name or _WITH_AN_ID.search(name):
+    splits = marks or (joins is not None and joins in looks.casefold().split())
+    stands_in = looks.casefold() in _NO_NAMES
+    if splits or stands_in or '"' in name or _WITH_AN_ID.search(looks):
         return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
     return name

@@ -194,8 +194,7 @@ def test_where_an_object_is_in_a_plan_has_the_names_that_the_page_shows(tmp_path
         ]
 
     # Alex and Sam have a bag each. The two names differ by a space, and a page shows them
-    # alike, so each card has the id. The report gives no id, and each card still says where
-    # its own bag is.
+    # alike, so each card has the id, and so has each line of the report.
     lets_in = refusing_nothing(story, "alex-bag", "sam-bag")
     content = {**story, "facts": [*others, *two("alex-bag", "sam-bag"), *lets_in]}
     content["objects"] = [
@@ -204,8 +203,8 @@ def test_where_an_object_is_in_a_plan_has_the_names_that_the_page_shows(tmp_path
     ]
     path.write_text(json.dumps(content))
     sent, found, words = in_words(path)
-    assert "\n  the bags: with Alex when the TRIP starts\n" in words
-    assert "\n  the  bags: with Sam when the TRIP starts\n" in words
+    assert "\n  the bags (alex-bag): with Alex when the TRIP starts\n" in words
+    assert "\n  the  bags (sam-bag): with Sam when the TRIP starts\n" in words
     (shown,) = all_objects([sent], [found], [words])
     said = [
         (each["name"], each["plan"], [option["plan"] for option in each["requires"]])
@@ -528,11 +527,11 @@ def test_an_object_that_might_be_in_one_of_several_places_says_each(tmp_path: Pa
     (shown,) = all_objects([sent], [found], [words])
     (bags,) = shown["objects"]
     assert ' or at "Believe It or Not" (art-institute) from 1:00 pm (' in bags["plan"]
-    assert ' or at "Believe It or Not" from 1:00 pm (' in words
+    assert ' or at "Believe It or Not" (art-institute) from 1:00 pm (' in words
     # A name holds the word where a page shows it so. A mark of direction after the word
     # shows as nothing, so the name reads "Tom or Jerry", and it is in quotation marks. Each
-    # name keeps the spelling of the FILE. The report tells the word by its spelling, so it
-    # sets no quotation marks here: the page differs from it in them and in the id.
+    # name keeps the spelling of the FILE. The report has the same rule, so its line has the
+    # quotation marks and the id too.
     content["persons"] = [
         {"id": "alex", "name": "Tom or\u200e Jerry"},
         {"id": "sam", "name": "Tom or Jerry"},
@@ -545,7 +544,7 @@ def test_an_object_that_might_be_in_one_of_several_places_says_each(tmp_path: Pa
     assert bags["requires"][0]["plan"] == (
         'Just before it starts: with "Tom or\u200e Jerry" (alex).'
     )
-    assert "\n  the bags: with Tom or\u200e Jerry when the TRIP starts; " in words
+    assert '\n  the bags: with "Tom or\u200e Jerry" (alex) when the TRIP starts; ' in words
     # So is a name with a character after the word that joins two others and shows as nothing.
     content["persons"] = [
         {"id": "alex", "name": "Tom or\u034f Jerry"},
