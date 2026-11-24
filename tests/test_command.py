@@ -768,6 +768,47 @@ def test_no_two_records_are_shown_by_the_same_name() -> None:
     assert words[3] == '  9:00 am to 9:30 am: call, Alex (a), Alex (b) and "Alex (b)"'
 
 
+def test_two_names_that_a_page_shows_alike_come_with_their_ids() -> None:
+    """Two travelers are called José. One name has the accent as part of the letter, and the
+    other has it as a sign after the e. A page shows both alike. So the report shows their
+    ids, and a line of the report can stand on a page beside its drawings. Two spaces in a
+    name, or a soft hyphen, are the same."""
+    document = {
+        "persons": [{"id": "a", "name": "Jos\u00e9"}, {"id": "b", "name": "Jose\u0301"}],
+        "places": [{"id": "hotel", "name": "the hotel"}],
+        "options": [stays("call", "hotel")],
+        "ways": [],
+        "wants": [],
+        "facts": [starts_at("call", 9), lasts("call", "PT30M"), needs_no_right("call")],
+        "decisions": [lock("call", "a", "b")],
+    }
+    file = load(document)
+    words = report.as_text(file, compiler.check(file)).splitlines()
+    assert words[3] == "  9:00 am to 9:30 am: call, Jos\u00e9 (a) and Jose\u0301 (b)"
+    for name in ("Ann  Lee", "Ann Le\u00ade"):
+        document["persons"] = [{"id": "a", "name": "Ann Lee"}, {"id": "b", "name": name}]
+        file = load(document)
+        words = report.as_text(file, compiler.check(file)).splitlines()
+        assert words[3] == f"  9:00 am to 9:30 am: call, Ann Lee (a) and {name} (b)"
+    # A name that a page shows as a name with its id is in quotes: a mark of direction after
+    # it shows as nothing.
+    document["persons"] = [
+        {"id": "a", "name": "Alex"},
+        {"id": "b", "name": "Alex"},
+        {"id": "c", "name": "Alex (b)\u200e"},
+    ]
+    document["decisions"] = [lock("call", "a", "b", "c")]
+    file = load(document)
+    words = report.as_text(file, compiler.check(file)).splitlines()
+    assert words[3] == '  9:00 am to 9:30 am: call, Alex (a), Alex (b) and "Alex (b)\u200e"'
+    document["decisions"] = [lock("call", "a", "b")]
+    # Two names that only look alike to a reader are two names: another alphabet, a dash.
+    document["persons"] = [{"id": "a", "name": "Paris"}, {"id": "b", "name": "P\u0430ris"}]
+    file = load(document)
+    words = report.as_text(file, compiler.check(file)).splitlines()
+    assert words[3] == "  9:00 am to 9:30 am: call, Paris and P\u0430ris"
+
+
 def test_a_name_that_the_report_uses_for_no_name_is_in_quotes() -> None:
     """A traveler is called Nobody, and another is called people. "call, Nobody" would read
     as a call with nobody in it, so each of those names is in quotes wherever it is shown."""
