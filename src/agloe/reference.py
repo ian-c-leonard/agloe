@@ -1058,26 +1058,48 @@ def _each_alone(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
     ]
 
 
+def taken_with_no_right(world: World, option: str, thing: str) -> bool:
+    """Whether an OPTION takes an OBJECT along that another transfer brings, with no right.
+
+    The transfer puts the OBJECT at hand where a plan needs it, and nothing follows the
+    OBJECT through the plan. An OPTION that requires the OBJECT and carries it takes it
+    along whenever it happens. One of which nobody knows whether it requires the OBJECT
+    might, and so might one that requires it, or might, of which nobody knows what it does
+    with it. Where such an OPTION needs a right for the OBJECT and nothing covers the OBJECT
+    there, it cannot happen: no transfer cures that.
+    """
+    pair = (option, thing)
+    if thing not in world.brought or pair not in world.uncovered:
+        return False
+    unknown_action = world.does.get(pair) in ("might_take", "might_carry")
+    return unknown_action or goes_along(world, option, thing) is not None
+
+
 def _taken_along(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
     """The sixteenth CONSTRAINT for an OBJECT that another transfer might bring.
 
     Nothing follows such an OBJECT through a plan: the transfer puts it at hand where the
     plan needs it, and takes it from a PERSON before an OPTION that needs a right for it.
-    One thing no transfer cures. An OPTION that requires the OBJECT and carries it takes
-    it along whenever it happens, and one of which nobody knows whether it requires the
-    OBJECT might. Where such an OPTION needs a right for the OBJECT and nothing covers the
-    OBJECT there, it cannot happen. The Broken names everybody who takes part.
+    Two things no transfer cures. An OPTION that takes the OBJECT along with no choice, or
+    might, cannot happen where nothing covers the OBJECT there: ``taken_with_no_right``
+    says when. And a plan that hands the OBJECT over there, or carries it there by choice,
+    does so with no right. The Broken names whoever is to have the OBJECT, or else
+    everybody who takes part.
     """
     out: list[Broken] = []
     for step in itinerary:
         if step.option is None:
             continue
+        takers = dict(step.handed)
         for thing in file.objects:
             pair = (step.option, thing.id)
-            unmet = thing.id in world.brought and pair in world.uncovered
-            if unmet and goes_along(world, *pair) is not None:
-                who = _in_file_order_of_persons(file, step.persons)
-                out.append(Broken(Constraint.COVERED, step.option, who, object=thing.id))
+            if thing.id not in world.brought or pair not in world.uncovered:
+                continue
+            chosen = thing.id in takers or thing.id in step.carried
+            if chosen or taken_with_no_right(world, *pair):
+                who = (takers[thing.id],) if thing.id in takers else step.persons
+                named = _in_file_order_of_persons(file, who)
+                out.append(Broken(Constraint.COVERED, step.option, named, object=thing.id))
     return out
 
 
@@ -1995,14 +2017,6 @@ def _least_broken(
             held = brought_in(places, persons)
             if refused and held:
                 broken = (*broken, (position, Constraint.REFUSED, None))
-            # A right is needed where a PERSON who takes part has the OBJECT, where it is
-            # handed over and where it is carried. That is one requirement, so one finding:
-            # for whoever has it, or else for whoever takes it, or else for the carry.
-            lacks: str | bool | None = False
-            if uncovered and held:
-                lacks = None
-            elif uncovered and taker is not None:
-                lacks = taker
             choices = (action,)
             if action == "any":
                 choices = ("nothing", "keeps", "hands_over", "carries")
@@ -2029,8 +2043,14 @@ def _least_broken(
                     after = _moved(after, persons, origin, refused, Where(option=option))
                 elif along == "might":
                     after = _left("might_carry", after, persons, origin, option, refused)
-                if lacks is not False:
-                    found = (*found, (position, Constraint.COVERED, lacks))
+                # A right is needed where a PERSON who takes part has the OBJECT, where it
+                # is handed over and where it is carried. That is one requirement, so one
+                # finding: for whoever has it, or else for whoever takes it, or else for
+                # the carry. A hand-over or a carry that does not happen needs none.
+                if uncovered and held:
+                    found = (*found, (position, Constraint.COVERED, None))
+                elif uncovered and taker is not None and Where(person=taker) in after:
+                    found = (*found, (position, Constraint.COVERED, taker))
                 elif uncovered and Where(option=option) in after:
                     found = (*found, (position, Constraint.COVERED, _CARRY))
                 known = following.get(after)

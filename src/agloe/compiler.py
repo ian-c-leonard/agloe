@@ -456,15 +456,14 @@ class _Search:
         # Where another transfer brings an OBJECT, the model does not follow it. An OPTION
         # that takes it along with no choice, or might, cannot happen where it needs a right
         # for the OBJECT and nothing covers it: the transfer puts the OBJECT at hand, and
-        # no transfer covers it.
-        for index, option in enumerate(file.options):
+        # no transfer covers it. That holds with PERSONs in the OPTION and with nobody.
+        self.cannot_happen = {
+            index
+            for index, option in enumerate(file.options)
             if any(
-                thing.id in world.brought
-                and (option.id, thing.id) in world.uncovered
-                and reference.goes_along(world, option.id, thing.id) is not None
-                for thing in file.objects
-            ):
-                self.usable[index] = False
+                reference.taken_with_no_right(world, option.id, thing.id) for thing in file.objects
+            )
+        }
         self.endless = [each.longest is None for each in self.terms]
         self.moves = [option.origin != option.destination for option in file.options]
         self.lasts = [each.shortest for each in self.terms]
@@ -550,6 +549,8 @@ class _Search:
                     model.add_implication(row[index], self.used[index])
             else:
                 model.add_max_equality(self.used[index], [0, *(row[index] for row in self.takes)])
+            if index in self.cannot_happen:
+                model.add(self.used[index] == 0)
             for number, person in enumerate(file.persons):
                 takes = self.takes[number][index]
                 asked = any(
