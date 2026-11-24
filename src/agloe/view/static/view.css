@@ -88,6 +88,10 @@ html { scroll-padding-top: calc(var(--row-of-links, 0px) + 12px); }
 .day-body { position: relative; background-image: repeating-linear-gradient(to bottom, var(--line) 0 1px, transparent 1px var(--hour)); }
 /* A PERSON keeps one colour in every day. Red, orange and yellow are kept for what a report says. */
 .p0 { --hue: #284ba4; } .p1 { --hue: #73a434; } .p2 { --hue: #84266c; } .p3 { --hue: #3e96ea; } .p4 { --hue: #236228; } .p5 { --hue: #cd6aaf; }
+/* The column after those of the PERSONs holds the steps with nobody of the TRIP in them. It
+   has no colour of a PERSON, and its name is set apart from theirs. */
+.nobody { --hue: var(--muted); }
+.person.nobody, .strip-people .nobody { font-style: italic; color: var(--muted); }
 
 .mark { position: absolute; z-index: 1; padding: 0 2px; }
 .block { position: relative; height: 100%; overflow: hidden; border: 1.4px solid var(--ink); border-radius: 5px; background: var(--ink); color: var(--surface); }
@@ -232,8 +236,8 @@ html { scroll-padding-top: calc(var(--row-of-links, 0px) + 12px); }
 .key { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 12px; }
 .key span { display: inline-flex; align-items: center; gap: 6px; }
 .key.only-locks .in-a-plan { display: none; }
-.key .in-a-clash, .key .in-a-warning, .key .in-an-ask { display: none; }
-.key.with-clash .in-a-clash, .key.with-warnings .in-a-warning, .key.with-asks .in-an-ask { display: inline-flex; }
+.key .in-a-clash, .key .in-a-warning, .key .in-an-ask, .key .for-nobody { display: none; }
+.key.with-clash .in-a-clash, .key.with-warnings .in-a-warning, .key.with-asks .in-an-ask, .key.with-nobody .for-nobody { display: inline-flex; }
 /* What a report warns of at a step has a yellow edge. So has a step that the report names in
    what the FILE does not say. Yellow is kept for what a report says. */
 .warned .block, .key-box.warned, .asked .block, .key-box.asked { border-color: var(--warn); box-shadow: 0 0 0 1.5px var(--warn); }

@@ -20,7 +20,7 @@
 // moment is on: the view says. This lays out what it is sent: how far down its day a part
 // starts, how tall it is, whose columns it spans, and what its words are.
 
-import { casesAbout, casesIn, findsOf, listed, optionsOf, ruledOut, saidOf } from "./named.js";
+import { casesAbout, casesIn, findsOf, listed, optionsOf, ruledOut, saidOf, someone } from "./named.js";
 import { clock, clocksOf, dateName } from "./times.js";
 
 const DAY = 24 * 60 * 60; // seconds
@@ -110,7 +110,11 @@ function saysOf(trip, timed) {
  * marks, its bounds, and the parts of those hours that its clocks never show (`shut`). A mark is
  * the part of one step that one day shows, for PERSONs whose columns are side by side: `top` and
  * `height` are minutes from the top of the day, `first` and `last` are columns. Marks of one
- * PERSON at the same time each get a `lane` of the `lanes` in that column. `begins` and `ends`
+ * PERSON at the same time each get a `lane` of the `lanes` in that column. An OPTION of the
+ * plan can have nobody of the TRIP in it: a luggage service carries the bags while everybody
+ * is somewhere else. `nobody` says that the plan has such a step. The calendar then has one
+ * more column, after those of the PERSONs, and each such step has its marks there, with
+ * `nobody` on them. `begins` and `ends`
  * say whether the part holds the start and the end of its step. A bound is where the TRIP starts
  * or ends. `untimed` names the steps that have no time. `itinerary` says whether the steps are
  * the ITINERARY of the report.
@@ -122,8 +126,6 @@ function saysOf(trip, timed) {
  *
  * `warnings` holds, at the place of each step, what the report in words warns of there.
  * `warns` on a mark holds those words, and `warned` on the calendar says that a mark has some.
- * An OPTION of the plan with nobody of the TRIP in it has no column, and so no mark: `says`
- * names it with its PLACEs, its day and its time, and with what the report warns of there.
  * Each mark also holds the `records` that are about its step, and each bound its `record`.
  *
  * `stated` holds the words of the report for the cases in which it says the trip works: the
@@ -133,11 +135,14 @@ function saysOf(trip, timed) {
  * says of them, and `asked` on the calendar says that a mark has some.
  */
 export function calendar(trip, report = null, warnings = [], stated = null) {
-  const none = { says: "", zone: null, itinerary: false, clash: false, warned: false, asked: false, persons: [], hours: { from: 9 * 60, to: 17 * 60 }, days: [], untimed: [] };
+  const none = { says: "", zone: null, itinerary: false, clash: false, warned: false, asked: false, persons: [], nobody: false, hours: { from: 9 * 60, to: 17 * 60 }, days: [], untimed: [] };
   if (trip === null) return { ...none, says: "There is no calendar of this TRIP: the view could not make one." };
   const column = new Map(trip.persons.map((person, n) => [person.id, n]));
   const place = new Map(trip.places.map((each) => [each.id, each.name]));
-  const names = (columns) => listed(columns.map((n) => trip.persons[n].name));
+  // The column after those of the PERSONs: for each OPTION of the plan with nobody in it.
+  const alone = trip.persons.length;
+  // A PERSON who is called nobody is told from nobody at all.
+  const names = (columns) => (columns.includes(alone) ? "nobody of the TRIP" : listed(columns.map((n) => someone(trip.persons[n].name))));
   // The FACTs, WANTs and DECISIONs that the report names as ruling out every plan.
   const ruled = ruledOut(report);
   // The cases in which the report says the trip works, where it depends on what the FILE does
@@ -146,10 +151,12 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
 
   // ---- each step in words
   const steps = trip.steps.map((step, n) => {
-    const columns = step.persons.map((id) => column.get(id)).sort((a, b) => a - b);
+    // A WAY always has somebody on it. An OPTION of a plan can have nobody of the TRIP in it.
+    const nobody = step.option !== null && !step.persons.length;
+    const columns = nobody ? [alone] : step.persons.map((id) => column.get(id)).sort((a, b) => a - b);
     const locked = new Set(step.locked.map((id) => column.get(id)));
     return {
-      n, columns, parts: step.parts, end: step.end,
+      n, columns, nobody, parts: step.parts, end: step.end,
       records: step.records,
       warns: Array.isArray(warnings[n]) ? warnings[n].filter((words) => typeof words === "string") : [],
       clash: step.records.filter((id) => ruled.has(id)),
@@ -166,7 +173,6 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
       who: names(columns),
       where: step.from === step.to ? place.get(step.from) : `${place.get(step.from)} to ${place.get(step.to)}`,
       when: step.start === null ? null : `${clock(step.start)} to ${step.end === null ? "an unknown time" : clock(step.end, step.start)}`,
-      day: step.start === null ? null : dateName(step.start.at),
       late: step.latest === null ? null : `or as late as ${clock(step.latest, step.start)}`,
       stateOf: (at) => (step.option === null ? "way" : locked.has(at) ? "locked" : "planned"),
     };
@@ -176,26 +182,18 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
   // on its days, the steps with no time that it names beside them, and the times of the TRIP.
   const marked = new Set(steps.filter((step) => step.parts.length || step.when === null).flatMap((step) => step.clash));
   for (const bound of [trip.starts, trip.ends]) if (bound !== null && bound.day !== null && ruled.has(bound.record)) marked.add(bound.record);
-  // An OPTION of the plan with nobody of the TRIP in it has no column to be drawn in: a
-  // luggage service carries the bags while everybody is somewhere else. So no mark is made
-  // for it, and the calendar says in words what a mark would: the step with its PLACEs, its
-  // day and its time, and what the report warns of there and says of it.
-  const alone = (step) => step.kind === "option" && !step.columns.length && step.when !== null;
-  const nobody = steps.filter(alone).map((step) => {
-    const warns = step.warns.length ? ` The report warns there: ${step.warns.join(" ")}` : "";
-    const asks = step.asks.length ? ` ${step.asks.join(" ")}` : "";
-    return ` Nobody of the TRIP is in ${step.name} (${step.where}) on ${step.day}, ${step.late ? `${step.when}, ${step.late}` : step.when}, so no column shows it.${warns}${asks}`;
-  }).join("");
+  // The calendar has the column for nobody where a step with nobody in it is on one of its days.
+  const nobody = steps.some((step) => step.nobody && step.parts.length > 0);
   // A step that the report warns about is marked where the calendar shows it. A step after
   // the days shown has no mark, and the calendar says how many of those the report warns about.
-  const warned = steps.some((step) => step.warns.length && step.parts.length && !alone(step));
-  const after = steps.filter((step) => step.warns.length && !step.parts.length && !alone(step)).length;
+  const warned = steps.some((step) => step.warns.length && step.parts.length);
+  const after = steps.filter((step) => step.warns.length && !step.parts.length).length;
   const warns = (warned ? " A yellow edge marks each step shown at which the report warns of something." : "") + (after ? ` The report also warns of something at ${after === 1 ? "1 step" : `${after} steps`} after the days shown.` : "");
   // A step that the report names in what the FILE does not say is marked where the calendar
   // shows it: on its days, or among the steps with no time.
-  const asked = steps.some((step) => step.cases.length && (step.parts.length || step.when === null) && !alone(step));
+  const asked = steps.some((step) => step.cases.length && (step.parts.length || step.when === null));
   const asks = !needed.length ? "" : asked ? " A yellow edge marks each step shown that the report names in what the FILE does not say." : " What the report says the FILE does not say is not about a step shown here.";
-  const says = saysOf(trip, steps.length - untimed.length) + rulesOut(ruled.size, marked.size) + warns + asks + nobody;
+  const says = saysOf(trip, steps.length - untimed.length) + rulesOut(ruled.size, marked.size) + warns + asks;
   if (!trip.days.length) return { ...none, says, zone: trip.zone, itinerary: trip.itinerary, clash: marked.size > 0, asked, persons: trip.persons, untimed };
 
   // ---- the hours that every day shows: from the earliest start of a step on any day to the
@@ -247,7 +245,8 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
   }
   for (const day of days) {
     // OPTIONs that one PERSON is in at the same time stand beside each other in that column.
-    const lanes = trip.persons.map((_, at) => lanesOf(day.shown.filter((mark) => mark.step.kind === "option" && mark.step.columns.includes(at)).sort((a, b) => a.top - b.top)));
+    // So do OPTIONs with nobody in them, in theirs.
+    const lanes = Array.from({ length: alone + 1 }, (_, at) => lanesOf(day.shown.filter((mark) => mark.step.kind === "option" && mark.step.columns.includes(at)).sort((a, b) => a.top - b.top)));
     for (const mark of day.shown) {
       const { step, part, top, bottom } = mark;
       const laneOf = (at) => (step.kind === "option" ? lanes[at].get(mark) : { lane: 0, lanes: 1 });
@@ -265,8 +264,9 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
         day.marks.push({
           step: step.n, kind: step.kind, name: step.name, when: step.when, late: step.late, where: step.where, who: step.who,
           // One LOCK can name several PERSONs, and several LOCKs one each: the words fit both.
-          lock: run.state === "way" ? null : run.state === "locked" ? `${these} ${run.first === run.last ? "is" : "are each"} named by a LOCK.` : `No LOCK names ${these}.`,
-          state: run.state, first: run.first, last: run.last, lane: run.lane, lanes: run.lanes,
+          // A LOCK names a PERSON, so none names anybody for a step with nobody in it.
+          lock: run.state === "way" ? null : step.nobody ? "No LOCK names anybody for it." : run.state === "locked" ? `${these} ${run.first === run.last ? "is" : "are each"} named by a LOCK.` : `No LOCK names ${these}.`,
+          state: run.state, first: run.first, last: run.last, lane: run.lane, lanes: run.lanes, nobody: step.nobody,
           top: (top - from) / 60, height: (bottom - top) / 60,
           begins: part.begins && top === part.from,
           ends: part.ends && bottom === part.to && step.late === null,
@@ -291,5 +291,5 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
     const time = clock(bound, { at: trip.days[bound.day].date });
     days[bound.day].bounds.push({ says: `The TRIP ${word} at ${time}`, edge: word, top: down(bound.second), clash: ruled.has(bound.record), record: bound.record });
   }
-  return { says, zone: trip.zone, itinerary: trip.itinerary, clash: marked.size > 0, warned, asked, persons: trip.persons, hours: { from: from / 60, to: to / 60 }, days, untimed };
+  return { says, zone: trip.zone, itinerary: trip.itinerary, clash: marked.size > 0, warned, asked, persons: trip.persons, nobody, hours: { from: from / 60, to: to / 60 }, days, untimed };
 }

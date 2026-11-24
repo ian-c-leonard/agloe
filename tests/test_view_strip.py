@@ -24,7 +24,17 @@ from agloe.answers import Answer, Report
 from agloe.file import File
 from agloe.reference import Step
 from agloe.view.trip import holds
-from tests.stories import EXAMPLES, lasts, lock, seconds, starts_at, stays, trip, way_between
+from tests.stories import (
+    EXAMPLES,
+    lasts,
+    lock,
+    moves,
+    seconds,
+    starts_at,
+    stays,
+    trip,
+    way_between,
+)
 from tests.test_view_calendar import (
     RECORDS,
     alone,
@@ -40,6 +50,10 @@ STORY = EXAMPLES / "flight-home"
 DAYS = EXAMPLES / "several-days"
 CHICAGO = "[America/Chicago]"
 SAYS = "All the days of the calendar on one strip, a row for each PERSON."
+NOBODY = (
+    "All the days of the calendar on one strip, a row for each PERSON and one for the steps"
+    " with nobody of the TRIP in them."
+)
 CUT = " It leaves out the hours that the calendar does not show."
 CLICK = " Click a step to see it in the calendar."
 WIDE = 844  # pixels: the room of the strip in a window of the usual width
@@ -672,3 +686,74 @@ def test_whatever_calendar_the_page_draws_has_a_strip_or_needs_none() -> None:
             assert day["x"] - 1e-6 <= bound["x"] <= day["x"] + day["w"] - 2 + 1e-6
     assert with_a_strip > 100
     assert merged > 10
+
+
+def test_the_strip_has_a_row_for_the_steps_with_nobody_in_them() -> None:
+    """Alex visits the hall on Saturday and on Sunday. A van runs on each day with nobody of
+    the TRIP in it. The strip has a row after Alex's, and each van is in that row."""
+    file = trip(
+        ["alex"],
+        ["hall", "port"],
+        [
+            stays("visit", "hall"),
+            stays("again", "hall"),
+            moves("van", "hall", "port"),
+            moves("other-van", "hall", "port"),
+        ],
+        [starts_at("visit", 10)],
+        [],
+    )
+    day = 86400
+    plan = (
+        Step("visit", "hall", "hall", ("alex",), seconds(10), seconds(11)),
+        Step("van", "hall", "port", (), seconds(14), seconds(15, 30)),
+        Step("again", "hall", "hall", ("alex",), seconds(10) + day, seconds(11) + day),
+        Step("other-van", "hall", "port", (), seconds(14) + day, seconds(15, 30) + day),
+    )
+    sent = sent_for(file, Report(Answer.FEASIBLE, itinerary=plan))
+    band = a_strip(sent)
+    assert band["nobody"] is True
+    assert band["persons"] == [{"id": "alex", "name": "alex"}]
+    assert band["says"] == NOBODY + CUT + CLICK
+    rows = sorted(
+        (mark["of"][0]["day"], mark["of"][0]["name"], mark["first"], mark["last"], mark["small"])
+        for mark in band["marks"]
+    )
+    assert rows == [
+        (0, "van", 1, 1, False),
+        (0, "visit", 0, 0, False),
+        (1, "again", 0, 0, False),
+        (1, "other-van", 1, 1, False),
+    ]
+    assert all(
+        each["nobody"] is (each["name"] != "visit" and each["name"] != "again")
+        for mark in band["marks"]
+        for each in mark["of"]
+    )
+    # On a strip too narrow to draw a van, it is a small mark in the row of the vans, and it
+    # joins nothing in Alex's row.
+    narrow = a_strip(sent, wide=16)
+    small = [
+        ([each["name"] for each in mark["of"]], mark["first"], mark["last"])
+        for mark in narrow["marks"]
+        if mark["small"]
+    ]
+    assert any(row == 1 for _, row, _ in small)
+    # Every step is on the strip once, wide or narrow, and each in its own row: a van in
+    # the row after Alex's, and a visit in Alex's.
+    for band_of in (band, narrow):
+        on_it = [
+            (each["name"], mark["first"], mark["last"])
+            for mark in band_of["marks"]
+            for each in mark["of"]
+        ]
+        assert sorted(on_it) == [
+            ("again", 0, 0),
+            ("other-van", 1, 1),
+            ("van", 1, 1),
+            ("visit", 0, 0),
+        ]
+    # A plan with somebody in every step has no such row, and the strip says so.
+    everybody = sent_for(file, Report(Answer.FEASIBLE, itinerary=(plan[0], plan[2])))
+    plain = a_strip(everybody)
+    assert (plain["nobody"], plain["says"]) == (False, SAYS + CUT + CLICK)

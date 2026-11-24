@@ -6,7 +6,7 @@
 // right to take part in an OPTION. Each part of the page that shows an OPTION says the same
 // of it, in the same words.
 
-import { listed } from "./named.js";
+import { listed, someone } from "./named.js";
 
 /**
  * Whether a PERSON needs a right to take part in each OPTION of a TRIP as the view sends it,
@@ -33,7 +33,8 @@ export function needsARight(trip) {
  */
 export function whoIsIn(trip) {
   const person = new Map(trip.persons.map((each) => [each.id, each.name]));
-  const names = (ids) => ids.map((id) => person.get(id));
+  // A PERSON who is called nobody is told from nobody at all.
+  const names = (ids) => ids.map((id) => someone(person.get(id)));
   return (id) => {
     const step = trip.steps.findIndex((each) => each.option === id);
     const locked = names(trip.options.find((each) => each.id === id)?.locked ?? []);
