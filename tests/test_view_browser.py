@@ -2726,8 +2726,13 @@ def test_the_page_lists_what_is_open_above_everything_that_it_draws(
         page.locator("#report .row").first.wait_for()
         page.locator("#calendar .mark").first.wait_for()
         page.locator("#open .entry").first.wait_for()
-        assert page.text_content("#open-says") == (
-            "No plan works. Times are on the clocks of America/Chicago."
+        assert page.text_content("#open-says") == "No plan works."
+        # Over the records is the report's own line: which kinds they are, and what taking
+        # one away means.
+        assert page.text_content("#open .open-kind") == (
+            "These FACTs and DECISIONs rule out every plan by themselves. Take any one away and"
+            " they no longer do. A FACT that is taken away leaves what it said unknown. Times"
+            " are in America/Chicago."
         )
         listed = page.evaluate(rows)
         assert len(listed) == 8 and all(row["mark"] == "clash" for row in listed)
@@ -2747,6 +2752,47 @@ def test_the_page_lists_what_is_open_above_everything_that_it_draws(
             "() => [...document.querySelectorAll('#report .row.lit')]"
             ".some((row) => row.dataset.record === 'case:1')"
         )
+        # What the report says after its cases is under them, a line of the list for each
+        # line of the report. The line of a BUDGET is a drawing of that BUDGET.
+        also = page.locator("#open .open-also span")
+        assert also.nth(0).text_content() == (
+            "Who buys which place is from one plan that works in that case. A place with a"
+            " price above nothing is paid from a BUDGET that lists the PERSON who takes it and"
+            " holds the currency of the price. The BUDGETs of this FILE:"
+        )
+        assert also.nth(1).text_content() == "the trip money: for Alex and Sam; it holds USD"
+        also.nth(1).hover()
+        found = lit(page, budgets=["the trip money"], marks=[])
+        assert found["rows"] == ["  the trip money: for Alex and Sam; it holds USD"]
+        page.wait_for_function("() => document.querySelector('#open .open-under.lit') !== null")
+    # A case can hold only under a condition that the report states on another line. The
+    # plan and the cap that the report sets under the case stay with it.
+    with opened(chromium, EXAMPLES / "a-ticket" / "depends-on-the-receipt.json") as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#open .entry").first.wait_for()
+        (case,) = page.evaluate(rows)
+        assert [words.split(":")[0] for words in case["says"]] == [
+            "The trip works if the FILE states what alex-skydeck-ticket paid and from which"
+            " BUDGET.",
+            "One plan that works then",
+            "trip-cap, on the trip money",
+        ]
+        assert case["says"][2].endswith("That leaves 18.00 USD for whatever else is charged to it.")
+        assert page.text_content("#contents .to") == "To do and to decide1"
+        # The line of the plan is a drawing of the OFFER that Sam buys a place of.
+        page.locator("#open .entry-more").first.hover()
+        lit(page, rights=["skydeck-tickets"])
+        # The keyboard goes through the case and the lines under it, and on to what the
+        # report says after them.
+        page.locator("#open-part").evaluate(
+            "(part) => part.querySelector('[tabindex=\"0\"]').focus()"
+        )
+        stops: list[str] = []
+        for _ in range(5):
+            stops.append(page.evaluate("() => document.activeElement.className.split(' ')[0]"))
+            page.keyboard.press("ArrowDown")
+        assert stops == ["entry", "entry-more", "entry-more", "open-under", "open-under"]
+        lit(page, budgets=["the trip money"])
     # What the report warns of at a step is on the list with that step.
     with opened(chromium, EXAMPLES / "a-ticket" / "not-bought-yet.json") as page:
         page.locator("#report .row").first.wait_for()
@@ -2755,8 +2801,18 @@ def test_the_page_lists_what_is_open_above_everything_that_it_draws(
         (ticket,) = page.evaluate(rows)
         assert ticket["mark"] == "warned"
         assert ticket["says"][0] == "Skydeck visit"
+        # The item is of what its line of the report is about: the step, and the OFFER that
+        # Sam still has to buy a place of.
         page.locator("#open .entry").hover()
-        lit(page, marks=["Skydeck visit"])
+        found = lit(page, marks=["Skydeck visit"], rights=["skydeck-tickets"])
+        assert any(row.startswith("    ! Sam still has to buy") for row in found["rows"])
+        # The other way round: pointing at the OFFER lights up the item.
+        page.locator("#rights .entry", has_text="skydeck-tickets").hover()
+        page.wait_for_function("() => document.querySelectorAll('#open .entry.lit').length === 1")
+        # With the keyboard on the item, the same is lit.
+        page.locator("#report").hover()
+        page.locator("#open .entry").focus()
+        lit(page, marks=["Skydeck visit"], rights=["skydeck-tickets"])
     # Before the report comes, nothing says what is open, and the page has no such list.
     path = tmp_path / "trip.json"
     path.write_bytes((EXAMPLES / "flight-home" / "works.json").read_bytes())
