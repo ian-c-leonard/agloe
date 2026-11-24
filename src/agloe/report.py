@@ -1482,6 +1482,17 @@ def _record(file: File, clock: Clock, record: str) -> str:
         closed = "nobody on the trip holds another or can get one"
         if found.offers:
             closed += f", except from {_listed(found.offers)}"
+        # That is about the PERSONs who take part. Where the OPTION needs a right for an
+        # OBJECT, or might, the line says that this FACT leaves that right open.
+        things = _names(file.objects, "or")
+        left_open = [
+            things[thing.id]
+            for thing in file.objects
+            if file.needs_right_for(found.option, thing.id) is not False
+        ]
+        if left_open:
+            about = "that is about the PERSONs who take part"
+            closed += f"; {about}, and it says nothing of a right for {_listed(left_open, 'or')}"
         return f"the FILE lists every right to {name}: {closed}"
     return _cutoff(file, name, found)
 

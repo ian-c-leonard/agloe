@@ -33,6 +33,7 @@ from tests.stories import (
     Document,
     carries,
     does_with,
+    every_right,
     every_right_for,
     every_transfer,
     every_use,
@@ -42,6 +43,8 @@ from tests.stories import (
     lies_at,
     lock,
     moves,
+    needs_no_right,
+    needs_right,
     needs_right_for,
     requires_object,
     seconds,
@@ -74,13 +77,14 @@ def booking(option: str, *covers: str) -> Document:
     return {"id": f"{option}-booking", "booking": {"option": option, "covers": list(covers)}}
 
 
-def a_ferry(*facts: Document, holds: bool = True, drive: bool = True) -> File:
+def a_ferry(*facts: Document, holds: bool = True, drive: bool = True, rights: bool = False) -> File:
     """Alex takes the car ferry from Milwaukee to Muskegon at 6:00 am, and a LOCK says so.
 
     With ``holds``, Alex has the hire car when the TRIP starts. Otherwise it stands on the
     quay at Milwaukee, and the ferry can carry it. With ``drive``, a drive at Muskegon at
     9:00 am requires the car, and Alex is LOCKed into it. The FILE says about rights for
-    the car only what ``facts`` says.
+    the car only what ``facts`` says. With ``rights``, it says about rights for the PERSONs
+    only what ``facts`` says too. Otherwise nobody needs one.
     """
     options = [moves("ferry", "milwaukee", "muskegon"), stays("drive", "muskegon")]
     stated = [
@@ -96,7 +100,16 @@ def a_ferry(*facts: Document, holds: bool = True, drive: bool = True) -> File:
     ]
     locks = [lock("ferry", "alex"), *([lock("drive", "alex")] if drive else [])]
     places = ["milwaukee", "muskegon"]
-    return trip(["alex"], places, options, stated, locks, objects=["car"], object_rights=True)
+    return trip(
+        ["alex"],
+        places,
+        options,
+        stated,
+        locks,
+        rights=rights,
+        objects=["car"],
+        object_rights=True,
+    )
 
 
 TICKET = needs_right_for("ferry", "car")
@@ -499,6 +512,31 @@ def test_the_report_names_a_booking_only_where_the_object_needs_its_right() -> N
     assert covered_in(a_ferry(*free, covers)) == [("drive", None)]
 
 
+def test_a_complete_set_of_rights_says_nothing_of_a_right_for_an_object() -> None:
+    """The ferry needs a right for each PERSON, and a FACT says that the FILE lists every
+    right to it. No BOOKING covers Alex, so Alex cannot board. That FACT is about the
+    PERSONs who take part. Where the ferry needs a right for the car, or might, the line
+    of the report says that the FACT leaves that right open."""
+    sold_out = [needs_right("ferry"), every_right("ferry"), needs_no_right("drive")]
+
+    def line(*about_the_car: Document) -> str:
+        file = a_ferry(*sold_out, *about_the_car, rights=True)
+        found = checked(file)
+        assert found.answer is Answer.INFEASIBLE
+        words = report.as_text(file, found).split("\n")
+        (said,) = [each for each in words if each.startswith("  every-right-to-ferry: ")]
+        return said.removeprefix("  every-right-to-ferry: ")
+
+    whole = "the FILE lists every right to ferry: nobody on the trip holds another or can get one"
+    scope = "; that is about the PERSONs who take part, and it says nothing of a right for car"
+    assert line(TICKET, NO_OTHER) == f"{whole}{scope}"
+    # Nobody says whether the ferry needs a right for the car: it might.
+    assert line(needs_right_for("drive", "car", False)) == f"{whole}{scope}"
+    # A FACT says that it needs none, or that the FILE states every OPTION that does.
+    assert line(needs_right_for("ferry", "car", False)) == whole
+    assert line(NO_OTHER) == whole
+
+
 def test_a_car_with_no_ticket_might_have_another() -> None:
     file = a_ferry(TICKET, NO_OTHER)
     found = checked(file)
@@ -846,9 +884,9 @@ def test_a_booking_that_covers_the_object_leaves_nothing_to_ask_about_the_right(
     FACT about the right is among what the FILE leaves unknown."""
     covers = booking("ferry", "bike")
     file = a_quay(requires_object("ferry", "bike"), carries("ferry", "bike"), covers)
-    silent = replace(
-        file, facts=tuple(fact for fact in file.facts if not isinstance(fact, NeedsRightFor))
-    )
+    silent = without(without(file, "ferry-right-for-bike"), "every-right-for-bike")
+    assert file.needs_right_for("ferry", "bike") is True
+    assert silent.needs_right_for("ferry", "bike") is None
     for each in (file, silent):
         about_rights = ("needs no right for", "another right for")
         assert not [unknown for unknown in unknowns(each) if unknown.what in about_rights]
