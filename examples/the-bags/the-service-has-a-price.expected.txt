@@ -1,0 +1,52 @@
+FEASIBLE, with a WARNING: this trip works, but not everything is booked yet.
+
+Saturday 15 May 2027 (times in America/Chicago)
+  1:00 pm to 2:30 pm: Museum visit, Alex and Sam
+  2:00 pm to 3:30 pm: Luggage service
+    ! A right to this still has to be bought for the bags, from bag-transfer, for 25.00 USD from the trip money.
+    This carries the bags.
+  2:30 pm to 3:30 pm: the Blue Line to O'Hare, Alex and Sam
+  5:00 pm to 7:30 pm: Flight home, Alex and Sam
+
+WARNING: not everything is booked yet. A line marked "!" that names an OFFER says which OBJECT still needs a right. Only a BOOKING secures one.
+
+The plan relies on these FACTs and DECISIONs:
+  alex-start: Alex starts from the Art Institute
+  sam-start: Sam starts from the Art Institute
+  visit-time: Museum visit starts at 1:00 pm on Saturday 15 May 2027
+  visit-length: Museum visit takes 1 h 30 min
+  visit-arrival: nobody has to be at the Art Institute before Museum visit starts
+  visit-needs-a-ticket: people need a right to take part in Museum visit
+  museum-tickets: a BOOKING for Museum visit covers Alex and Sam
+  service-time: Luggage service starts at 2:00 pm on Saturday 15 May 2027
+  service-length: Luggage service takes 1 h 30 min
+  service-arrival: nobody has to be at the hotel before Luggage service starts
+  service-needs-a-ticket: people need a right to take part in Luggage service
+  flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
+  flight-length: Flight home takes 2 h 30 min
+  bag-drop: people must be at O'Hare 45 min before Flight home starts
+  flight-needs-a-ticket: people need a right to take part in Flight home
+  flight-tickets: a BOOKING for Flight home covers Alex and Sam
+  blue-line-length: the Blue Line to O'Hare takes 1 h
+  where-the-bags-start: the TRIP starts with the bags at the hotel
+  flight-needs-the-bags: Flight home requires the bags
+  service-carries-the-bags: Luggage service can carry the bags
+  service-needs-a-bag-ticket: Luggage service needs a right for the bags
+  every-use-of-the-bags: of the OPTIONs in this FILE, only Flight home requires the bags, and none refuses the bags
+  everything-that-moves-the-bags: the FILE states every OPTION that hands over, keeps or carries the bags: Luggage service
+  every-ticket-for-the-bags: of the OPTIONs in this FILE, only Luggage service needs a right for the bags
+  bag-transfer: an OFFER has 2 places for Luggage service that can still be bought to cover the bags, for 25.00 USD each
+  trip-start: the TRIP starts at 1:00 pm on Saturday 15 May 2027
+  lock-visit: Alex and Sam take part in Museum visit
+  lock-flight: Alex and Sam take part in Flight home
+
+Where each OBJECT is:
+  the bags: at the hotel when the TRIP starts; in Luggage service from 2:00 pm (carried); at O'Hare from 3:30 pm (where Luggage service ends)
+    Luggage service needs a right for the bags. Just before it starts: at the hotel. A place from bag-transfer covers the bags, once it is bought.
+    Flight home requires the bags. Just before it starts: at O'Hare.
+
+What the BOOKINGs state that they paid:
+  No payment is stated for museum-tickets and flight-tickets.
+
+The money of this plan, by currency:
+  USD: 25.00 still to buy (bag-transfer)

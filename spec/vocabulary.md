@@ -113,9 +113,9 @@ A physical thing with a position that OPTIONs may require, refuse or move: a ren
 
 ### BUDGET
 
-A store of one or more currencies that OPTIONs, OFFERs and BOOKINGs draw on: money, loyalty points, energy. A BUDGET belongs to one PERSON or is shared by several, and states which PERSONs may draw on it. Each currency either has a limit or is unlimited. Limits never mix currencies: no conversion ever decides whether a limit is kept. A currency may refill on a stated event, as energy does with a night's sleep; money never refills.
+A store of one or more currencies that OPTIONs, OFFERs and BOOKINGs draw on: money, loyalty points, energy. A BUDGET belongs to one PERSON or is shared by several, and lists the PERSONs who may draw on it and the OBJECTs whose places it may pay for. Each currency either has a limit or is unlimited. Limits never mix currencies: no conversion ever decides whether a limit is kept. A currency may refill on a stated event, as energy does with a night's sleep; money never refills.
 
-*Uses:* PERSON, → OPTION, → OFFER, → BOOKING.
+*Uses:* PERSON, → OBJECT, → OPTION, → OFFER, → BOOKING.
 
 ---
 

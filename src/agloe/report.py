@@ -16,7 +16,17 @@ from datetime import date, timedelta
 from decimal import Decimal
 from itertools import groupby
 
-from agloe.answers import Answer, CapRow, Carried, Cover, Missing, Plan, Report
+from agloe.answers import (
+    Answer,
+    CapRow,
+    Carried,
+    Cover,
+    Missing,
+    Plan,
+    Report,
+    bought_if_needed,
+    right_needed,
+)
 from agloe.file import (
     Booking,
     Cap,
@@ -111,9 +121,12 @@ def as_json(file: File, report: Report) -> dict[str, object]:
     """The Report in the shape of the expected results beside the examples."""
     out: dict[str, object] = {"answer": report.answer.value}
     if report.answer is Answer.FEASIBLE:
+        # What gives each PERSON their right. A place that covers an OBJECT is under
+        # "to_buy", and with the OBJECT under "objects".
         rights: dict[str | None, dict[str, str]] = {}
         for cover in report.rights:
-            rights.setdefault(cover.option, {})[cover.person] = cover.by
+            if cover.person is not None:
+                rights.setdefault(cover.option, {})[cover.person] = cover.by
         carried = _carried_in(report)
         out["itinerary"] = [
             {
@@ -169,25 +182,33 @@ def as_json(file: File, report: Report) -> dict[str, object]:
                             "stated": use.stated,
                             "where": [_where_as_json(each) for each in use.where],
                             "booking": use.by,
+                            **({"offer": use.offer} if use.offer is not None else {}),
                         }
                         for use in carried.uses
-                        if use.by is not None
+                        if use.by is not None or use.offer is not None
                     ],
                 }
                 for carried in report.objects
             ]
-        if _to_buy(report):
+        if _to_buy(file, report):
             out["to_buy"] = [
                 {
                     "option": option,
                     "offer": offer,
-                    "persons": [cover.person for cover in covers],
-                    "only_if_needed": file.needs_right(option) is None,
+                    "persons": [cover.person for cover in covers if cover.person is not None],
+                    **(
+                        {"objects": [cover.object for cover in covers]}
+                        if covers[0].object is not None
+                        else {}
+                    ),
+                    "only_if_needed": if_needed,
                     "price": _money_as_json(covers[0].price),
                     "budget": budget,
                 }
-                for (option, offer, budget), covers in _to_buy(report).items()
+                for (option, offer, budget, if_needed), covers in _to_buy(file, report).items()
             ]
+        if _together(report.rights):
+            out["places_together"] = _together_as_json(report.rights)
         money = _money(file, report)
         if money is not None:
             out["money"] = {
@@ -228,14 +249,20 @@ def as_json(file: File, report: Report) -> dict[str, object]:
                 "buys": [
                     {
                         "person": cover.person,
+                        **({"object": cover.object} if cover.object is not None else {}),
                         "option": cover.option,
                         "offer": cover.by,
                         "price": _money_as_json(cover.price),
                         "budget": cover.budget,
-                        "only_if_needed": file.needs_right(cover.option) is None,
+                        "only_if_needed": right_needed(file, cover) is None,
                     }
                     for cover in plan.buys
                 ],
+                **(
+                    {"places_together": _together_as_json(plan.buys)}
+                    if _together(plan.buys)
+                    else {}
+                ),
                 "caps": [_cap_as_json(file, row) for row in plan.caps],
             }
             for plan in report.plans
@@ -264,10 +291,50 @@ def as_json(file: File, report: Report) -> dict[str, object]:
         out["not_stated"] = [each for each in _with_no_payment(file) if each in report.conflict]
     if _turns_on_who_pays(report):
         out["budgets"] = [
-            {"id": each.id, "persons": list(each.persons), "currencies": list(each.currencies)}
+            {
+                "id": each.id,
+                "persons": list(each.persons),
+                **({"objects": list(each.objects)} if each.objects else {}),
+                "currencies": list(each.currencies),
+            }
             for each in file.budgets
         ]
     return out
+
+
+def _together(covers: Sequence[Cover]) -> dict[str, tuple[tuple[str, ...], ...]]:
+    """The sets of OPTIONs where an OBJECT takes places together, for each OBJECT with several.
+
+    Such an OBJECT is in one place at a time, and nobody knows where. So it takes the
+    places of one set, and never of two.
+    """
+    return {
+        cover.object: cover.together
+        for cover in covers
+        if cover.object is not None and cover.together
+    }
+
+
+def _together_as_json(covers: Sequence[Cover]) -> list[dict[str, object]]:
+    return [
+        {"object": thing, "options": [list(some) for some in sets]}
+        for thing, sets in _together(covers).items()
+    ]
+
+
+def _together_in_words(file: File, name: str, sets: Sequence[Sequence[str]]) -> str:
+    """Which places for one OBJECT have to be bought together at most, in words.
+
+    ``name`` is the name to show for the OBJECT. Where each set is one OPTION, "or" joins
+    their names. Otherwise each OPTION has its own "for", and a semicolon parts the sets: a
+    name with a comma or a semicolon in it is shown in quotes.
+    """
+    if all(len(some) == 1 for some in sets):
+        options = _listed([_name(file, some[0], "or") for some in sets], "or")
+        return f"Of the places for {name}, at most one has to be bought: for {options}."
+    groups = [", ".join(f"for {_name(file, option)}" for option in some) for some in sets]
+    said = "; or ".join(groups)
+    return f"Of the places for {name}, at most these have to be bought together: {said}."
 
 
 def _cap_as_json(file: File, row: CapRow) -> dict[str, object]:
@@ -317,8 +384,9 @@ class _Sums:
     """The money of one currency: what BOOKINGs state they paid, and what the plan shown buys.
 
     ``if_needed`` holds the prices of the places it buys only if an OPTION turns out to need
-    a right. The OPTIONs are separate, so their sum is the most that those can come to. The
-    places bought come with the ids of their OFFERs.
+    a right, or an OBJECT turns out to be there: those that ``bought_if_needed`` counts, so
+    their sum is the most that such places can come to. The places bought come with the ids
+    of their OFFERs.
     """
 
     paid: list[Decimal] = field(default_factory=list[Decimal])
@@ -326,6 +394,7 @@ class _Sums:
     if_needed: list[Decimal] = field(default_factory=list[Decimal])
     offers: dict[str, None] = field(default_factory=dict[str, None])
     offers_if_needed: dict[str, None] = field(default_factory=dict[str, None])
+    might_be_there: bool = False  # a place for an OBJECT that only might be in its OPTION
 
 
 def _money(file: File, report: Report) -> dict[str, _Sums] | None:
@@ -345,15 +414,24 @@ def _money(file: File, report: Report) -> dict[str, _Sums] | None:
                 money.setdefault(fact.paid.money.currency, _Sums()).paid.append(
                     fact.paid.money.amount
                 )
-    for cover in report.rights:
-        if cover.to_buy and cover.price is not None and cover.price.amount:
-            sums = money.setdefault(cover.price.currency, _Sums())
-            if file.needs_right(cover.option) is None:
-                sums.if_needed.append(cover.price.amount)
-                sums.offers_if_needed[cover.by] = None
-            else:
-                sums.to_buy.append(cover.price.amount)
-                sums.offers[cover.by] = None
+    bought = [
+        cover
+        for cover in report.rights
+        if cover.to_buy and cover.price is not None and cover.price.amount
+    ]
+    for cover in bought:
+        if cover.price is None:
+            continue
+        sums = money.setdefault(cover.price.currency, _Sums())
+        if right_needed(file, cover) is None:
+            sums.offers_if_needed[cover.by] = None
+            sums.might_be_there = sums.might_be_there or cover.might
+        else:
+            sums.to_buy.append(cover.price.amount)
+            sums.offers[cover.by] = None
+    for currency, sums in money.items():
+        theirs = [cover for cover in bought if cover.price and cover.price.currency == currency]
+        sums.if_needed += [c.price.amount for c in bought_if_needed(file, theirs) if c.price]
     return money if money or stated else None
 
 
@@ -378,12 +456,18 @@ def _with_no_payment(file: File) -> list[str]:
     return [fact.id for fact in file.facts if isinstance(fact, Booking) and fact.paid is None]
 
 
-def _to_buy(report: Report) -> dict[tuple[str, str, str | None], list[Cover]]:
-    """Who still has to buy a right, for each OPTION, each OFFER it is from and each BUDGET."""
-    buyers: dict[tuple[str, str, str | None], list[Cover]] = {}
+def _to_buy(file: File, report: Report) -> dict[tuple[str, str, str | None, bool], list[Cover]]:
+    """Who still has to buy a right, for each OPTION, each OFFER it is from and each BUDGET.
+
+    An OFFER for OBJECTs has the OBJECTs that still need a right. With each group comes
+    whether the right has to be bought only if it turns out to be needed. That is the same
+    for all the PERSONs of an OPTION, and it can differ from one OBJECT to the next.
+    """
+    buyers: dict[tuple[str, str, str | None, bool], list[Cover]] = {}
     for cover in report.rights:
         if cover.to_buy:
-            buyers.setdefault((cover.option, cover.by, cover.budget), []).append(cover)
+            if_needed = right_needed(file, cover) is None
+            buyers.setdefault((cover.option, cover.by, cover.budget, if_needed), []).append(cover)
     return buyers
 
 
@@ -478,11 +562,14 @@ def _missing_as_json(needed: Missing) -> dict[str, object]:
             out["settled"] = False
         return out
     if unknown.about is not None:
-        out["booking" if unknown.what == "charged" else "offer"] = unknown.about
+        # What a BOOKING charged, the price of an OFFER, or a BUDGET that pays for an OBJECT.
+        kinds = {"charged": "booking", "funding": "object"}
+        out[kinds.get(unknown.what, "offer")] = unknown.about
     if needed.buys:
         out["buys"] = [
             {
                 "person": cover.person,
+                **({"object": cover.object} if cover.object is not None else {}),
                 "option": cover.option,
                 "offer": cover.by,
                 "price": _money_as_json(cover.price),
@@ -728,23 +815,28 @@ def _budgets(file: File, first: str = "") -> list[str]:
 
     ``first`` is a sentence to start with.
     """
+    for_objects = any(isinstance(fact, Offer) and fact.objects for fact in file.facts)
+    whom = "the PERSON who takes it, or the OBJECT that it covers," if for_objects else "the PERSON"
     rule = (
-        f"{first}A place with a price above nothing is paid from a BUDGET that lists the PERSON"
-        " who takes it and holds the currency of the price."
+        f"{first}A place with a price above nothing is paid from a BUDGET that lists {whom}"
+        f"{'' if for_objects else ' who takes it'} and holds the currency of the price."
     )
     if not file.budgets:
         return [f"{rule} This FILE names no BUDGET."]
     lines = [f"{rule} The BUDGETs of this FILE:"]
+    # One list of PERSONs and OBJECTs: no two of them show the same name.
+    shown = _names([*file.persons, *file.objects], "and")
     for budget in file.budgets:
-        who = _people(file, budget.persons)
-        whose = f"for {who}" if who else "it lists no PERSON"
+        listed = [shown[person.id] for person in file.persons if person.id in budget.persons]
+        listed += [shown[thing.id] for thing in file.objects if thing.id in budget.objects]
+        whose = f"for {_listed(listed)}" if listed else "it lists no PERSON"
         holds = _listed(budget.currencies)
         lines.append(f"  {_names(file.budgets)[budget.id]}: {whose}; it holds {holds}")
     return lines
 
 
 def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
-    to_buy = _to_buy(report)
+    to_buy = _to_buy(file, report)
     if not report.robust:
         lines = ["FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold."]
     elif to_buy:
@@ -786,10 +878,28 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
             " states.",
         ]
     if to_buy:
+        people = any(cover.person is not None for covers in to_buy.values() for cover in covers)
+        things = any(cover.object is not None for covers in to_buy.values() for cover in covers)
+        says = "who still has to buy a right" if people else ""
+        if things:
+            # A place for an OBJECT can be one that only might have to be bought.
+            for_sure = any(
+                covers[0].object is not None and not if_needed
+                for (_, _, _, if_needed), covers in to_buy.items()
+            )
+            maybe = any(
+                covers[0].object is not None and if_needed
+                for (_, _, _, if_needed), covers in to_buy.items()
+            )
+            needs = "still needs" if for_sure else "might still need"
+            a_right = "one" if people else "a right"
+            says += f"{' and ' if people else ''}which OBJECT {needs} {a_right}"
+            if for_sure and maybe:
+                says += ", or might"
         lines += [
             "",
             "WARNING: not everything is booked yet."
-            ' A line marked "!" that names an OFFER says who still has to buy a right.'
+            f' A line marked "!" that names an OFFER says {says}.'
             " Only a BOOKING secures one.",
         ]
     if report.relies_on:
@@ -797,7 +907,11 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
         for record in report.relies_on:
             # A BOOKING can cover more PERSONs than the plan credits to it.
             found = next((fact for fact in file.facts if fact.id == record), None)
-            credited = tuple(cover.person for cover in report.rights if cover.by == record)
+            credited = tuple(
+                cover.person
+                for cover in report.rights
+                if cover.by == record and cover.person is not None
+            )
             # The OBJECTs that the plan uses the BOOKING for.
             things = [
                 carried.object
@@ -836,8 +950,13 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
                 lines.append(f"  {name} requires {what} of {whom}. {who} {meet} that requirement.")
     if report.objects:
         lines += ["", "Where each OBJECT is:"]
+        together = _together(report.rights)
         for carried in report.objects:
             lines += _carried_in_words(file, clock, report.itinerary, carried)
+            if carried.object in together:
+                name = _names(file.objects)[carried.object]
+                said = _together_in_words(file, name, together[carried.object])
+                lines.append(f"    {said}")
     money = _money(file, report)
     if money is not None:
         people, pots = _names(file.persons, "and"), _names(file.budgets)
@@ -858,13 +977,15 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
             if sums.to_buy:
                 parts.append(f"{_added(sums.to_buy)} still to buy ({_listed(list(sums.offers))})")
             if sums.if_needed:
+                where = " and on where each OBJECT is" if sums.might_be_there else ""
                 parts.append(
                     f"up to {_added(sums.if_needed)} more, depending on which OPTIONs need a"
-                    f" right ({_listed(list(sums.offers_if_needed))})"
+                    f" right{where} ({_listed(list(sums.offers_if_needed))})"
                 )
             lines.append(f"  {currency}: {'; '.join(parts)}")
     if report.caps:
-        lines += ["", "The caps:", *(f"  {_cap_in_words(file, row)}" for row in report.caps)]
+        rows = (f"  {_cap_in_words(file, row, report.rights)}" for row in report.caps)
+        lines += ["", "The caps:", *rows]
     return lines
 
 
@@ -907,7 +1028,14 @@ def _carried_in_words(
     lines = [f"  {thing}: {'; '.join(stays)}"]
     for use in carried.uses:
         name, where = _name(file, use.option), _where(file, use.where)
-        if use.by is not None and use.stated:
+        if use.offer is not None and use.stated:
+            before = f"Just before it starts: {where}. A place from {use.offer} covers {thing}"
+            lines.append(f"    {name} {use.check} {thing}. {before}, once it is bought.")
+        elif use.offer is not None:
+            silent = f"The FILE does not say whether {name} {use.check} {thing}"
+            holds = f"A place from {use.offer} covers {thing}, so the plan holds if it does"
+            lines.append(f"    {silent}. Just before it starts: {where}. {holds}.")
+        elif use.by is not None and use.stated:
             before = f"Just before it starts: {where}. {use.by} covers {thing}"
             lines.append(f"    {name} {use.check} {thing}. {before}.")
         elif use.by is not None:
@@ -1014,17 +1142,31 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
             continue
         together.setdefault((number, found.constraint, found.late), []).extend(found.persons)
     marks: dict[int, list[str]] = {}
-    for (option, offer, budget), covers in _to_buy(report).items():
-        buyers = [cover.person for cover in covers]
-        have = "has" if len(buyers) == 1 else "have"
-        if_needed = "" if file.needs_right(option) else " if it needs one"
+    # One list of PERSONs and OBJECTs: no two of them show the same name.
+    shown = _names([*file.persons, *file.objects], "and")
+    for (option, offer, budget, only_if_needed), covers in _to_buy(file, report).items():
+        buyers = [cover.person for cover in covers if cover.person is not None]
+        covered = [cover.object for cover in covers if cover.object is not None]
+        one = len(covers) == 1
         price = covers[0].price
         if price is not None and budget is not None:
-            each = " each" if len(buyers) > 1 else ""
+            each = "" if one else " each"
             offer = f"{offer}, for {price}{each} from {_names(file.budgets)[budget]}"
         elif price is not None:
             offer = f"{offer}, at no cost"
-        mark = f"{_people(file, tuple(buyers))} still {have} to buy a right to this{if_needed}"
+        if covered:
+            # A place that covers an OBJECT: nobody takes it, so the mark names the OBJECT.
+            # A name can be of one thing or of several, so no verb follows it.
+            named = [shown[thing.id] for thing in file.objects if thing.id in covered]
+            things = named[0] if one else f"each of {_listed(named)}"
+            # Where nobody knows whether the right is needed, it might have to be bought:
+            # the OPTION might need none, or the OBJECT might not be in it.
+            might = "might still have" if only_if_needed else "still has"
+            mark = f"A right to this {might} to be bought for {things}"
+        else:
+            if_needed = " if it needs one" if only_if_needed else ""
+            who = _people(file, tuple(buyers))
+            mark = f"{who} still {'has' if one else 'have'} to buy a right to this{if_needed}"
         marks.setdefault(line_of_option[option], []).append(f"{mark}, from {offer}.")
     for (number, constraint, late), persons in together.items():
         who = _people(file, tuple(persons))
@@ -1262,7 +1404,15 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
             "another right for": _OwnWords(f"a right to {name} is found that covers {thing}"),
         }[unknown.what]
     if unknown.what == "price":
-        buyers = tuple(cover.person for cover in needed.buys)
+        covered = [cover.object for cover in needed.buys if cover.object is not None]
+        if covered:
+            # The places of an OFFER for OBJECTs: nobody takes them, so the OBJECTs are named.
+            shown = _names([*file.persons, *file.objects], "and")
+            things = _listed([shown[thing.id] for thing in file.objects if thing.id in covered])
+            each = "each of " if len(covered) > 1 else ""
+            can_be_paid = f"has a price that can be paid for {each}{things}"
+            return _OwnWords(f"a place from {unknown.about} {can_be_paid}")
+        buyers = tuple(cover.person for cover in needed.buys if cover.person is not None)
         each = " each" if len(buyers) > 1 else ""
         who = _people(file, buyers)
         return _OwnWords(f"a place from {unknown.about} has a price that {who} can{each} pay")
@@ -1275,7 +1425,6 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
         paid = f"the {booking.paid.money} of {booking.id}"
         return _OwnWords(f"the FILE states which BUDGET {paid} came from")
     if unknown.what == "funding":
-        who = _people(file, (unknown.person or "",))
         places = [
             f"one from {cover.by} at a price that the FILE has yet to state"
             if cover.price is None
@@ -1283,6 +1432,12 @@ def _wanted(file: File, needed: Missing, alone: bool) -> str:
             for cover in needed.buys
         ]
         within = ", within its caps" if file.caps else ""
+        if unknown.person is None:
+            # A BUDGET that can pay for an OBJECT: the places are those that cover it.
+            what = _names([*file.persons, *file.objects], "and")[unknown.about or ""]
+            can_be_paid = f"can be paid from a BUDGET that lists {what}{within}"
+            return _OwnWords(f"each place that covers {what} {can_be_paid} ({', '.join(places)})")
+        who = _people(file, (unknown.person,))
         can_be_paid = f"can be paid from a BUDGET that lists {who}{within}"
         return _OwnWords(f"each place that {who} has to buy {can_be_paid} ({', '.join(places)})")
     if unknown.what == "other ways":
@@ -1474,7 +1629,14 @@ def _record(file: File, clock: Clock, record: str) -> str:
     if isinstance(found, Offer):
         each = " each" if found.places > 1 else ""
         price = "; nobody knows the price" if found.price is None else f", for {found.price}{each}"
-        return f"an OFFER has {_places(found.places)} for {name} that can still be bought{price}"
+        bought = "that can still be bought"
+        if found.objects:
+            # Each place covers one of the OBJECTs it names. They are named as a BOOKING
+            # names them: no PERSON shows the same name.
+            shown = _names([*file.persons, *file.objects], "or")
+            named = [shown[thing.id] for thing in file.objects if thing.id in found.objects]
+            bought += f" to cover {_listed(named, 'or')}"
+        return f"an OFFER has {_places(found.places)} for {name} {bought}{price}"
     if isinstance(found, CompleteRights):
         # Each such FACT says what it is about: the PERSONs who take part, or one OBJECT.
         closed = "nobody on the trip holds another or can get one"
@@ -1486,12 +1648,18 @@ def _record(file: File, clock: Clock, record: str) -> str:
         # name with "and" in it is in quotes, so that it is not read as two things.
         thing = _names([*file.persons, *file.objects], "and")[found.object]
         closed = "nobody on the trip holds another or can get one"
+        if found.offers:
+            closed += f", except from {_listed(found.offers)}"
         return f"the FILE lists every right to {name} that covers {thing}: {closed}"
     return _cutoff(file, name, found)
 
 
-def _cap_in_words(file: File, row: CapRow) -> str:
-    """One cap of a plan that works: its limit, and what is charged to it."""
+def _cap_in_words(file: File, row: CapRow, rights: Sequence[Cover] = ()) -> str:
+    """One cap of a plan that works: its limit, and what is charged to it.
+
+    ``rights`` holds what the plan buys: a place for an OBJECT that only might be in its
+    OPTION is bought only if the OBJECT is there.
+    """
     cap = next(each for each in file.caps.values() if each.id == row.cap)
     places = -int(cap.limit.amount.as_tuple().exponent)
     parts = [f"{_amount(row.paid, places)} paid"]
@@ -1501,13 +1669,22 @@ def _cap_in_words(file: File, row: CapRow) -> str:
         names = _listed([booking for booking, _ in known])
         parts.append(f"up to {most} more that {names} might have paid from it")
     parts.append(f"{_amount(row.to_buy, places)} still to buy")
+    # A place for an OBJECT that only might be in its OPTION, charged to this cap.
+    there = any(_charged_to(cap, cover) and cover.might for cover in rights)
     if row.if_needed:
         more = _amount(row.if_needed, places)
-        parts.append(f"up to {more} more to buy, depending on which OPTIONs need a right")
+        where = " and on where each OBJECT is" if there else ""
+        parts.append(f"up to {more} more to buy, depending on which OPTIONs need a right{where}")
     # A BOOKING that might have charged the cap is counted in full, so more may be left.
     parts.append(f"{'at least ' if known else ''}{_amount(row.left, places)} left")
     pot = _names(file.budgets)[cap.budget]
     return f"{cap.id}: at most {cap.limit} from {pot}: {'; '.join(parts)}"
+
+
+def _charged_to(cap: Cap, cover: Cover) -> bool:
+    """Whether what a place costs is charged to this cap: to its BUDGET, in its currency."""
+    price = cover.price
+    return cover.budget == cap.budget and price is not None and price.currency == cap.limit.currency
 
 
 def _plan_in_words(file: File, plan: Plan) -> list[str]:
@@ -1515,7 +1692,13 @@ def _plan_in_words(file: File, plan: Plan) -> list[str]:
     pots = _names(file.budgets)
     buys: list[str] = []
     for cover in plan.buys:
-        place = f"{_people(file, (cover.person,))} buys a place from {cover.by}"
+        if cover.person is None:
+            # A place that covers an OBJECT: nobody takes it, so the OBJECT is named. A
+            # name can be of one thing or of several, so no verb follows it.
+            thing = _names([*file.persons, *file.objects], "and")[cover.object or ""]
+            place = f"a place from {cover.by} covers {thing},"
+        else:
+            place = f"{_people(file, (cover.person,))} buys a place from {cover.by}"
         if cover.price is None:
             place += " at a price that the FILE has yet to state"
         elif not cover.price.amount:
@@ -1524,11 +1707,17 @@ def _plan_in_words(file: File, plan: Plan) -> list[str]:
             place += f" for {cover.price}"
         if cover.budget is not None:
             place += f" from {pots[cover.budget]}"
-        if file.needs_right(cover.option) is None:
+        if right_needed(file, cover) is None and cover.person is None:
+            place += ", if a right is needed there"
+        elif right_needed(file, cover) is None:
             place += ", if the OPTION needs a right"
         buys.append(place)
     nothing = "nobody buys a place from an OFFER of this FILE"
     lines = [f"One plan that works then: {'; '.join(buys) or nothing}."]
+    shown = _names([*file.persons, *file.objects], "and")
+    lines += [
+        _together_in_words(file, shown[thing], sets) for thing, sets in _together(plan.buys).items()
+    ]
     for row in plan.caps:
         cap = next(each for each in file.caps.values() if each.id == row.cap)
         places = -int(cap.limit.amount.as_tuple().exponent)
@@ -1541,7 +1730,11 @@ def _plan_in_words(file: File, plan: Plan) -> list[str]:
         if row.to_buy:
             terms.append(f"{_amount(row.to_buy, places)} still to buy")
         if row.if_needed:
-            terms.append(f"up to {_amount(row.if_needed, places)} more if OPTIONs need a right")
+            # A place for an OBJECT that only might be in its OPTION is bought if it is there.
+            there = any(_charged_to(cap, cover) and cover.might for cover in plan.buys)
+            or_there = " or an OBJECT is there" if there else ""
+            more = _amount(row.if_needed, places)
+            terms.append(f"up to {more} more if OPTIONs need a right{or_there}")
         counted = "; ".join(terms) or "nothing so far"
         left = f"{_amount(row.left, places)} {cap.limit.currency}"
         open_ended = [booking for booking, units in row.might if units and booking not in row.asked]

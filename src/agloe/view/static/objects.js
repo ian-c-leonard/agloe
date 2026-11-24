@@ -22,7 +22,7 @@
 // and nobody who has it can take part. That is what the two FACTs mean in every TRIP. An
 // OPTION that carries the OBJECT and refuses it still carries it, from no PERSON.
 
-import { atHandFor, carriedIn, either, listed, marksBy } from "./named.js";
+import { atHandFor, carriedIn, either, listed, marksBy, togetherIn } from "./named.js";
 import { clock, clocksOf } from "./times.js";
 import { whoIsIn } from "./who.js";
 
@@ -135,8 +135,10 @@ function ticketedBy(thing, silent) {
  * says where it is throughout the plan. `plan` on an OPTION that requires it or refuses it
  * says where it is just before that OPTION starts. `might` holds each OPTION of the plan of
  * which the report says that the FILE does not say whether it requires the OBJECT, or
- * whether it refuses it, with the same. Where the report names something that the TRIP does
- * not hold, nothing is said of that OBJECT.
+ * whether it refuses it, with the same. `together` says which of the places that it takes
+ * of OFFERs have to be bought together at most, where the report says in which OPTIONs it
+ * takes places together. Where the report names something that the TRIP does not hold,
+ * nothing is said of that OBJECT.
  *
  * `report` is the report as JSON, where the page has one. `clash` on an OBJECT or on one of
  * its OPTIONs holds its `records` that the report names as ruling out every plan, and `finds`
@@ -176,6 +178,7 @@ export function objects(trip, report = null, stated = null) {
     return outside.length === people.size + places.size + 1 ? "nobody knows where" : listed(each, "or");
   };
   const carried = new Map(carriedIn(report).map((each) => [each.object, each]));
+  const inSets = new Map(togetherIn(report).map((each) => [each.object, each.options]));
   // Whether a card gives a time of the plan. The part then says whose clocks it is on.
   let timed = false;
   const shown = trip.objects.map((thing) => {
@@ -196,17 +199,18 @@ export function objects(trip, report = null, stated = null) {
       if (how === undefined) return null;
       return `${where} from ${clock(startOf.get(stay.since), first)} (${how(named.get(stay.since), thing.name)})`;
     });
-    const usesOf = (list, check) => list.map((use) => ({ option: use.option, check, stated: use.stated, where: startOf.has(use.option) ? whereIs(use.where) : null, by: typeof use.booking === "string" ? use.booking : null }));
+    const usesOf = (list, check) => list.map((use) => ({ option: use.option, check, stated: use.stated, where: startOf.has(use.option) ? whereIs(use.where) : null, by: typeof use.booking === "string" ? use.booking : null, offer: typeof use.offer === "string" ? use.offer : null }));
     const all = said === null ? [] : [...usesOf(said.uses, "requires"), ...usesOf(said.refusals, "refuses"), ...usesOf(said.covers, "needs a right for")];
     const known = stays.length > 0 && !stays.includes(null) && all.every((use) => use.where !== null);
     const uses = known ? all : [];
     timed ||= known && said.stays.some((stay) => stay.since !== null);
     // Where the OBJECT is just before an OPTION starts, where the report says that a FACT
     // has the OPTION require it, or refuse it, or need a right for it. With a right comes
-    // the BOOKING that covers the OBJECT.
+    // the BOOKING that covers the OBJECT, or the OFFER that the OBJECT takes a place of.
     const before = (option, check) => {
       const use = uses.find((each) => each.option === option && each.check === check && each.stated);
       if (use === undefined) return null;
+      if (use.offer !== null) return `Just before it starts: ${use.where}. A place from ${use.offer} covers ${thing.name}, once it is bought.`;
       return use.by === null ? `Just before it starts: ${use.where}.` : `Just before it starts: ${use.where}. ${use.by} covers ${thing.name}.`;
     };
     // An OPTION under the OBJECT shows one thing of the three: whether it requires the
@@ -246,9 +250,22 @@ export function objects(trip, report = null, stated = null) {
       .filter((use) => !use.stated && !asked[use.check].has(use.option))
       .map((use) => {
         const { step, takes } = who(use.option);
-        const plan = use.by === null ? `Just before it starts: ${use.where}, so the plan holds if it does.` : `Just before it starts: ${use.where}. ${use.by} covers ${thing.name}, so the plan holds if it does.`;
+        const covering = use.offer !== null ? `A place from ${use.offer}` : use.by;
+        const plan = covering === null ? `Just before it starts: ${use.where}, so the plan holds if it does.` : `Just before it starts: ${use.where}. ${covering} covers ${thing.name}, so the plan holds if it does.`;
         return { option: use.option, name: named.get(use.option), does: false, says: `the FILE does not say whether this ${use.check} it`, takes, step, plan, ...marked([], () => false, "") };
       });
+    // The sets of OPTIONs in which the OBJECT takes places together, as the report words
+    // them: one of several OPTIONs, or one of several sets. Where each set is one OPTION,
+    // "or" joins their names.
+    const sets = known ? (inSets.get(thing.id) ?? null) : null;
+    let together = null;
+    if (sets !== null && sets.every((some) => some.every((id) => named.has(id)))) {
+      const alone = sets.every((some) => some.length === 1);
+      const groups = sets.map((some) => some.map((id) => `for ${named.get(id)}`).join(", ")).join("; or ");
+      together = alone
+        ? `Of the places for ${thing.name}, at most one has to be bought: for ${listed(sets.map(([id]) => either(named.get(id))), "or")}.`
+        : `Of the places for ${thing.name}, at most these have to be bought together: ${groups}.`;
+    }
     const { starts } = thing;
     // The report says it so: Alex has the bags when the TRIP starts, the TRIP starts with the
     // bags at the hotel.
@@ -258,6 +275,7 @@ export function objects(trip, report = null, stated = null) {
       name: thing.name,
       starts: where,
       plan: known ? `In the plan: ${stays.join("; ")}.` : null,
+      together,
       requires: thing.requires.map((each) => under(each, each.needed, each.needed ? "requires it" : "does not require it", ABOUT_REQUIRING, "requires")),
       refuses: thing.refuses.map((each) => under(each, each.refused, each.refused ? "refuses it" : "does not refuse it", ABOUT_REFUSING, "refuses")),
       rights: thing.rights.map((each) => under(each, each.needed, each.needed ? "needs a right for it" : "needs no right for it", ABOUT_RIGHTS, "needs a right for")),
@@ -275,7 +293,7 @@ export function objects(trip, report = null, stated = null) {
         ),
         // Each OPTION of which a FACT says that the FILE lists every right for the OBJECT,
         // as the report words it.
-        ...thing.rights_closed.map((each) => `The FILE lists every right to ${each.name} that covers it: nobody on the trip holds another or can get one.`),
+        ...thing.rights_closed.map((each) => `The FILE lists every right to ${each.name} that covers it: nobody on the trip holds another or can get one${each.offers.length ? `, except from ${listed(each.offers)}` : ""}.`),
       ],
       // An OBJECT's own records: the FACT about where it is when the TRIP starts, the FACTs
       // that the FILE states every OPTION that requires it or refuses it, every one that

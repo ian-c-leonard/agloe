@@ -1,0 +1,41 @@
+FEASIBLE, with a WARNING: this trip works, but not everything is booked yet.
+
+Sunday 18 July 2027 (times in America/Chicago)
+  6:00 am to 8:30 am: Car ferry to Muskegon, Alex and Sam
+    ! A right to this still has to be bought for the car, from car-deck, for 90.00 USD from the trip money.
+  9:00 am to 10:00 am: Drive along the shore, Alex and Sam
+
+WARNING: not everything is booked yet. A line marked "!" that names an OFFER says which OBJECT still needs a right. Only a BOOKING secures one.
+
+The plan relies on these FACTs and DECISIONs:
+  alex-start: Alex starts from the ferry terminal in Milwaukee
+  sam-start: Sam starts from the ferry terminal in Milwaukee
+  ferry-time: Car ferry to Muskegon starts at 6:00 am on Sunday 18 July 2027
+  ferry-length: Car ferry to Muskegon takes 2 h 30 min
+  ferry-arrival: nobody has to be at the ferry terminal in Milwaukee before Car ferry to Muskegon starts
+  ferry-needs-a-ticket: people need a right to take part in Car ferry to Muskegon
+  drive-time: Drive along the shore starts at 9:00 am on Sunday 18 July 2027
+  drive-length: Drive along the shore takes 1 h
+  drive-arrival: nobody has to be at Muskegon before Drive along the shore starts
+  drive-is-open: nobody needs a right to take part in Drive along the shore
+  alex-has-the-car: Alex has the car when the TRIP starts
+  drive-needs-the-car: Drive along the shore requires the car
+  every-use-of-the-car: of the OPTIONs in this FILE, only Drive along the shore requires the car, and none refuses the car
+  everything-that-moves-the-car: the FILE states every OPTION that hands over, keeps or carries the car: there is none
+  ferry-needs-a-car-ticket: Car ferry to Muskegon needs a right for the car
+  every-ticket-for-the-car: of the OPTIONs in this FILE, only Car ferry to Muskegon needs a right for the car
+  ferry-tickets: a BOOKING for Car ferry to Muskegon covers Alex and Sam
+  car-deck: an OFFER has 3 places for Car ferry to Muskegon that can still be bought to cover the car, for 90.00 USD each
+  lock-ferry: Alex and Sam take part in Car ferry to Muskegon
+  lock-drive: Alex and Sam take part in Drive along the shore
+
+Where each OBJECT is:
+  the car: with Alex when the TRIP starts
+    Car ferry to Muskegon needs a right for the car. Just before it starts: with Alex. A place from car-deck covers the car, once it is bought.
+    Drive along the shore requires the car. Just before it starts: with Alex.
+
+What the BOOKINGs state that they paid:
+  No payment is stated for ferry-tickets.
+
+The money of this plan, by currency:
+  USD: 90.00 still to buy (car-deck)

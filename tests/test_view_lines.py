@@ -20,9 +20,10 @@ from typing import Any, cast
 import pytest
 
 from agloe import compiler, report
-from agloe.file import parse, read
+from agloe.file import File, parse, read
 from agloe.view.trip import shown
-from tests.stories import EXAMPLES
+from tests.stories import EXAMPLES, budget, needs_right, offer
+from tests.test_offers_for_objects import a_crossing, car_deck
 
 FILES = sorted(
     path for path in EXAMPLES.rglob("*.json") if not path.name.endswith(".expected.json")
@@ -46,7 +47,10 @@ def offers_of(line: Line) -> list[str]:
 
 def asked_of(path: Path) -> dict[str, Any]:
     """The report on this FILE in words and as JSON, and the TRIP that the view sends with it."""
-    file = read(path)
+    return asked_about(read(path))
+
+
+def asked_about(file: File) -> dict[str, Any]:
     found = compiler.check(file)
     return {
         "text": report.as_text(file, found),
@@ -191,9 +195,16 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
             if "object" in each
         }
         expected += [f"object:{thing}" for _, thing in late]
+        # A warning that an OBJECT still needs a right is about that OBJECT too.
+        expected += [
+            f"object:{thing}" for buy in said.get("to_buy", []) for thing in buy.get("objects", [])
+        ]
+        in_sets = {each["object"] for each in said.get("places_together", [])}
         for thing in said.get("objects", []):
             checks = len(thing["required_by"]) + len(thing["refused_by"])
             checks += len(thing["covered_in"])
+            # One more line where the report says in which OPTIONs it takes places together.
+            checks += thing["object"] in in_sets
             expected += [f"object:{thing['object']}"] * (1 + checks)
         assert sorted(about) == sorted(expected), name
         carried += bool(expected)
@@ -245,9 +256,11 @@ def test_a_line_that_says_who_buys_a_place_is_tied_to_the_offer() -> None:
     assert buys[0]["text"].startswith("    ! Sam still has to buy a right to this, from ")
     assert buys[1]["text"] == "  USD: 32.00 paid; 32.00 still to buy (skydeck-tickets)"
     # A report that names another OFFER for that step, or none, leaves the line tied to none.
+    # So does a report that says the right only might be needed, where the line does not.
     odd: list[Any] = [
         [{**asked["report"]["to_buy"][0], "offer": "skydeck"}],
         [{**asked["report"]["to_buy"][0], "option": "lunch"}],
+        [{**asked["report"]["to_buy"][0], "only_if_needed": True}],
         "skydeck-tickets",
         [],
     ]
@@ -262,6 +275,116 @@ def test_a_line_that_says_who_buys_a_place_is_tied_to_the_offer() -> None:
     (late,) = lines_of([asked_of(EXAMPLES / "flight-home" / "works-but-risky.json")])
     assert any(line["warns"] for line in late)
     assert all(line["about"] == [] for line in late)
+
+
+def test_a_line_about_a_right_that_an_object_still_needs_is_tied_to_its_offer() -> None:
+    """A right to the ferry still has to be bought for the car, from the OFFER car-deck."""
+    asked = asked_of(EXAMPLES / "a-car-ferry" / "a-place-on-the-car-deck.json")
+    (found,) = lines_of([asked])
+    buys = [line for line in found if offers_of(line)]
+    assert [(line["about"], line["step"], line["warns"]) for line in buys] == [
+        (["offer:car-deck", "object:car"], 0, True),
+        # Under the car: the ferry needs a right for it, and a place of the OFFER covers it.
+        (["0", "object:car", "offer:car-deck"], None, False),
+        # The sum in USD of what the plan pays: it still buys a place of the OFFER.
+        (["offer:car-deck"], None, False),
+    ]
+    start = "    ! A right to this still has to be bought for the car, from car-deck, "
+    assert buys[0]["text"].startswith(start)
+    assert buys[1]["text"].endswith("A place from car-deck covers the car, once it is bought.")
+    # A right that might be needed has other words. The line is tied to the OBJECTs of which
+    # the report as JSON says the same.
+    (buy,) = asked["report"]["to_buy"]
+    maybe = "    ! A right to this might still have to be bought for the car, from car-deck."
+    text = asked["text"].replace(buys[0]["text"], maybe)
+    if_needed = {
+        **asked,
+        "text": text,
+        "report": {**asked["report"], "to_buy": [{**buy, "only_if_needed": True}]},
+    }
+    (other,) = lines_of([if_needed])
+    (line,) = [line for line in other if line["warns"]]
+    assert (line["text"], line["about"]) == (maybe, ["offer:car-deck", "object:car"])
+    # A report that names another OFFER for that step, an OBJECT that the TRIP does not
+    # have, or a place of the other kind leaves the line tied to none.
+    odd: list[Any] = [
+        [{**buy, "offer": "seats"}],
+        [{**buy, "option": "drive"}],
+        [{**buy, "objects": ["boat"]}],
+        [{**buy, "only_if_needed": True}],
+        [{key: value for key, value in buy.items() if key != "objects"}],
+        [],
+    ]
+    for to_buy in odd:
+        (other,) = lines_of([{**asked, "report": {**asked["report"], "to_buy": to_buy}}])
+        assert all(line["about"] == [] for line in other if line["warns"])
+
+
+def test_two_objects_that_take_places_of_one_offer_each_have_their_own_line() -> None:
+    """The car and the bike each take a place on the rack, and each has its own BUDGET. The
+    report has a warning for each, and each is tied to its own OBJECT."""
+    rack = offer("ferry", 2, "rack", "5.00 USD", objects=["car", "bike"])
+    pots = [budget("car-money", objects=["car"]), budget("bike-money", objects=["bike"])]
+    file = a_crossing(rack, budgets=[budget("money", "alex", "sam"), *pots], bike=True)
+    asked = asked_about(file)
+    said = asked["report"]
+    (tied,) = lines_of([asked])
+    warned = [(line["text"], line["about"]) for line in tied if line["warns"]]
+    start = "    ! A right to this still has to be bought for"
+    assert warned == [
+        (f"{start} car, from rack, for 5.00 USD from car-money.", ["offer:rack", "object:car"]),
+        (f"{start} bike, from rack, for 5.00 USD from bike-money.", ["offer:rack", "object:bike"]),
+    ]
+    # Where the report as JSON names one of the two purchases only, the lines and the
+    # purchases do not agree one by one, and none is tied.
+    first, _ = cast("list[dict[str, object]]", said["to_buy"])
+    (other,) = lines_of([{**asked, "report": {**said, "to_buy": [first]}}])
+    assert all(line["about"] == [] for line in other if line["warns"])
+
+
+def test_a_line_about_a_place_is_tied_whatever_the_name_of_the_budget_that_pays() -> None:
+    """Alex and Sam each still buy a seat, and the car a place on the car deck. The BUDGET
+    that pays is called "Travel fund, from savings". Its name comes after the OFFER in each
+    line, and the lines are tied to their OFFERs all the same."""
+    fund = {**budget("fund", "alex", "sam", objects=["car"]), "name": "Travel fund, from savings"}
+    people = [needs_right("ferry"), offer("ferry", 20, "seats")]
+    asked = asked_about(a_crossing(car_deck(), *people, budgets=[fund], rights=True))
+    (tied,) = lines_of([asked])
+    warned = [(line["text"], line["about"]) for line in tied if line["warns"]]
+    paid = 'from "Travel fund, from savings".'
+    assert warned == [
+        (
+            f"    ! alex and sam still have to buy a right to this, from seats, "
+            f"for 10.00 USD each {paid}",
+            ["offer:seats"],
+        ),
+        (
+            f"    ! A right to this still has to be bought for car, from car-deck, "
+            f"for 90.00 USD {paid}",
+            ["offer:car-deck", "object:car"],
+        ),
+    ]
+    # Where only the if of the seats is unlike the report as JSON, no line of the step is tied.
+    seats, deck = asked["report"]["to_buy"]
+    unlike = {**asked["report"], "to_buy": [{**seats, "only_if_needed": True}, deck]}
+    (other,) = lines_of([{**asked, "report": unlike}])
+    assert all(line["about"] == [] for line in other if line["warns"])
+
+
+def test_the_line_about_places_that_are_bought_together_is_tied_to_its_object() -> None:
+    """Nobody said where the bike is. Under the bike, the report says that at most one of
+    its two places has to be bought, and that line is about the bike."""
+    asked = asked_of(EXAMPLES / "a-car-ferry" / "nobody-said-where-the-bike-is.json")
+    (found,) = lines_of([asked])
+    (line,) = [line for line in found if line["text"].startswith("    Of the places for ")]
+    assert line["about"] == ["object:bike"]
+    assert (line["step"], line["record"], line["warns"]) == (None, None, False)
+    # Where the report as JSON does not say so, the lines under the OBJECTs are one more
+    # than it accounts for, and none of them is tied.
+    said = {key: value for key, value in asked["report"].items() if key != "places_together"}
+    (other,) = lines_of([{**asked, "report": said}])
+    under = other[[line["text"] for line in other].index("Where each OBJECT is:") + 1 :]
+    assert all(line["about"] == [] for line in under if line["text"].startswith("  the "))
 
 
 def test_the_plan_that_a_report_gives_for_a_case_is_tied_to_the_offers_it_buys_from() -> None:

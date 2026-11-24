@@ -34,7 +34,7 @@ import pytest
 from agloe import compiler
 from agloe import report as reports
 from agloe.answers import Answer, Report
-from agloe.file import Complete, File, instant, parse, read
+from agloe.file import Complete, File, Offer, instant, parse, read
 from agloe.names import seen_as
 from agloe.reference import Step
 from agloe.view.trip import MOST_DAYS, holds, shown
@@ -203,7 +203,9 @@ def test_every_example_is_sent_as_a_trip_that_a_page_can_draw(path: Path) -> Non
     assert list(said_of) == [each.id for each in file.options if each.id in said_of]
     for each in file.options:
         needed, complete = file.needs_right(each.id), file.rights_complete(each.id)
-        bookings, offers = file.bookings(each.id), file.offers(each.id)
+        # Each OFFER for the OPTION: for PERSONs, or for the OBJECTs it names.
+        bookings = file.bookings(each.id)
+        offers = [fact for fact in file.facts if isinstance(fact, Offer) and fact.option == each.id]
         if needed is None and complete is None and not bookings and not offers:
             assert each.id not in said_of
             continue
@@ -224,11 +226,16 @@ def test_every_example_is_sent_as_a_trip_that_a_page_can_draw(path: Path) -> Non
         assert [(offer["id"], offer["places"]) for offer in rights["offers"]] == [
             (fact.id, fact.places) for fact in offers
         ]
+        for offer, fact in zip(rights["offers"], offers, strict=True):
+            named = [thing.id for thing in file.objects if thing.id in fact.objects]
+            assert offer["objects"] == named and sorted(offer["names"]) == sorted(named)
         assert (rights["complete"] is None) is (complete is None)
     # Every BUDGET of the FILE is sent, in the FILE's order, with each cap on it.
     assert [budget["id"] for budget in sent["budgets"]] == [each.id for each in file.budgets]
     for budget, pot in zip(sent["budgets"], file.budgets, strict=True):
         assert budget["persons"] == [each.id for each in file.persons if each.id in pot.persons]
+        assert budget["objects"] == [each.id for each in file.objects if each.id in pot.objects]
+        assert sorted(budget["names"]) == sorted([*pot.persons, *pot.objects])
         assert budget["currencies"] == list(pot.currencies)
         assert [(cap["id"], cap["limit"]["currency"]) for cap in budget["caps"]] == [
             (cap.id, currency) for (id, currency), cap in file.caps.items() if id == pot.id
@@ -673,7 +680,14 @@ def test_the_rights_to_each_option_are_sent_as_far_as_the_file_says() -> None:
             }
         ],
         "offers": [
-            {"id": "skydeck-tickets", "places": 2, "price": {"amount": "32.00", "currency": "USD"}}
+            {
+                "id": "skydeck-tickets",
+                "places": 2,
+                "price": {"amount": "32.00", "currency": "USD"},
+                # The OBJECTs that its places are for: none, so they are for PERSONs.
+                "objects": [],
+                "names": {},
+            }
         ],
         # The FILE does not say that these are all the rights to the visit.
         "complete": None,
@@ -701,6 +715,10 @@ def test_the_budgets_of_the_file_are_sent_with_their_caps() -> None:
             "id": "trip-money",
             "name": "the trip money",
             "persons": ["alex", "sam"],
+            # The OBJECTs whose places it may pay for: none.
+            "objects": [],
+            # The name to show for each PERSON and OBJECT that it lists.
+            "names": {"alex": "Alex", "sam": "Sam"},
             "currencies": ["USD"],
             "caps": [{"id": "trip-cap", "limit": {"amount": "200.00", "currency": "USD"}}],
         }
@@ -778,8 +796,26 @@ def test_the_objects_of_the_file_are_sent_with_what_the_file_says_of_each() -> N
             "name": "Car ferry to Muskegon",
             "record": "the-car-deck-is-full",
             "called": "the car",
+            # The OFFERs that the FACT names: none.
+            "offers": [],
         }
     ]
+    # Three places on the car deck are on OFFER for the car, and the trip money pays for it.
+    on_offer = drawn(EXAMPLES / "a-car-ferry" / "the-trip-money-is-three-dollars-short.json")
+    (to_the_ferry, _) = on_offer["rights"]
+    assert to_the_ferry["offers"] == [
+        {
+            "id": "car-deck",
+            "places": 3,
+            "price": {"amount": "90.00", "currency": "USD"},
+            "objects": ["car"],
+            "names": {"car": "the car"},
+        }
+    ]
+    assert on_offer["objects"][0]["rights_closed"][0]["offers"] == ["car-deck"]
+    (money,) = on_offer["budgets"]
+    assert (money["persons"], money["objects"]) == (["alex", "sam"], ["car"])
+    assert money["names"] == {"alex": "Alex", "sam": "Sam", "car": "the car"}
     # A luggage service with no BOOKING has rights to show: it has no place for the bags.
     service = drawn(EXAMPLES / "the-bags" / "the-service-has-no-place-for-the-bags.json")
     assert "luggage-service" in [each["option"] for each in service["rights"]]
@@ -2057,7 +2093,15 @@ RIGHTS: dict[str, Any] = {
     "bookings": [
         {"id": "room", "covers": ["alex"], "objects": [], "names": {"alex": "alex"}, "paid": None}
     ],
-    "offers": [{"id": "rooms", "places": 2, "price": {"amount": "120.00", "currency": "USD"}}],
+    "offers": [
+        {
+            "id": "rooms",
+            "places": 2,
+            "price": {"amount": "120.00", "currency": "USD"},
+            "objects": [],
+            "names": {},
+        }
+    ],
     "complete": {"record": "every-room", "offers": ["rooms"]},
 }
 
@@ -2070,6 +2114,8 @@ BUDGET: dict[str, Any] = {
     "id": "pot",
     "name": "the pot",
     "persons": ["alex", "sam"],
+    "objects": [],
+    "names": {"alex": "alex", "sam": "sam"},
     "currencies": ["USD", "EUR"],
     "caps": [{"id": "pot-cap", "limit": {"amount": "500.00", "currency": "USD"}}],
 }
@@ -2110,7 +2156,7 @@ def test_a_trip_with_a_budget_and_a_payment_is_a_trip() -> None:
     _budget()(sent)
     assert holds(sent)
     # A BUDGET that lists nobody, and has no cap.
-    _budget(persons=[], caps=[])(sent)
+    _budget(persons=[], names={}, caps=[])(sent)
     assert holds(sent)
     # A cap in each currency that the BUDGET holds.
     euros = {"id": "pot-cap-eur", "limit": {"amount": "300", "currency": "EUR"}}
@@ -2172,7 +2218,13 @@ OBJECT: dict[str, Any] = {
     "rights": [{"option": "night", "name": "night", "needed": True, "record": "night-needs-key"}],
     "rights_complete": "every-ticket-for-the-key",
     "rights_closed": [
-        {"option": "night", "name": "night", "record": "no-other-key-right", "called": "the key"}
+        {
+            "option": "night",
+            "name": "night",
+            "record": "no-other-key-right",
+            "called": "the key",
+            "offers": [],
+        }
     ],
 }
 
@@ -2208,6 +2260,17 @@ def test_a_trip_with_an_object_is_a_trip() -> None:
     assert holds(sent)
     _booking(covers=[], objects=["key"], names={"key": "the key"})(sent)
     assert holds(sent)
+    # An OFFER can name an OBJECT of the TRIP, and a BUDGET can list one. A FACT that the
+    # FILE lists every right for the OBJECT can name that OFFER.
+    for_the_key = {**RIGHTS["offers"][0], "objects": ["key"], "names": {"key": "the key"}}
+    _rights(offers=[for_the_key], complete=None)(sent)
+    assert holds(sent)
+    _object(rights_closed=[{**OBJECT["rights_closed"][0], "offers": ["rooms"]}])(sent)
+    assert holds(sent)
+    _budget(objects=["key"], names={"alex": "alex", "sam": "sam", "key": "the key"})(sent)
+    assert holds(sent)
+    _budget()(sent)
+    _object()(sent)
     _rights()(sent)
     # An OBJECT of which the FILE says nothing.
     _object(
@@ -2482,6 +2545,12 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "an offer with a price that is a number": _offer(price=120),
     "an offer with a price in no currency": _offer(price={"amount": "120.00", "currency": " "}),
     "an offer with a price that is no amount": _offer(price={"amount": "-1", "currency": "USD"}),
+    "an offer with no list of objects": _offer(objects=None),
+    "an offer for an object the trip does not have": _offer(
+        objects=["boat"], names={"boat": "the boat"}
+    ),
+    "an offer with a name for an object that it does not name": _offer(names={"boat": "the boat"}),
+    "an offer whose names are a list": _offer(names=[]),
     "a fact that the rights are all listed with no id": _rights(
         complete={"record": "", "offers": []}
     ),
@@ -2499,6 +2568,13 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "two budgets with one id": _set("budgets", to=[BUDGET, BUDGET_WITH_NO_CAP]),
     "a budget for a person the trip does not have": _budget(persons=["jo"]),
     "a budget that lists a person twice": _budget(persons=["alex", "alex"]),
+    "a budget with no list of objects": _budget(objects=None),
+    "a budget for an object the trip does not have": _budget(
+        objects=["boat"], names={"alex": "alex", "sam": "sam", "boat": "the boat"}
+    ),
+    "a budget with no name for a person that it lists": _budget(names={"alex": "alex"}),
+    "a budget with a blank name for a person": _budget(names={"alex": "alex", "sam": " "}),
+    "a budget whose names are a list": _budget(names=["alex", "sam"]),
     "a budget that holds no currency": _budget(currencies=[]),
     "a budget that holds a currency twice": _budget(currencies=["USD", "USD"]),
     "a budget that holds a blank currency": _budget(currencies=[" "]),
@@ -2557,6 +2633,15 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
         transfers=[OBJECT["transfers"][0]] * 2
     ),
     "an object whose complete set is no id": _object(requires_complete=7),
+    "an object whose rights are all listed with no list of offers": _object(
+        rights_closed=[{**OBJECT["rights_closed"][0], "offers": None}]
+    ),
+    "an object whose rights are all listed with an offer twice": _object(
+        rights_closed=[{**OBJECT["rights_closed"][0], "offers": ["rooms", "rooms"]}]
+    ),
+    "an object whose rights are all listed with an offer that has no id": _object(
+        rights_closed=[{**OBJECT["rights_closed"][0], "offers": [""]}]
+    ),
     "no capabilities": _drop("capabilities"),
     "capabilities that are no list": _set("capabilities", to={}),
     "a capability that is no record": _set("capabilities", to=["driving"]),

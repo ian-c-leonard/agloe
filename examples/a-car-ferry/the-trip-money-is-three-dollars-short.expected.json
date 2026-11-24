@@ -1,0 +1,46 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "alex-has-the-car",
+    "everything-that-moves-the-car",
+    "ferry-needs-a-car-ticket",
+    "ferry-tickets",
+    "car-deck",
+    "every-place-for-the-car",
+    "lock-ferry",
+    "trip-money-cap"
+  ],
+  "caps": [
+    {
+      "cap": "trip-money-cap",
+      "budget": "trip-money",
+      "currency": "USD",
+      "limit": "125.00"
+    }
+  ],
+  "payments": [
+    {
+      "booking": "ferry-tickets",
+      "amount": "38.00",
+      "currency": "USD",
+      "budget": "trip-money",
+      "by": null
+    }
+  ],
+  "not_stated": [],
+  "budgets": [
+    {
+      "id": "trip-money",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "objects": [
+        "car"
+      ],
+      "currencies": [
+        "USD"
+      ]
+    }
+  ]
+}

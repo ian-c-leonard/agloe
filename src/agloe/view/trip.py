@@ -177,9 +177,23 @@ _BOOKING: _Shape = {
     "paid": (dict, _NONE),
 }
 _PAID: _Shape = {"amount": str, "currency": str, "budget": (str, _NONE), "by": (str, _NONE)}
-_BUDGET: _Shape = {"id": str, "name": str, "persons": list, "currencies": list, "caps": list}
+_BUDGET: _Shape = {
+    "id": str,
+    "name": str,
+    "persons": list,
+    "objects": list,
+    "names": dict,
+    "currencies": list,
+    "caps": list,
+}
 _CAP: _Shape = {"id": str, "limit": dict}
-_OFFER: _Shape = {"id": str, "places": int, "price": (dict, _NONE)}
+_OFFER: _Shape = {
+    "id": str,
+    "places": int,
+    "price": (dict, _NONE),
+    "objects": list,
+    "names": dict,
+}
 _MONEY: _Shape = {"amount": str, "currency": str}
 _ALL_RIGHTS: _Shape = {"record": str, "offers": list}
 _AMOUNT = re.compile(r"[0-9]+(\.[0-9]+)?")  # an amount of money, as a FILE writes one
@@ -196,7 +210,13 @@ _OBJECT: _Shape = {
     "rights_complete": (str, _NONE),
     "rights_closed": list,
 }
-_OBJECT_CLOSED: _Shape = {"option": str, "name": str, "record": str, "called": str}
+_OBJECT_CLOSED: _Shape = {
+    "option": str,
+    "name": str,
+    "record": str,
+    "called": str,
+    "offers": list,
+}
 _OBJECT_STARTS: _Shape = {"person": (str, _NONE), "place": (str, _NONE), "record": str}
 _OBJECT_NEED: _Shape = {"option": str, "name": str, "needed": bool, "record": str}
 _OBJECT_REFUSAL: _Shape = {"option": str, "name": str, "refused": bool, "record": str}
@@ -523,13 +543,19 @@ def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
     A BOOKING covers PERSONs and OBJECTs, and the report names them in one list. So each
     BOOKING comes with the name to show for each of them (``names``): no PERSON and no
     OBJECT of the FILE shows the same name as another there.
+
+    An OFFER has places for PERSONs, or for the OBJECTs it names (``objects``, in the
+    FILE's order). The report says that a place covers one or another of them, so each
+    comes with the name to show in such a list (``names``).
     """
     needs = {fact.option: fact for fact in file.facts if isinstance(fact, NeedsRight)}
     holders = _names([*file.persons, *file.objects], "and")
+    either = _names([*file.persons, *file.objects], "or")
     rights: list[Trip] = []
     for option in file.options:
         need, complete = needs.get(option.id), file.rights_complete(option.id)
-        bookings, offers = file.bookings(option.id), file.offers(option.id)
+        bookings = file.bookings(option.id)
+        offers = file.every_offer(option.id)
         # An OPTION that needs a right for an OBJECT has rights to show too.
         ticketed = any(
             file.needs_right_for(option.id, thing.id) is True
@@ -570,6 +596,8 @@ def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
                         "id": offer.id,
                         "places": offer.places,
                         "price": None if offer.price is None else _money(offer.price),
+                        "objects": [each.id for each in file.objects if each.id in offer.objects],
+                        "names": {each: either[each] for each in offer.objects},
                     }
                     for offer in offers
                 ],
@@ -595,7 +623,8 @@ def _objects(file: File, names: Mapping[str, str]) -> list[Trip]:
     keeps it or carries it. ``rights`` holds each OPTION of which a FACT says whether it
     needs a right for the OBJECT, and ``rights_complete`` is the FACT that the FILE states
     every one of its OPTIONs that does. ``rights_closed`` holds each OPTION of which a FACT
-    says that the FILE lists every right to it that covers the OBJECT, with that FACT. The
+    says that the FILE lists every right to it that covers the OBJECT, with that FACT and
+    the OFFERs that it names. The
     report names the OBJECT there as a BOOKING names it, so that no PERSON shows the same
     name, and ``called`` is that name.
     """
@@ -672,6 +701,7 @@ def _objects(file: File, names: Mapping[str, str]) -> list[Trip]:
                         "name": names[option.id],
                         "record": fact.id,
                         "called": among_all[thing.id],
+                        "offers": list(fact.offers),
                     }
                     for option, fact in closed
                     if fact is not None
@@ -690,15 +720,21 @@ def _budgets(file: File) -> list[Trip]:
     """The BUDGETs of the FILE, in its order, each with what the FILE says of it.
 
     ``persons`` are those who may draw on the BUDGET for what the TRIP still has to buy, in the
-    FILE's order of PERSONs. ``currencies`` are those it holds. ``caps`` holds each DECISION
+    FILE's order of PERSONs. ``objects`` are the OBJECTs whose places it may pay for, in the
+    FILE's order of OBJECTs. The report names both in one list, so each comes with the name
+    to show there (``names``): no PERSON and no OBJECT of the FILE shows the same name as
+    another. ``currencies`` are those it holds. ``caps`` holds each DECISION
     that the TRIP spends at most an amount from the BUDGET, in the FILE's order.
     """
     called = _names(file.budgets)
+    listed = _names([*file.persons, *file.objects], "and")
     return [
         {
             "id": budget.id,
             "name": called[budget.id],
             "persons": [each.id for each in file.persons if each.id in budget.persons],
+            "objects": [each.id for each in file.objects if each.id in budget.objects],
+            "names": {each: listed[each] for each in (*budget.persons, *budget.objects)},
             "currencies": list(budget.currencies),
             "caps": [
                 {"id": cap.id, "limit": _money(cap.limit)}
@@ -999,7 +1035,7 @@ def holds(trip: object) -> bool:
     planned = sent["itinerary"] is True
     options = _the_options(sent["options"], persons, places)
     ways = _the_ways(sent["ways"], places)
-    budgets = _the_budgets(sent["budgets"], persons)
+    budgets = _the_budgets(sent["budgets"], persons, _object_ids(sent["objects"]))
     steps = cast("list[object]", sent["steps"])
     return (
         options is not None
@@ -1135,10 +1171,13 @@ def _is_travel_listed_in_full(travel: object, places: frozenset[str]) -> bool:
     return _all_different(records) is not None
 
 
-def _the_budgets(budgets: object, persons: frozenset[str]) -> frozenset[str] | None:
+def _the_budgets(
+    budgets: object, persons: frozenset[str], objects: frozenset[str]
+) -> frozenset[str] | None:
     """The ids of the BUDGETs of such a TRIP, or None where these are not its BUDGETs.
 
-    Each has an id of its own and a name. It lists PERSONs of the TRIP, each once, and holds
+    Each has an id of its own and a name. It lists PERSONs and OBJECTs of the TRIP, each
+    once, with a name to show for each, and holds
     one currency at least, each once. It has one cap at most in a currency, and each cap is a
     DECISION of its own with an amount of money.
     """
@@ -1149,13 +1188,21 @@ def _the_budgets(budgets: object, persons: frozenset[str]) -> frozenset[str] | N
             return None
         said = cast("dict[str, object]", budget)
         who, held = _all_different(said["persons"]), _all_different(said["currencies"])
+        things = _all_different(said["objects"])
         if (
             not cast("str", said["name"]).strip()
             or who is None
             or not who <= persons
+            or things is None
+            or not things <= objects
             or not held
             or not all(currency.strip() for currency in held)
         ):
+            return None
+        named = cast("dict[str, object]", said["names"])
+        if frozenset(named) != who | things:
+            return None
+        if not all(isinstance(name, str) and name.strip() for name in named.values()):
             return None
         capped: list[object] = []
         for cap in cast("list[object]", said["caps"]):
@@ -1201,8 +1248,9 @@ def _are_rights(
     Each OPTION of the TRIP is there once at most, and each BOOKING and each OFFER once. A
     BOOKING covers PERSONs and OBJECTs of the TRIP, each once and one at least, with a name
     to show for each, and what it paid names a BUDGET and a PERSON of the TRIP, or none. An
-    OFFER has one place at least, and a price that is an amount in a currency. A FACT that
-    the FILE lists every right to an OPTION names OFFERs for that OPTION.
+    OFFER has one place at least, and a price that is an amount in a currency. It names
+    OBJECTs of the TRIP, each once, with a name to show for each, or none. A FACT that
+    the FILE lists every right to an OPTION names OFFERs for that OPTION that name no OBJECT.
     """
     which: list[object] = []
     ids: list[object] = []
@@ -1243,8 +1291,15 @@ def _are_rights(
                 return False
             if not _is_money(stated["price"]):
                 return False
+            for_things = _all_different(stated["objects"])
+            named = cast("dict[str, object]", stated["names"])
+            if for_things is None or not for_things <= objects or frozenset(named) != for_things:
+                return False
+            if not all(isinstance(name, str) and name.strip() for name in named.values()):
+                return False
             ids.append(stated["id"])
-            on_offer.append(stated["id"])
+            if not for_things:
+                on_offer.append(stated["id"])
         if complete is not None:
             if not _fits(complete, _ALL_RIGHTS):
                 return False
@@ -1312,6 +1367,10 @@ def _are_objects(
                     return False
                 if kind == "rights_closed" and not cast("str", stated["called"]).strip():
                     return False
+                if kind == "rights_closed":
+                    open_offers = _all_different(stated["offers"])
+                    if open_offers is None or not all(open_offers):
+                        return False
                 if kind == "transfers" and stated["does"] not in _DOES:
                     return False
                 named.append(stated["option"])

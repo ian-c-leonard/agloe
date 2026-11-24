@@ -13,7 +13,7 @@
 //
 // Nothing here judges a TRIP. It finds what the report already says, line by line.
 
-import { boughtIn, cappedIn, casesIn, listed, notAtHandIn, objectsIn, requirementsIn, takenIn, toBuyIn } from "./named.js";
+import { boughtIn, cappedIn, casesIn, listed, notAtHandIn, objectsIn, requirementsIn, takenIn, toBuyIn, togetherIn } from "./named.js";
 
 /**
  * A line that shows one step of a plan: "  2:00 pm to 3:00 pm: Museum visit, Alex and Sam". A
@@ -27,8 +27,17 @@ const WARNING = /^ {4}! /;
 const ONE_CASE = /^The trip (?:works|might work) if /;
 /** The line above the cases in which a trip works or might, where the report lists several. */
 const CASES = /^The trip (?:works|might work) in any of these cases:$/;
-/** A warning that says who still has to buy a right, and from which OFFER. */
-const TO_BUY = /^ {4}! .+ still ha(?:s|ve) to buy a right to this(?: if it needs one)?, from (.+)\.$/;
+/**
+ * A warning that says who still has to buy a right. It says "if it needs one" where nobody
+ * knows whether the OPTION needs a right.
+ */
+const TO_BUY = /^ {4}! .+ still ha(?:s|ve) to buy a right to this( if it needs one)?, from .+\.$/;
+/**
+ * A warning that says which OBJECT still needs a right. It says that the right might have to
+ * be bought where nobody knows whether it is needed: the OPTION might need none, or the
+ * OBJECT might not be in it.
+ */
+const TO_COVER = /^ {4}! A right to this (might )?still ha(?:s|ve) to be bought for .+, from .+\.$/;
 /** How the line starts that gives one plan for a case: who buys which place. */
 const ONE_PLAN = "One plan that works then: ";
 /** The line above the sums of a plan in each currency. */
@@ -108,14 +117,36 @@ export function lines(text, report, trip) {
     under = false;
     return one(line);
   });
-  // A warning that says who still has to buy a right names its OFFER after "from". It is tied
-  // to that OFFER where the report as JSON has the plan buy a place of it for the same step.
+  // Under a step, the report in words has one warning for each place that the report as JSON
+  // has the plan still buy at that OPTION, in the same order. A warning that says who still
+  // has to buy a right names its OFFER after "from", and is tied to that OFFER. A warning
+  // that says which OBJECT still needs a right is tied to its OFFER too, and to each OBJECT
+  // of that purchase. So two OBJECTs that take places of one OFFER, each paid from its own
+  // BUDGET, each have their own line. Where the warnings under a step and the purchases of
+  // the report as JSON do not agree one by one, none of them is tied: in the OFFER, in
+  // whether the place is for OBJECTs, and in whether the right only might be needed. A
+  // name in the line can hold ", from " itself, so the line is not cut there: it has to
+  // hold ", from " and the id of the OFFER, and then end or go on with a comma.
+  const known = new Set((trip === null ? [] : trip.objects).map((each) => each.id));
+  const places = new Map();
   for (const line of found) {
     const from = line.warns ? TO_BUY.exec(line.text) : null;
-    if (from === null) continue;
-    const named = (offer) => from[1] === offer || from[1].startsWith(`${offer}, `);
-    const bought = toBuyIn(report).filter((buy) => buy.option === trip.steps[line.step].option && named(buy.offer));
-    line.about = [...new Set(bought.map((buy) => `offer:${buy.offer}`))];
+    const cover = line.warns && from === null ? TO_COVER.exec(line.text) : null;
+    if (from === null && cover === null) continue;
+    if (!places.has(line.step)) places.set(line.step, []);
+    places.get(line.step).push({ line, covers: cover !== null, might: (from ?? cover)[1] !== undefined });
+  }
+  for (const [step, said] of places) {
+    const buys = toBuyIn(report).filter((buy) => buy.option === trip.steps[step].option);
+    const things = (buy) => (Array.isArray(buy.objects) ? buy.objects : null);
+    const agrees = (each, buy) => {
+      const named = each.line.text.endsWith(`, from ${buy.offer}.`) || each.line.text.includes(`, from ${buy.offer}, `);
+      const covered = things(buy);
+      if (!named || (covered !== null) !== each.covers || (buy.only_if_needed === true) !== each.might) return false;
+      return covered === null || covered.every((id) => known.has(id));
+    };
+    if (said.length !== buys.length || !said.every((each, n) => agrees(each, buys[n]))) continue;
+    said.forEach((each, n) => (each.line.about = [`offer:${buys[n].offer}`, ...(things(buys[n]) ?? []).map((id) => `object:${id}`)]));
   }
   for (const [ids, isHeading] of listsOf(report)) {
     // The lines under the one heading of this list, where they name its ids one after another.
@@ -229,19 +260,28 @@ export function lines(text, report, trip) {
   }
   // Where each OBJECT is in the plan: under their heading, up to the first line that is not
   // set in, one line for each OBJECT of the report as JSON, and after it one line for each
-  // OPTION that requires it or refuses it. They are tied only where the words hold exactly as
-  // many lines as that. How far a line is set in is not compared: a name can start with a
-  // space. A line about a requirement or a refusal is about the OBJECT and about the step that
-  // its OPTION is.
+  // OPTION that requires it or refuses it. Last comes one line for an OBJECT of which the
+  // report as JSON says in which OPTIONs it takes places together. They are tied only where
+  // the words hold exactly as many lines as that. How far a line is set in is not compared:
+  // a name can start with a space. A line about a requirement or a refusal is about the
+  // OBJECT and about the step that its OPTION is.
   const things = objectsIn(report);
+  const inSets = new Set(togetherIn(report).map((each) => each.object));
   const above = found.flatMap((line, at) => (line.text === OBJECTS ? [at] : []));
   if (things.length && above.length === 1) {
     const under = [];
     for (let at = above[0] + 1; at < found.length && found[at].text.startsWith("  "); at += 1) under.push(found[at]);
-    // A line about a right for the OBJECT is also about the BOOKING that it names.
-    const ties = things.flatMap(({ object, options, bookings }) => [
+    // A line about a right for the OBJECT is also about the BOOKING that it names, or
+    // about the OFFER that it says the OBJECT takes a place of.
+    const ties = things.flatMap(({ object, options, bookings, offers }) => [
       [`object:${object}`],
-      ...options.map((option, n) => [...(stepOf(option) < 0 ? [] : [String(stepOf(option))]), `object:${object}`, ...(bookings[n] === null ? [] : [`booking:${bookings[n]}`])]),
+      ...options.map((option, n) => [
+        ...(stepOf(option) < 0 ? [] : [String(stepOf(option))]),
+        `object:${object}`,
+        ...(bookings[n] === null ? [] : [`booking:${bookings[n]}`]),
+        ...(offers[n] === null ? [] : [`offer:${offers[n]}`]),
+      ]),
+      ...(inSets.has(object) ? [[`object:${object}`]] : []),
     ]);
     if (under.length === ties.length && under.every(free)) under.forEach((line, n) => (line.about = ties[n]));
   }

@@ -16,9 +16,19 @@ are in ``answers``, which works them out from this module's search or from a fas
 """
 
 from collections import deque
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Set, Sized
+from collections.abc import (
+    Callable,
+    Collection,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+    Set,
+    Sized,
+)
 from dataclasses import dataclass, field, replace
 from enum import Enum
+from functools import partial
 from heapq import heapify, heappop, heappush
 from itertools import chain, combinations, groupby, pairwise, permutations, product
 from math import inf
@@ -181,7 +191,8 @@ class World:
     another right is found for them. ``places`` says how many more PERSONs can take part in an
     OPTION that needs a right: each takes one place of an OFFER. ``payable`` holds each OFFER
     and PERSON where the PERSON can pay for a place of it: the place costs nothing, or a
-    BUDGET that lists the PERSON holds the currency of its price.
+    BUDGET that lists the PERSON holds the currency of its price. It holds the same for
+    each OFFER and each OBJECT that the OFFER names.
 
     ``spent`` says, for each cap by its BUDGET and currency, the most that the BOOKINGs might
     have charged to it in ten-thousandths. None: no upper bound. Each cap has its own sum, so
@@ -220,7 +231,10 @@ class World:
 
     ``ticketed`` holds each OPTION and OBJECT where the OPTION needs a right for the
     OBJECT. ``uncovered`` holds those of them where nothing covers the OBJECT: no BOOKING
-    of the FILE, and no other right. The sixteenth CONSTRAINT asks about those pairs only.
+    of the FILE, no other right, and no OFFER that names the OBJECT. ``offered`` holds
+    those where only a place of an OFFER can cover it: no BOOKING and no other right does,
+    and an OFFER for the OPTION names the OBJECT. There the OBJECT takes one place where
+    it needs the right. The sixteenth CONSTRAINT asks about those two kinds of pairs only.
 
     ``undecided`` holds each OPTION and OBJECT where the FILE does not say what the OPTION
     does with the OBJECT, and this world does not say either. That is so in the best case,
@@ -256,6 +270,7 @@ class World:
     ticketed: frozenset[tuple[str, str]] = frozenset()
     uncovered: frozenset[tuple[str, str]] = frozenset()
     undecided: frozenset[tuple[str, str]] = frozenset()
+    offered: frozenset[tuple[str, str]] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -269,7 +284,9 @@ class Unknown:
     a right to the OPTION for that PERSON that no BOOKING in the FILE secures. It
     is "another option" for a WANT and a PERSON: an OPTION outside the FILE
     that SATISFIES the WANT, and that the PERSON can take part in. That is one condition for one
-    WANT and one PERSON, whichever OPTION meets it.
+    WANT and one PERSON, whichever OPTION meets it. It is "price" for an OFFER, with the
+    OFFER in ``about``, and "funding" for a PERSON or for an OBJECT: a BUDGET that can pay
+    for them. The OBJECT is in ``about``.
 
     For an OPTION and a CAPABILITY it is "requirement": what the OPTION requires of it. For a
     PERSON and a CAPABILITY it is "has". ``about`` names the CAPABILITY.
@@ -305,7 +322,8 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
     That a PERSON has a CAPABILITY can help only where some OPTION requires it or might.
     A price and who pays can help only where somebody might have to pay for a place. So a
     price is listed only for an OFFER that ``for_sale`` gives, and who pays only for a PERSON
-    with no BOOKING for the OPTION of one of those. A FACT about an OBJECT can help only where
+    with no BOOKING for the OPTION of one of those, and for an OBJECT that one of those
+    names and that no BOOKING for its OPTION covers. A FACT about an OBJECT can help only where
     some OPTION requires the OBJECT or refuses it, or needs a right for it, or might. That
     an OPTION needs no right for an OBJECT is unknown where no FACT and no COMPLETE set
     says. Another right for the OBJECT can be found where a FACT says that the OPTION needs
@@ -317,7 +335,18 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
     buyers = [
         person.id
         for person in file.persons
-        if any(file.booking(offer.option, person.id) is None for offer in sold)
+        if any(
+            not offer.objects and file.booking(offer.option, person.id) is None for offer in sold
+        )
+    ]
+    # The OBJECTs that might have to take a place that costs something, in the FILE's order.
+    placed_things = [
+        thing.id
+        for thing in file.objects
+        if any(
+            thing.id in offer.objects and file.booking_for(offer.option, thing.id) is None
+            for offer in sold
+        )
     ]
     musts = [
         want
@@ -367,7 +396,7 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
             for person in file.persons:
                 if file.booking(option.id, person.id) is None:
                     out.append(Unknown("another right", option.id, person=person.id))
-        for offer in file.offers(option.id):
+        for offer in file.every_offer(option.id):
             if offer.price is None and offer.id in to_pay:
                 out.append(Unknown("price", option.id, about=offer.id))
         for booking in file.bookings(option.id):
@@ -402,6 +431,9 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
     for person in buyers:
         if not file.listed(person):
             out.append(Unknown("funding", person=person))
+    for thing in placed_things:
+        if not file.listed(thing):
+            out.append(Unknown("funding", about=thing))
     for want in musts:
         for person in _in_file_order_of_persons(file, want.musts):
             out.append(Unknown("another option", want=want.id, person=person))
@@ -431,6 +463,10 @@ def for_sale(file: File) -> list[Offer]:
     Only a PERSON with no BOOKING for an OPTION takes a place of it. An OFFER is left out
     where its price is nothing, where a FACT says its OPTION needs no right, and where the
     OPTION has a place that costs nothing for each of those PERSONs: nobody has to pay then.
+
+    An OFFER for OBJECTs is the same. Only an OBJECT that it names takes a place of it, and
+    only where no BOOKING for the OPTION covers the OBJECT and no FACT says that the OPTION
+    needs no right for it. It is left out where its price is nothing.
     """
     sold: list[Offer] = []
     for option in file.options:
@@ -441,6 +477,14 @@ def for_sale(file: File) -> list[Offer]:
         buyers = sum(file.booking(option.id, person.id) is None for person in file.persons)
         if file.needs_right(option.id) is not False and free < buyers:
             sold += [each for each in offers if each.price is None or each.price.amount]
+        for each in file.offers_for_objects(option.id):
+            might_take = any(
+                file.needs_right_for(option.id, thing) is not False
+                and file.booking_for(option.id, thing) is None
+                for thing in each.objects
+            )
+            if might_take and (each.price is None or each.price.amount):
+                sold.append(each)
     return sold
 
 
@@ -470,10 +514,13 @@ class Remaining:
     SATISFY it. An OPTION whose FACT about the WANT was taken out might. ``unsaid`` holds each
     such OPTION and WANT. A BOOKING that is taken out is the same: nobody knows whom it covers,
     so it might cover anybody. ``open_to_all`` holds the OPTION of each such BOOKING, and of
-    each OFFER that is taken out: it might have a place for every PERSON. A BOOKING that is
-    taken out might cover any OBJECT too, and ``covering_any`` holds its OPTION. An OFFER
-    has no place for an OBJECT. These belong to the search for a conflict: no FILE that is
-    read has them, and no answer is ever given for what is left.
+    each OFFER for PERSONs that is taken out: it might have a place for every PERSON. A
+    BOOKING that is taken out might cover any OBJECT too, and ``covering_any`` holds its
+    OPTION. An OFFER for OBJECTs that is taken out might have a place for each OBJECT it
+    names, at no cost: ``open_to`` holds its OPTION with each of them. It still has no
+    place for a PERSON or for another OBJECT, as an OFFER for PERSONs has none for an
+    OBJECT. These belong to the search for a conflict: no FILE that is read has them, and
+    no answer is ever given for what is left.
 
     What an OPTION requires of a CAPABILITY or of an OBJECT needs nothing of the kind, and
     neither does whether it refuses an OBJECT. Only best cases are asked about what is left,
@@ -492,20 +539,32 @@ class Remaining:
     open_to_all: frozenset[str] = frozenset()
     undone: frozenset[tuple[str, str]] = frozenset()
     covering_any: frozenset[str] = frozenset()
+    open_to: frozenset[tuple[str, str]] = frozenset()
 
     def without(self, record: str) -> Remaining:
         """What is left with one more FACT, WANT or DECISION taken out."""
         found = [fact for fact in self.file.facts if fact.id == record]
         taken = {(fact.option, fact.want) for fact in found if isinstance(fact, Satisfies)}
-        opened = {fact.option for fact in found if isinstance(fact, Booking | Offer)}
+        opened = {
+            fact.option
+            for fact in found
+            if isinstance(fact, Booking) or (isinstance(fact, Offer) and not fact.objects)
+        }
         acted = {(fact.option, fact.object) for fact in found if isinstance(fact, WithObject)}
         booked = {fact.option for fact in found if isinstance(fact, Booking)}
+        named = {
+            (fact.option, thing)
+            for fact in found
+            if isinstance(fact, Offer)
+            for thing in fact.objects
+        }
         return Remaining(
             self.file.without(record),
             self.unsaid | taken,
             self.open_to_all | opened,
             self.undone | acted,
             self.covering_any | booked,
+            self.open_to | named,
         )
 
     def might_cover(self) -> frozenset[tuple[str, str]]:
@@ -514,9 +573,14 @@ class Remaining:
         return frozenset((option, person.id) for option in self.open_to_all for person in people)
 
     def might_cover_objects(self) -> frozenset[tuple[str, str]]:
-        """Each OPTION and OBJECT that a BOOKING taken out might cover: any, for its OPTION."""
+        """Each OPTION and OBJECT that a record taken out might cover.
+
+        A BOOKING might cover any OBJECT, for its OPTION. An OFFER for OBJECTs might have a
+        place for each OBJECT it named, at no cost.
+        """
         things = self.file.objects
-        return frozenset((option, thing.id) for option in self.covering_any for thing in things)
+        booked = frozenset((option, thing.id) for option in self.covering_any for thing in things)
+        return booked | self.open_to
 
     def reopened(self) -> list[tuple[str, str]]:
         """Each OPTION and WANT that nobody knows about though the WANT's set is COMPLETE.
@@ -574,6 +638,7 @@ def best_case_left(remaining: Remaining) -> tuple[World, list[tuple[str, str]]]:
         best,
         rights=best.rights | remaining.might_cover(),
         uncovered=best.uncovered - remaining.might_cover_objects(),
+        offered=best.offered - remaining.might_cover_objects(),
         satisfies=best.satisfies | helps,
         might_satisfy=best.might_satisfy | helps,
         does={**best.does, **remaining.might_do_anything()},
@@ -600,8 +665,17 @@ def can_work(remaining: Remaining) -> bool:
 
 
 def with_no_offer(world: World) -> World:
-    """The same world with every OFFER left out: what works here takes no place of one."""
-    return replace(world, places={}, payable=frozenset())
+    """The same world with every OFFER left out: what works here takes no place of one.
+
+    An OBJECT that only a place of an OFFER can cover has nothing to cover it.
+    """
+    return replace(
+        world,
+        places={},
+        payable=frozenset(),
+        uncovered=world.uncovered | world.offered,
+        offered=frozenset(),
+    )
 
 
 def worst_case(file: File) -> World:
@@ -820,10 +894,18 @@ def _world(
     # that nobody knows is one quote for all the places: at best nothing, at worst one that
     # no BUDGET of the FILE is sure to hold. Where no BUDGET lists a PERSON, nobody knows who
     # pays for them: at best a BUDGET that pays for whatever they take, at worst none.
+    # An OBJECT is the same: the BUDGETs that list it pay for its places, and where none
+    # lists it, nobody knows who pays for them. An OFFER has places for PERSONs, or for the
+    # OBJECTs it names.
     funded = {
         person.id
         for person in file.persons
         if not file.listed(person.id) and well(Unknown("funding", person=person.id))
+    }
+    funded |= {
+        thing.id
+        for thing in file.objects
+        if not file.listed(thing.id) and well(Unknown("funding", about=thing.id))
     }
     payable: set[tuple[str, str]] = set()
     for offer in (fact for fact in file.facts if isinstance(fact, Offer)):
@@ -832,10 +914,10 @@ def _world(
             free = well(Unknown("price", offer.option, about=offer.id))
         else:
             free = not price.amount
-        for person in file.persons:
-            paid = price is not None and file.pays(person.id, price) is not None
-            if free or paid or person.id in funded:
-                payable.add((offer.id, person.id))
+        for buyer in offer.objects or [person.id for person in file.persons]:
+            paid = price is not None and file.pays(buyer, price) is not None
+            if free or paid or buyer in funded:
+                payable.add((offer.id, buyer))
     # What the BOOKINGs might have charged to each cap. A payment that names its BUDGET is
     # charged there. One that names none might have been charged to any BUDGET that holds its
     # currency, so it counts against each cap in that currency. A BOOKING that states no
@@ -914,8 +996,10 @@ def _world(
     # worst it needs one. A BOOKING for the OPTION covers the OBJECTs it names. Another
     # right for the OBJECT can be found at best, and at worst there is none. Where a FACT
     # says that the rights to the OPTION for the OBJECT are COMPLETE, there is none at all.
+    # What is left is a place of an OFFER for the OPTION that names the OBJECT.
     ticketed: set[tuple[str, str]] = set()
     uncovered: set[tuple[str, str]] = set()
+    offered: set[tuple[str, str]] = set()
     for thing in file.objects:
         another = Unknown("another transfer", about=thing.id)
         if file.transfers_complete(thing.id) is None and well(another):
@@ -930,7 +1014,7 @@ def _world(
             if ticket:
                 ticketed.add(pair)
                 if file.booking_for(*pair) is None and not found_one:
-                    uncovered.add(pair)
+                    (offered if file.offers_for(*pair) else uncovered).add(pair)
             required = file.requires_object(*pair)
             if required is None:
                 required = not well(Unknown("does not require", option.id, about=thing.id))
@@ -995,6 +1079,7 @@ def _world(
         frozenset(ticketed),
         frozenset(uncovered),
         frozenset(undecided),
+        frozenset(offered),
     )
 
 
@@ -1052,7 +1137,12 @@ def broken_as_listed(file: File, world: World, itinerary: Itinerary) -> list[Bro
     """
     _well_formed(file, itinerary)
     placed = list(enumerate(itinerary))
-    return [*_each_alone(file, world, itinerary), *_in_this_order(file, world, itinerary, placed)]
+    found, taking, together = _objects(file, world, placed)
+    return [
+        *_each_alone(file, world, itinerary, taking, together),
+        *_along_each_path(file, world, itinerary, placed),
+        *found,
+    ]
 
 
 def works_as_listed(file: File, world: World, itinerary: Itinerary) -> bool:
@@ -1067,13 +1157,35 @@ def works_as_listed(file: File, world: World, itinerary: Itinerary) -> bool:
 def _in_this_order(
     file: File, world: World, itinerary: Itinerary, order: list[_Placed]
 ) -> list[Broken]:
-    """The CONSTRAINTs that turn on the order of the steps, with the steps in one order."""
-    return [*_along_each_path(file, world, itinerary, order), *_objects(file, world, order)]
+    """The CONSTRAINTs that turn on the order of the steps, with the steps in one order.
+
+    This is for a FILE that lists no OBJECT, so no OBJECT takes a place of an OFFER.
+    """
+    return [*_along_each_path(file, world, itinerary, order), *_objects(file, world, order)[0]]
 
 
-def _each_alone(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
-    """The CONSTRAINTs that hold or not whatever order the steps happen in."""
+# An OBJECT that takes a place of an OFFER in an OPTION of a plan: the OPTION, the OBJECT,
+# the PERSONs that a finding about it names, and whether it is sure to take the place. It
+# is not sure where the OBJECT only might be in the OPTION.
+type _Placing = tuple[str, str, tuple[str, ...], bool]
+
+
+def _each_alone(
+    file: File,
+    world: World,
+    itinerary: Itinerary,
+    taking: Sequence[_Placing] = (),
+    together: Mapping[str, Collection[frozenset[str]]] | None = None,
+) -> list[Broken]:
+    """The CONSTRAINTs that hold or not whatever order the steps happen in.
+
+    ``taking`` holds each OBJECT that takes a place of an OFFER in the order the steps
+    happen in: where an OBJECT is turns on that order, and what its place costs is paid
+    with the places of the PERSONs. ``together`` says which of its places an OBJECT takes
+    together, as for ``way_to_pay``.
+    """
     taking_part = {step.option: step.persons for step in itinerary if step.option is not None}
+    moved, more = _where_a_transfer_brings_it(file, world, itinerary)
     return [
         *_locks(file, itinerary),
         *_starts(world, itinerary),
@@ -1082,29 +1194,38 @@ def _each_alone(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
         *_must_nots(file, world, taking_part),
         *_requirements(file, world, taking_part),
         *_within(file, itinerary),
-        *_rights(file, world, taking_part),
-        *_where_a_transfer_brings_it(file, world, itinerary),
+        *_rights(file, world, taking_part, [*taking, *more], together),
+        *moved,
     ]
 
 
-def taken_with_no_right(world: World, option: str, thing: str) -> bool:
-    """Whether an OPTION takes an OBJECT along that another transfer brings, with no right.
+def taken_along(world: World, option: str, thing: str) -> bool:
+    """Whether an OPTION takes an OBJECT along that another transfer brings, or might.
 
     The transfer puts the OBJECT at hand where a plan needs it, and nothing follows the
     OBJECT through the plan. An OPTION that requires the OBJECT and carries it takes it
     along whenever it happens. One of which nobody knows whether it requires the OBJECT
     might, and so might one that requires it, or might, of which nobody knows what it does
-    with it. Where such an OPTION needs a right for the OBJECT and nothing covers the OBJECT
-    there, it cannot happen: no transfer cures that.
+    with it.
     """
-    pair = (option, thing)
-    if thing not in world.brought or pair not in world.uncovered:
+    if thing not in world.brought:
         return False
-    unknown_action = world.does.get(pair) in ("might_take", "might_carry")
+    unknown_action = world.does.get((option, thing)) in ("might_take", "might_carry")
     return unknown_action or goes_along(world, option, thing) is not None
 
 
-def _where_a_transfer_brings_it(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
+def taken_with_no_right(world: World, option: str, thing: str) -> bool:
+    """Whether an OPTION takes an OBJECT along that another transfer brings, with no right.
+
+    ``taken_along`` says when it takes it along. Where such an OPTION needs a right for the
+    OBJECT and nothing covers the OBJECT there, it cannot happen: no transfer cures that.
+    """
+    return (option, thing) in world.uncovered and taken_along(world, option, thing)
+
+
+def _where_a_transfer_brings_it(
+    file: File, world: World, itinerary: Itinerary
+) -> tuple[list[Broken], list[_Placing]]:
     """What a plan breaks with an OBJECT that another transfer might bring.
 
     Nothing follows such an OBJECT through a plan: the transfer puts it at hand where the
@@ -1127,8 +1248,13 @@ def _where_a_transfer_brings_it(file: File, world: World, itinerary: Itinerary) 
     carries it there by choice, does so with no right. A hand-over or a carry that does
     not happen needs none. The Broken names whoever is to have the OBJECT, or else
     everybody who takes part.
+
+    Where an OFFER for the OPTION names the OBJECT, the OBJECT takes a place of it in
+    those cases. The second result holds each of them, with the PERSONs that a finding
+    about it names.
     """
     out: list[Broken] = []
+    taking: list[_Placing] = []
     for step in itinerary:
         if step.option is None:
             continue
@@ -1147,42 +1273,155 @@ def _where_a_transfer_brings_it(file: File, world: World, itinerary: Itinerary) 
                 out.append(Broken(Constraint.AT_HAND, step.option, (taker,), object=thing.id))
             if loaded and action not in ("carries", "any"):
                 out.append(Broken(Constraint.AT_HAND, step.option, everybody, object=thing.id))
-            if pair not in world.uncovered:
+            if pair not in world.uncovered and pair not in world.offered:
                 continue
             handed = taker is not None and action in ("hands_over", "any") and not refused
             carried = loaded and action in ("carries", "any")
-            if handed or carried or taken_with_no_right(world, *pair):
+            if handed or carried or taken_along(world, *pair):
                 who = (taker,) if handed and taker is not None else everybody
-                out.append(Broken(Constraint.COVERED, step.option, who, object=thing.id))
-    return out
+                if pair in world.offered:
+                    # The plan's own hand-over or carry is sure, and so is an OBJECT that
+                    # goes along with no choice. One that only might go along is not.
+                    sure = handed or carried or goes_along(world, *pair) == "sure"
+                    taking.append((step.option, thing.id, who, sure))
+                else:
+                    out.append(Broken(Constraint.COVERED, step.option, who, object=thing.id))
+    return out, taking
 
 
-def _rights(file: File, world: World, taking_part: Mapping[str, tuple[str, ...]]) -> list[Broken]:
+def _rights(
+    file: File,
+    world: World,
+    taking_part: Mapping[str, tuple[str, ...]],
+    taking: Sequence[_Placing] = (),
+    together: Mapping[str, Collection[frozenset[str]]] | None = None,
+) -> list[Broken]:
     """Each PERSON has the rights they need, and each place they take is paid for.
 
     The PERSONs with no right of their own take the places of the OPTION's OFFERs, as
     ``placed`` shares them out: as many as can pay for one have one. The others go in the
     FILE's order. Each takes a place that is still free, and cannot pay for it. Once no place
     is free, the rest have no right.
+
+    ``taking`` holds each OBJECT that takes a place of an OFFER in one of these OPTIONs.
+    They take the places of the OFFERs that name them in the same way. An OBJECT that is
+    left with a free place of an OFFER that names it cannot pay for it: the eleventh
+    CONSTRAINT. One with no such place has no right: the sixteenth. A cap counts what the
+    PERSONs and the OBJECTs buy together. ``together`` says which of its places an OBJECT
+    takes together, as for ``way_to_pay``.
     """
     out: list[Broken] = []
+    order = {thing.id: number for number, thing in enumerate(file.objects)}
+    things: dict[str, list[_Placing]] = {}
+    for each in sorted(taking, key=lambda each: order[each[1]]):
+        things.setdefault(each[0], []).append(each)
     for option, persons in taking_part.items():
-        if option not in world.needs_right:
-            continue
-        lacking = [person for person in persons if (option, person) not in world.rights]
-        without = _in_file_order_of_persons(file, lacking)
-        taken = placed(file, world, option, without)
-        left_out = tuple(person for person in without if person not in taken)
-        free = max(world.places.get(option, 0) - len(taken), 0)
-        if left_out[free:]:
-            out.append(Broken(Constraint.RIGHT, option, left_out[free:]))
-        if left_out[:free]:
-            out.append(Broken(Constraint.PAID, option, left_out[:free]))
+        if option in world.needs_right:
+            lacking = [person for person in persons if (option, person) not in world.rights]
+            without = _in_file_order_of_persons(file, lacking)
+            taken = placed(file, world, option, without)
+            left_out = tuple(person for person in without if person not in taken)
+            free = max(world.places.get(option, 0) - len(taken), 0)
+            if left_out[free:]:
+                out.append(Broken(Constraint.RIGHT, option, left_out[free:]))
+            if left_out[:free]:
+                out.append(Broken(Constraint.PAID, option, left_out[:free]))
+        if option in things:
+            out += _with_no_place(file, world, option, things[option])
     out += [
         Broken(Constraint.CAP, None, (), cap=cap) for cap in passed_by_the_bookings(file, world)
     ]
-    if file.caps and not out and way_to_pay(file, world, taking_part) is None:
+    places = {option: [thing for _, thing, _, _ in theirs] for option, theirs in things.items()}
+    paying = way_to_pay(file, world, taking_part, places, together) if file.caps and not out else {}
+    if paying is None:
         out.append(Broken(Constraint.CAP, None, ()))
+    return out
+
+
+def taking_a_place(file: File, world: World, itinerary: Itinerary) -> dict[str, dict[str, bool]]:
+    """The OBJECTs that take a place of an OFFER in each OPTION of an ITINERARY, in this world.
+
+    They are in the FILE's order. An OBJECT takes a place where an OFFER for the OPTION
+    names it, nothing else covers it, and it needs the right there: a PERSON who takes part
+    has it just before the OPTION starts, or might, or it is handed over or carried there.
+
+    With each comes whether it is sure to take the place. It is not where the OBJECT only
+    might be in the OPTION: nobody knows where it is, or whether the OPTION takes it along.
+    The place is counted either way, and a report says that it might have to be bought.
+    """
+    order = {thing.id: number for number, thing in enumerate(file.objects)}
+    _, followed, _ = _objects(file, world, list(enumerate(itinerary)))
+    _, moved = _where_a_transfer_brings_it(file, world, itinerary)
+    taking: dict[str, dict[str, bool]] = {}
+    for option, thing, _, sure in sorted([*followed, *moved], key=lambda each: order[each[1]]):
+        taking.setdefault(option, {})[thing] = sure
+    return taking
+
+
+def taken_together(
+    file: File, world: World, itinerary: Itinerary
+) -> dict[str, frozenset[frozenset[str]]]:
+    """The OPTIONs where each OBJECT takes a place of an OFFER together, in this world.
+
+    An OBJECT is in one place at a time. Where nobody knows which, it might take a place
+    in one OPTION or in another, and never in both. So each OBJECT that is followed through
+    the ITINERARY and takes a place has its sets of OPTIONs here: one set for each way
+    things can turn out, and only the sets that no other of them holds. The OBJECT takes
+    the places of one set, and a cap counts the most that one of them costs.
+
+    An OBJECT that another transfer might bring is left out: it can take every place that
+    ``taking_a_place`` gives for it.
+    """
+    return _objects(file, world, list(enumerate(itinerary)))[2]
+
+
+def _with_no_place(
+    file: File, world: World, option: str, taking: Sequence[_Placing]
+) -> list[Broken]:
+    """What the OBJECTs that take a place in one OPTION break, in the FILE's order of OBJECTs.
+
+    Nothing is broken where ``placed`` gives each of them a place that can be paid for.
+    Otherwise as many of them as can have a place of an OFFER that names them have one,
+    whoever pays. Which of them are on a place that can be paid for comes first, going
+    through them in the FILE's order: an OBJECT is, where that leaves a place for as many
+    as before. Then the others have a place in the FILE's order, while one is left. An
+    OBJECT on a place that cannot be paid for breaks the eleventh CONSTRAINT, and an OBJECT
+    with no place the sixteenth.
+
+    A car and a bike cross, a free rack takes either, and a car deck that nobody pays for
+    takes only the car: the bike has the rack, and the car's place is not paid for. With
+    the rack alone, at a price that a BUDGET pays for the bike only, the bike has the rack
+    and the car has no right.
+    """
+    offers = file.offers_for_objects(option)
+    things = [thing for _, thing, _, _ in taking]
+    if len(placed(file, world, option, things, offers)) == len(things):
+        return []
+    named = {(each.id, thing) for each in offers for thing in each.objects}
+
+    def seated(paying: Sequence[str]) -> dict[str, str]:
+        """A place for as many as can have one, with these on places that can be paid for.
+
+        These come first, and the others follow in the FILE's order.
+        """
+        theirs = {pair for pair in world.payable if pair[1] in paying}
+        any_place = {pair for pair in named if pair[1] not in paying}
+        trial = replace(world, payable=frozenset(theirs | any_place))
+        rest = [thing for thing in things if thing not in paying]
+        return placed(file, trial, option, [*paying, *rest], offers)
+
+    most = len(seated(()))
+    paid: list[str] = []
+    for thing in things:
+        found = seated((*paid, thing))
+        if thing in found and len(found) == most:
+            paid.append(thing)
+    have = seated(paid)
+    out: list[Broken] = []
+    for _, thing, who, _ in taking:
+        if thing not in paid:
+            missing = Constraint.PAID if thing in have else Constraint.COVERED
+            out.append(Broken(missing, option, who, object=thing))
     return out
 
 
@@ -1198,8 +1437,11 @@ def passed_by_the_bookings(file: File, world: World) -> list[str]:
 type Pair = tuple[str, str | None, tuple[str, str] | None, int]
 
 
-def pairs_to_pay(file: File, world: World, option: str, person: str) -> list[Pair]:
+def pairs_to_pay(file: File, world: World, option: str, buyer: str) -> list[Pair]:
     """Each pair of an OFFER and a BUDGET this PERSON can take for a place, in the FILE's order.
+
+    ``buyer`` can be an OBJECT too: then the pairs are for a place that covers it, from the
+    OFFERs that name it and the BUDGETs that list it.
 
     A pair holds the OFFER, the BUDGET, the cap that counts the purchase by its BUDGET and
     currency, and the price in ten-thousandths. The BUDGET is None for a place that costs
@@ -1207,11 +1449,11 @@ def pairs_to_pay(file: File, world: World, option: str, person: str) -> list[Pai
     cap in the currency of the price are alike, so only the first of them makes a pair.
     """
     able: list[Pair] = []
-    for offer in file.offers(option):
-        if (offer.id, person) not in world.payable:
+    for offer in file.offers_open_to(option, buyer):
+        if (offer.id, buyer) not in world.payable:
             continue
         price = offer.price
-        sources = () if price is None or not price.amount else file.payers(person, price.currency)
+        sources = () if price is None or not price.amount else file.payers(buyer, price.currency)
         if price is None or not sources:
             able.append((offer.id, None, None, 0))
             continue
@@ -1227,7 +1469,11 @@ def pairs_to_pay(file: File, world: World, option: str, person: str) -> list[Pai
 
 
 def way_to_pay(
-    file: File, world: World, taking_part: Mapping[str, Sequence[str]]
+    file: File,
+    world: World,
+    taking_part: Mapping[str, Sequence[str]],
+    taking: Mapping[str, Iterable[str]] | None = None,
+    together: Mapping[str, Collection[frozenset[str]]] | None = None,
 ) -> dict[tuple[str, str], tuple[str, str | None]] | None:
     """The way to pay for the places these OPTIONs need, by the fixed rule, or None.
 
@@ -1235,6 +1481,16 @@ def way_to_pay(
     gives, for each OPTION and PERSON who takes a place, the OFFER it is from and the BUDGET
     that pays. The BUDGET is None for a place that costs nothing, and for a PERSON whom no
     BUDGET of the FILE lists. None: there is no way to pay in this world.
+
+    ``taking`` gives the OBJECTs that take a place in each OPTION, in the FILE's order.
+    The result has them too, by the OPTION and the OBJECT. Within an OPTION the PERSONs
+    come first.
+
+    ``together`` is for an OBJECT that might be in one place or another. It takes a place
+    in each OPTION where it might need one, and each of those places has its OFFER and its
+    BUDGET. But it pays only for the places it takes together: ``taken_together`` gives
+    those sets of OPTIONs. So a cap counts the most that one of the sets costs. An OBJECT
+    that ``together`` leaves out pays for every place it takes.
 
     With no cap in the FILE, each OPTION is by itself: ``placed`` shares out its places, and
     the first BUDGET that can pay pays. With caps, one BUDGET can run short over several
@@ -1252,26 +1508,30 @@ def way_to_pay(
     the purchases so far can leave the same places and the same room for the same purchases
     to come. Where those had no way to pay once, they have none now, and the pair that leads
     there is passed over too.
+
+    A purchase draws on its cap what it adds to what the cap counts: see ``_Caps``.
     """
-    buyers: list[tuple[str, str]] = []
+    # Those who take a place in each OPTION, with the OFFERs that have places for them.
+    groups: list[tuple[str, Sequence[str], Sequence[Offer]]] = []
     for option, persons in taking_part.items():
         if option in world.needs_right:
             lacking = [person for person in persons if (option, person) not in world.rights]
-            buyers += [(option, person) for person in _in_file_order_of_persons(file, lacking)]
+            without = _in_file_order_of_persons(file, lacking)
+            groups.append((option, without, file.offers(option)))
+        if taking is not None and taking.get(option):
+            groups.append((option, list(taking[option]), file.offers_for_objects(option)))
+    buyers = [(option, buyer) for option, group, _ in groups for buyer in group]
     if not file.caps:
         chosen: dict[tuple[str, str], tuple[str, str | None]] = {}
-        groups: dict[str, list[str]] = {}
-        for option, person in buyers:
-            groups.setdefault(option, []).append(person)
-        for option, group in groups.items():
-            taken = placed(file, world, option, group)
+        for option, group, offers in groups:
+            taken = placed(file, world, option, group, offers)
             if len(taken) < len(group):
                 return None
-            prices = {offer.id: offer.price for offer in file.offers(option)}
-            for person in group:
-                price = prices[taken[person]]
-                payer = None if price is None else file.pays(person, price)
-                chosen[option, person] = (taken[person], None if payer is None else payer.id)
+            prices = {offer.id: offer.price for offer in offers}
+            for buyer in group:
+                price = prices[taken[buyer]]
+                payer = None if price is None else file.pays(buyer, price)
+                chosen[option, buyer] = (taken[buyer], None if payer is None else payer.id)
         return chosen
     room: dict[tuple[str, str], int] = {}
     for key, cap in file.caps.items():
@@ -1279,109 +1539,203 @@ def way_to_pay(
         if charged is None or charged > cap.limit.units:
             return None
         room[key] = cap.limit.units - charged
-    pairs = [pairs_to_pay(file, world, option, person) for option, person in buyers]
-    left = {offer.id: offer.places for option in taking_part for offer in file.offers(option)}
-    picked: list[int] = []
+    pairs = [pairs_to_pay(file, world, option, buyer) for option, buyer in buyers]
+    left = {offer.id: offer.places for _, _, offers in groups for offer in offers}
+    caps = _Caps(room, buyers, together or {})
+    picked: list[tuple[int, int]] = []  # the pair each purchase takes, and what it drew
     start = 0
     looks_ahead = False
     no_way: set[_Tried] = set()  # where the purchases to come were found to have no way to pay
     while len(picked) < len(buyers):
-        able = pairs[len(picked)]
+        purchase = len(picked)
+        able = pairs[purchase]
         found = None
         for number in range(start, len(able)):
             offer, _, key, units = able[number]
-            if not left[offer] or (key is not None and room[key] < units):
+            if not left[offer] or (
+                key is not None and room[key] < caps.draws(purchase, key, units)
+            ):
                 continue
             left[offer] -= 1
-            if key is not None:
-                room[key] -= units
-            ahead = len(picked) + 1
+            drew = 0 if key is None else caps.take(purchase, key, units)
             if not looks_ahead or (
-                _tried(left, room) not in no_way and _can_follow(pairs, ahead, left, room)
+                _tried(left, caps) not in no_way and _can_follow(pairs, purchase + 1, left, caps)
             ):
-                found = number
+                found = (number, drew)
                 break
             left[offer] += 1
             if key is not None:
-                room[key] += units
+                caps.give_back(purchase, key, units, drew)
         if found is None:
             if not picked:
                 return None
             # Every pair of this purchase has been tried from here, now or before the search
             # last came back to it.
-            no_way.add(_tried(left, room))
+            no_way.add(_tried(left, caps))
             looks_ahead = True
-            start = picked.pop() + 1
-            offer, _, key, units = pairs[len(picked)][start - 1]
+            last, drew = picked.pop()
+            start = last + 1
+            offer, _, key, units = pairs[len(picked)][last]
             left[offer] += 1
             if key is not None:
-                room[key] += units
+                caps.give_back(len(picked), key, units, drew)
             continue
         picked.append(found)
         start = 0
     return {
         buyer: (able[number][0], able[number][1])
-        for buyer, able, number in zip(buyers, pairs, picked, strict=True)
+        for buyer, able, (number, _) in zip(buyers, pairs, picked, strict=True)
     }
+
+
+class _Caps:
+    """What each cap still allows, while the purchases of a way to pay are made one by one.
+
+    A purchase for a PERSON draws its price on the cap of its BUDGET. So does a purchase
+    for an OBJECT, unless ``together`` says in which OPTIONs the OBJECT takes places
+    together. Such an OBJECT takes the places of one of those sets, and nobody knows of
+    which. So the cap counts the most that one set has cost so far, and a purchase draws
+    what it adds to that. Two racks at 10 dollars each, on two trains that the bike cannot
+    both be on, draw 10 dollars and then nothing.
+
+    ``room`` is what each cap still allows. ``buyers`` names each purchase: the OPTION, and
+    the PERSON or the OBJECT.
+    """
+
+    def __init__(
+        self,
+        room: dict[tuple[str, str], int],
+        buyers: Sequence[tuple[str, str]],
+        together: Mapping[str, Collection[frozenset[str]]],
+    ) -> None:
+        self.room = room
+        # For each purchase of such an OBJECT: the OBJECT, and which of its sets hold the OPTION.
+        self._sets: dict[int, tuple[str, list[int]]] = {}
+        # What each set of each such OBJECT has cost so far, by cap.
+        self._cost: dict[tuple[str, tuple[str, str]], list[int]] = {}
+        for purchase, (option, buyer) in enumerate(buyers):
+            sets = sorted(together.get(buyer, ()), key=sorted)
+            holding = [number for number, some in enumerate(sets) if option in some]
+            if holding:
+                self._sets[purchase] = (buyer, holding)
+                for key in room:
+                    self._cost.setdefault((buyer, key), [0] * len(sets))
+
+    def counted_by_sets(self, purchase: int) -> str | None:
+        """The OBJECT of this purchase, where a cap counts the most it takes together."""
+        return self._sets[purchase][0] if purchase in self._sets else None
+
+    def draws(self, purchase: int, key: tuple[str, str], units: int) -> int:
+        """What this purchase would add to what its cap counts, at this price."""
+        if purchase not in self._sets:
+            return units
+        buyer, holding = self._sets[purchase]
+        cost = self._cost[buyer, key]
+        return max(max(cost[number] for number in holding) + units - max(cost), 0)
+
+    def take(self, purchase: int, key: tuple[str, str], units: int) -> int:
+        """Makes this purchase at this price. The result is what it drew on the cap."""
+        drew = self.draws(purchase, key, units)
+        self.room[key] -= drew
+        if purchase in self._sets:
+            buyer, holding = self._sets[purchase]
+            for number in holding:
+                self._cost[buyer, key][number] += units
+        return drew
+
+    def give_back(self, purchase: int, key: tuple[str, str], units: int, drew: int) -> None:
+        """Undoes this purchase, the last one made that has not been undone."""
+        self.room[key] += drew
+        if purchase in self._sets:
+            buyer, holding = self._sets[purchase]
+            for number in holding:
+                self._cost[buyer, key][number] -= units
+
+    def so_far(self) -> tuple[int, ...]:
+        """The room of each cap, and what each set of each OBJECT has cost."""
+        return (*self.room.values(), *(units for cost in self._cost.values() for units in cost))
 
 
 type _Tried = tuple[tuple[int, ...], tuple[int, ...]]
 
 
-def _tried(left: Mapping[str, int], room: Mapping[tuple[str, str], int]) -> _Tried:
+def _tried(left: Mapping[str, int], caps: _Caps) -> _Tried:
     """What decides whether the purchases still to come have a way to pay.
 
-    It is the places each OFFER still has and the room each cap still has. Each purchase
-    takes one place, so the places left also say how many purchases are behind, and which
-    are still to come. Which pairs the purchases behind took plays no part beyond that. So
-    the search for the rest goes the same way each time the two are the same.
+    It is the places each OFFER still has, the room each cap still has, and what each set
+    of places that an OBJECT takes together has cost. Each purchase takes one place, so
+    the places left also say how many purchases are behind, and which are still to come.
+    Which pairs the purchases behind took plays no part beyond that. So the search for the
+    rest goes the same way each time these are the same.
     """
-    return tuple(left.values()), tuple(room.values())
+    return tuple(left.values()), caps.so_far()
 
 
 def _can_follow(
-    pairs: Sequence[Sequence[Pair]],
-    first: int,
-    left: Mapping[str, int],
-    room: Mapping[tuple[str, str], int],
+    pairs: Sequence[Sequence[Pair]], first: int, left: Mapping[str, int], caps: _Caps
 ) -> bool:
     """Whether nothing yet rules out the purchases from this one on. False is a proof.
 
-    ``left`` says how many places each OFFER still has, and ``room`` what each cap still
+    ``left`` says how many places each OFFER still has, and ``caps`` what each cap still
     allows, after the purchases before these. A pair is open to a purchase while its OFFER
-    has a place and its cap has room for the price. The purchases before it only ever take
-    places and room away, so the pair a purchase ends with is one that is open to it now.
+    has a place and its cap has room for what the purchase would draw. The purchases
+    before it only ever take places and room away, so the pair a purchase ends with is one
+    that is open to it now.
 
     So a purchase with no pair open cannot be made. And where every pair still open to a
-    purchase draws on one cap, that cap owes it the cheapest of them at least. A cap that
-    owes more than it has left cannot pay for all of them.
+    purchase draws on one cap, that cap owes it the least that one of them draws. A cap
+    that owes more than it has left cannot pay for all of them.
+
+    An OBJECT that takes places together in one set of OPTIONs or in another is owed less.
+    What a pair would draw now is the least that its purchase adds to the most the OBJECT
+    takes together. Two such purchases can be for places that are never both taken, so
+    the cap owes the OBJECT the largest of those amounts, and not their sum.
 
     True promises nothing: the purchases can still turn out to have no way to pay.
     """
+    room = caps.room
     owed: dict[tuple[str, str], int] = {}
-    for able in pairs[first:]:
+    most: dict[tuple[str, tuple[str, str]], int] = {}
+    for purchase in range(first, len(pairs)):
         only: tuple[str, str] | None = None
         least = 0
         choice = False
-        for offer, _, key, units in able:
-            if not left[offer] or (key is not None and room[key] < units):
+        for offer, _, key, units in pairs[purchase]:
+            if not left[offer]:
                 continue
-            if key is None or (only is not None and key != only):
+            if key is None:
                 choice = True
                 break
-            least = units if only is None else min(least, units)
+            draws = caps.draws(purchase, key, units)
+            if room[key] < draws:
+                continue
+            if only is not None and key != only:
+                choice = True
+                break
+            least = draws if only is None else min(least, draws)
             only = key
         if choice:
             continue
         if only is None:
             return False
+        thing = caps.counted_by_sets(purchase)
+        if thing is not None:
+            before = most.get((thing, only), 0)
+            most[thing, only] = max(before, least)
+            least = most[thing, only] - before
         owed[only] = owed.get(only, 0) + least
         if owed[only] > room[only]:
             return False
     return True
 
 
-def placed(file: File, world: World, option: str, persons: Sequence[str]) -> dict[str, str]:
+def placed(
+    file: File,
+    world: World,
+    option: str,
+    persons: Sequence[str],
+    offers: Sequence[Offer] | None = None,
+) -> dict[str, str]:
     """The OFFER whose place each of these PERSONs takes, for as many as can have one.
 
     They are the PERSONs in an OPTION with no right of their own, in the FILE's order. Each
@@ -1389,11 +1743,15 @@ def placed(file: File, world: World, option: str, persons: Sequence[str]) -> dic
     if there is a way to give one to them and to everybody before them who got one. Then each
     takes a place of the first OFFER, in the FILE's order, that leaves a way for the rest.
 
+    With ``offers``, the places are those of these OFFERs for the OPTION, and ``persons``
+    can hold OBJECTs: the OBJECTs that take a place there, in the FILE's order, and the
+    OFFERs for OBJECTs. An OBJECT can take only a place of an OFFER that names it.
+
     This is bipartite matching, done with augmenting paths. One way to seat everybody who has
     a place is kept throughout. A PERSON finds a place by moving others along: they take a
     place, its holder takes another, and so on to a place that is free.
     """
-    listed = file.offers(option)
+    listed = file.offers(option) if offers is None else offers
     persons = [who for who in persons if any((each.id, who) in world.payable for each in listed)]
     offers = [
         offer for offer in listed if any((offer.id, person) in world.payable for person in persons)
@@ -1867,10 +2225,38 @@ type _Taken = tuple[tuple[str, str | None], ...]
 # and what the plan has there that cannot be: the PERSON who was to have the OBJECT where the
 # plan hands it over, or ``_CARRY`` where the plan carries it. None for a check of the OPTION.
 type _Miss = tuple[int, Constraint, str | None]
+# Where an OBJECT takes a place of an OFFER: the position of the OPTION, what the plan
+# has there, as for ``_Miss``, and whether the OBJECT is sure to take the place.
+type _Place = tuple[int, str | None, bool]
+# The OPTIONs where one OBJECT takes a place of an OFFER together, as things can turn out:
+# one set for each way, and only the sets that no other of them holds. Nobody knows which of
+# Alex and Jo has the bike. Alex takes the north train and Jo the south: the bike takes a
+# place on one of them, and never on both.
+type _Together[T] = frozenset[frozenset[T]]
+# The same for an OBJECT part of the way through a plan: by each place where it might be,
+# the places it has taken on the ways that lead there. It is empty for an OBJECT that no
+# OFFER names: nothing is kept for it.
+type _SoFar[T] = frozenset[tuple[Where, _Together[T]]]
 # One way an OBJECT can go: what it breaks, where it might be when the TRIP starts and then
-# after each OPTION, and where it might be just before each OPTION starts.
-type _Run = tuple[tuple[_Miss, ...], tuple[frozenset[Where], ...], tuple[frozenset[Where], ...]]
-type _Way = tuple[tuple[int, ...], *_Run]  # the picks that led somewhere, and what came of them
+# after each OPTION, where it might be just before each OPTION starts, where it takes a
+# place of an OFFER, and which of those places it takes together, by position.
+type _Run = tuple[
+    tuple[_Miss, ...],
+    tuple[frozenset[Where], ...],
+    tuple[frozenset[Where], ...],
+    tuple[_Place, ...],
+    _Together[int],
+]
+# A way so far: the picks that led there, what an OBJECT breaks, where it might be, where it
+# takes a place, and which places it has taken together by each place where it might be.
+type _Way = tuple[
+    tuple[int, ...],
+    tuple[_Miss, ...],
+    tuple[frozenset[Where], ...],
+    tuple[frozenset[Where], ...],
+    tuple[_Place, ...],
+    _SoFar[int],
+]
 _CARRY = ""  # stands for a carry where a PERSON's id stands for a hand-over: no id is empty
 
 
@@ -1991,6 +2377,120 @@ def _moved(
     return (places - reached) | {to} if reached else places
 
 
+def _after(
+    does: str,
+    places: frozenset[Where],
+    visit: _Visit,
+    refused: bool,
+    taker: str | None,
+    loaded: bool,
+    along: str | None,
+) -> frozenset[Where]:
+    """Where an OBJECT might be after an OPTION of a plan, from where it might be before it.
+
+    The OPTION does what it does with no choice. Then the OBJECT is handed over to
+    ``taker``, where the plan hands it over there and the OPTION does that. Then it is
+    carried: where the plan carries it there, with ``loaded``, or with no choice, as
+    ``along`` says.
+
+    Each place is moved by itself. So the result for several places is the results for each
+    of them, taken together.
+    """
+    option, persons, origin, _ = visit
+    after = _left(does, places, persons, origin, option, refused)
+    if taker is not None and does == "hands_over" and not refused:
+        after = _moved(after, persons, origin, False, Where(person=taker))
+    if does == "carries" and (loaded or along == "sure"):
+        return _moved(after, persons, origin, refused, Where(option=option))
+    if along == "might":
+        return _left("might_carry", after, persons, origin, option, refused)
+    return after
+
+
+def _takes(was: Where, now: Where, visit: _Visit, taker: str | None = None) -> bool:
+    """Whether an OBJECT needs the right in an OPTION, on one way through it.
+
+    The OBJECT is in one place before the OPTION and in one place after it. It needs the
+    right where a PERSON who takes part has it, where it is handed over to ``taker``, and
+    where it is in the OPTION afterwards.
+    """
+    handed = taker is not None and now == Where(person=taker)
+    return was.person in visit.persons or handed or now == Where(option=visit.option)
+
+
+def _never(was: Where, now: Where) -> bool:
+    """For an OPTION where the OBJECT takes no place of an OFFER, whatever way it goes."""
+    return False
+
+
+def _put(places: frozenset[Where], to: Where) -> frozenset[Where]:
+    """For an OPTION that moves the OBJECT to one place, from wherever it is."""
+    return frozenset({to})
+
+
+def _stay(places: frozenset[Where]) -> frozenset[Where]:
+    """For an OPTION that leaves the OBJECT where it is."""
+    return places
+
+
+def _largest[T](sets: Iterable[frozenset[T]]) -> _Together[T]:
+    """These sets, without each one that another of them holds."""
+    found = set(sets)
+    return frozenset(one for one in found if not any(one < other for other in found))
+
+
+def _no_more[T](one: Iterable[frozenset[T]], other: Collection[frozenset[T]]) -> bool:
+    """Whether some set of the second holds each set of the first.
+
+    Then whatever pays for the places of the second pays for those of the first: a cap
+    counts the most that an OBJECT takes together.
+    """
+    return all(any(mine <= theirs for theirs in other) for mine in one)
+
+
+def _all_together[T](so_far: _SoFar[T]) -> _Together[T]:
+    """The places an OBJECT has taken together, wherever it might be now."""
+    return _largest(each for _, sets in so_far for each in sets)
+
+
+def _not_yet[T](places: Iterable[Where]) -> _SoFar[T]:
+    """An OBJECT that might be in these places and has taken no place of an OFFER."""
+    return frozenset((each, frozenset({frozenset[T]()})) for each in places)
+
+
+def _takes_no_more[T](one: _SoFar[T], other: _SoFar[T]) -> bool:
+    """Whether the first has taken no more together than the second, place by place.
+
+    Both are for the same places where the OBJECT might be. Then the first can stand in for
+    the second: whatever follows, some way of the second takes each set of places that a
+    way of the first takes.
+    """
+    theirs = dict(other)
+    return all(_no_more(sets, theirs[where]) for where, sets in one)
+
+
+def _further[T](
+    so_far: _SoFar[T],
+    onward: Callable[[frozenset[Where]], frozenset[Where]],
+    takes: Callable[[Where, Where], bool],
+    here: T,
+) -> _SoFar[T]:
+    """The places an OBJECT has taken together, one OPTION further.
+
+    ``onward`` says where the OBJECT might be afterwards, from where it might be before.
+    It is asked about one place at a time: the OBJECT is in one place, and each place it
+    might go to from there is one way things can turn out. ``takes`` says whether the
+    OBJECT takes a place of an OFFER on the way from one place to another, and ``here``
+    names that place.
+    """
+    reached: dict[Where, set[frozenset[T]]] = {}
+    for was, sets in so_far:
+        for now in onward(frozenset({was})):
+            taken = {each | {here} for each in sets} if takes(was, now) else sets
+            reached.setdefault(now, set()).update(taken)
+    return frozenset((where, _largest(sets)) for where, sets in reached.items())
+
+
 def _least_broken(
     world: World,
     thing: str,
@@ -1999,7 +2499,7 @@ def _least_broken(
     handed: Mapping[str, str],
     carried: Set[str],
     ends_at: Mapping[str, str],
-) -> _Run:
+) -> list[_Run]:
     """How one OBJECT goes through the OPTIONs of a plan, in the order they happen.
 
     ``visits`` holds those OPTIONs in that order, each with the OPTIONs that are over by the
@@ -2046,26 +2546,51 @@ def _least_broken(
     the first difference. So after each OPTION, only the first way is kept for each set of
     places where the OBJECT might be. Those are few, where all the ways are as many as two
     to the power of the OPTIONs that do whichever thing suits.
+
+    Where an OFFER for the OPTION names the OBJECT and nothing else covers it, the OBJECT
+    takes a place of the OFFER in the cases where it needs the right. That breaks nothing
+    here: whether the place can be had and paid for turns on what everybody else takes. So
+    a way also says where the OBJECT takes a place, and two ways that leave the OBJECT in
+    the same places are both kept where they take places in different OPTIONs. The result
+    holds the ways that break the least, the first of them first.
+
+    An OBJECT that might be in one place or another takes a place in one OPTION or in
+    another, and may never take both. A cap counts the most it takes together. So a way
+    also says which places the OBJECT takes together: each place where it might be is
+    followed by itself, as ``_further`` says. Two ways that leave the OBJECT in the same
+    places are both kept where they differ in that. A way is left out of the result where
+    a way before it takes no more together: whatever can be paid for with the later way
+    can be paid for with the earlier one. In a world that leaves nothing to pick there is
+    one way.
     """
-    reached: dict[frozenset[Where], _Way] = {}
+    named = any((visit.option, thing) in world.offered for visit in visits)
+    reached: dict[tuple[frozenset[Where], tuple[_Place, ...], _SoFar[int]], _Way] = {}
     for pick, start in enumerate(begins):
-        reached.setdefault(start, ((pick,), (), (start,), ()))
-    for position, (option, persons, origin, over) in enumerate(visits):
+        none_yet: _SoFar[int] = _not_yet(start) if named else frozenset()
+        reached.setdefault((start, (), none_yet), ((pick,), (), (start,), (), (), none_yet))
+    for position, visit in enumerate(visits):
+        option, persons, origin, over = visit
         action = world.does.get((option, thing), "nothing")
         refused = (option, thing) in world.refuses
         uncovered = (option, thing) in world.uncovered
+        offered = (option, thing) in world.offered
         taker = handed.get(option)
         loaded = option in carried
         along = goes_along(world, option, thing)
+        takes = partial(_takes, visit=visit, taker=taker) if offered else _never
         # Whatever was carried in an OPTION that is over lies where that OPTION ends.
-        found_there: dict[frozenset[Where], _Way] = {}
-        for places, way in reached.items():
-            there = arrived(places, over, ends_at)
+        found_there: dict[tuple[frozenset[Where], tuple[_Place, ...], _SoFar[int]], _Way] = {}
+        for (places, _, so_far), way in reached.items():
+            lying = arrived(places, over, ends_at)
+            if so_far and lying != places:
+                arrive = partial(arrived, over=over, ends_at=ends_at)
+                so_far = _further(so_far, arrive, _never, position)
+            there = (lying, way[4], so_far)
             known = found_there.get(there)
             if known is None or (len(way[1]), way[0]) < (len(known[1]), known[0]):
-                found_there[there] = way
-        following: dict[frozenset[Where], _Way] = {}
-        for places, (picks, broken, trail, seen) in found_there.items():
+                found_there[there] = (*way[:5], so_far)
+        following: dict[tuple[frozenset[Where], tuple[_Place, ...], _SoFar[int]], _Way] = {}
+        for (places, _, so_far), (picks, broken, trail, seen, bought, _) in found_there.items():
             if (option, thing) in world.needs and not within_reach(places, persons, origin):
                 broken = (*broken, (position, Constraint.AT_HAND, None))
             held = brought_in(places, persons)
@@ -2079,49 +2604,93 @@ def _least_broken(
                     continue  # with no hand-over planned, that is "nothing"
                 if action == "any" and does == "carries" and not loaded:
                     continue  # and so is a carry that is not planned
-                after = _left(does, places, persons, origin, option, refused)
+                # A hand-over and a carry need the OBJECT at hand once the OPTION has done
+                # what it does with no choice.
                 found = broken
-                at_hand = within_reach(after, persons, origin)
+                at_hand = within_reach(
+                    _left(does, places, persons, origin, option, refused), persons, origin
+                )
                 if taker is not None:
                     if refused:
                         found = (*found, (position, Constraint.REFUSED, taker))
                     if does != "hands_over" or not at_hand:
                         found = (*found, (position, Constraint.AT_HAND, taker))
-                    if does == "hands_over" and not refused:
-                        after = _moved(after, persons, origin, False, Where(person=taker))
                 if loaded and (does != "carries" or not at_hand):
                     found = (*found, (position, Constraint.AT_HAND, _CARRY))
-                if does == "carries" and (loaded or along == "sure"):
-                    # It is carried by choice, or it goes along with no choice, and the
-                    # plan has no entry for that.
-                    after = _moved(after, persons, origin, refused, Where(option=option))
-                elif along == "might":
-                    after = _left("might_carry", after, persons, origin, option, refused)
+                # It is handed over as the plan says. It is carried by choice, or it goes
+                # along with no choice, and the plan has no entry for that.
+                onward = partial(
+                    _after,
+                    does,
+                    visit=visit,
+                    refused=refused,
+                    taker=taker,
+                    loaded=loaded,
+                    along=along,
+                )
+                after = onward(places)
                 # A right is needed where a PERSON who takes part has the OBJECT, where it
                 # is handed over and where it is carried. That is one requirement, so one
                 # finding: for whoever has it, or else for whoever takes it, or else for
                 # the carry. A hand-over or a carry that does not happen needs none.
-                if uncovered and held:
-                    found = (*found, (position, Constraint.COVERED, None))
-                elif uncovered and taker is not None and Where(person=taker) in after:
-                    found = (*found, (position, Constraint.COVERED, taker))
-                elif uncovered and Where(option=option) in after:
-                    found = (*found, (position, Constraint.COVERED, _CARRY))
-                known = following.get(after)
+                needed: tuple[str | None, ...] = ()
+                if held:
+                    needed = (None,)
+                elif taker is not None and Where(person=taker) in after:
+                    needed = (taker,)
+                elif Where(option=option) in after:
+                    needed = (_CARRY,)
+                if uncovered and needed:
+                    found = (*found, (position, Constraint.COVERED, needed[0]))
+                # Where an OFFER names the OBJECT, it takes a place of it there instead.
+                # That is sure where whoever might have it takes part, and where it is
+                # with the PERSON who takes it, or in the OPTION, and nowhere else.
+                sure = (
+                    all(each.person in persons for each in places)
+                    or (taker is not None and after == frozenset({Where(person=taker)}))
+                    or after == frozenset({Where(option=option)})
+                )
+                paid = bought
+                if offered and needed:
+                    paid = (*bought, (position, needed[0], sure))
+                later = _further(so_far, onward, takes, position) if so_far else so_far
+                known = following.get((after, paid, later))
                 if known is None or (len(found), (*picks, pick)) < (len(known[1]), known[0]):
-                    following[after] = ((*picks, pick), found, (*trail, after), (*seen, places))
+                    following[after, paid, later] = (
+                        (*picks, pick),
+                        found,
+                        (*trail, after),
+                        (*seen, places),
+                        paid,
+                        later,
+                    )
         reached = following
-    _, broken, trail, seen = min(reached.values(), key=lambda way: (len(way[1]), way[0]))
-    return broken, trail, seen
+    ways = sorted(reached.values(), key=lambda way: (len(way[1]), way[0]))
+    kept: list[_Run] = []
+    for _, broken, trail, seen, bought, so_far in ways:
+        if len(broken) > len(ways[0][1]):
+            break
+        together = _all_together(so_far) or frozenset({frozenset[int]()})
+        if not any(_no_more(run[4], together) for run in kept):
+            kept.append((broken, trail, seen, bought, together))
+    return kept
 
 
 # Where an OBJECT might be, and the arrivals that got it there: each an OPTION that carried
 # it, and the OPTION that first used it afterwards. The second starts no earlier than the
-# first ends.
-type _Spot = tuple[frozenset[Where], tuple[tuple[str, str], ...]]
+# first ends. Then the OPTIONs in which it has taken places of OFFERs together.
+type _Spot = tuple[frozenset[Where], tuple[tuple[str, str], ...], _SoFar[str]]
 # Each ``_Spot`` that a search has reached, with the first hand-overs and carries that lead
 # to it.
 type _Reached = dict[_Spot, _Ranked]
+# What a choice counts on: its arrivals, and the places of OFFERs it takes together.
+type _Counted = tuple[tuple[tuple[str, str], ...], _SoFar[str]]
+
+
+def _to_begin(world: World, thing: str, begins: Iterable[frozenset[Where]]) -> _Reached:
+    """Where a search for one OBJECT starts: each way it can start, with nothing done yet."""
+    named = any(each == thing for _, each in world.offered)
+    return {(start, (), _not_yet(start) if named else frozenset()): () for start in begins}
 
 
 def _first_hand_overs(
@@ -2157,8 +2726,16 @@ def _first_hand_overs(
     an arrival that the other does not. A slow ferry and a fast one both carry the bag to
     the island, and only one of them may be there in time: the start times decide, and they
     are not known here.
+
+    A place of an OFFER is the same. Where an OFFER for an OPTION names the OBJECT and
+    nothing else covers it, the OBJECT takes a place there in the cases where it needs the
+    right. Whether that place can be had and paid for turns on what everybody else takes,
+    and that is not known here. So a choice is left out only where the other also takes
+    no more places together, wherever the OBJECT might be: ``_takes_no_more`` says when.
+    Sam hands the bike to Jo before the ferry: that is one hand-over more, and the only
+    plan the trip money can pay for.
     """
-    reached: _Reached = {(start, ()): () for start in begins}
+    reached = _to_begin(world, thing, begins)
     for visit in visits:
         reached = _one_further(world, thing, reached, visit, rank, ends_at)
     return reached
@@ -2175,9 +2752,10 @@ def _one_further(
     """The search of ``_first_hand_overs``, one OPTION further.
 
     ``reached`` holds each place where the OBJECT might be before the OPTION, with the
-    arrivals counted on so far, and the first hand-overs and carries that lead there. The
-    result holds the same for after the OPTION. It is empty where the fourteenth or the
-    fifteenth CONSTRAINT cannot be kept, whatever was handed over or carried.
+    arrivals counted on so far and the places of OFFERs it has taken together, and the
+    first hand-overs and carries that lead there. The result holds the same for after the
+    OPTION. It is empty where the fourteenth or the fifteenth CONSTRAINT cannot be kept,
+    whatever was handed over or carried.
 
     An OPTION uses the OBJECT where it requires it, or where the OBJECT is handed over or
     carried in it. An OBJECT that was carried is used again only once the OPTION that
@@ -2193,32 +2771,61 @@ def _one_further(
     # Where the OPTION needs a right for the OBJECT and nothing covers it, no PERSON who
     # takes part has it, and it is not handed over or carried there, by choice or with none.
     uncovered = (option, thing) in world.uncovered
+    # Where an OFFER names the OBJECT instead, it takes a place of it in those cases.
+    offered = (option, thing) in world.offered
     action = world.does.get((option, thing), "nothing")
-    kept: dict[frozenset[Where], dict[tuple[tuple[str, str], ...], _Ranked]] = {}
+    kept: dict[frozenset[Where], dict[_Counted, _Ranked]] = {}
 
     def keep(
-        places: frozenset[Where], arrivals: tuple[tuple[str, str], ...], taken: _Ranked
+        places: frozenset[Where],
+        arrivals: tuple[tuple[str, str], ...],
+        bought: _SoFar[str],
+        taken: _Ranked,
     ) -> None:
-        """Keep this choice, unless one that is kept counts on no more and comes no later."""
+        """Keep this choice, unless one that is kept counts on no more and comes no later.
+
+        A choice counts on its arrivals and on the places of OFFERs it takes together.
+        """
         there = kept.setdefault(places, {})
         counted, rank = set(arrivals), (len(taken), taken)
         if any(
-            counted.issuperset(others) and (len(theirs), theirs) <= rank
-            for others, theirs in there.items()
+            counted.issuperset(others)
+            and _takes_no_more(theirs, bought)
+            and (len(first), first) <= rank
+            for (others, theirs), first in there.items()
         ):
             return
-        for others in [
-            others
-            for others, theirs in there.items()
-            if counted.issubset(others) and rank <= (len(theirs), theirs)
+        for key in [
+            (others, theirs)
+            for (others, theirs), first in there.items()
+            if counted.issubset(others)
+            and _takes_no_more(bought, theirs)
+            and rank <= (len(first), first)
         ]:
-            del there[others]
-        there[arrivals] = taken
+            del there[key]
+        there[arrivals, bought] = taken
 
-    for (places, arrivals), taken in reached.items():
+    def further(
+        so_far: _SoFar[str],
+        onward: Callable[[frozenset[Where]], frozenset[Where]],
+        taker: str | None = None,
+    ) -> _SoFar[str]:
+        """The places taken together once the OBJECT has gone ``onward`` in this OPTION.
+
+        It takes a place here where a PERSON who takes part has it, or might, and where
+        it is in the OPTION afterwards or handed over in it.
+        """
+        if not so_far:
+            return so_far
+        takes = partial(_takes, visit=visit, taker=taker) if offered else _never
+        return _further(so_far, onward, takes, option)
+
+    aboard = Where(option=option)
+    for (places, arrivals, before), taken in reached.items():
         # Where the OBJECT is for an OPTION that uses it, with the arrivals that takes. None
         # where nobody knows when an OPTION that carried it ends.
-        in_use: _Spot | None = (places, arrivals)
+        in_use: tuple[frozenset[Where], tuple[tuple[str, str], ...]] | None = (places, arrivals)
+        there_by_then = before
         carriers = sorted({each.option for each in places if each.option is not None})
         if carriers:
             in_use = None
@@ -2226,10 +2833,14 @@ def _one_further(
                 there = arrived(places, set(carriers), ends_at)
                 more = ((carrier, option) for carrier in carriers)
                 in_use = (there, tuple(sorted((*arrivals, *more))))
+                if before:
+                    arrive = partial(arrived, over=set(carriers), ends_at=ends_at)
+                    there_by_then = _further(before, arrive, _never, option)
         if (option, thing) in world.needs:
             if in_use is None or not within_reach(in_use[0], persons, origin):
                 continue
             places, arrivals = in_use
+            before = there_by_then
         if (refused or uncovered) and brought_in(places, persons):
             continue
         at_hand = in_use is not None and within_reach(in_use[0], persons, origin)
@@ -2237,36 +2848,52 @@ def _one_further(
             if does not in ("hands_over", "carries"):
                 # It takes the OBJECT from no PERSON where it refuses it.
                 left = _left(does, places, persons, origin, option, refused)
-                if not (uncovered and Where(option=option) in left):
-                    keep(left, arrivals, taken)
+                if not (uncovered and aboard in left):
+                    leave = partial(
+                        _left, does, persons=persons, origin=origin, option=option, refused=refused
+                    )
+                    keep(left, arrivals, further(before, leave), taken)
                 continue
             along = goes_along(world, option, thing)
             if along == "sure":
                 # It goes along with no choice: the OPTION requires it, so it is at hand.
                 if not uncovered:
-                    keep(frozenset({Where(option=option)}), arrivals, taken)
+                    load = partial(_put, to=aboard)
+                    keep(frozenset({aboard}), arrivals, further(before, load), taken)
                 continue
             if along == "might":
                 # A plan that does not choose the carry has to hold with both.
                 gone = _left("might_carry", places, persons, origin, option, refused)
-                if uncovered and Where(option=option) in gone:
+                if uncovered and aboard in gone:
                     continue
-                keep(gone, arrivals, taken)
+                go = partial(
+                    _left,
+                    "might_carry",
+                    persons=persons,
+                    origin=origin,
+                    option=option,
+                    refused=refused,
+                )
+                keep(gone, arrivals, further(before, go), taken)
             elif action != "any":  # with "any" that is "nothing"
-                keep(places, arrivals, taken)
+                keep(places, arrivals, further(before, _stay), taken)
             if in_use is None or not at_hand or uncovered:
                 continue
             if does == "carries":
-                keep(frozenset({Where(option=option)}), in_use[1], (*taken, rank(option, None)))
+                loaded = further(there_by_then, partial(_put, to=aboard))
+                keep(frozenset({aboard}), in_use[1], loaded, (*taken, rank(option, None)))
             elif not refused:
                 for person in persons:
                     there = frozenset({Where(person=person)})
                     if in_use[0] != there:  # they have it already
-                        keep(there, in_use[1], (*taken, rank(option, person)))
+                        given = further(
+                            there_by_then, partial(_put, to=Where(person=person)), person
+                        )
+                        keep(there, in_use[1], given, (*taken, rank(option, person)))
     return {
-        (places, arrivals): taken
+        (places, arrivals, bought): taken
         for places, there in kept.items()
-        for arrivals, taken in there.items()
+        for (arrivals, bought), taken in there.items()
     }
 
 
@@ -2275,23 +2902,31 @@ def _first_of(reached: _Reached) -> list[tuple[_Ranked, tuple[tuple[str, str], .
 
     Each is the hand-overs and carries of one OBJECT, with the arrivals they count on. Where
     the OBJECT ends up no longer matters. So a choice is left out where another counts on
-    no arrival that it does not count on, and the rules put the other no later: start times
-    that keep the first keep the other. They come in the order of the rules, the first
-    choice first.
+    no arrival that it does not count on, takes no more places of OFFERs together, and the
+    rules put the other no later: start times that keep the first keep the other, and so
+    does a way to pay. They come in the order of the rules, the first choice first.
     """
     ranked = sorted(
-        ((len(taken), taken, arrivals) for (_, arrivals), taken in reached.items()),
+        ((len(taken), taken, arrivals, bought) for (_, arrivals, bought), taken in reached.items()),
+        key=lambda each: each[:3],
     )
     found: list[tuple[_Ranked, tuple[tuple[str, str], ...]]] = []
-    for _, taken, arrivals in ranked:
-        if not any(set(arrivals).issuperset(others) for _, others in found):
-            found.append((taken, arrivals))
+    counted: list[tuple[tuple[tuple[str, str], ...], _Together[str]]] = []
+    for _, taken, arrivals, bought in ranked:
+        together = _all_together(bought)
+        if not any(
+            set(arrivals).issuperset(others) and _no_more(theirs, together)
+            for others, theirs in counted
+        ):
+            counted.append((arrivals, together))
+            if (taken, arrivals) not in found:
+                found.append((taken, arrivals))
     return found
 
 
 def _as_planned(
-    file: File, world: World, steps: Iterable[Step]
-) -> Iterator[tuple[str, list[_Visit], _Run]]:
+    file: File, world: World, steps: Sequence[Step]
+) -> list[tuple[str, list[_Visit], _Run]]:
     """How each OBJECT goes through the OPTIONs among these steps, as the plan says.
 
     One result for each OBJECT that the fourteenth and the fifteenth CONSTRAINT ask about in
@@ -2299,7 +2934,89 @@ def _as_planned(
     the hand-overs and the carries of the plan. An OPTION is over for another where it ends
     no later than the other starts. Where the world leaves something to pick, that is the
     first way that breaks the least.
+
+    Where several ways break as little and take places of OFFERs in different OPTIONs, the
+    ways of all the OBJECTs are picked together: the first ways, in the FILE's order of
+    OBJECTs, whose places can all be had and paid for with those of the PERSONs. Where no
+    ways can, each OBJECT goes its first way.
+
+    The ways are picked one OBJECT at a time. Places that cannot be had or paid for cannot
+    be either with more places taken besides. So a way of one OBJECT is given up as soon
+    as its places do not fit with those of the OBJECTs before it, and with it every pick
+    that starts the same way. Eight bags that can each start in four places have 65,536
+    picks, and 32 ways to try where no bag can pay. The places of an OBJECT with one way
+    only are counted from the start: no pick does without them.
     """
+    found = list(_each_way(file, world, steps))
+    first = [(thing, visits, runs[0]) for thing, visits, runs in found]
+    if all(len(runs) == 1 for _, _, runs in found):
+        return first
+    taking_part = {step.option: step.persons for step in steps if step.option is not None}
+    _, moved = _where_a_transfer_brings_it(file, world, tuple(steps))
+    settled = [(thing, visits, runs[0]) for thing, visits, runs in found if len(runs) == 1]
+    taking, together = _taking(file, settled)
+    if _rights(file, world, taking_part, [*taking, *moved], together):
+        return first  # these places cannot be had or paid for, whatever the other OBJECTs do
+    # The OBJECTs with several ways, the ways taken so far, and the ways still to try.
+    several = [each for each in found if len(each[2]) > 1]
+    chosen: list[tuple[str, list[_Visit], _Run]] = []
+    to_try = [iter(several[0][2])]
+    while to_try:
+        thing, visits, _ = several[len(to_try) - 1]
+        del chosen[len(to_try) - 1 :]
+        run = next(to_try[-1], None)
+        if run is None:
+            to_try.pop()
+            continue
+        chosen.append((thing, visits, run))
+        # A way that takes no place fits where the ways before it fit.
+        taking, together = _taking(file, [*settled, *chosen])
+        if run[3] and _rights(file, world, taking_part, [*taking, *moved], together):
+            continue
+        if len(chosen) < len(several):
+            to_try.append(iter(several[len(chosen)][2]))
+            continue
+        picked = {thing: run for thing, _, run in chosen}
+        return [(thing, visits, picked.get(thing, runs[0])) for thing, visits, runs in found]
+    return first
+
+
+def _taking(
+    file: File, planned: Iterable[tuple[str, list[_Visit], _Run]]
+) -> tuple[list[_Placing], dict[str, _Together[str]]]:
+    """Each OBJECT that takes a place of an OFFER, as these ways of the OBJECTs have it.
+
+    Each comes with the PERSONs that a finding about it names: whoever takes the OBJECT
+    where it is handed over, everybody who takes part where it is carried, and otherwise
+    each PERSON who takes part and has it just before the OPTION starts, or might.
+
+    The second result says, for each OBJECT that takes a place, in which OPTIONs it takes
+    places together: ``taken_together`` says what that is.
+    """
+    out: list[_Placing] = []
+    together: dict[str, _Together[str]] = {}
+    for thing, visits, (_, _, seen, bought, sets) in planned:
+        if bought:
+            together[thing] = frozenset(
+                frozenset(visits[position].option for position in some) for some in sets
+            )
+        for position, taker, sure in bought:
+            option, persons, _, _ = visits[position]
+            if taker is not None and taker != _CARRY:
+                who: tuple[str, ...] = (taker,)
+            elif taker is None:
+                have = [each for each in persons if Where(person=each) in seen[position]]
+                who = _in_file_order_of_persons(file, have)
+            else:
+                who = _in_file_order_of_persons(file, persons)
+            out.append((option, thing, who, sure))
+    return out, together
+
+
+def _each_way(
+    file: File, world: World, steps: Iterable[Step]
+) -> Iterator[tuple[str, list[_Visit], list[_Run]]]:
+    """What ``_as_planned`` picks from: for each OBJECT, the ways that ``_least_broken`` gives."""
     options = [step for step in steps if step.option is not None]
     ended: list[tuple[int, str]] = []  # each OPTION so far with a known end
     visits: list[_Visit] = []
@@ -2320,11 +3037,13 @@ def _as_planned(
         }
         carried = {step.option or "" for step in options if thing.id in step.carried}
         begins = _begins(file, world, thing.id)
-        run = _least_broken(world, thing.id, visits, begins, handed, carried, ends_at)
-        yield thing.id, visits, run
+        runs = _least_broken(world, thing.id, visits, begins, handed, carried, ends_at)
+        yield thing.id, visits, runs
 
 
-def _objects(file: File, world: World, order: list[_Placed]) -> list[Broken]:
+def _objects(
+    file: File, world: World, order: list[_Placed]
+) -> tuple[list[Broken], list[_Placing], dict[str, _Together[str]]]:
     """The fourteenth and the fifteenth CONSTRAINT, with the steps in one order.
 
     Each OBJECT is at hand where it is required, handed over or carried, and no PERSON has
@@ -2342,10 +3061,15 @@ def _objects(file: File, world: World, order: list[_Placed]) -> list[Broken]:
     is said apart from that: it is so where one of the places it might be is at hand. One
     OPTION can ask for an OBJECT twice: it requires it and carries it. Both findings are
     the same then, and one is given.
+
+    The second result holds each OBJECT that takes a place of an OFFER in the plan, as
+    ``_taking`` gives them. The sixteenth CONSTRAINT asks whether each has one. The third
+    says which of its places each OBJECT takes together.
     """
     steps = {step.option: step for _, step in order if step.option is not None}
     out: list[Broken] = []
-    for thing, visits, (broken, _, seen) in _as_planned(file, world, (step for _, step in order)):
+    planned = _as_planned(file, world, [step for _, step in order])
+    for thing, visits, (broken, _, seen, _, _) in planned:
         for position, constraint, taker in broken:
             option, persons, origin, _ = visits[position]
             late: int | None = None
@@ -2371,7 +3095,7 @@ def _objects(file: File, world: World, order: list[_Placed]) -> list[Broken]:
             found = Broken(constraint, option, who, late, object=thing, might=might, sooner=sooner)
             if found not in out:
                 out.append(found)
-    return out
+    return out, *_taking(file, planned)
 
 
 def whereabouts(
@@ -2386,7 +3110,7 @@ def whereabouts(
     until the next OPTION that starts no earlier than that one ends: ``just_before`` says
     where that OPTION finds it.
     """
-    return {thing: trail for thing, _, (_, trail, _) in _as_planned(file, world, itinerary)}
+    return {thing: run[1] for thing, _, run in _as_planned(file, world, itinerary)}
 
 
 def just_before(
@@ -2398,7 +3122,7 @@ def just_before(
     ``whereabouts``. An OBJECT that was carried in an OPTION that is over by then lies at the
     PLACE where that OPTION ends.
     """
-    return {thing: seen for thing, _, (_, _, seen) in _as_planned(file, world, itinerary)}
+    return {thing: run[2] for thing, _, run in _as_planned(file, world, itinerary)}
 
 
 type _Chain = tuple[list[tuple[int, int, int]], dict[int, _Taken], tuple[int, tuple[_Ranked, ...]]]
@@ -2426,12 +3150,13 @@ def _asked_about(
 
     An OPTION asks about an OBJECT where it requires it or refuses it, and where it needs a
     right for it that nothing gives: a PERSON who has the OBJECT hands it on first, or
-    leaves it where an OPTION keeps it. The OPTIONs are by position in the FILE. ``who``
-    names the PERSONs in each, and ``empty`` holds the OPTIONs that happen with nobody in
-    them.
+    leaves it where an OPTION keeps it. It asks too where only a place of an OFFER gives
+    the right: a plan can get by with fewer places that way. The OPTIONs are by position in
+    the FILE. ``who`` names the PERSONs in each, and ``empty`` holds the OPTIONs that
+    happen with nobody in them.
     """
     happening = [index for index, persons in enumerate(who) if persons or index in empty]
-    checked = world.needs | world.refuses | world.uncovered
+    checked = world.needs | world.refuses | world.uncovered | world.offered
     asked = [
         thing.id
         for thing in file.objects
@@ -2606,7 +3331,8 @@ def _ordered_by(
     PERSON who takes part can have it by then, as ``_can_have`` says. Nobody else has the
     OBJECT then, so a refusal asks nothing of an OPTION with nobody else in it, wherever
     that OPTION comes. An OPTION that needs a right for the OBJECT that nothing gives
-    checks it in the same way: no PERSON who takes part has it.
+    checks it in the same way: no PERSON who takes part has it. So does one where only a
+    place of an OFFER gives the right: the OBJECT takes a place where such a PERSON has it.
 
     The second are the OPTIONs that check the OBJECT or can move it. An OBJECT that no
     OPTION of the plan can move stays where it starts. So the order of the OPTIONs that
@@ -2620,6 +3346,7 @@ def _ordered_by(
         if (options[index].id, thing) in world.needs
         or ((options[index].id, thing) in world.refuses and index in holders)
         or ((options[index].id, thing) in world.uncovered and index in holders)
+        or ((options[index].id, thing) in world.offered and index in holders)
     )
     can_move = _can_move(file, world, orders, happening, thing)
     if not can_move:
@@ -2817,7 +3544,7 @@ def _orders_together(
         """
         thing = asked[number]
         brought = thing in world.brought
-        begins: _Reached = {(start, ()): () for start in _begins(file, world, thing)}
+        begins = _to_begin(world, thing, _begins(file, world, thing))
         # The OPTIONs done and where they leave the OBJECT, for each start of an order made.
         made: set[tuple[frozenset[int], frozenset[tuple[_Spot, _Ranked]]]] = set()
 

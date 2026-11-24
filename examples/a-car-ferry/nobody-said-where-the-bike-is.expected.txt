@@ -1,0 +1,66 @@
+FEASIBLE, with a WARNING: this trip works, but not everything is booked yet.
+
+Sunday 18 July 2027 (times in America/Chicago)
+  6:00 am to 8:30 am: Car ferry to Muskegon, Alex
+    ! A right to this still has to be bought for the car, from car-deck, for 90.00 USD from the trip money.
+    ! A right to this might still have to be bought for the bike, from bike-rack, for 10.00 USD from the trip money.
+  12:30 pm to 3:00 pm: Afternoon ferry to Muskegon, Sam
+    ! A right to this might still have to be bought for the bike, from afternoon-bike-rack, for 10.00 USD from the trip money.
+  4:00 pm to 5:00 pm: Drive along the shore, Alex and Sam
+
+WARNING: not everything is booked yet. A line marked "!" that names an OFFER says which OBJECT still needs a right, or might. Only a BOOKING secures one.
+
+The plan relies on these FACTs and DECISIONs:
+  alex-start: Alex starts from the ferry terminal in Milwaukee
+  sam-start: Sam starts from the ferry terminal in Milwaukee
+  ferry-time: Car ferry to Muskegon starts at 6:00 am on Sunday 18 July 2027
+  ferry-length: Car ferry to Muskegon takes 2 h 30 min
+  ferry-arrival: nobody has to be at the ferry terminal in Milwaukee before Car ferry to Muskegon starts
+  ferry-needs-a-ticket: people need a right to take part in Car ferry to Muskegon
+  afternoon-time: Afternoon ferry to Muskegon starts at 12:30 pm on Sunday 18 July 2027
+  afternoon-length: Afternoon ferry to Muskegon takes 2 h 30 min
+  afternoon-arrival: nobody has to be at the ferry terminal in Milwaukee before Afternoon ferry to Muskegon starts
+  afternoon-needs-a-ticket: people need a right to take part in Afternoon ferry to Muskegon
+  drive-time: Drive along the shore starts at 4:00 pm on Sunday 18 July 2027
+  drive-length: Drive along the shore takes 1 h
+  drive-arrival: nobody has to be at Muskegon before Drive along the shore starts
+  drive-is-open: nobody needs a right to take part in Drive along the shore
+  alex-has-the-car: Alex has the car when the TRIP starts
+  drive-needs-the-car: Drive along the shore requires the car
+  every-use-of-the-car: of the OPTIONs in this FILE, only Drive along the shore requires the car, and none refuses the car
+  everything-that-moves-the-car: the FILE states every OPTION that hands over, keeps or carries the car: there is none
+  ferry-needs-a-car-ticket: Car ferry to Muskegon needs a right for the car
+  every-ticket-for-the-car: of the OPTIONs in this FILE, only Car ferry to Muskegon needs a right for the car
+  every-use-of-the-bike: no OPTION in this FILE requires or refuses the bike
+  everything-that-moves-the-bike: the FILE states every OPTION that hands over, keeps or carries the bike: there is none
+  ferry-needs-a-bike-ticket: Car ferry to Muskegon needs a right for the bike
+  afternoon-needs-a-bike-ticket: Afternoon ferry to Muskegon needs a right for the bike
+  every-ticket-for-the-bike: of the OPTIONs in this FILE, only Car ferry to Muskegon and Afternoon ferry to Muskegon need a right for the bike
+  ferry-ticket: a BOOKING for Car ferry to Muskegon covers Alex; its payment: 19.00 USD, from the trip money
+  afternoon-ticket: a BOOKING for Afternoon ferry to Muskegon covers Sam; its payment: 19.00 USD, from the trip money
+  car-deck: an OFFER has 3 places for Car ferry to Muskegon that can still be bought to cover the car, for 90.00 USD each
+  bike-rack: an OFFER has 4 places for Car ferry to Muskegon that can still be bought to cover the bike, for 10.00 USD each
+  afternoon-bike-rack: an OFFER has 4 places for Afternoon ferry to Muskegon that can still be bought to cover the bike, for 10.00 USD each
+  lock-ferry: Alex takes part in Car ferry to Muskegon
+  lock-afternoon-ferry: Sam takes part in Afternoon ferry to Muskegon
+  lock-drive: Alex and Sam take part in Drive along the shore
+  trip-money-cap: the TRIP spends at most 140.00 USD from the trip money
+
+Where each OBJECT is:
+  the car: with Alex when the TRIP starts
+    Car ferry to Muskegon needs a right for the car. Just before it starts: with Alex. A place from car-deck covers the car, once it is bought.
+    Drive along the shore requires the car. Just before it starts: with Alex.
+  the bike: nobody knows where when the TRIP starts
+    Car ferry to Muskegon needs a right for the bike. Just before it starts: nobody knows where. A place from bike-rack covers the bike, once it is bought.
+    Afternoon ferry to Muskegon needs a right for the bike. Just before it starts: nobody knows where. A place from afternoon-bike-rack covers the bike, once it is bought.
+    Of the places for the bike, at most one has to be bought: for Car ferry to Muskegon or Afternoon ferry to Muskegon.
+
+What the BOOKINGs state that they paid:
+  ferry-ticket: 19.00 USD, from the trip money
+  afternoon-ticket: 19.00 USD, from the trip money
+
+The money of this plan, by currency:
+  USD: 38.00 paid; 90.00 still to buy (car-deck); up to 10.00 more, depending on which OPTIONs need a right and on where each OBJECT is (bike-rack and afternoon-bike-rack)
+
+The caps:
+  trip-money-cap: at most 140.00 USD from the trip money: 38.00 paid; 90.00 still to buy; up to 10.00 more to buy, depending on which OPTIONs need a right and on where each OBJECT is; 2.00 left
