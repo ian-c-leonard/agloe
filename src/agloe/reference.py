@@ -303,7 +303,8 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
     some OPTION requires the OBJECT or refuses it, or needs a right for it, or might. That
     an OPTION needs no right for an OBJECT is unknown where no FACT and no COMPLETE set
     says. Another right for the OBJECT can be found where a FACT says that the OPTION needs
-    one and no BOOKING covers the OBJECT.
+    one. Neither can help where a BOOKING for the OPTION covers the OBJECT, so neither is
+    listed there.
     """
     sold = for_sale(file)
     to_pay = {offer.id for offer in sold}
@@ -346,10 +347,14 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
                     if might_take or what not in _ABOUT_GOING_ALONG
                 ]
         for thing in file.objects_asked_for():
+            # A BOOKING that covers the OBJECT settles the pair: whether or not the OPTION
+            # needs the right, the OBJECT has one.
+            if file.booking_for(option.id, thing.id) is not None:
+                continue
             needed = file.needs_right_for(option.id, thing.id)
             if needed is None:
                 out.append(Unknown("needs no right for", option.id, about=thing.id))
-            elif needed and file.booking_for(option.id, thing.id) is None:
+            elif needed:
                 out.append(Unknown("another right for", option.id, about=thing.id))
         if file.needs_right(option.id) is True and file.rights_complete(option.id) is None:
             for person in file.persons:

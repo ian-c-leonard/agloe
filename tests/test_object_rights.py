@@ -612,6 +612,71 @@ def test_the_report_names_every_right_for_one_object_at_once() -> None:
     )
 
 
+def test_a_booking_that_covers_the_object_leaves_nothing_to_ask_about_the_right() -> None:
+    """The ferry requires the bike and carries it, and the bike lies in town. A BOOKING for
+    the ferry covers the bike, and nobody says whether the ferry needs a right for it. The
+    BOOKING settles that either way. So the report asks only for another transfer, and no
+    FACT about the right is among what the FILE leaves unknown."""
+    covers = booking("ferry", "bike")
+    file = a_quay(requires_object("ferry", "bike"), carries("ferry", "bike"), covers)
+    silent = replace(
+        file, facts=tuple(fact for fact in file.facts if not isinstance(fact, NeedsRightFor))
+    )
+    for each in (file, silent):
+        about_rights = ("needs no right for", "another right for")
+        assert not [unknown for unknown in unknowns(each) if unknown.what in about_rights]
+        found = checked(each)
+        assert cases_of(each, found) == ["another transfer puts bike at hand for ferry."]
+
+
+def test_a_right_for_an_object_has_no_length_of_time() -> None:
+    """Nobody says how long the ferry takes, and nobody says whether it needs a right for
+    the car, which the BOOKING covers. The report gives the exact limit for the ferry, and
+    asks nothing about the right. Where no BOOKING covers the car, the right is asked
+    about, and it has no limit in seconds."""
+    file = a_ferry(booking("ferry", "alex", "car"), needs_right_for("drive", "car", False))
+    open_length = replace(file, facts=tuple(f for f in file.facts if f.id != "ferry-length"))
+    found = checked(open_length)
+    ((only,),) = found.missing
+    assert (only.unknown.what, only.at_most) == ("duration", 3 * 3600)
+    uncovered_car = a_ferry(needs_right_for("drive", "car", False))
+    ((asked,),) = checked(uncovered_car).missing
+    assert (asked.unknown.what, asked.at_most) == ("needs no right for", None)
+
+
+def test_the_options_for_one_object_are_named_together_with_two_objects() -> None:
+    """Alex has a bike and a trailer on two trains in a row, and each train needs a right for
+    each. The report names the two trains together for the bike, and together for the
+    trailer. Where nobody says whether a train needs the rights, the report says once for
+    each train and OBJECT that a BOOKING is enough instead."""
+    places = ["stop-0", "stop-1", "stop-2"]
+    options = [moves("train-0", "stop-0", "stop-1"), moves("train-1", "stop-1", "stop-2")]
+    things = ["bike", "trailer"]
+
+    def two_trains(*facts: Document) -> File:
+        stated = [starts_from("alex", "stop-0"), *at("train-0", 9), *at("train-1", 10)]
+        for thing in things:
+            stated += [has_object("alex", thing), every_use(thing), every_transfer(thing)]
+        locks = [lock("train-0", "alex"), lock("train-1", "alex")]
+        return trip(
+            ["alex"], places, options, [*stated, *facts], locks, objects=things, object_rights=True
+        )
+
+    needed = [needs_right_for(train, thing) for train in ("train-0", "train-1") for thing in things]
+    file = two_trains(*needed, every_right_for("bike"), every_right_for("trailer"))
+    words = report.as_text(file, checked(file))
+    bike = "a right to each of train-0 and train-1 is found that covers bike"
+    trailer = "a right to each of train-0 and train-1 is found that covers trailer"
+    assert f"The trip works if {bike} and {trailer}.\n" in words
+    silent = two_trains()
+    words = report.as_text(silent, checked(silent))
+    both = "train-0 and train-1 need no right for"
+    assert f"The trip works if {both} bike and {both} trailer.\n" in words
+    instead = "a BOOKING for it that covers bike is enough instead."
+    assert words.count(f"If train-0 does need a right for bike, {instead}") == 1
+    assert words.count("is enough instead.") == 4
+
+
 def with_rights(rng: Random, file: File) -> File:
     """The same FILE, with FACTs about rights for its OBJECTs chosen at random: some OPTIONs
     need a right for an OBJECT, some need none, of some nobody says, and some BOOKINGs cover
@@ -625,13 +690,12 @@ def with_rights(rng: Random, file: File) -> File:
             name = f"{option.id}-right-for-{thing.id}"
             if roll < 0.4:
                 facts.append(NeedsRightFor(name, option.id, thing.id, True))
-                if rng.random() < 0.6:
-                    covers = Booking(
-                        f"{option.id}-covers-{thing.id}", option.id, (), None, (thing.id,)
-                    )
-                    facts.append(covers)
             elif roll < 0.5:
                 facts.append(NeedsRightFor(name, option.id, thing.id, False))
+            # A BOOKING can cover the OBJECT whatever the FILE says about the right.
+            if rng.random() < 0.3:
+                covers = f"{option.id}-covers-{thing.id}"
+                facts.append(Booking(covers, option.id, (), None, (thing.id,)))
     return replace(file, facts=tuple(facts))
 
 

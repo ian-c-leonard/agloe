@@ -668,7 +668,8 @@ def as_text(file: File, report: Report) -> str:
                 lines[-1] = lines[-1][:-1] + ", if what those BOOKINGs paid fits the caps."
         # A BOOKING that covers the OBJECT can stand in for the answer that an OPTION needs
         # no right for it.
-        might_be_covered = [unknown for unknown in asked if unknown.what == "needs no right for"]
+        about_a_right = [unknown for unknown in asked if unknown.what == "needs no right for"]
+        might_be_covered = list(dict.fromkeys(about_a_right))  # each OPTION and OBJECT once
         if might_be_covered:
             things = _names(file.objects)
             fits = ", if what it paid fits the caps" if file.caps else ""
@@ -1082,12 +1083,14 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
     PERSONs who need another OPTION for the same WANT are named together, as "each of". The
     condition is one for each PERSON: whether one OPTION or several meet it is left open. The
     OPTIONs that have to need no right are named together where they follow one another in the
-    set. So are the PERSONs who need a right to one OPTION. Nothing else changes the order.
+    set. So are the PERSONs who need a right to one OPTION. The OPTIONs that need a right for
+    one OBJECT, or have to need none for it, are named together wherever they come in the
+    set, at the place of the first. Nothing else changes the order.
     """
     parts: list[str] = []
     for_whom: dict[str | None, list[str]] = {}
     transfers: list[str] = []  # they come last, as in the fixed order
-    for _, run in groupby(enough, key=_named_with):
+    for _, run in groupby(_side_by_side(enough), key=_named_with):
         group = list(run)
         unknown = group[0].unknown
         if unknown.what == "another option":
@@ -1188,6 +1191,24 @@ def _another_transfer(file: File, needed: Missing) -> str:
 
 def _places(count: int) -> str:
     return "1 place" if count == 1 else f"{count} places"
+
+
+def _side_by_side(enough: Sequence[Missing]) -> list[Missing]:
+    """A set of unknown FACTs with those about a right for one OBJECT next to each other.
+
+    The fixed order puts the FACTs of one OPTION together. So with two OBJECTs, the OPTIONs
+    that need a right for the first are apart. Each such FACT moves up to the others of its
+    kind about its OBJECT, and nothing else moves.
+    """
+    placed: list[Missing] = []
+    for needed in enough:
+        at = len(placed)
+        if needed.unknown.what in ("needs no right for", "another right for"):
+            key = _named_with(needed)
+            alike = [n for n, other in enumerate(placed) if _named_with(other) == key]
+            at = alike[-1] + 1 if alike else at
+        placed.insert(at, needed)
+    return placed
 
 
 def _named_with(needed: Missing) -> object:

@@ -1274,6 +1274,7 @@ def _limit(file: File, unknown: Unknown, works: Works) -> int | None:
     no_length += ("does not keep", "does not carry", "does not keep or carry", "carries")
     no_length += ("hands over", "starts with", "starts at", "another transfer")
     about_rights = ("needs no right", "another right", "price", "funding", "charged")
+    about_rights += ("needs no right for", "another right for")
     if unknown.what in (*no_length, *about_rights):
         return None
 
