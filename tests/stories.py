@@ -285,6 +285,12 @@ def every_right_for(thing: str) -> Document:
     return {"id": f"every-right-for-{thing}", "complete": {"needs_right_for": thing}}
 
 
+def no_other_right_for(option: str, thing: str) -> Document:
+    """A FACT that the FILE lists every right to this OPTION that covers this OBJECT."""
+    whole = {"rights_to": option, "for_object": thing}
+    return {"id": f"every-right-to-{option}-for-{thing}", "complete": whole}
+
+
 def every_transfer(thing: str) -> Document:
     """A FACT that the FILE states every OPTION that hands this OBJECT over, keeps or carries it."""
     return {"id": f"every-transfer-of-{thing}", "complete": {"transfers": thing}}

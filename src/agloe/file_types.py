@@ -315,6 +315,16 @@ class NeedsRightForObject(TypedDict):
     needs_right_for: ObjectRight
 
 
+class RightsForAnObject(TypedDict):
+    rights_to: Id
+    for_object: Id
+
+
+class CompleteRightsForAnObject(TypedDict):
+    id: Id
+    complete: RightsForAnObject
+
+
 class NeedingARightForAnObject(TypedDict):
     needs_right_for: Id
 
@@ -412,5 +422,6 @@ class File(TypedDict):
         | CompleteTransfers
         | NeedsRightForObject
         | CompleteRightsNeededForAnObject
+        | CompleteRightsForAnObject
     ]
     decisions: list[Lock | TripStart | TripEnd | Cap]

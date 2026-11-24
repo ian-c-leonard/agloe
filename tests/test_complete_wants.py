@@ -447,8 +447,8 @@ def test_a_complete_set_of_two_kinds_is_refused_as_that() -> None:
     document["facts"].append(both)
     last = len(document["facts"]) - 1
     one_kind = "travel, the OPTIONs that SATISFY a WANT, the rights to an OPTION, the OPTIONs"
-    one_kind += " that require a CAPABILITY, the OPTIONs that require an OBJECT, or the transfers"
-    one_kind += " of an OBJECT"
+    one_kind += " that require a CAPABILITY, the OPTIONs that require an OBJECT, the transfers"
+    one_kind += " of an OBJECT, or the OPTIONs that need a right for an OBJECT"
     assert problems(document) == f"/facts/{last}: a COMPLETE set is of one kind: {one_kind}"
     both["complete"] = {"satisfies": "window-seat", "rights_to": "flight"}
     assert problems(document) == f"/facts/{last}: a COMPLETE set is of one kind: {one_kind}"
