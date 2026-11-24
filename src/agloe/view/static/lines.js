@@ -43,6 +43,8 @@ const BUDGETS = " The BUDGETs of this FILE:";
 const MEETS = "Who meets the requirements:";
 /** How the line starts that is above the records that rule out every plan. */
 const CONFLICT = /^These .+ rule out every plan/;
+/** How a line starts that says what the lines marked "!" under the steps of a plan mean. */
+const EXPLAINS = "WARNING: ";
 
 /**
  * The lists of ids that a report as JSON names one after another in its words, each with what
@@ -267,16 +269,18 @@ export function lines(text, report, trip) {
  * plan, in `charged`: what the report says is charged to each cap and what it has left, by
  * the id of the cap. In `records`: what the report says of each record that it lists by its
  * id, in the first line that does so. In `conflict`: the line over the records that rule out
- * every plan, or null. In `warnings`: what it warns of at each step.
+ * every plan, or null. In `warnings`: what it warns of at each step. In `explains`: each
+ * line with which the report says what its warnings mean, and under which condition they
+ * come true.
  *
  * A report that shows no plan says nothing after its cases, or after the records that rule
  * out every plan, that is not about them. `also` holds all of that: each paragraph up to the
  * end of the report, as the list of its lines.
  *
- * A line that is said again is `says`, its words without the space around them, and `about`,
- * what the line is about as the page names things. `whole` says that every line which looks
- * like a warning is tied to its step. Where it is false, the warnings here are not all of
- * them.
+ * A line that is said again is `says`, its words without the space around them, `about`,
+ * what the line is about as the page names things, and `inset`, whether the report sets it
+ * in. `whole` says that every line which looks like a warning is tied to its step. Where it
+ * is false, the warnings here are not all of them.
  */
 export function statedIn(tied) {
   const cases = [];
@@ -284,7 +288,7 @@ export function statedIn(tied) {
   const charged = {};
   const records = {};
   const warnings = [];
-  const said = (line) => ({ says: line.text.trim(), about: [...(line.step === null ? [] : [String(line.step)]), ...line.about] });
+  const said = (line) => ({ says: line.text.trim(), about: [...(line.step === null ? [] : [String(line.step)]), ...line.about], inset: line.text.startsWith(" ") });
   let capped = false;
   let last = -1; // the last line of the cases, or of the records that rule out every plan
   for (const [at, line] of tied.entries()) {
@@ -312,7 +316,8 @@ export function statedIn(tied) {
     if (more) also[also.length - 1].push(said(line));
   }
   const whole = tied.every((line) => line.warns || !WARNING.test(line.text));
-  return { heading: cases.length > 1 && heading !== undefined ? heading.text : null, cases, under, also, charged, records, conflict: over < 0 ? null : tied[over].text, warnings, whole };
+  const explains = tied.flatMap((line) => (line.text.startsWith(EXPLAINS) ? [line.text] : []));
+  return { heading: cases.length > 1 && heading !== undefined ? heading.text : null, cases, under, also, charged, records, conflict: over < 0 ? null : tied[over].text, warnings, explains, whole };
 }
 
 /**

@@ -28,7 +28,7 @@ function whenOf(step) {
  * `report` is the report as JSON. `stated` holds the report's own words, as lines.js finds
  * them: the line of each record with the line over them, the line of each case in which the
  * trip works with the heading over them and the lines under it, what the report says after
- * those, and what it warns of at each step.
+ * those, what it warns of at each step, and how it explains its warnings.
  *
  * The list is in `groups`, each with its `kind`, its heading in `says`, and its `items`:
  *
@@ -38,6 +38,8 @@ function whenOf(step) {
  * - `cases`, for a TRIP that depends on what the FILE does not say: each case in which the
  *   report says the trip works, with its line.
  * - `warnings`, for a plan: each thing that the report warns of at a step, with the step.
+ *   The heading is what the report says of its warnings, in its own lines: what they mean,
+ *   and under which condition they come true.
  * - `choices`, for a plan: each OPTION of the plan with the PERSONs in it whom no LOCK names
  *   for it. The COMPILER chose it for them, and nobody has decided it.
  *
@@ -49,8 +51,8 @@ function whenOf(step) {
  * would. `mark` says how it is marked: "clash" where the report names it in what rules out
  * every plan, "asked" where the report names it in what the FILE does not say, "warned" where
  * the report warns of it. `more` holds the lines that the report sets under the item's own,
- * each with its words in `says` and what it is `of`. `who` says which PERSONs a purchase is
- * for, where the report in words does not name them as the page does.
+ * each with its words in `says`, what it is `of`, and whether the report sets it in, in
+ * `inset`. Such a line is a drawing of what it is about itself, and not of what the item is.
  *
  * `also`, of a group, holds what the report says after the items: each of its paragraphs as
  * the list of its lines, like `more`. A report that shows no plan says nothing else, so the
@@ -62,15 +64,15 @@ function whenOf(step) {
 export function open(trip, report = null, stated = null) {
   const none = { says: "", count: 0, clash: false, asked: false, groups: [] };
   if (trip === null || stated === null || report === null || typeof report !== "object") return none;
-  const item = (name, says, more = {}) => ({ name, says, who: "", when: null, of: [], records: [], mark: "", more: [], ...more });
+  const item = (name, says, more = {}) => ({ name, says, when: null, of: [], records: [], mark: "", more: [], ...more });
   // Lines that the list takes from the report as they are, each with what it is of.
-  const further = (lines) => lines.map((line) => ({ says: line.says, of: line.about }));
+  const further = (lines) => lines.map((line) => ({ says: line.says, of: line.about, inset: line.inset }));
   const group = (kind, says, items, also = []) => ({ kind, says, items, also: also.map(further) });
   if (report.answer === "INFEASIBLE") {
     const records = [...ruledOut(report)];
     // The report in words names each of them under one line. Where it does not, the page
     // cannot say what rules out every plan.
-    if (!records.length || typeof stated.conflict !== "string" || records.some((id) => typeof stated.records[id] !== "string")) return none;
+    if (!records.length || records.some((id) => typeof stated.records[id] !== "string")) return none;
     const items = records.map((id) => item(id, stated.records[id], { records: [id], mark: "clash" }));
     return { says: "No plan works.", count: items.length, clash: true, asked: false, groups: [group("conflict", stated.conflict, items, stated.also)] };
   }
@@ -84,21 +86,18 @@ export function open(trip, report = null, stated = null) {
   const clocks = typeof trip.zone === "string" ? clocksOf(trip.zone) : "";
   const person = new Map(trip.persons.map((each) => [each.id, someone(each.name)]));
   const steps = trip.steps.map((step, n) => ({ ...step, n, name: step.name ?? "another WAY" }));
-  // A warning that somebody still has to buy a right is tied to its OFFER, and the report as
-  // JSON says who buys from that OFFER for that OPTION. The report in words names them by its
-  // own rule. Where that is not how the page names them, the item says who they are here.
-  const buyers = (step, warned) => {
-    const offers = warned.about.flatMap((thing) => (thing.startsWith("offer:") ? [thing.slice("offer:".length)] : []));
-    const ids = new Set(toBuyIn(report).flatMap((buy) => (buy.option === step.option && offers.includes(buy.offer) && Array.isArray(buy.persons) ? buy.persons : [])));
-    const names = trip.persons.flatMap((each) => (ids.has(each.id) ? [person.get(each.id)] : []));
-    return names.some((name) => !warned.says.includes(name)) ? `On this page, that is ${listed(names)}.` : "";
-  };
-  const warnings = steps.flatMap((step) => (stated.warnings[step.n] ?? []).map((warned) => item(step.name, warned.says, { who: buyers(step, warned), when: whenOf(step), of: [String(step.n), ...warned.about], mark: "warned" })));
+  const warnings = steps.flatMap((step) => (stated.warnings[step.n] ?? []).map((warned) => item(step.name, warned.says, { when: whenOf(step), of: [String(step.n), ...warned.about], mark: "warned" })));
+  // The report as JSON says whether it warns of something: no plan is sure to hold, or
+  // somebody still has to buy a right. The report in words has a line under a step for each
+  // such thing, and says what those lines mean. Where the three do not agree, the page
+  // cannot say what the report warns of.
+  const warns = report.robust === false || toBuyIn(report).length > 0;
+  if (warns !== warnings.length > 0 || warns !== stated.explains.length > 0) return none;
   const choices = steps.flatMap((step) => {
     const free = step.option === null ? [] : step.persons.filter((id) => !step.locked.includes(id));
     return free.length ? [item(step.name, listed(free.map((id) => person.get(id))), { when: whenOf(step), of: [String(step.n)] })] : [];
   });
-  const groups = [...(warnings.length ? [group("warnings", "The report warns:", warnings)] : []), ...(choices.length ? [group("choices", "No LOCK names these PERSONs for these OPTIONs of the plan:", choices)] : [])];
+  const groups = [...(warnings.length ? [group("warnings", stated.explains.join("\n"), warnings)] : []), ...(choices.length ? [group("choices", "No LOCK names these PERSONs for these OPTIONs of the plan:", choices)] : [])];
   const count = warnings.length + choices.length;
   const says = count ? `${count === 1 ? "1 thing is" : `${count} things are`} open.${clocks}` : "Nothing is open. The report gives no warnings, and a LOCK names each PERSON for every OPTION they take part in.";
   return { says, count, clash: false, asked: warnings.length > 0, groups };

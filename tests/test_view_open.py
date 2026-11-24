@@ -64,6 +64,16 @@ def further(lines: list[dict[str, Any]]) -> list[tuple[str, list[str]]]:
     return [(line["says"], line["of"]) for line in lines]
 
 
+NOT_SURE = (
+    "WARNING: no plan is sure to hold if the uncertain parts take their longest. Each line"
+    ' marked "!" says what would go wrong at the step above it.'
+)
+NOT_BOOKED = (
+    'WARNING: not everything is booked yet. A line marked "!" that names an OFFER says who'
+    " still has to buy a right. Only a BOOKING secures one."
+)
+
+
 CHOICES = "No LOCK names these PERSONs for these OPTIONs of the plan:"
 NOTHING = (
     "Nothing is open. The report gives no warnings, and a LOCK names each PERSON for every"
@@ -91,7 +101,7 @@ def test_a_plan_lists_the_steps_that_no_lock_decides() -> None:
         [],
         "",
     )
-    assert (train["who"], train["more"], group["also"]) == ("", [], [])
+    assert (train["more"], group["also"]) == ([], [])
     assert (listed["count"], listed["clash"], listed["asked"]) == (1, False, False)
 
 
@@ -106,7 +116,7 @@ def test_a_plan_with_every_step_decided_has_nothing_open() -> None:
     )
     plan = (Step("visit", "hall", "hall", ("alex",), seconds(10), seconds(11)),)
     nothing: Open = {"says": NOTHING, "count": 0, "clash": False, "asked": False, "groups": []}
-    assert open_in(file, Report(Answer.FEASIBLE, itinerary=plan)) == nothing
+    assert open_in(file, Report(Answer.FEASIBLE, itinerary=plan, robust=True)) == nothing
     # A service takes the bags with nobody of the TRIP in it. No LOCK can name anybody for
     # it, and the list does not say that one does.
     assert open_of("the-bags/the-service-takes-them") == nothing
@@ -117,7 +127,8 @@ def test_a_plan_lists_what_the_report_warns_of() -> None:
     listed = open_of("a-ticket/not-bought-yet")
     assert listed["says"] == "1 thing is open. Times are on the clocks of America/Chicago."
     (warnings,) = listed["groups"]
-    assert (warnings["kind"], warnings["says"]) == ("warnings", "The report warns:")
+    # Over the warnings is what the report says of them: only a BOOKING secures a right.
+    assert (warnings["kind"], warnings["says"]) == ("warnings", NOT_BOOKED)
     (ticket,) = warnings["items"]
     # The item is of everything that the line of the report is about: the step and the OFFER.
     assert (ticket["name"], ticket["of"], ticket["mark"], ticket["records"]) == (
@@ -126,8 +137,6 @@ def test_a_plan_lists_what_the_report_warns_of() -> None:
         "warned",
         [],
     )
-    # The report names Sam as the page does, so the item says nothing more of who it is.
-    assert ticket["who"] == ""
     assert ticket["says"] == (
         "Sam still has to buy a right to this, from skydeck-tickets, for 32.00 USD from the"
         " trip money."
@@ -135,7 +144,9 @@ def test_a_plan_lists_what_the_report_warns_of() -> None:
     assert ticket["when"] == "Saturday 15 May 2027, 10:00 am to 11:30 am"
     assert (listed["count"], listed["clash"], listed["asked"]) == (1, False, True)
     # A step that could start too late is warned of too, also where it is a WAY.
+    # The report says under which condition that comes true. The list says it with it.
     listed = open_of("several-days/works-but-risky")
+    assert listed["groups"][0]["says"] == NOT_SURE
     (walk,) = listed["groups"][0]["items"]
     assert (walk["name"], walk["says"], walk["of"]) == (
         "the walk between the hotel and Willis Tower",
@@ -145,29 +156,38 @@ def test_a_plan_lists_what_the_report_warns_of() -> None:
     assert walk["when"] == "Saturday 15 May 2027, 8:45 am to 9:00 am"
 
 
-def renamed(tmp_path: Path, example: str, names: dict[str, str]) -> Open:
-    """What the page lists as open about an example in which PERSONs have other names."""
-    document = json.loads((EXAMPLES / f"{example}.json").read_text())
-    for person in document["persons"]:
-        person["name"] = names.get(person["id"], person["name"])
+def test_each_purchase_is_an_item_of_its_own(tmp_path: Path) -> None:
+    """Nobody has a ticket for the Skydeck yet, and Alex and Sam each pay from their own
+    BUDGET. The report has a line for each of the two, and so has the list."""
+    document = json.loads((EXAMPLES / "a-ticket" / "not-bought-yet.json").read_text())
+    document["budgets"] = [
+        {"id": "alex-money", "name": "Alex's money", "persons": ["alex"], "currencies": ["USD"]},
+        {"id": "sam-money", "name": "Sam's money", "persons": ["sam"], "currencies": ["USD"]},
+    ]
+    document["facts"] = [fact for fact in document["facts"] if fact["id"] != "alex-skydeck-ticket"]
     path = tmp_path / "trip.json"
     path.write_text(json.dumps(document))
     sent, found, text = in_words(path)
-    return all_open([sent], [found], [text])[0]
-
-
-def test_a_purchase_names_who_buys_as_the_page_names_them(tmp_path: Path) -> None:
-    """Two PERSONs have names that a page shows alike: one has two spaces in it. The report
-    in words tells them apart by the spaces. A page cannot, so it shows the id of each."""
-    listed = renamed(tmp_path, "a-ticket/not-bought-yet", {"alex": "Mary Ann", "sam": "Mary  Ann"})
-    (ticket,) = listed["groups"][0]["items"]
-    assert ticket["says"].startswith("Mary  Ann still has to buy a right to this, from ")
-    assert ticket["who"] == "On this page, that is Mary  Ann (sam)."
-    # Where the report names the PERSON as the page does, the item adds nothing.
-    listed = renamed(tmp_path, "a-ticket/not-bought-yet", {"sam": "Samantha"})
-    (ticket,) = listed["groups"][0]["items"]
-    assert ticket["says"].startswith("Samantha still has to buy a right to this, from ")
-    assert ticket["who"] == ""
+    (listed,) = all_open([sent], [found], [text])
+    (group,) = listed["groups"]
+    assert [(item["name"], item["says"], item["of"]) for item in group["items"]] == [
+        (
+            "Skydeck visit",
+            "Alex still has to buy a right to this, from skydeck-tickets, for 32.00 USD from"
+            " Alex's money.",
+            ["0", "offer:skydeck-tickets"],
+        ),
+        (
+            "Skydeck visit",
+            "Sam still has to buy a right to this, from skydeck-tickets, for 32.00 USD from"
+            " Sam's money.",
+            ["0", "offer:skydeck-tickets"],
+        ),
+    ]
+    # Each item is its line of the report and nothing else.
+    assert all(set(item) == set(group["items"][0]) for item in group["items"])
+    assert set(group["items"][0]) == {"name", "says", "when", "of", "records", "mark", "more"}
+    assert listed["says"] == "2 things are open. Times are on the clocks of America/Chicago."
 
 
 def test_a_trip_that_depends_on_something_lists_each_case() -> None:
@@ -203,6 +223,8 @@ def test_a_trip_that_depends_on_something_lists_each_case() -> None:
             ("the trip money: for Alex and Sam; it holds USD", ["budget:trip-money"]),
         ]
     ]
+    # A line is set in where the report sets it in.
+    assert [line["inset"] for line in group["also"][0]] == [False, True]
     # One case has no heading over it in the report, and none here.
     listed = open_of("flight-home/depends-on-the-cab")
     assert said(listed) == [("", [("", "The trip works if Cab to O'Hare takes 45 min or less.")])]
@@ -331,6 +353,11 @@ def test_a_report_whose_words_and_json_disagree_lists_nothing() -> None:
         ("a-ticket/depends-on-the-price", "  2. A place from", "  A place from"),
         # A line that the report marks with "!" is under no step.
         ("a-ticket/not-bought-yet", "    ! Sam still", "\n    ! Sam still"),
+        # The words have no line for the right that the JSON says somebody has to buy.
+        ("a-ticket/not-bought-yet", "    ! Sam still", "    Sam still"),
+        # The words do not say what the lines marked "!" mean.
+        ("a-ticket/not-bought-yet", "WARNING: not everything", "Not everything"),
+        ("flight-home/works-but-risky", "WARNING: no plan is sure", "No plan is sure"),
     ]:
         sent, found, text = in_words(EXAMPLES / f"{name}.json")
         assert old in text, name
@@ -352,7 +379,7 @@ def test_a_step_with_nobody_in_it_is_no_decision_of_a_person() -> None:
         Step("lunch", "hall", "hall", ("nobody", "alex"), seconds(12), seconds(13)),
         Step("van", "hall", "port", (), seconds(14), seconds(15, 30)),
     )
-    listed = open_in(file, Report(Answer.FEASIBLE, itinerary=plan))
+    listed = open_in(file, Report(Answer.FEASIBLE, itinerary=plan, robust=True))
     # Lunch is not decided for either of the two. A PERSON called nobody is told from nobody.
     assert said(listed) == [(CHOICES, [("lunch", '"nobody" and alex')])]
 
@@ -383,6 +410,13 @@ def test_every_example_lists_what_its_report_says() -> None:
             line.removeprefix("    ! ") for line in text.split("\n") if line.startswith("    ! ")
         ]
         assert [item["says"] for item in groups.get("warnings", [])] == warned, name
+        # Over them is each line with which the report says what they mean.
+        explained = "\n".join(line for line in text.split("\n") if line.startswith("WARNING: "))
+        over = [group["says"] for group in listed_of["groups"] if group["kind"] == "warnings"]
+        assert over == ([explained] if warned else []), name
+        assert bool(explained) == bool(warned), name
+        # A report that the page can read has a list, also where nothing is open.
+        assert listed_of["says"], name
         # A step is listed as not decided where somebody is in it whom no LOCK names for it.
         steps: list[dict[str, Any]] = sent["steps"] if found["answer"] == "FEASIBLE" else []
         open_steps = [

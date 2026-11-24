@@ -373,9 +373,10 @@ function drawOpen(shown) {
   box.replaceChildren();
   part("open-part").hidden = shown.says === "";
   part("open-says").textContent = shown.says;
-  // A line that the list takes from the report as it is: a drawing of what that line is of.
-  const further = (line, kind) => {
-    const words = made("span", kind, line.says);
+  // A line that the list takes from the report as it is: a drawing of what that line is
+  // about, and of nothing else. It is set in where the report sets it in.
+  const further = (line) => {
+    const words = made("span", line.inset ? "open-under" : "open-first", line.says);
     if (line.of.length) words.dataset.of = line.of.join(" ");
     return words;
   };
@@ -385,21 +386,26 @@ function drawOpen(shown) {
     for (const item of group.items) {
       // An OPTION that nobody has decided is drawn like what the FILE does not state.
       const row = made("li", `entry ${item.mark || "not"}`);
-      row.title = [item.name, item.says, item.who, ...item.more.map((line) => line.says), item.when].filter(Boolean).join("\n");
+      row.title = [item.name, item.says, item.when].filter(Boolean).join("\n");
       if (item.of.length) row.dataset.of = item.of.join(" ");
       if (item.records.length) row.dataset.records = item.records.join(" ");
       if (item.name) row.append(made("b", "entry-name", item.name));
       row.append(made("span", "entry-says", item.says));
-      if (item.who) row.append(made("span", "entry-more", item.who));
-      for (const line of item.more) row.append(further(line, "entry-more"));
       if (item.when) row.append(made("span", "entry-takes", item.when));
       list.append(row);
+      // What the report sets under the line of the item is under the item, and no part of
+      // it: pointing at such a line lights up what that line is about, as in the report.
+      if (item.more.length) {
+        const under = made("li", "open-more");
+        for (const line of item.more) under.append(further(line));
+        list.append(under);
+      }
     }
     box.append(list);
     // What the report says after these, a paragraph for each of its own.
     for (const lines of group.also) {
       const more = made("p", "open-also");
-      lines.forEach((line, n) => more.append(further(line, n ? "open-under" : "open-first")));
+      for (const line of lines) more.append(further(line));
       box.append(more);
     }
   }
