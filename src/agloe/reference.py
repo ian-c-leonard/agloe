@@ -2400,6 +2400,7 @@ def _chains(
     soonest: Mapping[int, int] | None = None,
     fits: Callable[[list[tuple[int, int, int]]], bool] | None = None,
     empty: Set[int] = frozenset(),
+    whether_any: bool = False,
 ) -> Iterator[_Chain] | None:
     """Each order of the OPTIONs that matter to each OBJECT, with the hand-overs that work in it.
 
@@ -2456,6 +2457,11 @@ def _chains(
     ``soonest`` holds the earliest that some OPTIONs can start, whatever the order. An
     OPTION that cannot start until after the fixed start of another never comes before it.
 
+    With ``whether_any``, the caller asks only whether there is a result, and takes none.
+    Then orders that end alike are left out too where one OBJECT is asked about, as
+    ``_one_object_is_asked_about`` says. That is so only with no ``fits``: the start times
+    turn on the order so far, so with them two beginnings that end alike are not alike.
+
     ``fits`` says whether some start times keep a list of gaps with what the PERSONs do. A
     choice of one OBJECT that counts on an arrival is left out where its own gaps do not
     fit: then they do not fit with the gaps of the other OBJECTs either. Nine bags that
@@ -2466,6 +2472,8 @@ def _chains(
     if not asked:
         return None
     alike = only_the_first_of_a_kind
+    if whether_any and fits is None:
+        alike = alike or _one_object_is_asked_about(asked)
     return _orders_together(file, world, who, orders, happening, asked, alike, soonest or {}, fits)
 
 
@@ -3620,7 +3628,9 @@ def _schedules(
     the other PERSONs do. So the routes that are left come in the same order, and the first
     ITINERARY that works is the same one. Every other route is left to the timing.
     """
-    found = _chains(file, world, who, orders, empty=empty)
+    # A first check, before any WAY or time: does some order of the OPTIONs let each OBJECT be
+    # where it has to be? Only whether there is one matters here, and not which.
+    found = _chains(file, world, who, orders, empty=empty, whether_any=True)
     if found is not None and next(iter(found), None) is None:
         return  # an OBJECT is not at hand where it has to be, whatever the WAYs and the times
     needed = _travel(file, world, orders, known)
@@ -3640,6 +3650,30 @@ def _schedules(
             for (number, position, _), route in zip(needed, chosen, strict=True)
         }
         yield from _timings(file, world, who, orders, hops, None, any_will_do, empty=empty)
+
+
+def _one_object_is_asked_about(asked: Sequence[str]) -> bool:
+    """Whether a search for any order at all can leave out orders that end alike.
+
+    ``asked`` holds the OBJECTs that the OPTIONs of a plan ask about. The first check of
+    ``_schedules`` asks ``_chains`` only whether it has a result.
+
+    ``_chains`` makes each order of an OBJECT's OPTIONs one OPTION at a time. Take two
+    beginnings with the same OPTIONs, in different orders, that leave the OBJECT in the same
+    places with the same hand-overs, carries and arrivals. The same OPTIONs are left for
+    both. Which of them can come next turns on what is left, on the fixed starts and on what
+    the PERSONs do, and not on the order so far. Where the OBJECT can go from there turns on
+    where it is. So whatever finishes the one finishes the other, and where the first
+    beginning leads to no order that works, neither does the second. No start time has a
+    say in that: the check gives ``_chains`` nothing to time an order with.
+
+    That holds while no other OBJECT has an order to go with. The order of one OBJECT is
+    made to go with the orders of the OBJECTs before it, so with two OBJECTs the second
+    beginning can be the only one that suits the other OBJECT. So the check leaves out the
+    second beginning only where one OBJECT is asked about. Eight vans that all bring the
+    bag too late have 40,320 orders, and 256 sets of vans that have left.
+    """
+    return len(asked) == 1
 
 
 def _over(terms: Terms) -> int | None:
