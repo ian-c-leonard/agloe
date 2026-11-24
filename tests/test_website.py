@@ -24,6 +24,9 @@ examples their expected reports where the solver is missing, as it is in a brows
 through ``website_gestures.mjs``: each change a reader can make must write a FILE that the format
 accepts, and the page must be able to read the report on it.
 
+The page on how an answer is decided shows four FILEs in the worst case and in the best case.
+Both checkers must find a plan where the page says one works, and none where it says none does.
+
 The page on how a rule is built has two figures. One shows the eight choices of who is in a
 drive, with those the reference checker tries and what each breaks: the reference checker must
 say the same. The other shows variables of the COMPILER and statements about them: Node runs its
@@ -48,10 +51,10 @@ from typing import Any
 
 import pytest
 
-from agloe import answers, reference
+from agloe import answers, compiler, reference
 from agloe import report as reports_in
 from agloe.file import load, read
-from agloe.reference import Constraint, worst_case
+from agloe.reference import Constraint, best_case, worst_case
 
 ROOT = Path(__file__).parent.parent
 PAGES = ROOT / "pages"
@@ -449,6 +452,40 @@ def test_the_choices_are_marked_as_the_reference_checker_marks_them() -> None:
     assert [" ".join(step.persons) for step in shown] == [working[0]] * len(shown)
 
 
+def test_the_two_cases_of_each_file_are_what_both_checkers_find() -> None:
+    """The page on how an answer is decided says, for four FILEs, whether a plan works in each case.
+
+    Both checkers are asked about the worst case and the best case of each FILE. The answer that
+    the two cases give, by the small table on the page, is the answer of the expected report.
+    """
+    page = SITE_TEXT["how-an-answer-is-decided/index.html"]
+    boards = re.findall(
+        r'<div class="worlds" data-file="([^"]+)" data-worst="(\w+)" data-best="(\w+)">', page
+    )
+    assert {name for name, _, _ in boards} == set(re.findall(r'name="case" value="([^"]+)"', page))
+    rows = re.findall(
+        r"<tr><td>([a-z ]+)</td><td>([a-z ]+)</td><td class=\"\w+\">(\w+)</td></tr>", page
+    )
+    said = {"a plan works": "plan", "no plan works": "none"}
+    table = {(said[worst], said[best]): answer for worst, best, answer in rows}
+    assert len(table) == 3
+    # The home page shows the same table.
+    assert all(
+        f"<td>{worst}</td><td>{best}</td>" in SITE_TEXT["index.html"] for worst, best, _ in rows
+    )
+    seen: set[str] = set()
+    for name, worst, best in boards:
+        file = read(ROOT / "examples" / f"{name}.json")
+        for case, plan in ((worst_case(file), worst), (best_case(file), best)):
+            works = bool(reference.itineraries(file, case))
+            assert compiler.works(file, case) == works, name
+            assert plan == ("plan" if works else "none"), name
+        expected = json.loads((ROOT / "examples" / f"{name}.expected.json").read_text())["answer"]
+        assert table[worst, best] == expected, name
+        seen.add(expected)
+    assert seen == {"FEASIBLE", "INFEASIBLE", "UNDETERMINED"}
+
+
 def test_the_page_gives_the_constraint_its_number_on_the_rules_page() -> None:
     rules = (ROOT / "spec" / "rules.md").read_text()
     number = re.search(r"^(\d+)\. \*\*Each requirement of an OPTION is met\.\*\*", rules, re.M)
@@ -654,6 +691,14 @@ def links_of(name: str) -> list[tuple[Path, str]]:
     return found
 
 
+def headings_of(document: Path) -> set[str]:
+    """The headings of a document, each as GitHub names it in a link."""
+    return {
+        re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
+        for heading in re.findall(r"^#+ (.+)$", document.read_text(), flags=re.MULTILINE)
+    }
+
+
 @pytest.mark.parametrize("name", SITE_PAGES)
 def test_every_link_leads_somewhere(name: str) -> None:
     page = SITE_PAGES[name]
@@ -665,7 +710,10 @@ def test_every_link_leads_somewhere(name: str) -> None:
             continue
         for start in (f"{REPOSITORY}/blob/main/", f"{REPOSITORY}/tree/main/"):
             if link.startswith(start):
-                assert (ROOT / link.removeprefix(start)).exists(), link
+                path, _, mark = link.removeprefix(start).partition("#")
+                assert (ROOT / path).exists(), link
+                if mark:
+                    assert mark in headings_of(ROOT / path), link
                 break
         else:
             if "://" in link and not link.startswith(SITE):
