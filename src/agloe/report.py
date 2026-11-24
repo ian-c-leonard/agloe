@@ -65,8 +65,21 @@ from agloe.file import (
 from agloe.reference import Broken, Constraint, Itinerary, Step, Where
 
 _WITH_AN_ID = re.compile(r" \([a-z0-9]+(-[a-z0-9]+)*\)$")  # how a name ends when its id is shown
-# The words that a report uses in place of a name: "nobody takes part", "people need a right".
-_NO_NAMES = frozenset({"nobody", "everybody", "somebody", "anybody", "whoever", "people"})
+# The words that a report uses in place of a name: "nobody takes part", "people need a
+# right", "there is none", "none refuses the bags", "another WAY".
+_NO_NAMES = frozenset(
+    {
+        "nobody",
+        "everybody",
+        "somebody",
+        "anybody",
+        "whoever",
+        "people",
+        "none",
+        "there is none",
+        "another way",
+    }
+)
 _DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 _MONTHS = [
     "January",
