@@ -2828,7 +2828,10 @@ def test_the_page_lists_what_is_open_above_everything_that_it_draws(
             "One plan that works then: nobody buys a place from an OFFER of this FILE."
         )
         # Two cases, and two things in the list: the lines under a case are part of its one.
+        # The list says that it is a list, also to a browser that takes one without bullets
+        # for none.
         assert page.locator("#open li").count() == 2
+        assert page.locator("#open ul[role='list'] > li").count() == 2
         assert page.text_content("#contents .to") == "To do and to decide2"
         page.locator("#open .entry").first.hover()
         page.wait_for_function("() => document.querySelectorAll('.lit').length > 1")

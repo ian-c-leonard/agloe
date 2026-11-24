@@ -383,6 +383,9 @@ function drawOpen(shown) {
   for (const group of shown.groups) {
     if (group.says) box.append(made("p", "open-kind", group.says));
     const list = made("ul", "card-options");
+    // A list that shows no bullets is no list to some browsers. This one says that it is one,
+    // so that a reader who hears the page hears how many things are open.
+    list.setAttribute("role", "list");
     for (const item of group.items) {
       // An OPTION that nobody has decided is drawn like what the FILE does not state.
       const row = made("div", `entry ${item.mark || "not"}`);
