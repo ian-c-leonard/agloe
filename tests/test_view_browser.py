@@ -522,6 +522,47 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
         found = page.evaluate(under_the_row, "options-part")
         assert found["row"][0] == 0
         assert found["row"][1] <= found["part"] < found["row"][1] + 30
+    # In a narrow window, such as the browser beside an agent, the row is one line from one
+    # edge of the window to the other. It scrolls sideways, and the page does not.
+    one_line = """() => {
+      const row = document.getElementById("contents");
+      const at = row.getBoundingClientRect();
+      const links = [...row.querySelectorAll(".to")].map((each) => each.getBoundingClientRect());
+      return {
+        tall: row.offsetHeight,
+        lines: new Set(links.map((each) => Math.round(each.top))).size,
+        sides: [at.left, at.right],
+        cut: links.filter((each) => each.right > at.right).length,
+        page: [document.documentElement.scrollWidth, document.documentElement.clientWidth],
+      };
+    }"""
+    # Whether a link is in view, whole, in the row.
+    whole = """(link) => {
+      const row = document.getElementById("contents").getBoundingClientRect();
+      const at = link.getBoundingClientRect();
+      return at.left >= row.left && at.right <= row.right;
+    }"""
+    with opened(chromium, story / "they-collect-them.json", wide=360, tall=700) as page:
+        page.locator("#objects .card").first.wait_for()
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 9")
+        found = page.evaluate(one_line)
+        assert (found["lines"], found["sides"], found["page"]) == (1, [0, 360], [360, 360])
+        assert found["tall"] < 45
+        # The row cuts off the links that do not fit, and the first one is in view.
+        assert found["cut"] > 3
+        assert page.locator("#contents .to").first.evaluate(whole)
+        # The keyboard brings a link into view that the row cuts off.
+        last = page.locator("#contents .to").last
+        assert not last.evaluate(whole)
+        last.focus()
+        page.wait_for_function(whole, arg=last.element_handle())
+        # A click brings the part into view under the row, and the row stays at the top.
+        page.locator("#contents .to", has_text="OPTIONs").click()
+        page.wait_for_function("() => scrollY > 0")
+        page.wait_for_timeout(200)
+        found = page.evaluate(under_the_row, "options-part")
+        assert found["row"][0] == 0
+        assert found["row"][1] <= found["part"] < found["row"][1] + 30
     # A link has the yellow edge where the report names something in what the FILE does not say.
     with opened(chromium, EXAMPLES / "flight-home" / "depends-on-the-cab.json") as page:
         page.locator("#options .item.asked").first.wait_for()

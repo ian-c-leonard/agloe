@@ -67,6 +67,15 @@ html { scroll-padding-top: calc(var(--row-of-links, 0px) + 12px); }
   .contents { position: static; padding: 0; border-bottom: 0; }
   html { scroll-padding-top: 0; }
 }
+/* A narrow window, such as the browser beside an agent, has less room at its sides. The row of
+   links is one line there, from one edge of the window to the other, and scrolls sideways: it
+   stays at the top, so each line that it takes is a line less of the page. */
+@media (max-width: 640px) {
+  header { padding: 10px 14px; }
+  main { padding: 14px 14px 48px; }
+  .contents { flex-wrap: nowrap; margin-inline: -14px; padding-inline: 14px; overflow-x: auto; scrollbar-width: none; }
+  .contents .to { flex: none; white-space: nowrap; }
+}
 .report-part, .calendar-part, .part { display: grid; gap: 8px; }
 /* The calendar with the steps under it that have no time. */
 .calendar-steps { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
