@@ -35,8 +35,9 @@ from agloe import compiler
 from agloe import report as reports
 from agloe.answers import Answer, Report
 from agloe.file import Complete, File, instant, parse, read
+from agloe.names import seen_as
 from agloe.reference import Step
-from agloe.view.trip import MOST_DAYS, holds, seen_as, shown
+from agloe.view.trip import MOST_DAYS, holds, shown
 from tests.stories import (
     EXAMPLES,
     any_time,
