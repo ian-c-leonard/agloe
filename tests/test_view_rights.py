@@ -301,6 +301,30 @@ def test_the_rights_card_says_what_it_does_not_cover_for_an_object(tmp_path: Pat
         ("a BOOKING that covers Scout (car)", "In the plan: Scout (car) uses it."),
     ]
     assert "covers Scout (alex) and Sam" in text and "covers Scout (car)" in text
+    # Sam is called Scout too. Two PERSONs show their ids wherever they are named, and the
+    # car still shows its own on its receipt.
+    content["persons"][1]["name"] = "Scout"
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    assert [(booking["says"], booking["uses"]) for booking in ferry["bookings"]] == [
+        (
+            "a BOOKING that covers Scout (alex) and Scout (sam)",
+            "In the plan: Scout (alex) and Scout (sam) use it.",
+        ),
+        ("a BOOKING that covers Scout (car)", "In the plan: Scout (car) uses it."),
+    ]
+    assert "  car-ticket: a BOOKING for Car ferry to Muskegon covers Scout (car)\n" in text
+    # Two spellings that a page shows alike count as one name.
+    content["persons"][0]["name"], content["persons"][1]["name"] = "Zoe\u0308", "Sam"
+    content["objects"][0]["name"] = "Zo\u00eb"
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    assert [booking["says"] for booking in ferry["bookings"]] == [
+        "a BOOKING that covers Zoe\u0308 (alex) and Sam",
+        "a BOOKING that covers Zo\u00eb (car)",
+    ]
 
 
 def test_a_booking_says_what_it_paid_as_far_as_the_file_says() -> None:
@@ -402,9 +426,13 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report(tmp_path: Pat
         receipt = {"id": "car-ticket", "booking": {"option": "ferry", "covers": ["car"]}}
         content["facts"].append(receipt)
 
+    def a_name_with_nobody_in_it(content: Any) -> None:
+        content["objects"][0]["name"] = "the car nobody washed"
+
     more = [
         a_ferry_with(tmp_path, "free-entry", free_entry),
         a_ferry_with(tmp_path, "two-receipts", two_receipts),
+        a_ferry_with(tmp_path, "a-name", a_name_with_nobody_in_it),
     ]
     files = [*FILES, *more]
     asked = [in_words(path) for path in files]
@@ -455,7 +483,8 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report(tmp_path: Pat
                     said = booking["says"][len("a BOOKING that covers ") :]
                     covered, _, payment = said.partition("; ")
                     stated = f"  {booking['id']}: a BOOKING for {called} covers {covered}"
-                    assert stated in words, name
+                    # The list of who is covered ends there: the line ends, or says more.
+                    assert f"{stated}\n" in words or f"{stated}; " in words, name
                     # A report on a FILE with a cap says what the BOOKING paid on that line.
                     if file.caps:
                         assert f"{stated}; {payment}" in words, name
@@ -474,9 +503,11 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report(tmp_path: Pat
                 # Somebody uses it in the plan exactly where the report says so.
                 if sent["itinerary"]:
                     uses += (option.id, right["id"]) in used
-                    assert ("nobody" in right["uses"]) is ((option.id, right["id"]) not in used), (
-                        name
+                    unused = (
+                        "In the plan: nobody uses it.",
+                        "In the plan: nobody takes a place of it.",
                     )
+                    assert (right["uses"] in unused) is ((option.id, right["id"]) not in used), name
                 else:
                     assert right["uses"] is None, name
             complete = file.rights_complete(option.id)

@@ -187,7 +187,13 @@ _RIGHTS: _Shape = {
     "complete": (dict, _NONE),
 }
 _NEEDS: _Shape = {"needed": bool, "record": str}
-_BOOKING: _Shape = {"id": str, "covers": list, "objects": list, "paid": (dict, _NONE)}
+_BOOKING: _Shape = {
+    "id": str,
+    "covers": list,
+    "objects": list,
+    "names": dict,
+    "paid": (dict, _NONE),
+}
 _PAID: _Shape = {"amount": str, "currency": str, "budget": (str, _NONE), "by": (str, _NONE)}
 _BUDGET: _Shape = {"id": str, "name": str, "persons": list, "currencies": list, "caps": list}
 _CAP: _Shape = {"id": str, "limit": dict}
@@ -583,8 +589,13 @@ def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
     of one place, each in the FILE's order. ``complete`` is the FACT that the FILE lists every
     right to the OPTION, with the OFFERs that it names. Each is None, or empty, where the FILE
     is silent.
+
+    A BOOKING covers PERSONs and OBJECTs, and the report names them in one list. So each
+    BOOKING comes with the name to show for each of them (``names``): no PERSON and no
+    OBJECT of the FILE shows the same name as another there.
     """
     needs = {fact.option: fact for fact in file.facts if isinstance(fact, NeedsRight)}
+    holders = _names([*file.persons, *file.objects], "and")
     rights: list[Trip] = []
     for option in file.options:
         need, complete = needs.get(option.id), file.rights_complete(option.id)
@@ -605,6 +616,9 @@ def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
                         "covers": [each.id for each in file.persons if each.id in booking.covers],
                         # The OBJECTs it covers, in the order of the FILE.
                         "objects": [each.id for each in file.objects if each.id in booking.objects],
+                        "names": {
+                            each: holders[each] for each in (*booking.covers, *booking.objects)
+                        },
                         # What it paid, with the BUDGET that the money came from and the PERSON
                         # who paid, where it names them. None: the BOOKING states no payment.
                         "paid": None
@@ -1234,10 +1248,10 @@ def _are_rights(
     """Whether this is what such a TRIP says of the rights to its OPTIONs.
 
     Each OPTION of the TRIP is there once at most, and each BOOKING and each OFFER once. A
-    BOOKING covers PERSONs and OBJECTs of the TRIP, each once and one at least, and what it
-    paid names a BUDGET and a PERSON of the TRIP, or none. An OFFER has one place at least,
-    and a price that is an amount in a currency. A FACT that the FILE lists every right to
-    an OPTION names OFFERs for that OPTION.
+    BOOKING covers PERSONs and OBJECTs of the TRIP, each once and one at least, with a name
+    to show for each, and what it paid names a BUDGET and a PERSON of the TRIP, or none. An
+    OFFER has one place at least, and a price that is an amount in a currency. A FACT that
+    the FILE lists every right to an OPTION names OFFERs for that OPTION.
     """
     which: list[object] = []
     ids: list[object] = []
@@ -1261,6 +1275,11 @@ def _are_rights(
             if not stated["id"] or covered is None or things is None:
                 return False
             if not (covered or things) or not covered <= persons or not things <= objects:
+                return False
+            named = cast("dict[str, object]", stated["names"])
+            if frozenset(named) != covered | things:
+                return False
+            if not all(isinstance(name, str) and name.strip() for name in named.values()):
                 return False
             if not _is_a_payment(stated["paid"], persons, budgets):
                 return False

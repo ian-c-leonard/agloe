@@ -660,6 +660,8 @@ def test_the_rights_to_each_option_are_sent_as_far_as_the_file_says() -> None:
                 "covers": ["alex"],
                 # The OBJECTs it covers: none.
                 "objects": [],
+                # The name to show for each PERSON and OBJECT that it covers.
+                "names": {"alex": "Alex"},
                 # What the BOOKING paid, from which BUDGET, and who paid.
                 "paid": {
                     "amount": "32.00",
@@ -766,6 +768,7 @@ def test_the_objects_of_the_file_are_sent_with_what_the_file_says_of_each() -> N
     assert car["rights_complete"] == "every-ticket-for-the-car"
     (tickets,) = ferry["rights"][0]["bookings"]
     assert (tickets["covers"], tickets["objects"]) == (["alex", "sam"], ["car"])
+    assert tickets["names"] == {"alex": "Alex", "sam": "Sam", "car": "the car"}
     # Alex has the bags when the TRIP starts, and the museum keeps them.
     (bags,) = drawn(EXAMPLES / "the-bags" / "the-museum-keeps-them.json")["objects"]
     assert bags["starts"] == {"person": "alex", "place": None, "record": "where-the-bags-start"}
@@ -2019,7 +2022,9 @@ RIGHTS: dict[str, Any] = {
     "option": "night",
     "name": "night",
     "needs": {"needed": True, "record": "night-needs-a-room"},
-    "bookings": [{"id": "room", "covers": ["alex"], "objects": [], "paid": None}],
+    "bookings": [
+        {"id": "room", "covers": ["alex"], "objects": [], "names": {"alex": "alex"}, "paid": None}
+    ],
     "offers": [{"id": "rooms", "places": 2, "price": {"amount": "120.00", "currency": "USD"}}],
     "complete": {"record": "every-room", "offers": ["rooms"]},
 }
@@ -2164,9 +2169,9 @@ def test_a_trip_with_an_object_is_a_trip() -> None:
     _object()(sent)
     assert holds(sent)
     # A BOOKING can cover an OBJECT of the TRIP beside a PERSON, or an OBJECT alone.
-    _booking(objects=["key"])(sent)
+    _booking(objects=["key"], names={"alex": "alex", "key": "the key"})(sent)
     assert holds(sent)
-    _booking(covers=[], objects=["key"])(sent)
+    _booking(covers=[], objects=["key"], names={"key": "the key"})(sent)
     assert holds(sent)
     _rights()(sent)
     # An OBJECT of which the FILE says nothing.
@@ -2427,6 +2432,13 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "a booking whose objects are no list": _booking(objects="key"),
     "a booking that covers a person twice": _booking(covers=["alex", "alex"]),
     "a booking that covers a person the trip does not have": _booking(covers=["jo"]),
+    "a booking with no name for a person it covers": _booking(names={}),
+    "a booking with a name for a person it does not cover": _booking(
+        names={"alex": "alex", "sam": "sam"}
+    ),
+    "a booking with a blank name": _booking(names={"alex": " "}),
+    "a booking with a name that is a number": _booking(names={"alex": 1}),
+    "a booking whose names are a list": _booking(names=["alex"]),
     "two bookings with one id": _rights(bookings=[RIGHTS["bookings"][0]] * 2),
     "a booking with the id of an offer": _booking(id="rooms"),
     "an offer that is no record": _rights(offers=["rooms"], complete=None),
