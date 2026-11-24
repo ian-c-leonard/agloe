@@ -59,24 +59,6 @@ main { max-width: 980px; margin-inline: auto; padding: 22px 28px 60px; display: 
 .contents .to.clash { border-color: var(--stop); box-shadow: 0 0 0 1px var(--stop); }
 /* A link is pale where its part is: what the part shows is not of the FILE as it is now. */
 .contents .to.old { opacity: 0.45; }
-/* Where the row scrolls sideways, an arrow at each end where a link is cut off. An arrow has
-   no width of its own, so the links stay where they are when it comes and goes. It stays at
-   its end of the row while the links move under it. The arrow itself is a box from the edge
-   of the window, which is as far from it as the row has room at its side. Only that box
-   takes a press. Beside it the links fade out, and a press there is a press on the link. */
-.contents .more { display: none; position: sticky; z-index: 1; flex: none; align-self: stretch; width: 0; padding: 0; border: 0; background: none; pointer-events: none; }
-.contents .more.back { left: 0; margin-right: -6px; }
-.contents .more.on { right: 0; margin-left: -6px; }
-.contents .more span { position: absolute; top: -7px; bottom: -7px; width: calc(var(--side, 0px) + 16px); background: var(--ground); cursor: pointer; pointer-events: auto; }
-.contents .more.back span { left: calc(0px - var(--side, 0px)); }
-.contents .more.on span { right: calc(0px - var(--side, 0px)); }
-.contents .more span::before { content: ""; position: absolute; top: 50%; left: 50%; width: 8px; height: 8px; border: solid var(--ink2); border-width: 0 2px 2px 0; }
-.contents .more.back span::before { transform: translate(-25%, -50%) rotate(135deg); }
-.contents .more.on span::before { transform: translate(-75%, -50%) rotate(-45deg); }
-.contents .more span:hover::before { border-color: var(--ink); }
-.contents .more::before { content: ""; position: absolute; top: -7px; bottom: -7px; width: 18px; }
-.contents .more.back::before { left: 16px; background: linear-gradient(to right, var(--ground), transparent); }
-.contents .more.on::before { right: 16px; background: linear-gradient(to left, var(--ground), transparent); }
 /* What the page brings into view comes to rest under the row, however many lines the row
    takes: a part that a link leads to, and a drawing that the keyboard goes to. */
 html { scroll-padding-top: calc(var(--row-of-links, 0px) + 12px); }
@@ -85,16 +67,14 @@ html { scroll-padding-top: calc(var(--row-of-links, 0px) + 12px); }
   .contents { position: static; padding: 0; border-bottom: 0; }
   html { scroll-padding-top: 0; }
 }
-/* A narrow window, such as the browser beside an agent, has less room at its sides. The row of
-   links is one line there, from one edge of the window to the other, and scrolls sideways: it
-   stays at the top, so each line that it takes is a line less of the page. It shows no scroll
-   bar: its arrows say where there is more, and a click on one brings that into view. */
+/* A narrow window, such as the browser beside an agent, has less room at its sides. The row
+   of links takes several lines there. So it does not stay at the top: it goes with the page,
+   and a part that the page brings into view comes to rest at the top of the window. */
 @media (max-width: 640px) {
   header { padding: 10px 14px; }
   main { padding: 14px 14px 48px; }
-  .contents { --side: 14px; flex-wrap: nowrap; margin-inline: calc(0px - var(--side)); padding-inline: var(--side); overflow-x: auto; scrollbar-width: none; }
-  .contents .to { flex: none; white-space: nowrap; }
-  .contents .more { display: block; }
+  .contents { position: static; padding: 0; border-bottom: 0; }
+  html { scroll-padding-top: 12px; }
 }
 .report-part, .calendar-part, .part { display: grid; gap: 8px; }
 /* The calendar with the steps under it that have no time. */
