@@ -1,12 +1,15 @@
-"""The agloe.ai home page, ``pages/index.html``, agrees with the documents and the examples.
+"""The pages of agloe.ai, under ``pages/``, agree with the documents and the examples.
 
-The page marks what it takes from elsewhere with the path of its source:
+A page marks what it takes from elsewhere with the path of its source:
 
 - ``data-from``: a passage from a document must be in that document, word for word, and an
   example must be shown whole.
 - ``data-lines-from``: the words are whole lines of that file, one after another.
 
-The page also draws the first story as a day that a reader can change. It draws the day from a
+The pages share one style sheet, ``pages/site.css``. Every link of a page and of the style sheet
+must lead somewhere.
+
+The home page also draws the first story as a day that a reader can change. It draws the day from a
 FILE, and it carries each version of the story whole: its FILE, and the report the example
 expects, in words and as data. When a reader changes the trip, the page runs the reference
 checker in the reader's browser, through ``pages/checker.py``. That program must give the
@@ -47,7 +50,7 @@ MARKS = {"data-from": "passage", "data-lines-from": "lines"}
 
 
 class Page(HTMLParser):
-    """Reads the page into its marked passages, its links, its ids and its style sheet."""
+    """Reads a page into its marked passages, its links, its ids and its style sheets."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -55,12 +58,14 @@ class Page(HTMLParser):
         self.links: list[str] = []
         self.ids: set[str] = set()
         self.text: list[str] = []
-        self.style: list[str] = []
+        self.sheets: list[str] = []
         self.open: list[tuple[str, str | None, str | None, list[str]]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         named = dict(attrs)
         self.links += [value for name in ("href", "src") if (value := named.get(name))]
+        if tag == "link" and named.get("rel") == "stylesheet" and (sheet := named.get("href")):
+            self.sheets.append(sheet)
         if (content := named.get("content")) and content.startswith(SITE):
             self.links.append(content)
         if identity := named.get("id"):
@@ -81,7 +86,6 @@ class Page(HTMLParser):
     def handle_data(self, data: str) -> None:
         inside = self.open[-1][0] if self.open else ""
         if inside == "style":
-            self.style.append(data)
             self.links += re.findall(r'url\("([^"]+)"\)', data)
             return
         if inside == "script":
@@ -92,15 +96,27 @@ class Page(HTMLParser):
                 parts.append(data)
 
 
-def read_page() -> Page:
+def read_page(path: Path) -> Page:
     page = Page()
-    page.feed((PAGES / "index.html").read_text())
+    page.feed(path.read_text())
     page.close()
-    assert page.open == [], "the page ends with an element still open"
+    assert page.open == [], f"{path.name} ends with an element still open"
     return page
 
 
-PAGE = read_page()
+# Every page of the site, by its path under pages/. What the site needs from elsewhere is not one.
+SITE_PAGES = {
+    path.relative_to(PAGES).as_posix(): read_page(path)
+    for path in sorted(PAGES.rglob("*.html"))
+    if "vendor" not in path.parts
+}
+# The home page.
+PAGE = SITE_PAGES["index.html"]
+PASSAGES = [
+    (name, kind, source, text)
+    for name, page in SITE_PAGES.items()
+    for kind, source, text in page.passages
+]
 
 
 def words(text: str) -> str:
@@ -131,9 +147,10 @@ def test_the_page_takes_passages_from_documents_and_shows_examples() -> None:
 
 
 @pytest.mark.parametrize(
-    ("kind", "source", "text"), PAGE.passages, ids=lambda value: words(str(value))[:50]
+    ("name", "kind", "source", "text"), PASSAGES, ids=lambda value: words(str(value))[:50]
 )
-def test_the_page_says_what_its_source_says(kind: str, source: str, text: str) -> None:
+def test_a_page_says_what_its_source_says(name: str, kind: str, source: str, text: str) -> None:
+    assert (ROOT / source).is_file(), f"{name} names {source}"
     there = (ROOT / source).read_text()
     if kind == "lines":
         wanted, all_lines = lines(text), lines(there)
@@ -146,23 +163,23 @@ def test_the_page_says_what_its_source_says(kind: str, source: str, text: str) -
 
 
 def test_each_report_stands_under_the_command_that_gives_it() -> None:
-    shown = words("".join(PAGE.text))
     reports = [
-        source
-        for kind, source, _ in PAGE.passages
+        (name, source)
+        for name, kind, source, _ in PASSAGES
         if kind == "passage" and source.endswith(".expected.txt")
     ]
     assert reports
-    for report in reports:
+    for name, report in reports:
         file = report.replace(".expected.txt", ".json")
-        assert f"uv run agloe check {file}" in shown
+        assert f"uv run agloe check {file}" in words("".join(SITE_PAGES[name].text)), name
 
 
-def test_every_example_the_page_names_exists() -> None:
-    named = set(re.findall(r"examples/[\w/-]+\.json", "".join(PAGE.text)))
-    assert named
-    for file in named:
-        assert (ROOT / file).is_file(), file
+def test_every_example_a_page_names_exists() -> None:
+    for name, page in SITE_PAGES.items():
+        named = set(re.findall(r"examples/[\w/-]+\.json", "".join(page.text)))
+        for file in named:
+            assert (ROOT / file).is_file(), f"{name} names {file}"
+    assert re.findall(r"examples/[\w/-]+\.json", "".join(PAGE.text))
 
 
 def offered() -> list[str]:
@@ -365,15 +382,48 @@ def test_the_day_shows_what_the_report_says() -> None:
     }
 
 
-def test_every_link_leads_somewhere() -> None:
-    for link in PAGE.links:
+def links_of(name: str) -> list[tuple[Path, str]]:
+    """Each link of a page and of its style sheets, with the folder it is read from."""
+    folder = (PAGES / name).parent
+    found = [(folder, link) for link in SITE_PAGES[name].links]
+    for sheet in SITE_PAGES[name].sheets:
+        styles = folder / sheet
+        found += [
+            (styles.parent, link) for link in re.findall(r'url\("([^"]+)"\)', styles.read_text())
+        ]
+    return found
+
+
+@pytest.mark.parametrize("name", SITE_PAGES)
+def test_every_link_leads_somewhere(name: str) -> None:
+    page = SITE_PAGES[name]
+    for folder, link in links_of(name):
         if link.startswith("#"):
-            assert link[1:] in PAGE.ids, link
+            assert link[1:] in page.ids, link
+            continue
+        if link.startswith("data:"):
             continue
         for start in (f"{REPOSITORY}/blob/main/", f"{REPOSITORY}/tree/main/"):
             if link.startswith(start):
                 assert (ROOT / link.removeprefix(start)).exists(), link
                 break
         else:
-            if "://" not in link or link.startswith(SITE):
-                assert (PAGES / link.removeprefix(SITE)).exists(), link
+            if "://" in link and not link.startswith(SITE):
+                continue
+            # A link inside the site: to a file, or to a folder that holds a page.
+            path, _, mark = link.partition("#")
+            target = PAGES / path.removeprefix(SITE) if path.startswith(SITE) else folder / path
+            target = target.resolve()
+            assert PAGES.resolve() in (target, *target.parents), f"{link} leaves the site"
+            if target.is_dir():
+                target = target / "index.html"
+            assert target.is_file(), link
+            if mark:
+                there = SITE_PAGES[target.relative_to(PAGES.resolve()).as_posix()]
+                assert mark in there.ids, link
+
+
+def test_the_pages_share_one_style_sheet() -> None:
+    for name, page in SITE_PAGES.items():
+        sheets = {((PAGES / name).parent / sheet).resolve() for sheet in page.sheets}
+        assert sheets == {(PAGES / "site.css").resolve()}, name
