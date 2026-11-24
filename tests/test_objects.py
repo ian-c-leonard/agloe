@@ -9348,17 +9348,17 @@ def test_vans_that_all_come_too_late_are_not_tried_in_every_order(
     world = worst_case(file)
     assert not reference.any_works(file, world)
     assert not compiler.works(file, world)
-    # With start times to go by, the orders that end alike are all made: which of them can
-    # be timed turns on the order.
+    # The orders that end alike are all made for a caller that takes the result, and for
+    # one that has start times to go by: which of them can be timed turns on the order.
     fewer = late_vans(5)
     who: tuple[tuple[str, ...], ...] = (*[()] * 5, ("jo",))
     orders, vans = ((5,),), frozenset(range(5))
-    made: dict[bool, int] = {}
+    made: dict[tuple[bool, bool], int] = {}
 
     def any_time(gaps: list[tuple[int, int, int]]) -> bool:
         return True
 
-    for timed in (False, True):
+    for whether_any, timed in ((True, False), (True, True), (False, False)):
         steps = 0
         found = reference._chains(  # pyright: ignore[reportPrivateUsage]
             fewer,
@@ -9367,11 +9367,12 @@ def test_vans_that_all_come_too_late_are_not_tried_in_every_order(
             orders,
             fits=any_time if timed else None,
             empty=vans,
-            whether_any=True,
+            whether_any=whether_any,
         )
         assert found is not None and list(found) == []
-        made[timed] = steps
-    assert made[False] < made[True] / 5
+        made[whether_any, timed] = steps
+    assert made[True, False] < made[True, True] / 5
+    assert made[True, True] == made[False, False]
     # Five vans, with every order made, give the same answer.
     monkeypatch.setattr(reference, "_one_further", its_own)
     EveryOrder(monkeypatch).skipping_nothing()
