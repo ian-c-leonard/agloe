@@ -3388,13 +3388,19 @@ class EveryOrder:
     """Switches the search between its own way and one that skips nothing.
 
     Its own way makes only some orders of the OPTIONs that matter to an OBJECT, tries some
-    orders before the others, and stops at an ITINERARY that none can come before. The other
+    orders before the others, and stops at an ITINERARY that none can come before. Its first
+    check of a schedule does not make an order again that ends like one made before. The other
     way takes the orders that a stand-in gives and no other, times every one of them, and
     ranks every ITINERARY that works.
     """
 
-    SHORT_CUTS = ("_orders_differ_only_in_the_listing", "_nothing_comes_before", "_to_try_first")
-    OFF = (never, never, no_order_first)
+    SHORT_CUTS = (
+        "_orders_differ_only_in_the_listing",
+        "_nothing_comes_before",
+        "_to_try_first",
+        "_one_object_is_asked_about",
+    )
+    OFF = (never, never, no_order_first, never)
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.monkeypatch = monkeypatch
@@ -9299,6 +9305,90 @@ def some_vans(
         stated += [needs_right(van), every_right(van)]
     more = [moves(van, "hotel", "ohare") for van in vans]
     return a_service(*stated, *facts, more=more, ways=ways, others=others)
+
+
+def late_vans(count: int, jo_at: str = "b") -> File:
+    """Vans leave A at 4:00 pm and reach B at 5:30 pm. Each can carry the bag, which lies at
+    A, and nobody rides in a van. Jo needs the bag at B at 5:00 pm."""
+    vans = [f"van-{number}" for number in range(count)]
+    options = [*(moves(van, "a", "b") for van in vans), stays("pickup", "b")]
+    facts = [starts_from("jo", jo_at), lies_at("bag", "a"), requires_object("pickup", "bag")]
+    facts += [*at("pickup", 17), needs_no_right("pickup"), every_use("bag")]
+    facts += [every_transfer("bag")]
+    for van in vans:
+        facts += [*at(van, 16, 0, "PT1H30M"), carries(van, "bag"), needs_right(van)]
+        facts += [every_right(van)]
+    locks = [lock("pickup", "jo")]
+    return trip(["jo"], ["a", "b"], options, facts, locks, rights=True, objects=["bag"])
+
+
+def test_vans_that_all_come_too_late_are_not_tried_in_every_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Eight vans can each carry the bag to Jo, and each arrives half an hour too late. The
+    first check of a schedule asks only whether some order of the vans lets the bag be
+    where it has to be. An order that starts with the same vans as one made before, and
+    leaves the bag in the same places, is not made again. So the check goes through the
+    sets of vans that have left, and not through their 40,320 orders. Both checkers say
+    that nothing works, and so does the search that makes every order, with fewer vans."""
+    steps = 0
+    its_own = reference._one_further  # pyright: ignore[reportPrivateUsage]
+
+    def counted(*given: Any) -> Any:
+        nonlocal steps
+        steps += 1
+        # Every order of eight vans takes 400,000 steps: fail at once.
+        assert steps < 1000, "the first check makes order after order"
+        return its_own(*given)
+
+    monkeypatch.setattr(reference, "_one_further", counted)
+    file = late_vans(8)
+    world = worst_case(file)
+    assert not reference.any_works(file, world)
+    assert steps == 256
+    assert not compiler.works(file, world)
+    # Five vans, with every order made: 1,956 steps, and the same answer.
+    monkeypatch.setattr(reference, "_one_further", its_own)
+    fewer = late_vans(5)
+    EveryOrder(monkeypatch).skipping_nothing()
+    assert not reference.any_works(fewer, worst_case(fewer))
+
+
+def test_with_two_objects_the_first_check_leaves_out_no_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two desks open at 10:00 am, with Alex at the first and Sam at the second. A red folder
+    lies there, and either desk can hand it over. Sam has a blue folder, the second desk
+    keeps it, and the first desk requires it: so the second desk comes first. For the red
+    folder the two orders of the desks end alike. The order that the search makes first
+    for it has the first desk first, and that does not go with the blue folder. So the
+    other order is made too. Leaving it out is right only where one OBJECT is asked
+    about."""
+    options = [stays("first", "desk"), stays("second", "desk"), stays("third", "desk")]
+    facts = [*at("first", 10), *at("second", 10), *at("third", 11)]
+    facts += [starts_from("alex", "desk"), starts_from("sam", "desk")]
+    facts += [lies_at("red", "desk"), hands_over("first", "red"), hands_over("second", "red")]
+    facts += [requires_object("third", "red"), every_use("red"), every_transfer("red")]
+    facts += [has_object("sam", "blue"), keeps("second", "blue")]
+    facts += [requires_object("first", "blue"), every_use("blue"), every_transfer("blue")]
+    locks = [lock("first", "alex"), lock("second", "sam"), lock("third", "alex", "sam")]
+    file = trip(["alex", "sam"], ["desk"], options, facts, locks, objects=["red", "blue"])
+    world = worst_case(file)
+    plan = first_shown(file, world)
+    assert plan is not None
+    assert [(step.option, step.handed) for step in plan] == [
+        ("second", ()),
+        ("first", ()),
+        ("third", ()),
+    ]
+    assert checked(file).answer is Answer.FEASIBLE
+
+    # With the orders that end alike left out for two OBJECTs, the plan would be lost.
+    def always(*given: object) -> bool:
+        return True
+
+    monkeypatch.setattr(reference, "_one_object_is_asked_about", always)
+    assert not reference.any_works(file, world)
 
 
 def test_many_services_that_can_each_carry_the_bags_are_not_tried_in_every_combination(

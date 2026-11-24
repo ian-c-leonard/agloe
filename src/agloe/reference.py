@@ -3620,7 +3620,9 @@ def _schedules(
     the other PERSONs do. So the routes that are left come in the same order, and the first
     ITINERARY that works is the same one. Every other route is left to the timing.
     """
-    found = _chains(file, world, who, orders, empty=empty)
+    # A first check, before any WAY or time: does some order of the OPTIONs let each OBJECT be
+    # where it has to be? Only whether there is one matters here, and not which.
+    found = _chains(file, world, who, orders, _one_object_is_asked_about(file, world, who, empty))
     if found is not None and next(iter(found), None) is None:
         return  # an OBJECT is not at hand where it has to be, whatever the WAYs and the times
     needed = _travel(file, world, orders, known)
@@ -3640,6 +3642,28 @@ def _schedules(
             for (number, position, _), route in zip(needed, chosen, strict=True)
         }
         yield from _timings(file, world, who, orders, hops, None, any_will_do, empty=empty)
+
+
+def _one_object_is_asked_about(
+    file: File, world: World, who: tuple[tuple[str, ...], ...], empty: Set[int]
+) -> bool:
+    """Whether the first check of ``_schedules`` can leave out orders that end alike.
+
+    ``_chains`` makes each order of an OBJECT's OPTIONs one OPTION at a time. Take two
+    beginnings with the same OPTIONs, in different orders, that leave the OBJECT in the same
+    places with the same hand-overs, carries and arrivals. The same OPTIONs are left for
+    both. Which of them can come next turns on what is left, on the fixed starts and on what
+    the PERSONs do, and not on the order so far. Where the OBJECT can go from there turns on
+    where it is. So whatever finishes the one finishes the other, and where the first
+    beginning leads to no order that works, neither does the second.
+
+    That holds while no other OBJECT has an order to go with. The order of one OBJECT is
+    made to go with the orders of the OBJECTs before it, so with two OBJECTs the second
+    beginning can be the only one that suits the other OBJECT. So the check leaves out the
+    second beginning only where one OBJECT is asked about. Eight vans that all bring the
+    bag too late have 40,320 orders, and 256 sets of vans that have left.
+    """
+    return len(_asked_about(file, world, who, empty)[1]) == 1
 
 
 def _over(terms: Terms) -> int | None:
