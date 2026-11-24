@@ -931,6 +931,15 @@ def test_names_are_sent_as_the_report_shows_them() -> None:
     words = reports.as_text(file, found)
     for each in sent["persons"]:
         assert each["name"] in words, each["name"]
+    # A name that the report uses for no name is in quotes too: a PERSON called nobody.
+    by_id["sam"]["name"] = "nobody"
+    file = parse(json.dumps(content))
+    found = compiler.check(file)
+    sent = sent_for(file, found)
+    assert [each["name"] for each in sent["persons"]] == ["Alex (alex)", '"nobody"', "Alex (jo)"]
+    words = reports.as_text(file, found)
+    for each in sent["persons"]:
+        assert each["name"] in words, each["name"]
 
 
 def test_a_file_with_no_report_is_sent_as_the_file_alone_gives_it() -> None:

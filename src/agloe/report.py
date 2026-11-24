@@ -65,6 +65,8 @@ from agloe.file import (
 from agloe.reference import Broken, Constraint, Itinerary, Step, Where
 
 _WITH_AN_ID = re.compile(r" \([a-z0-9]+(-[a-z0-9]+)*\)$")  # how a name ends when its id is shown
+# The words that a report uses in place of a name: "nobody takes part", "people need a right".
+_NO_NAMES = frozenset({"nobody", "everybody", "somebody", "anybody", "whoever", "people"})
 _DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 _MONTHS = [
     "January",
@@ -1600,9 +1602,10 @@ def _names(
     every record shows its id: no two ids are the same.
 
     A name is shown in quotes where it could be taken for something else: one with a comma,
-    a colon, a semicolon or a quote mark, one that ends like a name with its id, and one that
-    holds the word ``joins``, which joins the list the names are for. The quotes go on
-    before the id.
+    a colon, a semicolon or a quote mark, one that ends like a name with its id, one that
+    holds the word ``joins``, which joins the list the names are for, and one that is a
+    word the report uses in place of a name. A PERSON can be called nobody, and "visit,
+    nobody" would read as a visit with nobody in it. The quotes go on before the id.
     """
     shared = Counter(record.name for record in records)
     shown = {
@@ -1620,7 +1623,8 @@ def _quoted(name: str, joins: str | None) -> str:
     """A name, in quotes where it could be taken for something else."""
     marks = any(mark in name for mark in ",:;")  # what a report puts between its own parts
     splits = marks or (joins is not None and joins in name.casefold().split())
-    if splits or '"' in name or _WITH_AN_ID.search(name):
+    stands_in = " ".join(name.casefold().split()) in _NO_NAMES
+    if splits or stands_in or '"' in name or _WITH_AN_ID.search(name):
         return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
     return name
 

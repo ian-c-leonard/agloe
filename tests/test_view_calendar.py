@@ -487,8 +487,9 @@ def test_the_calendar_tells_a_person_called_nobody_from_nobody() -> None:
         ("lunch", 0, 1, '"nobody" and alex', 'No LOCK names "nobody" and alex.', False),
         ("van", 2, 2, "nobody of the TRIP", "No LOCK names anybody for it.", True),
     ]
-    # The names over the columns are the names of the PERSONs as they are.
-    assert laid["persons"] == [{"id": "nobody", "name": "nobody"}, {"id": "alex", "name": "alex"}]
+    # The names over the columns are the names as the report shows them: it puts a name
+    # that it uses for no PERSON in quotation marks wherever it is shown.
+    assert laid["persons"] == [{"id": "nobody", "name": '"nobody"'}, {"id": "alex", "name": "alex"}]
 
 
 def test_the_calendar_of_the_flight_home() -> None:
