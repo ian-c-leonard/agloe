@@ -1316,7 +1316,8 @@ def test_the_rights_have_the_edges_of_what_the_report_names(chromium: Browser) -
         clash = page.locator("#rights .entry.clash")
         assert clash.locator(".entry-name").all_text_contents() == ["alex-skydeck-ticket"]
         assert page.text_content("#rights .card-whole") == (
-            "The FILE lists every right to it: nobody on the trip holds another or can get one."
+            "The FILE lists every right for a PERSON to take part in it:"
+            " nobody on the trip holds another or can get one."
         )
         # The report shows no plan, so the page says nothing of who uses the BOOKING.
         assert clash.locator("span").all_text_contents() == ["a BOOKING that covers Alex"]
