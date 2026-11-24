@@ -1059,7 +1059,7 @@ def _each_alone(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
         *_requirements(file, world, taking_part),
         *_within(file, itinerary),
         *_rights(file, world, taking_part),
-        *_taken_along(file, world, itinerary),
+        *_where_a_transfer_brings_it(file, world, itinerary),
     ]
 
 
@@ -1080,31 +1080,54 @@ def taken_with_no_right(world: World, option: str, thing: str) -> bool:
     return unknown_action or goes_along(world, option, thing) is not None
 
 
-def _taken_along(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
-    """The sixteenth CONSTRAINT for an OBJECT that another transfer might bring.
+def _where_a_transfer_brings_it(file: File, world: World, itinerary: Itinerary) -> list[Broken]:
+    """What a plan breaks with an OBJECT that another transfer might bring.
 
     Nothing follows such an OBJECT through a plan: the transfer puts it at hand where the
-    plan needs it, and takes it from a PERSON before an OPTION that needs a right for it.
-    Two things no transfer cures. An OPTION that takes the OBJECT along with no choice, or
-    might, cannot happen where nothing covers the OBJECT there: ``taken_with_no_right``
-    says when. And a plan that hands the OBJECT over there, or carries it there by choice,
-    does so with no right. The Broken names whoever is to have the OBJECT, or else
-    everybody who takes part.
+    plan needs it, and takes it from a PERSON before an OPTION that refuses it or needs a
+    right for it. No transfer cures what the plan itself does, or what an OPTION does with
+    no choice.
+
+    A hand-over of the plan is in an OPTION that hands the OBJECT over: the fourteenth
+    CONSTRAINT otherwise. That OPTION does not refuse the OBJECT: the fifteenth otherwise,
+    since nobody takes the OBJECT there. Both name the PERSON who was to have it. A carry
+    of the plan is in an OPTION that carries the OBJECT: the fourteenth CONSTRAINT
+    otherwise, and it names everybody who takes part. Where the FILE does not say what the
+    OPTION does with the OBJECT, the world says the worst of it, and the hand-over or the
+    carry is broken. The best case says nothing of it: there the OPTION does what suits
+    the plan.
+
+    The sixteenth CONSTRAINT is the same. An OPTION that takes the OBJECT along with no
+    choice, or might, cannot happen where nothing covers the OBJECT there:
+    ``taken_with_no_right`` says when. And a plan that hands the OBJECT over there, or
+    carries it there by choice, does so with no right. The Broken names whoever is to have
+    the OBJECT, or else everybody who takes part.
     """
     out: list[Broken] = []
     for step in itinerary:
         if step.option is None:
             continue
         takers = dict(step.handed)
+        everybody = _in_file_order_of_persons(file, step.persons)
         for thing in file.objects:
-            pair = (step.option, thing.id)
-            if thing.id not in world.brought or pair not in world.uncovered:
+            if thing.id not in world.brought:
                 continue
-            chosen = thing.id in takers or thing.id in step.carried
-            if chosen or taken_with_no_right(world, *pair):
-                who = (takers[thing.id],) if thing.id in takers else step.persons
-                named = _in_file_order_of_persons(file, who)
-                out.append(Broken(Constraint.COVERED, step.option, named, object=thing.id))
+            pair = (step.option, thing.id)
+            action = world.does.get(pair, "nothing")
+            if pair not in world.does and file.does_with(*pair) is None:
+                action = "any"
+            taker, loaded = takers.get(thing.id), thing.id in step.carried
+            if taker is not None and pair in world.refuses:
+                out.append(Broken(Constraint.REFUSED, step.option, (taker,), object=thing.id))
+            if taker is not None and action not in ("hands_over", "any"):
+                out.append(Broken(Constraint.AT_HAND, step.option, (taker,), object=thing.id))
+            if loaded and action not in ("carries", "any"):
+                out.append(Broken(Constraint.AT_HAND, step.option, everybody, object=thing.id))
+            if pair not in world.uncovered:
+                continue
+            if taker is not None or loaded or taken_with_no_right(world, *pair):
+                who = everybody if taker is None else (taker,)
+                out.append(Broken(Constraint.COVERED, step.option, who, object=thing.id))
     return out
 
 
