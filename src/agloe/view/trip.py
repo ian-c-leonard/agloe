@@ -212,7 +212,9 @@ _OBJECT: _Shape = {
     "transfers_complete": (str, _NONE),
     "rights": list,
     "rights_complete": (str, _NONE),
+    "rights_closed": list,
 }
+_OBJECT_CLOSED: _Shape = {"option": str, "name": str, "record": str}
 _OBJECT_STARTS: _Shape = {"person": (str, _NONE), "place": (str, _NONE), "record": str}
 _OBJECT_NEED: _Shape = {"option": str, "name": str, "needed": bool, "record": str}
 _OBJECT_REFUSAL: _Shape = {"option": str, "name": str, "refused": bool, "record": str}
@@ -601,7 +603,11 @@ def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
         need, complete = needs.get(option.id), file.rights_complete(option.id)
         bookings, offers = file.bookings(option.id), file.offers(option.id)
         # An OPTION that needs a right for an OBJECT has rights to show too.
-        ticketed = any(file.needs_right_for(option.id, thing.id) is True for thing in file.objects)
+        ticketed = any(
+            file.needs_right_for(option.id, thing.id) is True
+            or file.rights_complete_for(option.id, thing.id) is not None
+            for thing in file.objects
+        )
         if need is None and complete is None and not bookings and not offers and not ticketed:
             continue
         rights.append(
@@ -660,7 +666,8 @@ def _objects(file: File, names: Mapping[str, str]) -> list[Trip]:
     ``transfers_complete`` the FACT that it states every OPTION that hands the OBJECT over,
     keeps it or carries it. ``rights`` holds each OPTION of which a FACT says whether it
     needs a right for the OBJECT, and ``rights_complete`` is the FACT that the FILE states
-    every one of its OPTIONs that does.
+    every one of its OPTIONs that does. ``rights_closed`` holds each OPTION of which a FACT
+    says that the FILE lists every right to it that covers the OBJECT, with that FACT.
     """
     objects: list[Trip] = []
     called = _names(file.objects)
@@ -671,6 +678,9 @@ def _objects(file: File, names: Mapping[str, str]) -> list[Trip]:
         does = [(option, file.action(option.id, thing.id)) for option in file.options]
         tickets = [(option, file.object_right(option.id, thing.id)) for option in file.options]
         ticketed = file.object_rights_complete(thing.id)
+        closed = [
+            (option, file.rights_complete_for(option.id, thing.id)) for option in file.options
+        ]
         required, moved = (
             file.object_requirements_complete(thing.id),
             file.transfers_complete(thing.id),
@@ -725,6 +735,11 @@ def _objects(file: File, names: Mapping[str, str]) -> list[Trip]:
                     if fact is not None
                 ],
                 "rights_complete": None if ticketed is None else ticketed.id,
+                "rights_closed": [
+                    {"option": option.id, "name": names[option.id], "record": fact.id}
+                    for option, fact in closed
+                    if fact is not None
+                ],
             }
         )
     return objects
@@ -1349,6 +1364,7 @@ def _are_objects(
             ("refuses", _OBJECT_REFUSAL),
             ("transfers", _TRANSFER),
             ("rights", _OBJECT_NEED),
+            ("rights_closed", _OBJECT_CLOSED),
         )
         for kind, shape in kinds:
             named: list[object] = []
