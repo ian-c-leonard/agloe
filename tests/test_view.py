@@ -70,9 +70,14 @@ def put(path: Path, content: bytes | Path) -> None:
 
 
 @contextmanager
-def serving(path: Path, python: str = sys.executable) -> Generator[View]:
-    """The view of one FILE, served on a free port of this machine until the test is done."""
-    view = View(path, port=0, python=python)
+def serving(
+    path: Path, python: str = sys.executable, allowed_host: str | None = None
+) -> Generator[View]:
+    """The view of one FILE, served on a free port of this machine until the test is done.
+
+    ``allowed_host`` is one more name that the view answers under.
+    """
+    view = View(path, port=0, python=python, allowed_host=allowed_host)
     thread = threading.Thread(target=view.serve, daemon=True)
     thread.start()
     try:
@@ -647,6 +652,49 @@ def test_the_view_tells_a_browser_to_keep_the_page_to_itself(tmp_path: Path) -> 
             assert headers["Cache-Control"] == "no-store", part
             assert headers["X-Content-Type-Options"] == "nosniff", part
             assert headers["Cross-Origin-Resource-Policy"] == "same-origin", part
+            # A page that opened the view from another site keeps no hold on its window.
+            assert headers["Cross-Origin-Opener-Policy"] == "same-origin", part
+
+
+def status_of(view: View, *lines: str) -> int:
+    """The status that the view gives for a request with these lines after its first, sent
+    as they are: a line can be there twice, and can end in blanks."""
+    request = "\r\n".join(["GET / HTTP/1.1", *lines, "Connection: close", "", ""])
+    with socket.create_connection(("127.0.0.1", port_of(view)), timeout=20) as line:
+        line.sendall(request.encode("latin-1"))
+        reply = line.makefile("rb").readline().decode("latin-1")
+    return int(reply.split()[1])
+
+
+def test_a_request_says_each_thing_about_itself_once(tmp_path: Path) -> None:
+    """A request that names two hosts, or says twice where it comes from, is no request: the
+    view looks at one of each, and the other could say anything."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    with serving(path, allowed_host="view.example.org") as view:
+        own = f"127.0.0.1:{port_of(view)}"
+        assert status_of(view, f"Host: {own}") == 200
+        assert status_of(view, "Host: view.example.org", "Origin: https://view.example.org") == 200
+        for twice in [
+            [f"Host: {own}", "Host: evil.example"],
+            ["Host: evil.example", f"Host: {own}"],
+            [f"Host: {own}", f"Host: {own}"],
+            [f"Host: {own}", f"Origin: http://{own}", "Origin: https://evil.example"],
+            [f"Host: {own}", "Sec-Fetch-Site: same-origin", "Sec-Fetch-Site: cross-site"],
+            [f"Host: {own}", "Sec-Fetch-Mode: navigate", "Sec-Fetch-Mode: cors"],
+            [f"Host: {own}", "Sec-Fetch-Dest: document", "Sec-Fetch-Dest: iframe"],
+            # Two words on where a request comes from are no request, with or without a host.
+            ["Origin: https://evil.example", "Origin: https://evil.example"],
+        ]:
+            assert status_of(view, *twice) == 400, twice
+        # A request that names no host is refused like one that names another.
+        assert status_of(view) == 403
+        # Blanks around what a line says are no part of it.
+        assert status_of(view, "Host:   view.example.org \t") == 200
+        assert status_of(view, f"Host: {own}", "Sec-Fetch-Site:  same-origin ") == 200
+        assert status_of(view, "Host: view.example.org", "Origin: https://view.example.org ") == 200
+        # A blank inside a name makes it another name.
+        assert status_of(view, "Host: view.example .org") == 403
 
 
 def test_the_view_serves_this_machine_only(tmp_path: Path) -> None:
@@ -666,6 +714,260 @@ def test_the_view_serves_this_machine_only(tmp_path: Path) -> None:
             assert asked(view, part, Origin="null")[0] == 403
             for site in ["cross-site", "same-site"]:
                 assert asked(view, part, Sec_Fetch_Site=site)[0] == 403, site
+        links_from_elsewhere(view)
+
+
+def test_the_view_answers_no_request_that_a_browser_makes_ahead_of_its_reader(
+    tmp_path: Path,
+) -> None:
+    """A browser can fetch a page before anybody opens it, and it says so in the request. The
+    view answers when somebody opens the page, and not before."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    opens = {"Sec_Fetch_Mode": "navigate", "Sec_Fetch_Dest": "document"}
+    with serving(path, allowed_host="view.example.org") as view:
+        for named in [{}, {"Host": "view.example.org"}]:
+            for part in ["/", "/events", "/view.js"]:
+                for purpose in ["prefetch", "prefetch;prerender", "prefetch;anonymous-client-ip"]:
+                    assert asked(view, part, Sec_Purpose=purpose, **named)[0] == 403, purpose
+                    for site in ["none", "same-origin", "cross-site"]:
+                        got = asked(
+                            view, part, Sec_Purpose=purpose, Sec_Fetch_Site=site, **opens, **named
+                        )
+                        assert got[0] == 403, (purpose, site)
+                # Browsers said the same in another line before.
+                assert asked(view, part, Purpose="prefetch", **named)[0] == 403
+                assert asked(view, part, Sec_Fetch_Site="none", **opens, **named)[0] == 200
+        # A request that says twice what it is for is no request.
+        own = f"127.0.0.1:{port_of(view)}"
+        assert status_of(view, f"Host: {own}", "Sec-Purpose: prefetch", "Sec-Purpose: x") == 400
+
+
+def links_from_elsewhere(view: View, **named: str) -> None:
+    """Checks that a link on another site can open the page itself, and nothing else of the
+    view. A sign-in on another site sends its reader back to the page that way. ``named`` is
+    the Host line of the request, where it is not the view's own address."""
+    link = {"Sec_Fetch_Mode": "navigate", "Sec_Fetch_Dest": "document"}
+    for site in ["cross-site", "same-site"]:
+        assert asked(view, "/", Sec_Fetch_Site=site, **link, **named)[0] == 200, site
+        assert asked(view, "/?from=elsewhere", Sec_Fetch_Site=site, **link, **named)[0] == 200
+        # What the page is to show, and the page's own files, are for the page alone.
+        for part in ["/events", "/view.js", "/view.css"]:
+            assert asked(view, part, Sec_Fetch_Site=site, **link, **named)[0] == 403, part
+        # The page is shown in no other page, and it is no part of another page.
+        for mode, kind in [
+            ("navigate", "iframe"),
+            ("navigate", "frame"),
+            ("navigate", "embed"),
+            ("navigate", "object"),
+            ("no-cors", "document"),
+            ("cors", "empty"),
+            ("no-cors", "script"),
+        ]:
+            got = asked(
+                view, "/", Sec_Fetch_Site=site, Sec_Fetch_Mode=mode, Sec_Fetch_Dest=kind, **named
+            )
+            assert got[0] == 403, (mode, kind)
+        # A request that says which other site it comes from is still refused.
+        got = asked(view, "/", Sec_Fetch_Site=site, Origin="https://evil.example", **link, **named)
+        assert got[0] == 403
+
+
+def test_the_view_answers_under_one_more_name_that_its_owner_gives(tmp_path: Path) -> None:
+    """The owner runs a gateway that passes requests on to the view under the gateway's name.
+    The view answers under that name, and under no other."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    name = "view.example.org"
+    with serving(path, allowed_host="View.Example.org") as view:
+        # The view still listens on this machine only, and still answers under its own names.
+        assert view.address.startswith("http://127.0.0.1:")
+        port = port_of(view)
+        for part in ["/", "/events"]:
+            assert asked(view, part)[0] == 200
+            assert asked(view, part, Host=f"localhost:{port}")[0] == 200
+            # The name of a host counts whatever the case of its letters.
+            for host in [name, "VIEW.example.ORG"]:
+                assert asked(view, part, Host=host)[0] == 200, host
+            # A page that came through the gateway is the view's own page. The gateway speaks
+            # to browsers over a secured line, so its pages say that they come from one.
+            for origin in [f"https://{name}", "HTTPS://View.Example.Org"]:
+                got = asked(view, part, Host=name, Origin=origin, Sec_Fetch_Site="same-origin")
+                assert got[0] == 200, origin
+            assert asked(view, part, Host=name, Origin=f"http://{name}")[0] == 403
+            # No other name is the view's.
+            others = ["example.org", f"{name}:8443", f"{name}.evil.example", f"evil.{name}"]
+            for host in others:
+                assert asked(view, part, Host=host)[0] == 403, host
+            # A page of another site is not the view's page, also not one of a site beside it.
+            for origin in ["https://evil.example", f"https://www.{name}", "null", f"ftp://{name}"]:
+                assert asked(view, part, Host=name, Origin=origin)[0] == 403, origin
+            for site in ["cross-site", "same-site"]:
+                assert asked(view, part, Host=name, Sec_Fetch_Site=site)[0] == 403, site
+            # The view's own address is no site of the gateway, and the other way round.
+            own = f"http://127.0.0.1:{port}"
+            assert asked(view, part, Host=name, Origin=own)[0] == 403
+            assert asked(view, part, Origin=f"https://{name}")[0] == 403
+        # A sign-in at the gateway sends its reader back to the page from another site.
+        links_from_elsewhere(view, Host=name)
+    # A name with a port is that name with that port, written as a browser writes it.
+    for given in [f"{name}:8443", f"{name}:08443", f"{name}:{'0' * 40}8443"]:
+        with serving(path, allowed_host=given) as view:
+            assert view.allowed_host == f"{name}:8443"
+            assert asked(view, "/", Host=f"{name}:8443")[0] == 200
+            assert asked(view, "/", Host=f"{name}:8443", Origin=f"https://{name}:8443")[0] == 200
+            assert asked(view, "/", Host=f"{name}:8443", Origin=f"http://{name}:8443")[0] == 403
+            assert asked(view, "/", Host=name)[0] == 403
+            assert asked(view, "/", Host=f"{name}:8443", Origin=f"https://{name}")[0] == 403
+    # A browser leaves the usual port of a secured line out of what it sends, and so the
+    # view answers the address that a person opens: https://view.example.org:443/.
+    with serving(path, allowed_host=f"{name}:443") as view:
+        assert view.allowed_host == f"{name}:443"
+        assert asked(view, "/", Host=name)[0] == 200
+        assert asked(view, "/", Host=name, Origin=f"https://{name}")[0] == 200
+        assert asked(view, "/", Host=name, Origin=f"http://{name}")[0] == 403
+        # No browser sends that port over a secured line.
+        assert asked(view, "/", Host=f"{name}:443")[0] == 403
+    # Port 80 is not the usual port of a secured line, so a browser sends it.
+    with serving(path, allowed_host=f"{name}:80") as view:
+        assert asked(view, "/", Host=f"{name}:80", Origin=f"https://{name}:80")[0] == 200
+        assert asked(view, "/", Host=f"{name}:80", Origin=f"http://{name}:80")[0] == 403
+        assert asked(view, "/", Host=name)[0] == 403
+    # A name that ends in a dot is the name that a browser sends with the dot, and no other.
+    with serving(path, allowed_host=f"{name}.") as view:
+        assert asked(view, "/", Host=f"{name}.", Origin=f"https://{name}.")[0] == 200
+        assert asked(view, "/", Host=name)[0] == 403
+        assert asked(view, "/", Host=f"{name}.", Origin=f"https://{name}")[0] == 403
+    with serving(path, allowed_host=name) as view:
+        assert asked(view, "/", Host=f"{name}.")[0] == 403
+    # Without such a name, the view answers under its own names only.
+    with serving(path) as view:
+        assert asked(view, "/", Host=name)[0] == 403
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "",
+        " ",
+        "https://view.example.org",
+        "view.example.org/",
+        "view.example.org/trip",
+        "view example.org",
+        "view.example.org:port",
+        "view.example.org:65536",
+        "view.example.org:",
+        "-view.example.org",
+        "view-.example.org",
+        "view..example.org",
+        ".example.org",
+        "*.example.org",
+        "view_1.example.org",
+        f"{'a' * 64}.example.org",
+        ".".join(["a" * 63] * 4) + ".org",
+        "user@view.example.org",
+        "[::1]",
+        "view.example.org..",
+        ".",
+        "view.example.org.:8443x",
+        # What a browser would take for an address made of numbers, and would rewrite or refuse.
+        "999.999.999.999",
+        "127.1",
+        "1.2.3",
+        "1.2.3.4.5",
+        "010.0.0.5",
+        "10.0.0.5.",
+        "0x7f.0.0.1",
+        "host.123",
+        "example.0x10",
+        "2130706433",
+        "view.example.org:0065536",
+        "vi\u00e9w.example.org",
+        # The sign for kelvin is no letter of a name, though its small form is the letter k.
+        "\u212aiew.example.org",
+        "view.example.org\n",
+    ],
+)
+def test_one_more_name_for_the_view_is_the_name_of_a_host(name: str, tmp_path: Path) -> None:
+    """Whatever is no name of a host, with or without a port, is refused before the view serves."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    with pytest.raises(ValueError, match="no name that the view can answer under"):
+        View(path, allowed_host=name)
+
+
+@pytest.mark.parametrize("port", [0, 1, 21, 22, 25, 110, 143, 993, 6000, 6667, 10080])
+def test_one_more_name_for_the_view_has_a_port_that_browsers_open(
+    port: int, tmp_path: Path
+) -> None:
+    """A browser refuses to open a page on some ports, whatever answers there. The list is
+    the one of the standard that browsers follow."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    for given in [f"view.example.org:{port}", f"10.0.0.5:0{port}", f"view.example.org:0000{port}"]:
+        with pytest.raises(ValueError, match=f"port {port} is on the list of ports that browsers"):
+            View(path, allowed_host=given)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "view.example.org",
+        "localhost",
+        "trips",
+        "10.0.0.5",
+        "10.0.0.5:8080",
+        "a-b.c-d.example",
+        "x1.example.org:8443",
+        "xn--vie-dma.example.org",
+        "view.example.org.",
+        "view.example.org:010443",
+        "view.example.org:80",
+        "view.example.org:443",
+        "view.example.org:0443",
+        "view.example.org:8080",
+        "view.example.org:65535",
+        "1a.example",
+        "0x.example",
+    ],
+)
+def test_the_name_of_a_host_is_taken_as_one_more_name_for_the_view(
+    name: str, tmp_path: Path
+) -> None:
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    with serving(path, allowed_host=name) as view:
+        # The view answers under the name as a browser sends it over a secured line: with
+        # its port as a plain number, and without the usual port of such a line.
+        host, _, port = name.partition(":")
+        sent = host if port in ("", "443", "0443") else f"{host}:{int(port)}"
+        assert asked(view, "/", Host=sent)[0] == 200
+
+
+def test_the_command_takes_one_more_name_for_the_view(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The command says under which name the view answers too, and that the view has no sign-in."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    # What is no name of a host is refused, and the command says which name it was given.
+    assert main(["view", str(path), "--no-browser", "--allowed-host=https://example.org"]) == 2
+    assert "https://example.org" in capsys.readouterr().err
+    started, address = command(path, allowed_host="view.example.org")
+    try:
+        assert started.stdout is not None
+        also = started.stdout.readline()
+        assert also == (
+            "It also answers under the name view.example.org, for a gateway of your own that"
+            " speaks to browsers over https and passes requests on to it with the name that the"
+            " browser asked for. The view has no sign-in: the gateway needs one.\n"
+        )
+        request = urllib.request.Request(address, headers={"Host": "view.example.org"})
+        with urllib.request.urlopen(request, timeout=20) as reply:
+            assert reply.status == 200
+    finally:
+        started.kill()
+        started.wait(timeout=20)
 
 
 def test_the_page_asks_no_other_host_for_anything() -> None:
@@ -739,10 +1041,13 @@ def test_what_the_page_hides_stays_hidden() -> None:
     assert "[hidden] { display: none !important; }" in (STATIC / "view.css").read_text()
 
 
-def command(path: Path, python: str | None = None) -> tuple[subprocess.Popen[str], str]:
+def command(
+    path: Path, python: str | None = None, allowed_host: str | None = None
+) -> tuple[subprocess.Popen[str], str]:
     """The command as a process of its own, and the address of the view that it prints.
 
-    With ``python``, the command takes that program for the Python that runs its checks.
+    With ``python``, the command takes that program for the Python that runs its checks. With
+    ``allowed_host``, the view answers under that name too.
     """
     stand_in = f"sys.executable = {python!r}; " if python else ""
     started = subprocess.Popen(
@@ -753,6 +1058,7 @@ def command(path: Path, python: str | None = None) -> tuple[subprocess.Popen[str
             "view",
             str(path),
             "--no-browser",
+            *([] if allowed_host is None else [f"--allowed-host={allowed_host}"]),
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
