@@ -31,10 +31,8 @@ SOURCE = "https://github.com/ian-c-leonard/agloe/blob/main"
 FOLDER = "https://github.com/ian-c-leonard/agloe/tree/main"
 HEADING = "\n## Examples\n"
 COLUMNS = "| FILE | What it says | Answer |"
-ROW = re.compile(
-    r"^\| \[(?P<name>[^\]]+)\]\(\.\./(?P<file>examples/(?P<story>[\w-]+)/[\w-]+\.json)\)"
-    r" \| (?P<says>.+?) \| (?P<answer>.+?) \|$"
-)
+# The first cell of a row: the name of a FILE, as a link to it.
+FILE = re.compile(r"^\[(?P<name>[^\]]+)\]\(\.\./(?P<file>examples/[\w-]+/[\w-]+\.json)\)$")
 # The class of an answer on the page, by the answer in the report as data.
 KINDS = {"FEASIBLE": "feasible", "INFEASIBLE": "infeasible", "UNDETERMINED": "undetermined"}
 
@@ -49,8 +47,8 @@ CASE = Template("""\
                 <p class="command"><span aria-hidden="true">$$ </span>uv run agloe check $file</p>
                 <pre tabindex="0">$report</pre>
               </div>
-              <p class="small"><a href="$source/$file">The FILE</a> and
-                <a href="$source/$data">the report as data</a> are in the repository.</p>
+              <p class="small"><a href="$source/$file">FILE</a>
+                <a href="$source/$data">JSON report</a></p>
             </details>
           </li>""")
 PART = Template("""\
@@ -119,6 +117,12 @@ def stories(rules: str) -> dict[str, list[Part]]:
         folders = {each.file.split("/")[1] for each in cases}
         if len(folders) != 1:
             raise wrong(f"one table names FILEs of several folders: {sorted(folders)}")
+        listed = [each.file for parts in found.values() for part in parts for each in part.cases]
+        twice = sorted({each.file for each in cases} & set(listed)) or sorted(
+            {each.file for each in cases if [other.file for other in cases].count(each.file) > 1}
+        )
+        if twice:
+            raise wrong(f"a FILE is listed twice: {twice[0]}")
         found.setdefault(folders.pop(), []).append(Part(tuple(told), tuple(cases)))
         told = []
     if told or len(blocks) < 3 or blocks[-1].startswith("|"):
@@ -127,33 +131,47 @@ def stories(rules: str) -> dict[str, list[Part]]:
 
 
 def case(row: str) -> Case:
-    """One row of a table, with the report that stands beside its FILE."""
-    read = ROW.match(row)
-    if read is None:
+    """One row of a table, with the report that stands beside its FILE.
+
+    A row has three cells. A pipe inside a cell is written with a backslash before it.
+    """
+    cells = [cell.strip().replace("\\|", "|") for cell in re.split(r"(?<!\\)\|", row)]
+    read = FILE.match(cells[1]) if len(cells) == 5 and not (cells[0] or cells[4]) else None
+    if read is None or not cells[2] or not cells[3]:
         raise wrong(f"this row is not a FILE, what it says and an answer: {row[:80]}")
+    says, answer = cells[2], cells[3]
     file = ROOT / read["file"]
     in_words = file.with_name(file.stem + ".expected.txt")
     as_data = file.with_name(file.stem + ".expected.json")
     if not (file.is_file() and in_words.is_file() and as_data.is_file()):
         raise wrong(f"{read['file']} or its expected report is missing")
     report = in_words.read_text()
-    kind = KINDS[json.loads(as_data.read_text())["answer"]]
+    expected = json.loads(as_data.read_text())["answer"]
+    if expected not in KINDS:
+        raise wrong(f"{read['file']} expects the answer {expected}, which this page does not know")
+    # The words of the row start with the answer of the expected result.
+    if re.match(rf"{expected}\b", answer) is None:
+        raise wrong(f"the row of {read['file']} does not start its answer with {expected}")
+    kind = KINDS[expected]
     # A FEASIBLE answer with a WARNING says so in the first line of its report.
     if kind == "feasible" and "WARNING" in report.split("\n")[0]:
         kind = "feasible warned"
-    return Case(read["name"], read["file"], read["says"], read["answer"], kind, report)
+    return Case(read["name"], read["file"], says, answer, kind, report)
 
 
 def words(markdown: str) -> str:
     """A line of the rules page as HTML: its links, its bold words and its code."""
 
     def link(found: re.Match[str]) -> str:
+        # A link of the rules page is read from where that page is: spec/rules.md.
         target = found[2]
         if target.startswith("../"):
             target = f"{SOURCE}/{target.removeprefix('../')}"
+        elif target.startswith("#"):
+            target = f"{SOURCE}/spec/rules.md{target}"
         elif "://" not in target:
             target = f"{SOURCE}/spec/{target}"
-        return f'<a href="{target}">{found[1]}</a>'
+        return f'<a href="{html.escape(target)}">{found[1]}</a>'
 
     text = html.escape(markdown, quote=False)
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", link, text)
@@ -180,7 +198,6 @@ def in_page(each: Case) -> str:
 def page(rules: str, home: str) -> str:
     """The page of examples, with the header and the footer of the home page."""
     found = stories(rules)
-    blocks = blocks_of(rules)
     cases = [each for parts in found.values() for part in parts for each in part.cases]
     counts = {kind: sum(each.kind.split()[0] == kind for each in cases) for kind in KINDS.values()}
     told = [
@@ -201,9 +218,6 @@ def page(rules: str, home: str) -> str:
         header=home[home.index('<a class="skip" href="#main">') : home.index("</header>") + 9],
         footer=home[home.rindex("<footer>") : home.rindex("</footer>") + 9],
         count=len(cases),
-        # The first sentence of the last paragraph: every FILE has its expected result beside it.
-        checked=words(blocks[-1].split(". ")[0]) + ".",
-        about=words(blocks[0]),
         shown="\n".join(
             SHOWN.substitute(kind=kind, answer=answer, count=counts[kind])
             for answer, kind in KINDS.items()

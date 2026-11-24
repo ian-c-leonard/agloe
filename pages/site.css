@@ -574,7 +574,7 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
 
 /* The examples: each story of the rules page, with the answer and the report of each of its FILEs. */
 .examples .hero { padding-bottom: clamp(30px, 4vw, 48px); }
-/* Which answers to show. It needs a browser that can tell which one is chosen. */
+/* Which answer to pick out. It needs a browser that can tell which one is chosen. */
 .show { border: 0; margin: 6px 0 0; padding: 0; min-width: 0; }
 .show legend { float: left; padding: 0; margin: 4px 12px 0 0; }
 .show b { font-weight: 500; margin-left: 3px; opacity: 0.65; }
@@ -604,18 +604,12 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
 .case details[open] summary { margin-bottom: 10px; }
 .case .terminal { padding: 16px 18px; font-size: 0.74rem; }
 .case .terminal pre { margin: 0; font: inherit; white-space: pre-wrap; overflow-wrap: break-word; }
-.case details .small { margin-top: 10px; font-size: 0.85rem; }
-.about { margin-top: clamp(34px, 5vw, 54px); max-width: 52em; font-size: 0.9rem; line-height: 1.55; color: var(--muted); }
+.case details .small { margin-top: 10px; font-size: 0.85rem; display: flex; gap: 18px; }
+/* Picking out one answer fades the other FILEs. They stay, because a FILE can say "as above". */
 @supports selector(:has(*)) {
-  .examples:has(input[value="feasible"]:checked) .case:not(.feasible),
-  .examples:has(input[value="infeasible"]:checked) .case:not(.infeasible),
-  .examples:has(input[value="undetermined"]:checked) .case:not(.undetermined),
-  .examples:has(input[value="feasible"]:checked) .story:not(:has(.case.feasible)),
-  .examples:has(input[value="infeasible"]:checked) .story:not(:has(.case.infeasible)),
-  .examples:has(input[value="undetermined"]:checked) .story:not(:has(.case.undetermined)),
-  .examples:has(input[value="feasible"]:checked) .part:not(:has(.case.feasible)),
-  .examples:has(input[value="infeasible"]:checked) .part:not(:has(.case.infeasible)),
-  .examples:has(input[value="undetermined"]:checked) .part:not(:has(.case.undetermined)) { display: none; }
+  .examples:has(input[value="feasible"]:checked) .case:not(.feasible):not(:has(details[open])),
+  .examples:has(input[value="infeasible"]:checked) .case:not(.infeasible):not(:has(details[open])),
+  .examples:has(input[value="undetermined"]:checked) .case:not(.undetermined):not(:has(details[open])) { opacity: 0.36; }
 }
 @media (max-width: 900px) {
   .case { grid-template-columns: minmax(0, 1fr); }

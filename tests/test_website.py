@@ -543,32 +543,57 @@ def test_the_sitemap_lists_every_page_under_its_own_address() -> None:
         assert f'<link rel="canonical" href="{address}">' in SITE_TEXT[name], name
 
 
-def test_the_page_of_examples_shows_every_example_with_its_report() -> None:
+def test_the_page_of_examples_shows_every_example_as_the_rules_page_tells_it() -> None:
+    """Each FILE has one row: its name, what it says and the answer, in the words of the rules page.
+
+    Under the row are the command, the whole expected report, and links to the FILE and to the
+    report as JSON. The row has the class of the answer in the expected result, and the numbers
+    beside the answers to pick out are the numbers of FILEs with each answer.
+    """
     page = SITE_TEXT["examples/index.html"]
+    rules = (ROOT / "spec" / "rules.md").read_text().split("\n## Examples\n")[1]
+    told = {
+        file: (name, says, answer)
+        for name, file, says, answer in re.findall(
+            r"^\| \[([^\]]+)\]\(\.\./(examples/[\w/-]+\.json)\) \| (.+?) \| (.+?) \|$", rules, re.M
+        )
+    }
     files = sorted(
-        path
+        path.relative_to(ROOT).as_posix()
         for path in (ROOT / "examples").rglob("*.json")
         if not path.name.endswith(".expected.json")
     )
-    assert files
+    assert files and sorted(told) == files
     assert page.count('<li class="case ') == len(files)
     kinds = {"FEASIBLE": "feasible", "INFEASIBLE": "infeasible", "UNDETERMINED": "undetermined"}
-    shown: dict[str, int] = dict.fromkeys(kinds.values(), 0)
-    for file in files:
-        name = file.relative_to(ROOT).as_posix()
-        report = file.with_name(file.stem + ".expected.txt").read_text()
-        answer = json.loads(file.with_name(file.stem + ".expected.json").read_text())["answer"]
-        mark = name.removeprefix("examples/").removesuffix(".json").replace("/", "-")
-        row = page[page.index(f'id="{mark}">') :]
-        row = row[: row.index("</li>")]
+    shown: dict[str, int] = dict.fromkeys(kinds, 0)
+
+    def read(part: str) -> str:
+        """The words of a piece of the page, without its marks."""
+        return words(html.unescape(re.sub(r"<[^>]+>", "", part)))
+
+    for name in files:
+        stem = name.removesuffix(".json")
+        report = (ROOT / f"{stem}.expected.txt").read_text()
+        answer = json.loads((ROOT / f"{stem}.expected.json").read_text())["answer"]
+        mark = stem.removeprefix("examples/").replace("/", "-")
+        assert page.count(f'id="{mark}">') == 1, name
+        opened = re.search(rf'<li class="case {kinds[answer]}( warned)?" id="{mark}">', page)
+        assert opened is not None, name
+        row = page[opened.start() : page.index("</li>", opened.start())]
+        title, says, said = told[name]
+        assert f"<h4>{html.escape(title)}</h4>" in row, name
+        cells = re.findall(r'<p class="case-(?:says|answer)">(.*?)</p>', row, re.S)
+        assert [read(cell) for cell in cells] == [plain(says), plain(said)], name
+        assert plain(said).startswith(answer), name
         assert f"uv run agloe check {name}</p>" in row, name
         assert f'<pre tabindex="0">{html.escape(report, quote=False)}</pre>' in row, name
-        assert f'<li class="case {kinds[answer]}' in page[: page.index(f'id="{mark}">')][-40:], name
-        shown[kinds[answer]] += 1
-    # The numbers beside the answers to show are the numbers of FILEs with each answer.
-    for kind, count in shown.items():
-        assert re.search(rf'value="{kind}"><span>[A-Z]+ <b>{count}</b>', page), kind
-    assert f"<b>{len(files)}</b>" in page
+        assert f'<a href="{REPOSITORY}/blob/main/{name}">FILE</a>' in row, name
+        assert f'<a href="{REPOSITORY}/blob/main/{stem}.expected.json">JSON report</a>' in row, name
+        shown[answer] += 1
+    for answer, count in shown.items():
+        assert f'value="{kinds[answer]}"><span>{answer} <b>{count}</b></span>' in page, answer
+    assert f'value="all" checked><span>All <b>{len(files)}</b></span>' in page
 
 
 def test_the_script_for_the_page_of_examples_refuses_a_section_it_cannot_read() -> None:
@@ -579,16 +604,25 @@ def test_the_script_for_the_page_of_examples_refuses_a_section_it_cannot_read() 
     spec.loader.exec_module(tool)
     rules = (ROOT / "spec" / "rules.md").read_text()
     assert tool.stories(rules)
-    row = "| [works](../examples/flight-home/works.json) |"
+    row = "| [works](../examples/flight-home/works.json) | They leave the museum at 3:00 pm. |"
+    assert rules.count(row) == 1
     for broken in (
+        # No section, a row with no FILE, a table with other columns, a FILE that is not there.
         rules.replace("\n## Examples\n", "\n## Stories\n"),
-        rules.replace(row, "| works |", 1),
+        rules.replace(row, "| works | They leave the museum at 3:00 pm. |"),
         rules.replace("| FILE | What it says | Answer |", "| FILE | Answer |", 1),
-        rules.replace(row, "| [works](../examples/flight-home/missing.json) |", 1),
+        rules.replace(row, row.replace("works.json", "missing.json")),
+        # A fourth cell, an answer that is not the expected one, and a FILE listed twice.
+        rules.replace(row, row + " One more cell. |"),
+        rules.replace(row + " FEASIBLE.", row + " INFEASIBLE."),
+        rules.replace(row, row + " FEASIBLE. |\n" + row),
     ):
         assert broken != rules
         with pytest.raises(SystemExit, match="cannot be read"):
             tool.stories(broken)
+    # A pipe inside a cell is written with a backslash, and the page shows the pipe alone.
+    piped = tool.stories(rules.replace(row, row.replace("3:00 pm.", "3:00 pm \\| sharp.")))
+    assert piped["flight-home"][0].cases[0].says == "They leave the museum at 3:00 pm | sharp."
 
 
 def test_the_page_for_a_wrong_address_names_everything_from_the_root() -> None:
