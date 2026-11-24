@@ -157,6 +157,6 @@ export function strip(laid, wide = 800) {
   );
   const cut = days.some((day) => day.gap);
   const rows = laid.nobody ? "a row for each PERSON and one for the steps with nobody of the TRIP in them" : "a row for each PERSON";
-  const says = `All the days of the calendar on one strip, ${rows}.${cut ? " It leaves out the hours that the calendar does not show." : ""} Click a step to see it in the calendar.`;
+  const says = `All the days of the calendar on one strip, ${rows}.${cut ? " It leaves out the hours that the calendar does not show." : ""} Click a step, or press Enter on it, to see it in the calendar.`;
   return { says, persons: laid.persons, nobody: laid.nobody, wide: across, row: ROW, cut, days, marks: [...whole, ...groups.flat()], bounds };
 }

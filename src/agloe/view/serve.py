@@ -1,7 +1,9 @@
 """The program behind ``agloe view FILE``: it serves the page and checks the FILE as it changes.
 
-It serves this machine only: the page, the page's own files, and what the page is to show. It
-writes nothing.
+It listens on this machine only, and serves the page, the page's own files, and what the page
+is to show. It writes nothing. It answers a browser that asks for this machine by its own
+address. Its owner can give it one more name to answer under: the name of a gateway of their
+own, which passes requests on to it. The view has no sign-in, so such a gateway needs one.
 
 A state of the FILE is its content at one look. Each new state gets a number, its revision, and
 every event that a page is sent names the revision it is about. So a page can never take an
@@ -11,9 +13,11 @@ FILE changes is ended.
 """
 
 import contextlib
+import ipaddress
 import json
 import math
 import os
+import re
 import secrets
 import socket
 import socketserver
@@ -60,11 +64,29 @@ KINDS = {".html": "text/html", ".css": "text/css", ".js": "text/javascript"}
 LOOK = 0.1  # seconds between two looks at the FILE, and at whether the view is closed
 QUIET = 15.0  # seconds after which a page with nothing new is told that the view is still there
 LONGEST = 1e9  # seconds: no check takes this long, and a page can still write the number
+# The name of a host, with a port or without, as a browser sends it: parts of letters, digits
+# and hyphens with dots between them, and no part that starts or ends with a hyphen. A name
+# can end in a dot, and a browser then sends it with the dot.
+_PART = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+_HOST = re.compile(rf"({_PART}(?:\.{_PART})*)(\.?)(?::0*([0-9]{{1,5}}))?")
+_LONGEST_NAME = 253  # letters and dots: the names of the internet are no longer
+# A name whose last part is a number is an address made of numbers to a browser. It rewrites
+# such an address, or refuses it. So the view takes one only as a browser writes it.
+_A_NUMBER = re.compile(r"[0-9]+|0x[0-9a-f]*")
+# The port that a browser leaves out of what it sends over a secured line.
+_USUAL = 443
 # The ports from 1024 up that browsers refuse to open a page on: the bad ports of the Fetch
 # Standard.
 REFUSED_BY_BROWSERS = frozenset(
     {1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566}
     | {6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080}
+)
+# The rest of those bad ports. The view never serves on a port below 1024. A gateway can.
+_REFUSED_FOR_A_GATEWAY = REFUSED_BY_BROWSERS | frozenset(
+    {0, 1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95}
+    | {101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161}
+    | {179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563}
+    | {587, 601, 636, 989, 990, 993, 995}
 )
 ANSWERS = {"FEASIBLE", "INFEASIBLE", "UNDETERMINED"}
 # What a check can say, and what each of its events must hold. A check ends with one of ENDS.
@@ -173,15 +195,65 @@ def _said(line: bytes) -> Event:
     return event
 
 
+class NotAHost(ValueError):
+    """What was given as one more name for the view is no name of a host."""
+
+
+def _named(name: str) -> tuple[str, int | None]:
+    """One more name for the view, as a browser sends it: in small letters, and its port
+    where it has one.
+
+    The view takes the name of a host in letters, digits, hyphens and dots, or an address
+    of four numbers, with a port or without. It raises NotAHost for anything else, and for
+    a port that browsers refuse to open a page on. So nothing that is given as a name can
+    match a request that it was not meant for. An address of the newer kind, in brackets, is
+    not taken.
+    """
+    found = _HOST.fullmatch(name.lower()) if name.isascii() else None
+    if found is not None and len(found[1]) <= _LONGEST_NAME:
+        host, port = found[1] + found[2], None if found[3] is None else int(found[3])
+        whole = True
+        if _A_NUMBER.fullmatch(found[1].rsplit(".", 1)[-1]):
+            # An address made of numbers: four numbers up to 255, with no dot after them.
+            whole = False
+            with contextlib.suppress(ValueError):
+                whole = str(ipaddress.IPv4Address(host)) == host
+        if whole and port in _REFUSED_FOR_A_GATEWAY:
+            raise NotAHost(
+                f"{name!r}: port {port} is on the list of ports that browsers refuse to open "
+                "a page on, the blocked ports of the Fetch Standard"
+            )
+        if whole and (port is None or 1 <= port <= 65535):
+            return host, port
+    raise NotAHost(
+        f"{name!r} is no name that the view can answer under: give the name of a host, like "
+        "view.example.org, or an address of four numbers, like 10.0.0.5, with the port after "
+        "a colon where the gateway has one"
+    )
+
+
 class View:
     """The view of one FILE. ``serve`` runs it until ``close``. ``address`` is where the page is.
 
-    ``python`` is the Python that runs each check.
+    ``python`` is the Python that runs each check. ``allowed_host`` is one more name that the
+    view answers under: the name of a gateway that passes requests on to it.
     """
 
-    def __init__(self, path: Path, port: int = 0, python: str = sys.executable) -> None:
+    def __init__(
+        self,
+        path: Path,
+        port: int = 0,
+        python: str = sys.executable,
+        allowed_host: str | None = None,
+    ) -> None:
         self.path = path
         self.python = python
+        # The name is looked at before the view takes a port, so a bad one holds nothing.
+        self._gateway = None if allowed_host is None else _named(allowed_host)
+        self.allowed_host: str | None = None
+        if self._gateway is not None:
+            name, at = self._gateway
+            self.allowed_host = name if at is None else f"{name}:{at}"
         self._server = _listening(port)
         self._server.view = self
         self._server.timeout = LOOK
@@ -199,9 +271,23 @@ class View:
         self._serving = False
         self._check: subprocess.Popen[bytes] | None = None
 
-    def hosts(self) -> set[str]:
-        """The names by which a browser on this machine reaches the view."""
-        return {f"127.0.0.1:{self._port}", f"localhost:{self._port}"}
+    def sites(self) -> dict[str, set[str]]:
+        """Each name by which a browser reaches the view, with the sites that its page can say
+        it comes from.
+
+        A browser on this machine reaches the view by the address of this machine. Where the
+        owner has given one more name, a browser reaches it by that name too, through the
+        gateway that has the name. The gateway speaks to browsers over a secured line, so
+        a page that came through it says that it comes from one. A browser leaves the usual
+        port of such a line, 443, out of what it sends.
+        """
+        own = (f"127.0.0.1:{self._port}", f"localhost:{self._port}")
+        sites = {host: {f"http://{host}"} for host in own}
+        if self._gateway is not None:
+            name, port = self._gateway
+            sent = name if port is None or port == _USUAL else f"{name}:{port}"
+            sites.setdefault(sent, set()).add(f"https://{sent}")
+        return sites
 
     def serve(self) -> None:
         """Serve the page and watch the FILE, until ``close`` or until the command is stopped.
@@ -428,10 +514,16 @@ class _Asked(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         view = self.server.view
-        if not self._from_this_machine(view):
-            self.send_error(HTTPStatus.FORBIDDEN)
+        # A request that names two hosts, or says twice where it comes from, is no request.
+        once = ("Host", "Origin", "Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest")
+        once += ("Sec-Purpose", "Purpose")
+        if any(len(self.headers.get_all(name) or []) > 1 for name in once):
+            self.send_error(HTTPStatus.BAD_REQUEST)
             return
         path = self.path.split("?", 1)[0]
+        if not self._for_the_view(view, path):
+            self.send_error(HTTPStatus.FORBIDDEN)
+            return
         if path == "/events":
             self._tell(view)
         elif path in view.static:
@@ -441,18 +533,40 @@ class _Asked(BaseHTTPRequestHandler):
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
 
-    def _from_this_machine(self, view: View) -> bool:
-        """Whether the request is made to the view under its own name, and by its own page.
+    def _for_the_view(self, view: View, path: str) -> bool:
+        """Whether the request is made to the view under one of its names, and does not say
+        that a page of another site makes it.
 
-        A page from elsewhere reaches this machine under a name of its own, or says in the
-        request that it comes from another site. Both are refused.
+        A page from elsewhere reaches this machine under a name of its own, or its browser
+        says in the request that it comes from another site. Both are refused. A request
+        that says nothing of where it comes from is taken. One thing is taken from another
+        site: a request to open the page itself in a window of its own, as a link, a form
+        or a redirect makes one. A sign-in at a gateway sends its reader back to the page
+        that way. What the page is to show, and the page's own files, are for the page
+        alone. A request that a browser makes ahead of its reader, to have a page ready, is
+        refused: the view answers when somebody opens the page. The names of hosts count
+        whatever the case of their letters, and blanks around what a line says are no part
+        of it.
         """
-        if self.headers.get("Host") not in view.hosts():
+
+        def said(name: str) -> str | None:
+            value = self.headers.get(name)
+            return None if value is None else value.strip(" \t")
+
+        if said("Sec-Purpose") is not None or (said("Purpose") or "").lower() == "prefetch":
             return False
-        origin = self.headers.get("Origin")
-        if origin is not None and origin not in {f"http://{host}" for host in view.hosts()}:
+        sites = view.sites().get((said("Host") or "").lower())
+        if sites is None:
             return False
-        return self.headers.get("Sec-Fetch-Site") in {None, "same-origin", "none"}
+        origin = said("Origin")
+        if origin is not None and origin.lower() not in sites:
+            return False
+        if said("Sec-Fetch-Site") in {None, "same-origin", "none"}:
+            return True
+        return path == "/" and (said("Sec-Fetch-Mode"), said("Sec-Fetch-Dest")) == (
+            "navigate",
+            "document",
+        )
 
     def _begin(self, kind: str, length: int | None = None) -> None:
         self.send_response(HTTPStatus.OK)
@@ -461,6 +575,7 @@ class _Asked(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Security-Policy", POLICY)
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         if length is not None:
             self.send_header("Content-Length", str(length))
         self.end_headers()

@@ -271,7 +271,9 @@ function bar(mark, people) {
   // It names each of them, with its times and with what the report says of it.
   const said = (each) => [`${each.name}, ${each.late ? `${each.when}, ${each.late}` : each.when}`, ...[...(each.finds ? [each.finds] : []), ...each.warns, ...each.asks].map((words) => `    ${words}`)];
   box.title = several ? [`${mark.of.length} steps too close together to show apart at this width:`, ...mark.of.flatMap(said)].join("\n") : wordsOf(one);
-  // A click goes to the first of the marks that it stands for.
+  // A click goes to the first of the marks that it stands for. So do Enter and Space, and
+  // the mark says that it can be pressed.
+  box.setAttribute("role", "button");
   Object.assign(box.dataset, {
     of: [...new Set(mark.of.map((each) => each.step))].join(" "),
     records: [...new Set(mark.of.flatMap(tiesOf))].join(" "),
@@ -997,6 +999,15 @@ part("strip").addEventListener("click", (event) => {
   if (bar === null) return;
   const day = part("calendar").querySelectorAll(".day")[bar.dataset.day];
   day?.querySelector(`.mark[data-mark="${bar.dataset.mark}"]`)?.scrollIntoView({ block: "nearest", inline: "center" });
+});
+// Enter and Space on a mark of the strip do what a click on it does. With Shift, Alt, Control
+// or Meta they are the browser's.
+part("strip").addEventListener("keydown", (event) => {
+  if ((event.key !== "Enter" && event.key !== " ") || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+  const bar = event.target instanceof Element ? event.target.closest(".bar") : null;
+  if (bar === null) return;
+  event.preventDefault();
+  bar.click();
 });
 show();
 import("./calendar.js").then(
