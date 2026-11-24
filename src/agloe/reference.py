@@ -2400,6 +2400,7 @@ def _chains(
     soonest: Mapping[int, int] | None = None,
     fits: Callable[[list[tuple[int, int, int]]], bool] | None = None,
     empty: Set[int] = frozenset(),
+    whether_any: bool = False,
 ) -> Iterator[_Chain] | None:
     """Each order of the OPTIONs that matter to each OBJECT, with the hand-overs that work in it.
 
@@ -2456,6 +2457,10 @@ def _chains(
     ``soonest`` holds the earliest that some OPTIONs can start, whatever the order. An
     OPTION that cannot start until after the fixed start of another never comes before it.
 
+    With ``whether_any``, the caller asks only whether there is a result, and takes none.
+    Then orders that end alike are left out too where one OBJECT is asked about, as
+    ``_one_object_is_asked_about`` says.
+
     ``fits`` says whether some start times keep a list of gaps with what the PERSONs do. A
     choice of one OBJECT that counts on an arrival is left out where its own gaps do not
     fit: then they do not fit with the gaps of the other OBJECTs either. Nine bags that
@@ -2465,7 +2470,7 @@ def _chains(
     happening, asked = _asked_about(file, world, who, empty)
     if not asked:
         return None
-    alike = only_the_first_of_a_kind
+    alike = only_the_first_of_a_kind or (whether_any and _one_object_is_asked_about(asked))
     return _orders_together(file, world, who, orders, happening, asked, alike, soonest or {}, fits)
 
 
@@ -3622,8 +3627,7 @@ def _schedules(
     """
     # A first check, before any WAY or time: does some order of the OPTIONs let each OBJECT be
     # where it has to be? Only whether there is one matters here, and not which.
-    alike = _one_object_is_asked_about(file, world, who, empty)
-    found = _chains(file, world, who, orders, alike, empty=empty)
+    found = _chains(file, world, who, orders, empty=empty, whether_any=True)
     if found is not None and next(iter(found), None) is None:
         return  # an OBJECT is not at hand where it has to be, whatever the WAYs and the times
     needed = _travel(file, world, orders, known)
@@ -3645,10 +3649,11 @@ def _schedules(
         yield from _timings(file, world, who, orders, hops, None, any_will_do, empty=empty)
 
 
-def _one_object_is_asked_about(
-    file: File, world: World, who: tuple[tuple[str, ...], ...], empty: Set[int]
-) -> bool:
-    """Whether the first check of ``_schedules`` can leave out orders that end alike.
+def _one_object_is_asked_about(asked: Sequence[str]) -> bool:
+    """Whether a search for any order at all can leave out orders that end alike.
+
+    ``asked`` holds the OBJECTs that the OPTIONs of a plan ask about. The first check of
+    ``_schedules`` asks ``_chains`` only whether it has a result.
 
     ``_chains`` makes each order of an OBJECT's OPTIONs one OPTION at a time. Take two
     beginnings with the same OPTIONs, in different orders, that leave the OBJECT in the same
@@ -3664,7 +3669,7 @@ def _one_object_is_asked_about(
     second beginning only where one OBJECT is asked about. Eight vans that all bring the
     bag too late have 40,320 orders, and 256 sets of vans that have left.
     """
-    return len(_asked_about(file, world, who, empty)[1]) == 1
+    return len(asked) == 1
 
 
 def _over(terms: Terms) -> int | None:
