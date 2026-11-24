@@ -9,6 +9,11 @@ A page marks what it takes from elsewhere with the path of its source:
 The pages share one style sheet, ``pages/site.css``. Every link of a page and of the style sheet
 must lead somewhere.
 
+One page is not in the repository: ``tools/build_site_examples.py`` writes the page of examples
+from the examples section of ``spec/rules.md`` when the site is published. The tests run that
+script and read what it writes as one more page of the site. It must show every example FILE
+with its report.
+
 The home page also draws the first story as a day that a reader can change. It draws the day from a
 FILE, and it carries each version of the story whole: its FILE, and the report the example
 expects, in words and as data. When a reader changes the trip, the page runs the reference
@@ -26,15 +31,18 @@ code through ``website_statements.mjs``, and what it shows must agree with the e
 each example.
 """
 
+import html
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import replace
 from functools import cache
 from html.parser import HTMLParser
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from typing import Any
 
@@ -103,20 +111,36 @@ class Page(HTMLParser):
                 parts.append(data)
 
 
-def read_page(path: Path) -> Page:
+def read_page(name: str, written: str) -> Page:
     page = Page()
-    page.feed(path.read_text())
+    page.feed(written)
     page.close()
-    assert page.open == [], f"{path.name} ends with an element still open"
+    assert page.open == [], f"{name} ends with an element still open"
     return page
 
 
-# Every page of the site, by its path under pages/. What the site needs from elsewhere is not one.
-SITE_PAGES = {
-    path.relative_to(PAGES).as_posix(): read_page(path)
+EXAMPLES_TOOL = ROOT / "tools" / "build_site_examples.py"
+
+
+def built_examples() -> str:
+    """The page of examples as the script writes it now."""
+    with tempfile.TemporaryDirectory() as folder:
+        out = Path(folder) / "index.html"
+        subprocess.run(
+            [sys.executable, str(EXAMPLES_TOOL), "--out", str(out)], check=True, capture_output=True
+        )
+        return out.read_text()
+
+
+# The words of every page of the site, by its path under pages/. What the site needs from
+# elsewhere is no page. The page of examples is written when the site is published, so a copy
+# that may lie in pages/ is left out, and the page is written afresh here.
+SITE_TEXT = {
+    path.relative_to(PAGES).as_posix(): path.read_text()
     for path in sorted(PAGES.rglob("*.html"))
-    if "vendor" not in path.parts
-}
+    if not {"vendor", "examples"} & set(path.parts)
+} | {"examples/index.html": built_examples()}
+SITE_PAGES = {name: read_page(name, written) for name, written in SITE_TEXT.items()}
 # The home page.
 PAGE = SITE_PAGES["index.html"]
 PASSAGES = [
@@ -500,7 +524,7 @@ def test_the_pages_have_the_same_header_and_footer() -> None:
     """
 
     def part(name: str, start: str, end: str) -> str:
-        page = (PAGES / name).read_text()
+        page = SITE_TEXT[name]
         return page[page.rindex(start) : page.rindex(end) + len(end)]
 
     for start, end in (('<header class="top">', "</header>"), ("<footer>", "</footer>")):
@@ -511,12 +535,94 @@ def test_the_sitemap_lists_every_page_under_its_own_address() -> None:
     """The page for a wrong address is no page of the site, and it asks not to be listed."""
     listed = re.findall(r"<loc>([^<]+)</loc>", (PAGES / "sitemap.xml").read_text())
     pages = {name: SITE + name.removesuffix("index.html") for name in SITE_PAGES}
-    assert '<meta name="robots" content="noindex">' in (PAGES / "404.html").read_text()
+    assert '<meta name="robots" content="noindex">' in SITE_TEXT["404.html"]
     del pages["404.html"]
     assert sorted(listed) == sorted(pages.values())
     assert f"Sitemap: {SITE}sitemap.xml" in (PAGES / "robots.txt").read_text()
     for name, address in pages.items():
-        assert f'<link rel="canonical" href="{address}">' in (PAGES / name).read_text(), name
+        assert f'<link rel="canonical" href="{address}">' in SITE_TEXT[name], name
+
+
+def test_the_page_of_examples_shows_every_example_as_the_rules_page_tells_it() -> None:
+    """Each FILE has one row: its name, what it says and the answer, in the words of the rules page.
+
+    Under the row are the command, the whole expected report, and links to the FILE and to the
+    report as JSON. The row has the class of the answer in the expected result, and the numbers
+    beside the answers to pick out are the numbers of FILEs with each answer.
+    """
+    page = SITE_TEXT["examples/index.html"]
+    rules = (ROOT / "spec" / "rules.md").read_text().split("\n## Examples\n")[1]
+    told = {
+        file: (name, says, answer)
+        for name, file, says, answer in re.findall(
+            r"^\| \[([^\]]+)\]\(\.\./(examples/[\w/-]+\.json)\) \| (.+?) \| (.+?) \|$", rules, re.M
+        )
+    }
+    files = sorted(
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "examples").rglob("*.json")
+        if not path.name.endswith(".expected.json")
+    )
+    assert files and sorted(told) == files
+    assert page.count('<li class="case ') == len(files)
+    kinds = {"FEASIBLE": "feasible", "INFEASIBLE": "infeasible", "UNDETERMINED": "undetermined"}
+    shown: dict[str, int] = dict.fromkeys(kinds, 0)
+
+    def read(part: str) -> str:
+        """The words of a piece of the page, without its marks."""
+        return words(html.unescape(re.sub(r"<[^>]+>", "", part)))
+
+    for name in files:
+        stem = name.removesuffix(".json")
+        report = (ROOT / f"{stem}.expected.txt").read_text()
+        answer = json.loads((ROOT / f"{stem}.expected.json").read_text())["answer"]
+        mark = stem.removeprefix("examples/").replace("/", "-")
+        assert page.count(f'id="{mark}">') == 1, name
+        opened = re.search(rf'<li class="case {kinds[answer]}( warned)?" id="{mark}">', page)
+        assert opened is not None, name
+        row = page[opened.start() : page.index("</li>", opened.start())]
+        title, says, said = told[name]
+        assert f"<h4>{html.escape(title)}</h4>" in row, name
+        cells = re.findall(r'<p class="case-(?:says|answer)">(.*?)</p>', row, re.S)
+        assert [read(cell) for cell in cells] == [plain(says), plain(said)], name
+        assert plain(said).startswith(answer), name
+        assert f"uv run agloe check {name}</p>" in row, name
+        assert f'<pre tabindex="0">{html.escape(report, quote=False)}</pre>' in row, name
+        assert f'<a href="{REPOSITORY}/blob/main/{name}">FILE</a>' in row, name
+        assert f'<a href="{REPOSITORY}/blob/main/{stem}.expected.json">JSON report</a>' in row, name
+        shown[answer] += 1
+    for answer, count in shown.items():
+        assert f'value="{kinds[answer]}"><span>{answer} <b>{count}</b></span>' in page, answer
+    assert f'value="all" checked><span>All <b>{len(files)}</b></span>' in page
+
+
+def test_the_script_for_the_page_of_examples_refuses_a_section_it_cannot_read() -> None:
+    spec = spec_from_file_location("build_site_examples", EXAMPLES_TOOL)
+    assert spec is not None and spec.loader is not None
+    tool = module_from_spec(spec)
+    sys.modules[spec.name] = tool
+    spec.loader.exec_module(tool)
+    rules = (ROOT / "spec" / "rules.md").read_text()
+    assert tool.stories(rules)
+    row = "| [works](../examples/flight-home/works.json) | They leave the museum at 3:00 pm. |"
+    assert rules.count(row) == 1
+    for broken in (
+        # No section, a row with no FILE, a table with other columns, a FILE that is not there.
+        rules.replace("\n## Examples\n", "\n## Stories\n"),
+        rules.replace(row, "| works | They leave the museum at 3:00 pm. |"),
+        rules.replace("| FILE | What it says | Answer |", "| FILE | Answer |", 1),
+        rules.replace(row, row.replace("works.json", "missing.json")),
+        # A fourth cell, an answer that is not the expected one, and a FILE listed twice.
+        rules.replace(row, row + " One more cell. |"),
+        rules.replace(row + " FEASIBLE.", row + " INFEASIBLE."),
+        rules.replace(row, row + " FEASIBLE. |\n" + row),
+    ):
+        assert broken != rules
+        with pytest.raises(SystemExit, match="cannot be read"):
+            tool.stories(broken)
+    # A pipe inside a cell is written with a backslash, and the page shows the pipe alone.
+    piped = tool.stories(rules.replace(row, row.replace("3:00 pm.", "3:00 pm \\| sharp.")))
+    assert piped["flight-home"][0].cases[0].says == "They leave the museum at 3:00 pm | sharp."
 
 
 def test_the_page_for_a_wrong_address_names_everything_from_the_root() -> None:
@@ -568,12 +674,16 @@ def test_every_link_leads_somewhere(name: str) -> None:
             path, _, mark = link.partition("#")
             target = target_of(folder, path)
             assert PAGES.resolve() in (target, *target.parents), f"{link} leaves the site"
-            if target.is_dir():
-                target = target / "index.html"
-            assert target.is_file(), link
+            # A page of the site, by its own name or by the folder it is the page of.
+            there = target.relative_to(PAGES.resolve()).as_posix()
+            pages = [
+                each
+                for each in (there, f"{there}/index.html".removeprefix("./"))
+                if each in SITE_PAGES
+            ]
+            assert pages or target.is_file(), link
             if mark:
-                there = SITE_PAGES[target.relative_to(PAGES.resolve()).as_posix()]
-                assert mark in there.ids, link
+                assert mark in SITE_PAGES[pages[0]].ids, link
 
 
 def test_the_pages_share_one_style_sheet() -> None:
