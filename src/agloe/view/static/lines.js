@@ -259,14 +259,18 @@ export function lines(text, report, trip) {
  * its lines. For the cases in which the trip works: the line of each case, at the place of the
  * case, and the heading over them where the report lists several. For the caps of a plan, in
  * `charged`: what the report says is charged to each cap and what it has left, by the id of
- * the cap.
+ * the cap. In `records`: what the report says of each record that it lists by its id, in the
+ * first line that does so. In `warnings`: what it warns of at each step.
  */
 export function statedIn(tied) {
   const cases = [];
   const charged = {};
+  const records = {};
   let capped = false;
   for (const line of tied) {
     if (line.case !== null) cases[line.case] = line.text.trim();
+    // A line that lists a record starts with its id, set in.
+    if (line.record !== null && !Object.hasOwn(records, line.record) && line.text.startsWith(`  ${line.record}: `)) records[line.record] = line.text.slice(line.record.length + 4);
     // Under "The caps:", and nowhere else, a line states the cap with its limit and its
     // BUDGET, and after the last colon what is charged to it. A line that is not set in ends
     // what is under a heading.
@@ -274,7 +278,7 @@ export function statedIn(tied) {
     else if (capped && line.record !== null && line.text.startsWith(`  ${line.record}: at most `)) charged[line.record] = line.text.slice(line.text.lastIndexOf(": ") + 2);
   }
   const heading = tied.find((line) => CASES.test(line.text));
-  return { heading: cases.length > 1 && heading !== undefined ? heading.text : null, cases, charged };
+  return { heading: cases.length > 1 && heading !== undefined ? heading.text : null, cases, charged, records, warnings: warningsOf(tied) };
 }
 
 /**

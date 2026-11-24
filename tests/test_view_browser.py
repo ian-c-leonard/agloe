@@ -459,12 +459,13 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
     story = EXAMPLES / "the-bags"
     with opened(chromium, story / "nobody-collects-them.json", wide=1100, tall=800) as page:
         page.locator("#objects .card").first.wait_for()
-        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 8")
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 9")
         found = page.evaluate(shown)
         # In the order of the page, each with the heading of its part. This FILE has no WANT,
         # no BUDGET of its own to show and no CAPABILITY, so the row has no link for them.
         assert found["links"] == found["parts"]
         assert found["links"] == [
+            "To do and to decide",
             "Calendar",
             "PERSONs",
             "PLACEs",
@@ -475,11 +476,13 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
             "The COMPILER's report",
         ]
         # A part that holds things says how many.
-        assert found["counts"] == [None, "2", "4", "2", "2", "2", "1", None]
+        # What is open is counted too: four records rule out every plan.
+        assert found["counts"] == ["4", None, "2", "4", "2", "2", "2", "1", None]
         # A link has the red edge where something in its part has it, and only there.
         red = page.evaluate(edges, "clash")
         assert all(link is part for link, part in red)
-        assert [link for link, _ in red] == [True, False, True, True, False, False, True, False]
+        on = [True, True, False, True, True, False, False, True, False]
+        assert [link for link, _ in red] == on
         assert page.locator("#contents .to.asked").count() == 0
         # A click brings the part into view under the row, and the row stays at the top.
         page.locator("#contents .to", has_text="OPTIONs").click()
@@ -500,7 +503,7 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
             }"""
         )
         # The keyboard reaches each link.
-        page.locator("#contents .to").first.focus()
+        page.locator("#contents .to").nth(1).focus()
         page.keyboard.press("Tab")
         assert page.evaluate("() => document.activeElement.textContent") == "PERSONs2"
     # In a narrower window the row takes two lines. The part still comes to rest under it.
@@ -511,7 +514,7 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
     }"""
     with opened(chromium, story / "they-collect-them.json", wide=700, tall=800) as page:
         page.locator("#objects .card").first.wait_for()
-        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 8")
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 9")
         assert page.evaluate(under_the_row, "options-part")["row"][1] > 50
         page.locator("#contents .to", has_text="OPTIONs").click()
         page.wait_for_function("() => scrollY > 0")
@@ -522,16 +525,20 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
     # A link has the yellow edge where the report names something in what the FILE does not say.
     with opened(chromium, EXAMPLES / "flight-home" / "depends-on-the-cab.json") as page:
         page.locator("#options .item.asked").first.wait_for()
-        page.wait_for_function("() => document.querySelectorAll('#contents .to.asked').length > 0")
+        page.wait_for_function("() => document.querySelectorAll('#contents .to.asked').length > 1")
         yellow = page.evaluate(edges, "asked")
         assert all(link is part for link, part in yellow)
-        assert page.locator("#contents .to.asked").all_text_contents() == ["OPTIONs4"]
+        # The case in which the trip works is open, and it is about the cab among the OPTIONs.
+        assert page.locator("#contents .to.asked").all_text_contents() == [
+            "To do and to decide1",
+            "OPTIONs4",
+        ]
         assert page.locator("#contents .to.clash").count() == 0
     # On a wide window the row is above the two panes. A click moves the pane of the drawings,
     # and the page stays where it is.
     with opened(chromium, story / "they-collect-them.json", wide=1500, tall=700) as page:
         page.locator("#objects .card").first.wait_for()
-        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 8")
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 9")
         page.locator("#contents .to", has_text="OBJECTs").click()
         page.wait_for_function(
             """() => {
@@ -547,7 +554,7 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
     # it, and covers no part that a link leads to.
     with opened(chromium, story / "they-collect-them.json", wide=1400, tall=420) as page:
         page.locator("#objects .card").first.wait_for()
-        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 8")
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 9")
         page.locator("#contents .to", has_text="The COMPILER's report").click()
         page.wait_for_function("() => document.querySelector('main').scrollTop > 0")
         page.wait_for_timeout(200)
@@ -583,12 +590,12 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
     path.write_text(json.dumps(content))
     with opened(chromium, path) as page:
         page.locator("#objects .card").first.wait_for()
-        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 8")
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 9")
         page.locator("#contents .to", has_text="OBJECTs").focus()
         content["objects"] = []
         content["facts"] = [fact for fact in content["facts"] if "bags" not in json.dumps(fact)]
         put(path, json.dumps(content).encode())
-        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 7")
+        page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 8")
         assert page.evaluate("() => document.activeElement === document.body")
         page.keyboard.press("Tab")
         focused = page.evaluate("() => document.activeElement.getAttribute('href')")
@@ -598,10 +605,10 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
     with opened(chromium, story / "nobody-collects-them.json", without=("calendar.js",)) as page:
         page.locator("#objects .card.clash").first.wait_for()
         page.wait_for_function("() => document.querySelectorAll('#contents .to.clash').length > 0")
-        assert page.locator("#contents .to").first.text_content() == "Calendar"
+        assert page.locator("#contents .to").nth(1).text_content() == "Calendar"
         red = page.evaluate(edges, "clash")
         assert all(link is part for link, part in red)
-        assert red[0] == [False, False]
+        assert red[1] == [False, False]
     # A FILE that the format refuses has nothing to draw, and so no row.
     path = tmp_path / "trip.json"
     path.write_text("{}")
@@ -804,7 +811,8 @@ def test_the_keyboard_lights_up_what_the_pointer_does(chromium: Browser, tmp_pat
               .map((drawings) => drawings.filter((each) => each.tabIndex === 0).length)"""
         )
         # The calendar, the PERSONs, the PLACEs, the WANTs, the OPTIONs, the rights and the WAYs.
-        assert stops == [1] * 7
+        # What is open is a part too: the train to the flight, which no LOCK decides.
+        assert stops == [1] * 8
     # The pointer is on a drawing before the report comes. When the report is there, its
     # line about that drawing is brought into view.
     first, answer, report = (json.dumps(event) for event in checked(path.read_bytes()))
@@ -835,10 +843,11 @@ def test_the_keyboard_lights_up_what_the_pointer_does(chromium: Browser, tmp_pat
         }"""
         page.locator("#drawings").focus()
         seen: list[list[Any]] = []
-        for _ in range(4):
+        for _ in range(5):
             page.keyboard.press("Tab")
             seen.append(page.evaluate(where))
         assert seen == [
+            ["open-part", True],
             ["strip", True],
             ["calendar", False],
             ["calendar", True],
@@ -2670,3 +2679,96 @@ def test_a_step_with_nobody_in_it_has_a_column_and_a_row_of_its_own(
         # Pointing at it on the strip lights up the same step in the calendar.
         bar.hover()
         lit(page, marks=["Luggage service"], bars=["Luggage service"])
+
+
+def test_the_page_lists_what_is_open_above_everything_that_it_draws(
+    chromium: Browser, tmp_path: Path
+) -> None:
+    """A person who watches an agent plan a trip sees first what has to be done or decided."""
+    first_part = "() => document.querySelector('#drawings > section:not([hidden])').id"
+    rows = """() => [...document.querySelectorAll("#open .entry")].map((row) => ({
+      mark: row.className.replace("entry", "").replace("lit", "").trim(),
+      says: [...row.children].map((each) => each.textContent),
+    }))"""
+    # A plan that works: the train to the flight is the COMPILER's choice, and nobody has
+    # decided it. The item is its step, so pointing at it lights up the step and its line.
+    with opened(chromium, EXAMPLES / "flight-home" / "works.json") as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        page.locator("#open .entry").first.wait_for()
+        assert page.evaluate(first_part) == "open-part"
+        assert page.text_content("#open-part h2") == "To do and to decide"
+        assert page.text_content("#open-says") == (
+            "1 thing is open. Times are on the clocks of America/Chicago."
+        )
+        assert page.evaluate(rows) == [
+            {
+                "mark": "not",
+                "says": [
+                    "Blue Line to O'Hare",
+                    "Alex and Sam",
+                    "Saturday 15 May 2027, 3:00 pm to 4:00 pm",
+                ],
+            }
+        ]
+        link = page.locator("#contents .to").first
+        assert link.text_content() == "To do and to decide1"
+        assert link.get_attribute("class") == "to"
+        page.locator("#open .entry").hover()
+        found = lit(page, marks=["Blue Line to O'Hare"], options=["Blue Line to O'Hare"])
+        assert any("3:00 pm to 4:00 pm: Blue Line to O'Hare" in row for row in found["rows"])
+        # The other way round: pointing at the step in the calendar lights up the item.
+        page.locator("#calendar .mark", has_text="Blue Line").hover()
+        page.wait_for_function("() => document.querySelectorAll('#open .entry.lit').length === 1")
+    # A trip that cannot work: each record that the report names, with a red edge, and tied
+    # to its line of the report and to what the record is about.
+    with opened(chromium, EXAMPLES / "flight-home" / "cannot-work.json") as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        page.locator("#open .entry").first.wait_for()
+        assert page.text_content("#open-says") == (
+            "No plan works. Times are on the clocks of America/Chicago."
+        )
+        listed = page.evaluate(rows)
+        assert len(listed) == 8 and all(row["mark"] == "clash" for row in listed)
+        assert listed[-1]["says"] == ["lock-flight", "Alex and Sam take part in Flight home"]
+        assert page.locator("#contents .to").first.get_attribute("class") == "to clash"
+        page.locator("#open .entry", has_text="lock-flight").hover()
+        found = lit(page, marks=["Flight home"])
+        assert ids_of(found["rows"]) == ["lock-flight"]
+    # A trip that depends on what the FILE does not say: each case, with a yellow edge.
+    with opened(chromium, EXAMPLES / "a-ticket" / "depends-on-the-price.json") as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#open .entry").first.wait_for()
+        assert [row["mark"] for row in page.evaluate(rows)] == ["asked", "asked"]
+        assert page.locator("#contents .to").first.get_attribute("class") == "to asked"
+        page.locator("#open .entry").nth(1).hover()
+        page.wait_for_function(
+            "() => [...document.querySelectorAll('#report .row.lit')]"
+            ".some((row) => row.dataset.record === 'case:1')"
+        )
+    # What the report warns of at a step is on the list with that step.
+    with opened(chromium, EXAMPLES / "a-ticket" / "not-bought-yet.json") as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#calendar .mark").first.wait_for()
+        page.locator("#open .entry").first.wait_for()
+        (ticket,) = page.evaluate(rows)
+        assert ticket["mark"] == "warned"
+        assert ticket["says"][0] == "Skydeck visit"
+        page.locator("#open .entry").hover()
+        lit(page, marks=["Skydeck visit"])
+    # Before the report comes, nothing says what is open, and the page has no such list.
+    path = tmp_path / "trip.json"
+    path.write_bytes((EXAMPLES / "flight-home" / "works.json").read_bytes())
+    first, answer, report = (json.dumps(event) for event in checked(path.read_bytes()))
+    (tmp_path / "python.first").write_text(f"{first}\n{answer}\n")
+    (tmp_path / "python.report").write_text(f"{report}\n")
+    go = tmp_path / "python.go"
+    waits = 'cat "$0.first"\nwhile [ ! -e "$0.go" ]; do sleep 0.05; done\ncat "$0.report"'
+    drawn = "() => document.querySelectorAll('#options .item').length > 0"
+    with opened(chromium, path, python=stand_in(tmp_path, waits), once=drawn) as page:
+        assert page.locator("#open-part").is_hidden()
+        assert page.evaluate(first_part) == "calendar-part"
+        go.write_text("")
+        page.locator("#open .entry").first.wait_for()
+        assert page.evaluate(first_part) == "open-part"

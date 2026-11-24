@@ -226,7 +226,11 @@ html { scroll-padding-top: calc(var(--row-of-links, 0px) + 12px); }
 .in-full { padding: 5px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; font-size: 12.5px; color: var(--ink2); overflow-wrap: anywhere; }
 
 .card.clash, .entry.clash, .item.clash, .has.clash, .in-full.clash { border-style: solid; border-color: var(--stop); box-shadow: inset 0 0 0 1.5px var(--stop); }
-.card.asked, .entry.asked, .item.asked, .has.asked { border-style: solid; border-color: var(--warn); box-shadow: inset 0 0 0 1.5px var(--warn); }
+.card.asked, .entry.asked, .entry.warned, .item.asked, .has.asked { border-style: solid; border-color: var(--warn); box-shadow: inset 0 0 0 1.5px var(--warn); }
+/* What is still open about the TRIP: a list above everything else that the page draws. */
+.open { display: grid; gap: 6px; max-width: 720px; }
+.open-kind { color: var(--ink2); font-size: 13px; }
+.open .entry-says { flex: 1 1 60%; font-family: var(--text); font-size: 12.5px; }
 .card.lit, .entry.lit, .item.lit, .has.lit, .in-full.lit, .person.lit, .strip-people .lit { background: var(--lit); }
 /* The drawing that the keyboard is on. */
 [data-of]:focus-visible, [data-record]:focus-visible, [data-records]:focus-visible { outline: 2.5px solid var(--ink); outline-offset: 2px; border-radius: 3px; }

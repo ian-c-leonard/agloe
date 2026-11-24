@@ -362,6 +362,36 @@ function entry(thing, of, plain, ...more) {
 }
 
 /**
+ * What is still open about the TRIP, above everything else that the page draws: what the
+ * report names as ruling out every plan, the cases in which it says the trip works, what it
+ * warns of, and the OPTIONs of a plan that no LOCK decides. Each item is tied like a line of
+ * the report about it, so pointing at one lights up its step, its records and its lines. With
+ * no report on the FILE, the page has no such list.
+ */
+function drawOpen(shown) {
+  const box = part("open");
+  box.replaceChildren();
+  part("open-part").hidden = shown.says === "";
+  part("open-says").textContent = shown.says;
+  for (const group of shown.groups) {
+    if (group.says) box.append(made("p", "open-kind", group.says));
+    const list = made("ul", "card-options");
+    for (const item of group.items) {
+      // An OPTION that nobody has decided is drawn like what the FILE does not state.
+      const row = made("li", `entry ${item.mark || "not"}`);
+      row.title = [item.name, item.says, item.when].filter(Boolean).join("\n");
+      if (item.of !== null) row.dataset.of = item.of;
+      if (item.records.length) row.dataset.records = item.records.join(" ");
+      if (item.name) row.append(made("b", "entry-name", item.name));
+      row.append(made("span", "entry-says", item.says));
+      if (item.when) row.append(made("span", "entry-takes", item.when));
+      list.append(row);
+    }
+    box.append(list);
+  }
+}
+
+/**
  * The WANTs of the FILE: each with for whom it is a must or a must-not, and under it the
  * OPTIONs that the FILE says SATISFY it or do not, with who takes part in each. An OPTION that
  * the calendar holds is tied to its step, so pointing at it lights up that step.
@@ -599,6 +629,7 @@ function drawObjects(shown) {
  * the page has loaded it, and `of` is the TRIP that the part on the page is of.
  */
 const held = [
+  { id: "open-part", load: () => import("./open.js"), name: "open", draw: drawOpen, words: null, of: undefined },
   { id: "persons-part", load: () => import("./persons.js"), name: "persons", draw: drawPersons, words: null, of: undefined },
   { id: "places-part", load: () => import("./places.js"), name: "places", draw: drawPlaces, words: null, of: undefined },
   { id: "wants-part", load: () => import("./wants.js"), name: "wants", draw: drawWants, words: null, of: undefined },
@@ -887,7 +918,9 @@ function showParts() {
       try {
         const shown = each.words(each.of, said.calendar.report, tied ? tie.statedIn(tied) : null);
         each.draw(shown);
-        noted(each.id, Array.isArray(shown[each.name]) ? shown[each.name].length : null, shown.clash, shown.asked);
+        // How many things the part holds: its list, or the number that it gives itself.
+        const count = Array.isArray(shown[each.name]) ? shown[each.name].length : typeof shown.count === "number" ? shown.count : null;
+        noted(each.id, count, shown.clash, shown.asked);
         lightAgain();
       } catch (problem) {
         part(each.id).hidden = true;
