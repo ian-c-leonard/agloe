@@ -851,6 +851,24 @@ def test_an_object_says_whether_its_options_are_all_there_are() -> None:
     )
 
 
+def test_an_object_says_where_the_file_lists_every_right_for_it() -> None:
+    """The car deck is sold out: a FACT says that the FILE lists every right to the ferry
+    that covers the car. The card of the car says so in the words of the report, and it is
+    marked, because the report names that FACT among what rules out every plan."""
+    sent, found, text = in_words(EXAMPLES / "a-car-ferry" / "the-car-deck-is-sold-out.json")
+    (car,) = all_objects([sent], [found], [text])[0]["objects"]
+    said = (
+        "The FILE lists every right to Car ferry to Muskegon that covers it:"
+        " nobody on the trip holds another or can get one."
+    )
+    assert car["whole"][-1] == said
+    assert f"  the-car-deck-is-full: t{said[1:-1]}".replace("covers it:", "covers the car:") in text
+    assert "the-car-deck-is-full" in car["records"] and "the-car-deck-is-full" in car["clash"]
+    # A FILE with no such FACT says nothing of it.
+    (car,) = objects_of("a-car-ferry/booked")["objects"]
+    assert not [words for words in car["whole"] if "lists every right" in words]
+
+
 def test_an_option_that_leaves_an_object_alone_or_does_not_require_it_says_so() -> None:
     sent = drawn(STORY / "they-collect-them.json")
     (bags,) = sent["objects"]

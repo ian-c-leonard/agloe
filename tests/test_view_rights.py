@@ -27,8 +27,14 @@ SAYS = "The BOOKINGs and the OFFERs of the FILE, each under the OPTION that it g
 RED = " A red edge marks what the report names among what rules out every plan."
 YELLOW = " A yellow edge marks what the report names in what the FILE does not say."
 NEEDED = "People need a right to take part."
-NOT_ALL = "Another right to it may exist: the FILE does not say that these are all."
-ALL = "The FILE lists every right to it: nobody on the trip holds another or can get one"
+NOT_ALL = (
+    "Another right for a PERSON to take part in it may exist:"
+    " the FILE does not say that these are all."
+)
+ALL = (
+    "The FILE lists every right for a PERSON to take part in it:"
+    " nobody on the trip holds another or can get one"
+)
 ON_OFFER = "an OFFER with 2 places that can still be bought, for 32.00 USD each"
 
 type Trip = dict[str, Any]
@@ -227,8 +233,8 @@ def test_a_booking_names_the_objects_that_it_covers(tmp_path: Path) -> None:
 
 def test_the_rights_card_says_what_it_does_not_cover_for_an_object(tmp_path: Path) -> None:
     """The ferry needs a right for the car, and no BOOKING covers the car. A FACT says that
-    the FILE lists every right to the ferry. That is about the PERSONs who take part, and
-    the card says so: the report still asks for a right for the car. An OPTION that only
+    the FILE lists every right for a PERSON to take part in the ferry, and the card says
+    it in those words: the report still asks for a right for the car. An OPTION that only
     needs a right for an OBJECT has a card too."""
     content = json.loads((EXAMPLES / "a-car-ferry" / "the-car-has-no-ticket.json").read_text())
     content["facts"].append({"id": "sold-out", "complete": {"rights_to": "ferry"}})
@@ -239,32 +245,47 @@ def test_the_rights_card_says_what_it_does_not_cover_for_an_object(tmp_path: Pat
     whole = all_rights([sent], [found], [text])[0]
     (ferry,) = whole["rights"]
     assert ferry["things"] == "It needs a right for the car."
-    scope = "; that is about the PERSONs who take part, and it says nothing of a right for the car."
-    assert ferry["whole"] == f"{ALL}{scope}"
+    assert (ferry["whole"], ferry["closed"]) == (f"{ALL}.", [])
     assert "ferry-needs-a-car-ticket" in ferry["records"]
     # The right for the car is the one case of the report, and the card is marked with it.
     assert (ferry["cases"], whole["asked"]) == ([0], True)
-    # Where no FACT says whether the ferry needs a right for the car, it might, and the
-    # card says the same of the FACT that the FILE lists every right.
-    silent = json.loads(json.dumps(content))
-    kept = ("ferry-needs-a-car-ticket", "every-ticket-for-the-car")
-    silent["facts"] = [fact for fact in silent["facts"] if fact["id"] not in kept]
-    path.write_text(json.dumps(silent))
+    # A FACT says that the FILE lists every right to the ferry that covers the car. The
+    # card says so, beside what it says of the PERSONs, and it is marked where the report
+    # names that FACT among what rules out every plan.
+    content["facts"].append(
+        {"id": "the-car-deck-is-full", "complete": {"rights_to": "ferry", "for_object": "car"}}
+    )
+    path.write_text(json.dumps(content))
     sent, found, text = in_words(path)
-    assert "a BOOKING for it that covers the car is enough instead." in text
-    (ferry, *_) = all_rights([sent], [found], [text])[0]["rights"]
-    assert (ferry["things"], ferry["whole"]) == (None, f"{ALL}{scope}")
-    # Where a FACT says that the ferry needs no right for the car, the card adds nothing.
-    for fact in content["facts"]:
-        if fact["id"] == "ferry-needs-a-car-ticket":
-            fact["needs_right_for"]["needed"] = False
+    assert found["answer"] == "INFEASIBLE"
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    for_the_car = "The FILE lists every right to it that covers the car"
+    assert ferry["closed"] == [f"{for_the_car}: nobody on the trip holds another or can get one."]
+    assert (
+        f"  the-car-deck-is-full: t{ferry['closed'][0][1:-1]}".replace(
+            "to it that", "to Car ferry to Muskegon that"
+        )
+        in text
+    )
+    assert (ferry["whole"], "the-car-deck-is-full" in ferry["clash"]) == (f"{ALL}.", True)
+    # Where the car is called Alex too, the card names it as the report does, with its id.
+    content["objects"][0]["name"] = "Alex"
     path.write_text(json.dumps(content))
     sent, found, text = in_words(path)
     (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
-    assert ferry["whole"] == f"{ALL}."
-    for fact in content["facts"]:
-        if fact["id"] == "ferry-needs-a-car-ticket":
-            fact["needs_right_for"]["needed"] = True
+    assert ferry["closed"] == [
+        "The FILE lists every right to it that covers Alex (car):"
+        " nobody on the trip holds another or can get one."
+    ]
+    assert "that covers Alex (car): nobody on the trip" in text
+    content["objects"][0]["name"] = "car and trailer"
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    assert ferry["closed"][0].startswith('The FILE lists every right to it that covers "car and')
+    assert 'that covers "car and trailer": nobody on the trip' in text
+    content["objects"][0]["name"] = "the car"
+    content["facts"] = [fact for fact in content["facts"] if fact["id"] != "the-car-deck-is-full"]
     # Nobody needs a right to take part in the ferry, and it has no BOOKING: it still needs
     # a right for the car, so it has a card.
     for fact in content["facts"]:
@@ -513,7 +534,7 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report(tmp_path: Pat
             complete = file.rights_complete(option.id)
             if complete is not None and f"  {complete.id}: " in words:
                 sets += 1
-                said = rights["whole"].replace("to it:", f"to {called}:", 1)
+                said = rights["whole"].replace("part in it:", f"part in {called}:", 1)
                 assert f"  {complete.id}: t{said[1:-1]}" in words, name
         assert set(by_option) <= {option.id for option in file.options}, name
     assert min(bookings, uses) > 5

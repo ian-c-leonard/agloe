@@ -752,6 +752,8 @@ def test_the_objects_of_the_file_are_sent_with_what_the_file_says_of_each() -> N
             # says that the FILE states every OPTION that does.
             "rights": [],
             "rights_complete": "every-ticket-for-the-bags",
+            # No FACT says that the FILE lists every right to an OPTION that covers the bags.
+            "rights_closed": [],
         }
     ]
     # The car ferry needs a right for the car, and the BOOKING covers Alex, Sam and the car.
@@ -766,6 +768,20 @@ def test_the_objects_of_the_file_are_sent_with_what_the_file_says_of_each() -> N
         }
     ]
     assert car["rights_complete"] == "every-ticket-for-the-car"
+    assert car["rights_closed"] == []
+    # A FACT says that the FILE lists every right to the ferry that covers the car.
+    sold_out = drawn(EXAMPLES / "a-car-ferry" / "the-car-deck-is-sold-out.json")
+    assert sold_out["objects"][0]["rights_closed"] == [
+        {
+            "option": "ferry",
+            "name": "Car ferry to Muskegon",
+            "record": "the-car-deck-is-full",
+            "called": "the car",
+        }
+    ]
+    # A luggage service with no BOOKING has rights to show: it has no place for the bags.
+    service = drawn(EXAMPLES / "the-bags" / "the-service-has-no-place-for-the-bags.json")
+    assert "luggage-service" in [each["option"] for each in service["rights"]]
     (tickets,) = ferry["rights"][0]["bookings"]
     assert (tickets["covers"], tickets["objects"]) == (["alex", "sam"], ["car"])
     assert tickets["names"] == {"alex": "Alex", "sam": "Sam", "car": "the car"}
@@ -2139,6 +2155,9 @@ OBJECT: dict[str, Any] = {
     "transfers_complete": "everything-that-moves-the-key",
     "rights": [{"option": "night", "name": "night", "needed": True, "record": "night-needs-key"}],
     "rights_complete": "every-ticket-for-the-key",
+    "rights_closed": [
+        {"option": "night", "name": "night", "record": "no-other-key-right", "called": "the key"}
+    ],
 }
 
 

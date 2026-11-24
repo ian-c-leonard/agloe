@@ -273,12 +273,16 @@ export function objects(trip, report = null, stated = null) {
           thing,
           trip.options.some((option) => !asked["needs a right for"].has(option.id)),
         ),
+        // Each OPTION of which a FACT says that the FILE lists every right for the OBJECT,
+        // as the report words it.
+        ...thing.rights_closed.map((each) => `The FILE lists every right to ${each.name} that covers it: nobody on the trip holds another or can get one.`),
       ],
-      // An OBJECT's own records: the FACT about where it is when the TRIP starts, and the FACTs
-      // that the FILE states every OPTION that requires it or refuses it, and every one that
-      // moves it.
+      // An OBJECT's own records: the FACT about where it is when the TRIP starts, the FACTs
+      // that the FILE states every OPTION that requires it or refuses it, every one that
+      // moves it and every one that needs a right for it, and each FACT that the FILE lists
+      // every right to an OPTION that covers it.
       ...marked(
-        [...(starts === null ? [] : [starts.record]), ...[thing.requires_complete, thing.transfers_complete, thing.rights_complete].filter((id) => id !== null)],
+        [...(starts === null ? [] : [starts.record]), ...[thing.requires_complete, thing.transfers_complete, thing.rights_complete].filter((id) => id !== null), ...thing.rights_closed.map((each) => each.record)],
         (need) => need.object === thing.id,
         "The report names this OBJECT in what the FILE does not say.",
       ),

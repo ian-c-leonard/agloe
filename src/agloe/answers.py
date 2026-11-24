@@ -21,6 +21,7 @@ from agloe.file import (
     CompleteRequires,
     CompleteRequiresObject,
     CompleteRights,
+    CompleteRightsFor,
     CompleteTransfers,
     Fact,
     File,
@@ -393,7 +394,7 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> 
         return True
     if isinstance(fact, Booking | Offer):
         return fact.id in used
-    if isinstance(fact, CompleteRights):
+    if isinstance(fact, CompleteRights | CompleteRightsFor):
         return False
     if isinstance(fact, StartsFrom):
         in_it = any(fact.person in step.persons for step in itinerary)
