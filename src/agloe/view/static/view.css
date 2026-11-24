@@ -69,12 +69,15 @@ html { scroll-padding-top: calc(var(--row-of-links, 0px) + 12px); }
 }
 /* A narrow window, such as the browser beside an agent, has less room at its sides. The row
    of links takes several lines there. So it does not stay at the top: it goes with the page,
-   and a part that the page brings into view comes to rest at the top of the window. */
+   and a part that the page brings into view comes to rest at the top of the window. The
+   report is the last part. Where a link leads to it, it has the room under it that it needs
+   to come to rest there too, however short it is. */
 @media (max-width: 640px) {
   header { padding: 10px 14px; }
   main { padding: 14px 14px 48px; }
   .contents { position: static; padding: 0; border-bottom: 0; }
   html { scroll-padding-top: 12px; }
+  .report-part:target { min-height: calc(100vh - 60px); align-content: start; }
 }
 .report-part, .calendar-part, .part { display: grid; gap: 8px; }
 /* The calendar with the steps under it that have no time. */

@@ -568,6 +568,20 @@ def test_a_row_of_links_leads_to_each_part_of_the_page(chromium: Browser, tmp_pa
             found = page.evaluate(under_the_row, "options-part")
             assert found["row"][1] < 0
             assert 0 <= found["part"] < 30
+    # The report is the last part of the page, and the report on a trip that cannot work is
+    # short. Its link brings it to the top of a narrow window all the same.
+    for wide in (320, 640):
+        with opened(chromium, story / "nobody-collects-them.json", wide=wide, tall=700) as page:
+            page.locator("#objects .card").first.wait_for()
+            page.wait_for_function("() => document.querySelectorAll('#contents .to').length === 9")
+            page.locator("#contents .to").last.click()
+            page.wait_for_function("() => scrollY > 0 && location.hash === '#report-part'")
+            page.wait_for_timeout(200)
+            found = page.evaluate(under_the_row, "report-part")
+            assert 0 <= found["part"] < 30, (wide, found)
+            # The report itself is no taller for it.
+            tall = "() => document.getElementById('report').getBoundingClientRect().height"
+            assert page.evaluate(tall) < 500
     # One pixel wider, and the row stays at the top as in any window of one column.
     with opened(chromium, story / "they-collect-them.json", wide=641, tall=700) as page:
         page.locator("#objects .card").first.wait_for()
