@@ -379,6 +379,59 @@ def test_the_calendar_has_a_column_for_the_steps_with_nobody_in_them() -> None:
     assert calendar(everybody)["nobody"] is False
 
 
+def test_a_mark_on_a_later_day_says_when_its_step_started() -> None:
+    """A van leaves the hall on Thursday at 9:00 am and reaches the port on Saturday at 1:00 pm.
+    Alex stays at the hall from Friday 10:00 pm to Saturday 10:00 am. Each mark writes its
+    times as its own day reads them: a time has its date where that is not the date of the
+    column. So a mark on a later day says when its step started."""
+    file = trip(
+        ["alex"],
+        ["hall", "port"],
+        [stays("night", "hall"), moves("van", "hall", "port")],
+        [starts_at("night", 22)],
+        [],
+    )
+    day = 86400
+    plan = (
+        Step("van", "hall", "port", (), seconds(9) - 2 * day, seconds(13)),
+        Step("night", "hall", "hall", ("alex",), seconds(22) - day, seconds(10)),
+    )
+    laid = calendar(sent_for(file, Report(Answer.FEASIBLE, itinerary=plan)))
+    assert names(laid) == ["Thursday 13 May 2027", "Friday 14 May 2027", "Saturday 15 May 2027"]
+    said = [[(mark["name"], mark["when"]) for mark in each["marks"]] for each in laid["days"]]
+    assert said == [
+        # On the day it starts, a step is written as the report writes it.
+        [("van", "9:00 am to 1:00 pm on 15 May")],
+        [
+            ("van", "9:00 am on 13 May to 1:00 pm on 15 May"),
+            ("night", "10:00 pm to 10:00 am on 15 May"),
+        ],
+        [("van", "9:00 am on 13 May to 1:00 pm"), ("night", "10:00 pm on 14 May to 10:00 am")],
+    ]
+
+
+def test_a_mark_on_a_later_day_says_how_late_its_step_can_end() -> None:
+    """A van leaves on Saturday at 9:00 am and arrives on Monday at 11:00 am, or as late as
+    1:00 pm. The mark of each day says how late that is, with the date where it is another
+    day than its own."""
+    file = trip(
+        ["alex"], ["hall", "port"], [moves("van", "hall", "port")], [starts_at("van", 9)], []
+    )
+    day = 86400
+    plan = (Step("van", "hall", "port", (), seconds(9), seconds(11) + 2 * day),)
+    sent = sent_for(file, Report(Answer.FEASIBLE, itinerary=plan))
+    # The view sends how late a step can end, where the FILE gives a range.
+    (step,) = sent["steps"]
+    step["latest"] = {"at": "2027-05-17T13:00:00", "offset": None}
+    laid = calendar(sent)
+    said = [[(mark["when"], mark["late"]) for mark in each["marks"]] for each in laid["days"]]
+    assert said == [
+        [("9:00 am to 11:00 am on 17 May", "or as late as 1:00 pm on 17 May")],
+        [("9:00 am on 15 May to 11:00 am on 17 May", "or as late as 1:00 pm on 17 May")],
+        [("9:00 am on 15 May to 11:00 am", "or as late as 1:00 pm")],
+    ]
+
+
 def test_the_calendar_tells_a_person_called_nobody_from_nobody() -> None:
     """One PERSON of the TRIP is called nobody. A LOCK names them for the visit, and they go
     to lunch with Alex. A van runs with nobody of the TRIP in it. The marks write the name of
@@ -1036,7 +1089,9 @@ def test_a_step_that_runs_past_midnight_is_on_both_days() -> None:
     # The day after shows the rest of the night, from the first hour that the calendar shows.
     assert (saturday[night]["top"], saturday[night]["height"]) == (0, 30)
     assert (saturday[night]["begins"], saturday[night]["ends"]) == (False, True)
-    assert friday[night]["when"] == saturday[night]["when"] == "11:30 pm to 7:30 am on 15 May"
+    # Each mark writes the times as its own day reads them.
+    assert friday[night]["when"] == "11:30 pm to 7:30 am on 15 May"
+    assert saturday[night]["when"] == "11:30 pm on 14 May to 7:30 am"
     assert (saturday["Breakfast"]["top"], saturday["Breakfast"]["height"]) == (60, 45)
 
 

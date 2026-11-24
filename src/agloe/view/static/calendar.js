@@ -174,6 +174,13 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
       where: step.from === step.to ? place.get(step.from) : `${place.get(step.from)} to ${place.get(step.to)}`,
       when: step.start === null ? null : `${clock(step.start)} to ${step.end === null ? "an unknown time" : clock(step.end, step.start)}`,
       late: step.latest === null ? null : `or as late as ${clock(step.latest, step.start)}`,
+      // The same times as the column of one date reads them: a time has its date where that
+      // is not the date of the column. On the day a step starts, these are the words above,
+      // which are the report's. On a later day, the mark says when the step started.
+      on: (date) => ({
+        when: `${clock(step.start, { at: date })} to ${step.end === null ? "an unknown time" : clock(step.end, { at: date })}`,
+        late: step.latest === null ? null : `or as late as ${clock(step.latest, { at: date })}`,
+      }),
       stateOf: (at) => (step.option === null ? "way" : locked.has(at) ? "locked" : "planned"),
     };
   });
@@ -262,7 +269,7 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
       for (const run of runs) {
         const these = names(step.columns.filter((at) => run.first <= at && at <= run.last));
         day.marks.push({
-          step: step.n, kind: step.kind, name: step.name, when: step.when, late: step.late, where: step.where, who: step.who,
+          step: step.n, kind: step.kind, name: step.name, ...step.on(trip.days[part.day].date), where: step.where, who: step.who,
           // One LOCK can name several PERSONs, and several LOCKs one each: the words fit both.
           // A LOCK names a PERSON, so none names anybody for a step with nobody in it.
           lock: run.state === "way" ? null : step.nobody ? "No LOCK names anybody for it." : run.state === "locked" ? `${these} ${run.first === run.last ? "is" : "are each"} named by a LOCK.` : `No LOCK names ${these}.`,
