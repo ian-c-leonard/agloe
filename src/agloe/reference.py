@@ -3622,7 +3622,8 @@ def _schedules(
     """
     # A first check, before any WAY or time: does some order of the OPTIONs let each OBJECT be
     # where it has to be? Only whether there is one matters here, and not which.
-    found = _chains(file, world, who, orders, _one_object_is_asked_about(file, world, who, empty))
+    alike = _one_object_is_asked_about(file, world, who, empty)
+    found = _chains(file, world, who, orders, alike, empty=empty)
     if found is not None and next(iter(found), None) is None:
         return  # an OBJECT is not at hand where it has to be, whatever the WAYs and the times
     needed = _travel(file, world, orders, known)
