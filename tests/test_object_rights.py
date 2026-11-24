@@ -616,6 +616,26 @@ def test_no_other_right_covers_the_object_where_its_rights_are_complete() -> Non
     ]
 
 
+def test_a_set_of_rights_for_one_object_says_nothing_of_another_object() -> None:
+    """Alex has a bike and a trailer on the train, and the train needs a right for each. A
+    BOOKING covers the bike, and the FILE lists every right for the bike. That says
+    nothing of the trailer: another right for it can still be found."""
+    things = ["bike", "trailer"]
+    facts = [starts_from("alex", "a"), *at("train", 9), booking("train", "bike")]
+    for thing in things:
+        facts += [has_object("alex", thing), every_use(thing), every_transfer(thing)]
+        facts += [needs_right_for("train", thing), every_right_for(thing)]
+    facts += [no_other_right_for("train", "bike")]
+    options, locks = [moves("train", "a", "b")], [lock("train", "alex")]
+    file = trip(["alex"], ["a", "b"], options, facts, locks, objects=things, object_rights=True)
+    assert file.rights_complete_for("train", "bike") is not None
+    assert file.rights_complete_for("train", "trailer") is None
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    words = report.as_text(file, found)
+    assert "The trip works if a right to train is found that covers trailer.\n" in words
+
+
 def test_a_car_with_no_ticket_on_a_full_deck_cannot_cross() -> None:
     """Alex has the car and is LOCKed onto the ferry. The ferry needs a right for the car, no
     BOOKING covers it, and the FILE lists every right for the car. So the TRIP is
