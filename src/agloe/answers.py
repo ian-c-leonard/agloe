@@ -17,6 +17,7 @@ from agloe.file import (
     Cap,
     Complete,
     CompleteFor,
+    CompleteNeedsRightFor,
     CompleteRequires,
     CompleteRequiresObject,
     CompleteRights,
@@ -26,6 +27,7 @@ from agloe.file import (
     Has,
     Lock,
     Money,
+    NeedsRightFor,
     ObjectStarts,
     Offer,
     RefusesObject,
@@ -188,12 +190,17 @@ class Use:
     ``where`` holds each place the OBJECT might be just before the OPTION starts. Each is at
     hand where the OPTION requires the OBJECT. None is a PERSON who takes part where the
     OPTION refuses it.
+
+    ``check`` is "needs a right for" where the OPTION needs a right for the OBJECT, or
+    might, and a PERSON who takes part has the OBJECT, or it is handed over or carried
+    there. ``by`` is then the BOOKING that covers the OBJECT.
     """
 
     option: str
     stated: bool
     where: tuple[Where, ...]
     check: str = "requires"
+    by: str | None = None
 
 
 @dataclass(frozen=True)
@@ -378,9 +385,11 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> 
         return fact.id in used
     if isinstance(fact, CompleteRequiresObject | CompleteTransfers):
         return fact.id in used
+    if isinstance(fact, NeedsRightFor | CompleteNeedsRightFor):
+        return fact.id in used
     if isinstance(fact, CompleteFor):
         return _settles(file, itinerary, fact)
-    if isinstance(fact, Booking) and file.caps:
+    if isinstance(fact, Booking) and (file.caps or fact.id in used):
         return True
     if isinstance(fact, Booking | Offer):
         return fact.id in used
@@ -483,6 +492,13 @@ def _carried(
     the OBJECT alone. Where the FILE has neither, the report says each place where the
     OBJECT might be from then on.
 
+    For each OPTION in the plan and each OBJECT, the plan also relies on the FACT about
+    whether the OPTION needs a right for the OBJECT, where the FILE states one. Where it
+    states none and a FACT says that the FILE states every OPTION that needs a right for
+    the OBJECT, it relies on that FACT. Where the OPTION needs the right, or might, and a
+    PERSON who takes part has the OBJECT, or it is handed over or carried there, the plan
+    relies on the BOOKING that covers the OBJECT, and the report names it.
+
     An OBJECT that is carried is in the OPTION from its start, and lies at the PLACE where
     the OPTION ends from its end, as the plan shows that end. That is said whether or not a
     later step uses the OBJECT, and whether the travelers chose the carry or the OBJECT
@@ -546,7 +562,13 @@ def _carried(
                     relied.add(stated.id)
                 elif every is not None:
                     relied.add(every.id)
-        checked = world.needs | world.refuses
+            ticket = file.object_right(step.option or "", thing.id)
+            listed = file.object_rights_complete(thing.id)
+            if ticket is not None:
+                relied.add(ticket.id)
+            elif listed is not None:
+                relied.add(listed.id)
+        checked = world.needs | world.refuses | world.ticketed
         if thing.id not in trails or not any((step.option, thing.id) in checked for step in steps):
             continue
         trail, seen = trails[thing.id], found_at[thing.id]
@@ -587,6 +609,12 @@ def _carried(
                 }
                 stated = file.refuses_object(option, thing.id) is True
                 uses.append(Use(option, stated, in_order(before | landed), "refuses"))
+            covering = file.booking_for(option, thing.id)
+            in_it = taker is not None or held or aboard in after
+            if (option, thing.id) in world.ticketed and in_it and covering is not None:
+                relied.add(covering.id)
+                stated = file.needs_right_for(option, thing.id) is True
+                uses.append(Use(option, stated, in_order(before), "needs a right for", covering.id))
             if after != before:
                 # It is kept for sure where whoever might have it takes part.
                 sure = all(each.person in step.persons for each in before)
