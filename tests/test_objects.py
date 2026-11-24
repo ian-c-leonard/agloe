@@ -909,6 +909,95 @@ def test_at_best_another_transfer_takes_an_object_away_before_an_option_refuses_
     assert ("first", "passport") not in one.refuses and ("second", "passport") in one.refuses
 
 
+def test_another_transfer_does_not_cure_what_the_plan_itself_does() -> None:
+    """The passport lies on the desk, and the FILE does not state every transfer of it. At
+    best another transfer puts it at hand wherever a plan needs it. It cannot make an
+    OPTION do what it does not do. A hand-over of the plan is still in an OPTION that
+    hands the passport over and does not refuse it, and a carry of the plan is still in an
+    OPTION that carries it."""
+    facts = [lies_at("passport", "desk"), hands_over("first", "passport")]
+    facts += [does_with("second", "passport", "nothing"), carries("third", "passport")]
+    taken = (step("first", "desk", 9, "alex", handed=(("passport", "alex"),)),)
+    file = a_desk(*facts)
+    best = best_case(file)
+    assert best.brought == {"passport"}
+    assert broken(file, best, taken) == []
+    # The first appointment refuses the passport: nobody takes it there.
+    refusing = a_desk(*facts, refuses_object("first", "passport"))
+    assert broken(refusing, best_case(refusing), taken) == [refused("first", "alex")]
+    assert not works_as_listed(refusing, best_case(refusing), taken)
+    # The second appointment hands nothing over and carries nothing.
+    not_handed = (step("second", "desk", 10, "alex", handed=(("passport", "alex"),)),)
+    assert broken(file, best, not_handed) == [not_at_hand("second", "alex")]
+    not_carried = (step("second", "desk", 10, "alex", "sam", carried=("passport",)),)
+    assert broken(file, best, not_carried) == [not_at_hand("second", "alex", "sam")]
+    # The first one hands it over, and that is no carry.
+    loaded = (step("first", "desk", 9, "alex", carried=("passport",)),)
+    assert broken(file, best, loaded) == [not_at_hand("first", "alex")]
+    # The third one carries it, and that is no hand-over.
+    carried = (step("third", "office", 11, "alex", carried=("passport",)),)
+    assert broken(file, best, carried) == []
+    handed = (step("third", "office", 11, "alex", handed=(("passport", "alex"),)),)
+    assert broken(file, best, handed) == [not_at_hand("third", "alex")]
+    # At best an OPTION with no FACT about what it does with the passport does what suits
+    # the plan, so both a hand-over and a carry pass there. At worst it does neither.
+    silent = a_desk(lies_at("passport", "desk"))
+    assert not best_case(silent).does
+    for chosen in (not_handed, not_carried):
+        assert broken(silent, best_case(silent), chosen) == []
+    one = with_these_at_best(silent, [Unknown("another transfer", about="passport")])
+    assert one.brought == {"passport"} and one.does[("second", "passport")] == "might_take"
+    # A set of unknown FACTs can say that the second appointment neither keeps nor carries
+    # the passport. Then it does not carry it, though the world has no entry for that.
+    neither = Unknown("does not keep or carry", "second", about="passport")
+    settled_so = with_these_at_best(
+        silent, [Unknown("another transfer", about="passport"), neither]
+    )
+    assert ("second", "passport") not in settled_so.does
+    assert not settled_so.undecided and best_case(silent).undecided
+    assert not_at_hand("second", "alex", "sam") in broken(silent, settled_so, not_carried)
+    # Nobody says whether the second appointment refuses the passport either: at worst it does.
+    assert broken(silent, one, not_handed) == [
+        refused("second", "alex"),
+        not_at_hand("second", "alex"),
+    ]
+    assert broken(silent, one, not_carried) == [not_at_hand("second", "alex", "sam")]
+
+
+def test_a_carry_that_does_not_happen_needs_no_right_where_a_transfer_brings_the_object() -> None:
+    """The first appointment leaves the passport alone, and it needs a right for it that
+    nothing gives. A plan that carries the passport there breaks the fourteenth
+    CONSTRAINT: the appointment does not carry it. The passport stays on the desk, so the
+    sixteenth is kept, with another transfer and without one."""
+    file = a_desk(
+        lies_at("passport", "desk"),
+        does_with("first", "passport", "nothing"),
+        needs_right_for("first", "passport"),
+    )
+    carried = (step("first", "desk", 9, "alex", carried=("passport",)),)
+    for world in (
+        worst_case(file),
+        with_these_at_best(file, [Unknown("another transfer", about="passport")]),
+    ):
+        assert ("first", "passport") in world.uncovered
+        assert broken(file, world, carried) == [not_at_hand("first", "alex")]
+    # The same for a hand-over there.
+    handed = (step("first", "desk", 9, "alex", handed=(("passport", "alex"),)),)
+    brought = with_these_at_best(file, [Unknown("another transfer", about="passport")])
+    assert Constraint.COVERED not in [found.constraint for found in broken(file, brought, handed)]
+    # An appointment that hands the passport over and refuses it: nobody takes it there, so
+    # the hand-over does not happen, and the finding is the refusal alone.
+    refusing = a_desk(
+        lies_at("passport", "desk"),
+        hands_over("first", "passport"),
+        refuses_object("first", "passport"),
+        needs_right_for("first", "passport"),
+    )
+    brought = with_these_at_best(refusing, [Unknown("another transfer", about="passport")])
+    assert ("first", "passport") in brought.uncovered
+    assert broken(refusing, brought, handed) == [refused("first", "alex")]
+
+
 def test_an_object_that_might_be_in_two_places_can_be_handed_over() -> None:
     """After the first appointment the passport is with Alex or on the desk. The second one
     hands it over, with Alex in it: Sam has it afterwards, wherever it was."""
