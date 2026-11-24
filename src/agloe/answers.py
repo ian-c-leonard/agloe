@@ -877,8 +877,10 @@ def _to_bring(
     They are read off the ITINERARY shown in the world where the set turns out well and every
     other unknown FACT badly, in the order of its steps. Each OPTION that requires the
     OBJECT there is a check, "requires": the OBJECT has to be at hand. Each OPTION that
-    refuses it there is a check, "refuses": no PERSON may have the OBJECT in it. With each
-    comes whether a FACT says that the OPTION requires or refuses the OBJECT, and whether
+    refuses it there is a check, "refuses": no PERSON may have the OBJECT in it. So is each
+    OPTION that needs a right for the OBJECT where nothing covers it, "needs a right for".
+    With each comes whether a FACT says that the OPTION requires or refuses the OBJECT, or
+    needs the right, and whether
     the check holds in the same plan without another transfer: with what the FILE lists,
     and everything else as in that world. Any other FACT has none.
 
@@ -926,6 +928,12 @@ def _to_bring(
             stated = file.refuses_object(option, thing) is True
             holds = not brought_in(before, step.persons)
             checks.append((option, "refuses", stated, holds))
+        if (option, thing) in world.uncovered:
+            # Nothing covers the OBJECT there, so no PERSON who takes part may have it:
+            # another transfer has to leave it where it needs no right.
+            stated = file.needs_right_for(option, thing) is True
+            holds = not brought_in(before, step.persons)
+            checks.append((option, "needs a right for", stated, holds))
     return tuple(checks)
 
 

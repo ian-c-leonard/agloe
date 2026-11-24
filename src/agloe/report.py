@@ -1107,13 +1107,16 @@ def _another_transfer(file: File, needed: Missing) -> str:
     It names the OPTIONs for which another transfer has to put the OBJECT at hand in one
     plan, and then those for which what the FILE lists already does: another transfer has
     to leave it at hand there. Then come the OPTIONs that it has to keep the OBJECT out of,
-    and those that it has to leave it out of. An OPTION that only might require or refuse
-    the OBJECT is named so. An OPTION that a FACT says requires the OBJECT and another says
-    refuses it comes last: the OBJECT has to lie where it starts.
+    and those that it has to leave it out of: the ones that refuse it, and then the ones
+    that need a right for it where nothing covers it. An OPTION that only might require or
+    refuse the OBJECT is named so. An OPTION that a FACT says requires the OBJECT, and that
+    a FACT says refuses it or needs a right for it, comes last: the OBJECT has to lie where
+    it starts, and with no PERSON who takes part.
     """
     thing = _names(file.objects)[needed.unknown.about or ""]
     said = {(option, check) for option, check, stated, _ in needed.at_hand_for if stated}
-    both = {option for option, check in said if check == "requires" and (option, "refuses") in said}
+    barred = {option for option, check in said if check in ("refuses", "needs a right for")}
+    both = {option for option, check in said if check == "requires" and option in barred}
 
     def those(check: str, covered: bool, link: str) -> str:
         mine = [
@@ -1125,7 +1128,8 @@ def _another_transfer(file: File, needed: Missing) -> str:
         might = [_name(file, option, "and") for option, stated in mine if not stated]
         named = [f"{link} {_listed(stated)}"] if stated else []
         if might:
-            they = f"it {check}" if len(might) == 1 else f"they {check[:-1]}"
+            several = "need a right for" if check == "needs a right for" else check[:-1]
+            they = f"it {check}" if len(might) == 1 else f"they {several}"
             named.append(f"{link} {_listed(might)} if {they} {thing}")
         return ", and ".join(named)
 
@@ -1145,6 +1149,8 @@ def _another_transfer(file: File, needed: Missing) -> str:
         (f"leaves {thing} at hand", those("requires", True, "for")),
         (f"keeps {thing}", those("refuses", False, "out of")),
         (f"leaves {thing}", those("refuses", True, "out of")),
+        (f"keeps {thing}", those("needs a right for", False, "away from whoever is in")),
+        (f"leaves {thing}", those("needs a right for", True, "away from whoever is in")),
         (f"puts {thing}", lies_there(False)),
         (f"leaves {thing}", lies_there(True)),
     ]
