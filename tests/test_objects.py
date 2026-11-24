@@ -931,6 +931,9 @@ def test_another_transfer_does_not_cure_what_the_plan_itself_does() -> None:
     assert broken(file, best, not_handed) == [not_at_hand("second", "alex")]
     not_carried = (step("second", "desk", 10, "alex", "sam", carried=("passport",)),)
     assert broken(file, best, not_carried) == [not_at_hand("second", "alex", "sam")]
+    # The first one hands it over, and that is no carry.
+    loaded = (step("first", "desk", 9, "alex", carried=("passport",)),)
+    assert broken(file, best, loaded) == [not_at_hand("first", "alex")]
     # The third one carries it, and that is no hand-over.
     carried = (step("third", "office", 11, "alex", carried=("passport",)),)
     assert broken(file, best, carried) == []
