@@ -1,0 +1,44 @@
+{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" }
+  ],
+  "places": [
+    { "id": "milwaukee", "name": "the ferry terminal in Milwaukee" },
+    { "id": "muskegon", "name": "Muskegon" }
+  ],
+  "objects": [
+    { "id": "car", "name": "the car" }
+  ],
+  "options": [
+    { "id": "ferry", "name": "Car ferry to Muskegon", "from": "milwaukee", "to": "muskegon" },
+    { "id": "drive", "name": "Drive along the shore", "place": "muskegon" }
+  ],
+  "ways": [],
+  "wants": [],
+  "facts": [
+    { "id": "alex-start", "person": "alex", "starts_from": "milwaukee" },
+    { "id": "sam-start", "person": "sam", "starts_from": "milwaukee" },
+    { "id": "ferry-time", "option": "ferry", "starts_at": "2027-07-18T06:00:00-05:00[America/Chicago]" },
+    { "id": "ferry-length", "option": "ferry", "duration": "PT2H30M" },
+    { "id": "ferry-arrival", "option": "ferry", "arrive_before_start": "PT0S" },
+    { "id": "ferry-needs-a-ticket", "option": "ferry", "needs_right": true },
+    { "id": "drive-time", "option": "drive", "starts_at": "2027-07-18T09:00:00-05:00[America/Chicago]" },
+    { "id": "drive-length", "option": "drive", "duration": "PT1H" },
+    { "id": "drive-arrival", "option": "drive", "arrive_before_start": "PT0S" },
+    { "id": "drive-is-open", "option": "drive", "needs_right": false },
+    { "id": "alex-has-the-car", "object": "car", "starts_with": "alex" },
+    { "id": "drive-needs-the-car", "option": "drive", "requires": { "object": "car", "needed": true } },
+    { "id": "every-use-of-the-car", "complete": { "requires_object": "car" } },
+    { "id": "everything-that-moves-the-car", "complete": { "transfers": "car" } },
+    { "id": "ferry-needs-a-car-ticket", "option": "ferry", "needs_right_for": { "object": "car", "needed": true } },
+    { "id": "every-ticket-for-the-car", "complete": { "needs_right_for": "car" } },
+    { "id": "ferry-tickets", "booking": { "option": "ferry", "covers": ["alex", "sam"] } },
+    { "id": "ferry-seats", "offer": { "option": "ferry", "places": 20, "prices": [{ "amount": "19.00", "currency": "USD" }] } },
+    { "id": "the-car-deck-is-full", "complete": { "rights_to": "ferry", "for_object": "car" } }
+  ],
+  "decisions": [
+    { "id": "lock-ferry", "lock": "ferry", "persons": ["alex", "sam"] },
+    { "id": "lock-drive", "lock": "drive", "persons": ["alex", "sam"] }
+  ]
+}

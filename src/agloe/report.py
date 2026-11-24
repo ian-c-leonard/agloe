@@ -30,6 +30,7 @@ from agloe.file import (
     CompleteRequires,
     CompleteRequiresObject,
     CompleteRights,
+    CompleteRightsFor,
     CompleteTransfers,
     Cutoff,
     Duration,
@@ -667,8 +668,13 @@ def as_text(file: File, report: Report) -> str:
             if file.caps:
                 lines[-1] = lines[-1][:-1] + ", if what those BOOKINGs paid fits the caps."
         # A BOOKING that covers the OBJECT can stand in for the answer that an OPTION needs
-        # no right for it.
-        about_a_right = [unknown for unknown in asked if unknown.what == "needs no right for"]
+        # no right for it, unless a FACT says that no other right for the OBJECT can be had.
+        about_a_right = [
+            unknown
+            for unknown in asked
+            if unknown.what == "needs no right for"
+            and file.rights_complete_for(unknown.option or "", unknown.about or "") is None
+        ]
         might_be_covered = list(dict.fromkeys(about_a_right))  # each OPTION and OBJECT once
         if might_be_covered:
             things = _names(file.objects)
@@ -1479,21 +1485,15 @@ def _record(file: File, clock: Clock, record: str) -> str:
         price = "; nobody knows the price" if found.price is None else f", for {found.price}{each}"
         return f"an OFFER has {_places(found.places)} for {name} that can still be bought{price}"
     if isinstance(found, CompleteRights):
+        # Each such FACT says what it is about: the PERSONs who take part, or one OBJECT.
         closed = "nobody on the trip holds another or can get one"
         if found.offers:
             closed += f", except from {_listed(found.offers)}"
-        # That is about the PERSONs who take part. Where the OPTION needs a right for an
-        # OBJECT, or might, the line says that this FACT leaves that right open.
-        things = _names(file.objects, "or")
-        left_open = [
-            things[thing.id]
-            for thing in file.objects
-            if file.needs_right_for(found.option, thing.id) is not False
-        ]
-        if left_open:
-            about = "that is about the PERSONs who take part"
-            closed += f"; {about}, and it says nothing of a right for {_listed(left_open, 'or')}"
-        return f"the FILE lists every right to {name}: {closed}"
+        return f"the FILE lists every right for a PERSON to take part in {name}: {closed}"
+    if isinstance(found, CompleteRightsFor):
+        thing = _names(file.objects)[found.object]
+        closed = "nobody on the trip holds another or can get one"
+        return f"the FILE lists every right to {name} that covers {thing}: {closed}"
     return _cutoff(file, name, found)
 
 

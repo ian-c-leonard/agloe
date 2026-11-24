@@ -320,7 +320,7 @@ class Offer:
 
 @dataclass(frozen=True)
 class CompleteRights:
-    """A FACT: the rights to an OPTION are COMPLETE.
+    """A FACT: the rights to an OPTION for the PERSONs are COMPLETE.
 
     The BOOKINGs in the FILE secure every right for a PERSON to take part in it that anybody
     on the TRIP holds. Nobody on the TRIP can get another, except by a place of an OFFER
@@ -331,6 +331,20 @@ class CompleteRights:
     id: str
     option: str
     offers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CompleteRightsFor:
+    """A FACT: the rights to an OPTION for one OBJECT are COMPLETE.
+
+    The BOOKINGs in the FILE that cover the OBJECT secure every right to the OPTION that
+    covers it. Nobody on the TRIP can get another. The FACT says nothing of a right for a
+    PERSON, or for another OBJECT.
+    """
+
+    id: str
+    option: str
+    object: str
 
 
 @dataclass(frozen=True)
@@ -502,6 +516,7 @@ type Fact = (
     | CompleteTransfers
     | NeedsRightFor
     | CompleteNeedsRightFor
+    | CompleteRightsFor
 )
 type Decision = Lock | TripStart | TripEnd | Cap
 
@@ -869,6 +884,10 @@ class File:
         """The BOOKING that covers this OBJECT for this OPTION: the first one the FILE lists."""
         return self._bookings_for_objects.get((option, object))
 
+    def rights_complete_for(self, option: str, object: str) -> CompleteRightsFor | None:
+        """The FACT that the rights to this OPTION for this OBJECT are COMPLETE, if any."""
+        return self._rights_complete_for.get((option, object))
+
     def objects_asked_for(self) -> tuple[Object, ...]:
         """The OBJECTs that some OPTION of the FILE requires or refuses, or might, and those
         that some OPTION needs a right for, or might.
@@ -898,6 +917,14 @@ class File:
     @cached_property
     def _object_rights_complete(self) -> dict[str, CompleteNeedsRightFor]:
         return {fact.object: fact for fact in self.facts if isinstance(fact, CompleteNeedsRightFor)}
+
+    @cached_property
+    def _rights_complete_for(self) -> dict[tuple[str, str], CompleteRightsFor]:
+        return {
+            (fact.option, fact.object): fact
+            for fact in self.facts
+            if isinstance(fact, CompleteRightsFor)
+        }
 
     @cached_property
     def _bookings_for_objects(self) -> dict[tuple[str, str], Booking]:
@@ -1319,6 +1346,16 @@ def load(document: object) -> File:
                     problems.append(f"{where}: another FACT already states this about {about}")
                 stated.add((about, kind))
                 facts.append(kind(fact["id"], about))
+                continue
+            if "rights_to" in whole and "for_object" in whole:
+                about, thing = whole["rights_to"], whole["for_object"]
+                known(where, about, "OPTION", option_ids)
+                known(where, thing, "OBJECT", object_ids)
+                both = f"{about} and {thing}"
+                if (both, CompleteRightsFor) in stated:
+                    problems.append(f"{where}: another FACT already states this about {both}")
+                stated.add((both, CompleteRightsFor))
+                facts.append(CompleteRightsFor(fact["id"], about, thing))
                 continue
             if "rights_to" in whole:
                 about = whole["rights_to"]
