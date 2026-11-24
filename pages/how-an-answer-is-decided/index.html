@@ -85,7 +85,6 @@
       </div>
       <div class="stack">
         <h3>Two cases settle the answer</h3>
-        <p>There are too many possible worlds to try each one.</p>
         <dl class="cases-two">
           <div><dt>The worst case</dt><dd><span data-from="spec/rules.md">An unknown duration has no limit</span>. <span data-from="spec/rules.md">No unlisted WAY exists.</span></dd></div>
           <div><dt>The best case</dt><dd><span data-from="spec/rules.md">Every unknown start is free, and every unknown duration and access cutoff is zero.</span> <span data-from="spec/rules.md">An unlisted WAY joins any two PLACEs</span> and takes no time, <span data-from="spec/rules.md">except where a COMPLETE set of travel says there is none.</span></dd></div>
@@ -136,7 +135,7 @@
           </div>
         </div>
         <div class="worlds" data-file="flight-home/cannot-work" data-worst="none" data-best="none">
-          <p class="unknown">A FACT says the Blue Line is the only way to O'Hare, so no other way exists in either case.</p>
+          <p class="unknown">A FACT says every way straight to O'Hare that leaves from noon to 6:00 pm is listed. The Blue Line is the only one.</p>
           <div class="world">
             <h4>The worst case</h4>
             <div class="clock"><div class="hours" aria-hidden="true"><i>2 pm</i><i>3 pm</i><i>4 pm</i><i>5 pm</i></div><p class="row" style="--from: 16.67; --to: 50"><span>Museum visit, 2:30 pm to 3:30 pm</span><b class="bar visit"></b></p><p class="row" style="--from: 50; --to: 83.33"><span>Blue Line, 1 h: at O'Hare at 4:30 pm</span><b class="bar ride late"></b></p><p class="due">Bag drop closes at 4:15 pm</p></div>
@@ -198,7 +197,8 @@
     <div class="wrap split top-aligned">
       <div class="stack">
         <h2 id="asks-title">What an UNDETERMINED report asks for</h2>
-        <p>The report names the unknown FACTs that would make the trip work. <span data-from="spec/rules.md">A set of unknown FACTs is enough when the TRIP is FEASIBLE with those FACTs turned out well and every other unknown FACT as in the worst case.</span> Of the sets that are enough, the report lists those that ask for the least.</p>
+        <p>The report names unknown FACTs that could make the trip work. <span data-from="spec/rules.md">A set of unknown FACTs is enough when the TRIP is FEASIBLE with those FACTs turned out well and every other unknown FACT as in the worst case.</span></p>
+        <p class="small"><a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md#evidence">Which sets a report lists</a></p>
         <p class="small">A bag or another OBJECT might be moved by a transfer that the FILE does not list. The COMPILER does not work out whether such a transfer could bring it in time. <span data-from="spec/rules.md">So UNDETERMINED can be said of a TRIP that no transfer could save. FEASIBLE and INFEASIBLE are never said wrongly.</span></p>
         <p class="actions">
           <a class="button" href="/examples/">See the examples</a>
