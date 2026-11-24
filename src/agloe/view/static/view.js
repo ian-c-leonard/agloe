@@ -477,6 +477,7 @@ function drawRights(shown) {
     for (const offer of rights.offers) entries.append(entry(offer, `offer:${offer.id}`, false, offer.uses));
     if (entries.children.length) card.append(entries);
     card.append(made("p", "card-whole", rights.whole));
+    for (const words of rights.closed) card.append(made("p", "card-whole", words));
     box.append(card);
   }
 }

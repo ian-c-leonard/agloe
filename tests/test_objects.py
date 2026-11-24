@@ -328,7 +328,7 @@ def test_a_file_states_each_fact_about_an_object_once() -> None:
 def test_a_complete_set_is_of_one_kind() -> None:
     mixed = {"id": "both", "complete": {"requires_object": "passport", "transfers": "passport"}}
     said = problems(a_document(mixed))
-    assert "the OPTIONs that require an OBJECT, or the transfers of an OBJECT" in said
+    assert "the OPTIONs that require an OBJECT, the transfers of an OBJECT, or the OPTIONs" in said
 
 
 def test_an_object_has_an_id_of_its_own() -> None:

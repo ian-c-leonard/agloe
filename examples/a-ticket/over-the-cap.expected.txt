@@ -4,7 +4,7 @@ These FACTs and DECISIONs rule out every plan, given the BUDGETs of this FILE. T
   skydeck-needs-a-ticket: people need a right to take part in Skydeck visit
   alex-skydeck-ticket: a BOOKING for Skydeck visit covers Alex; its payment: 32.00 USD, paid by Alex, from the trip money
   skydeck-tickets: an OFFER has 2 places for Skydeck visit that can still be bought, for 32.00 USD each
-  skydeck-is-sold-out-otherwise: the FILE lists every right to Skydeck visit: nobody on the trip holds another or can get one, except from skydeck-tickets
+  skydeck-is-sold-out-otherwise: the FILE lists every right for a PERSON to take part in Skydeck visit: nobody on the trip holds another or can get one, except from skydeck-tickets
   lock-skydeck: Alex and Sam take part in Skydeck visit
   trip-cap: the TRIP spends at most 50.00 USD from the trip money
 

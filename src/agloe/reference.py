@@ -360,7 +360,8 @@ def unknowns(file: File) -> tuple[Unknown, ...]:
             needed = file.needs_right_for(option.id, thing.id)
             if needed is None:
                 out.append(Unknown("needs no right for", option.id, about=thing.id))
-            elif needed:
+            elif needed and file.rights_complete_for(option.id, thing.id) is None:
+                # Where the rights for the OBJECT are COMPLETE, there is no other right.
                 out.append(Unknown("another right for", option.id, about=thing.id))
         if file.needs_right(option.id) is True and file.rights_complete(option.id) is None:
             for person in file.persons:
@@ -468,9 +469,11 @@ class Remaining:
     Where a FACT says a WANT's set is COMPLETE, an OPTION with no FACT about the WANT does not
     SATISFY it. An OPTION whose FACT about the WANT was taken out might. ``unsaid`` holds each
     such OPTION and WANT. A BOOKING that is taken out is the same: nobody knows whom it covers,
-    so it might cover anybody. ``open_to_all`` holds the OPTION of each such BOOKING. Both
-    belong to the search for a conflict: no FILE that is read has them, and no answer is ever
-    given for what is left.
+    so it might cover anybody. ``open_to_all`` holds the OPTION of each such BOOKING, and of
+    each OFFER that is taken out: it might have a place for every PERSON. A BOOKING that is
+    taken out might cover any OBJECT too, and ``covering_any`` holds its OPTION. An OFFER
+    has no place for an OBJECT. These belong to the search for a conflict: no FILE that is
+    read has them, and no answer is ever given for what is left.
 
     What an OPTION requires of a CAPABILITY or of an OBJECT needs nothing of the kind, and
     neither does whether it refuses an OBJECT. Only best cases are asked about what is left,
@@ -488,6 +491,7 @@ class Remaining:
     unsaid: frozenset[tuple[str, str]] = frozenset()
     open_to_all: frozenset[str] = frozenset()
     undone: frozenset[tuple[str, str]] = frozenset()
+    covering_any: frozenset[str] = frozenset()
 
     def without(self, record: str) -> Remaining:
         """What is left with one more FACT, WANT or DECISION taken out."""
@@ -495,17 +499,24 @@ class Remaining:
         taken = {(fact.option, fact.want) for fact in found if isinstance(fact, Satisfies)}
         opened = {fact.option for fact in found if isinstance(fact, Booking | Offer)}
         acted = {(fact.option, fact.object) for fact in found if isinstance(fact, WithObject)}
+        booked = {fact.option for fact in found if isinstance(fact, Booking)}
         return Remaining(
             self.file.without(record),
             self.unsaid | taken,
             self.open_to_all | opened,
             self.undone | acted,
+            self.covering_any | booked,
         )
 
     def might_cover(self) -> frozenset[tuple[str, str]]:
         """Each OPTION and PERSON that a BOOKING taken out might cover: anybody, for its OPTION."""
         people = self.file.persons
         return frozenset((option, person.id) for option in self.open_to_all for person in people)
+
+    def might_cover_objects(self) -> frozenset[tuple[str, str]]:
+        """Each OPTION and OBJECT that a BOOKING taken out might cover: any, for its OPTION."""
+        things = self.file.objects
+        return frozenset((option, thing.id) for option in self.covering_any for thing in things)
 
     def reopened(self) -> list[tuple[str, str]]:
         """Each OPTION and WANT that nobody knows about though the WANT's set is COMPLETE.
@@ -562,6 +573,7 @@ def best_case_left(remaining: Remaining) -> tuple[World, list[tuple[str, str]]]:
     world = replace(
         best,
         rights=best.rights | remaining.might_cover(),
+        uncovered=best.uncovered - remaining.might_cover_objects(),
         satisfies=best.satisfies | helps,
         might_satisfy=best.might_satisfy | helps,
         does={**best.does, **remaining.might_do_anything()},
@@ -900,7 +912,8 @@ def _world(
     # OBJECT there. A FACT settles the first, and so does a COMPLETE set for an OPTION with
     # no FACT: it needs none. Otherwise the FILE does not say: at best it needs none, at
     # worst it needs one. A BOOKING for the OPTION covers the OBJECTs it names. Another
-    # right for the OBJECT can be found at best, and at worst there is none.
+    # right for the OBJECT can be found at best, and at worst there is none. Where a FACT
+    # says that the rights to the OPTION for the OBJECT are COMPLETE, there is none at all.
     ticketed: set[tuple[str, str]] = set()
     uncovered: set[tuple[str, str]] = set()
     for thing in file.objects:
@@ -912,7 +925,8 @@ def _world(
             ticket = file.needs_right_for(*pair)
             if ticket is None:
                 ticket = not well(Unknown("needs no right for", option.id, about=thing.id))
-            found_one = well(Unknown("another right for", option.id, about=thing.id))
+            closed = file.rights_complete_for(*pair) is not None
+            found_one = not closed and well(Unknown("another right for", option.id, about=thing.id))
             if ticket:
                 ticketed.add(pair)
                 if file.booking_for(*pair) is None and not found_one:
