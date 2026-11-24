@@ -55,7 +55,7 @@ NOBODY = (
     " with nobody of the TRIP in them."
 )
 CUT = " It leaves out the hours that the calendar does not show."
-CLICK = " Click a step to see it in the calendar."
+CLICK = " Click a step, or press Enter on it, to see it in the calendar."
 WIDE = 844  # pixels: the room of the strip in a window of the usual width
 TICK = 5  # pixels: the width of the tick of a WAY that is too short for a line
 LEAST = 3  # pixels: the least width of the block of an OPTION, and of the line of a WAY
