@@ -2459,7 +2459,8 @@ def _chains(
 
     With ``whether_any``, the caller asks only whether there is a result, and takes none.
     Then orders that end alike are left out too where one OBJECT is asked about, as
-    ``_one_object_is_asked_about`` says.
+    ``_one_object_is_asked_about`` says. That is so only with no ``fits``: the start times
+    turn on the order so far, so with them two beginnings that end alike are not alike.
 
     ``fits`` says whether some start times keep a list of gaps with what the PERSONs do. A
     choice of one OBJECT that counts on an arrival is left out where its own gaps do not
@@ -2470,7 +2471,9 @@ def _chains(
     happening, asked = _asked_about(file, world, who, empty)
     if not asked:
         return None
-    alike = only_the_first_of_a_kind or (whether_any and _one_object_is_asked_about(asked))
+    alike = only_the_first_of_a_kind
+    if whether_any and fits is None:
+        alike = alike or _one_object_is_asked_about(asked)
     return _orders_together(file, world, who, orders, happening, asked, alike, soonest or {}, fits)
 
 
@@ -3661,7 +3664,8 @@ def _one_object_is_asked_about(asked: Sequence[str]) -> bool:
     both. Which of them can come next turns on what is left, on the fixed starts and on what
     the PERSONs do, and not on the order so far. Where the OBJECT can go from there turns on
     where it is. So whatever finishes the one finishes the other, and where the first
-    beginning leads to no order that works, neither does the second.
+    beginning leads to no order that works, neither does the second. No start time has a
+    say in that: the check gives ``_chains`` nothing to time an order with.
 
     That holds while no other OBJECT has an order to go with. The order of one OBJECT is
     made to go with the orders of the OBJECTs before it, so with two OBJECTs the second

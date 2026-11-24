@@ -9347,11 +9347,33 @@ def test_vans_that_all_come_too_late_are_not_tried_in_every_order(
     file = late_vans(8)
     world = worst_case(file)
     assert not reference.any_works(file, world)
-    assert steps == 17_752
     assert not compiler.works(file, world)
-    # Five vans, with every order made: 1,956 steps, and the same answer.
-    monkeypatch.setattr(reference, "_one_further", its_own)
+    # With start times to go by, the orders that end alike are all made: which of them can
+    # be timed turns on the order.
     fewer = late_vans(5)
+    who: tuple[tuple[str, ...], ...] = (*[()] * 5, ("jo",))
+    orders, vans = ((5,),), frozenset(range(5))
+    made: dict[bool, int] = {}
+
+    def any_time(gaps: list[tuple[int, int, int]]) -> bool:
+        return True
+
+    for timed in (False, True):
+        steps = 0
+        found = reference._chains(  # pyright: ignore[reportPrivateUsage]
+            fewer,
+            worst_case(fewer),
+            who,
+            orders,
+            fits=any_time if timed else None,
+            empty=vans,
+            whether_any=True,
+        )
+        assert found is not None and list(found) == []
+        made[timed] = steps
+    assert made[False] < made[True] / 5
+    # Five vans, with every order made, give the same answer.
+    monkeypatch.setattr(reference, "_one_further", its_own)
     EveryOrder(monkeypatch).skipping_nothing()
     assert not reference.any_works(fewer, worst_case(fewer))
 
