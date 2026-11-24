@@ -646,7 +646,7 @@ function drawObjects(shown) {
     const options = made("ul", "card-options");
     for (const option of [...thing.requires, ...thing.refuses, ...thing.rights, ...thing.might, ...thing.transfers]) options.append(entry(option, drawingOf(option, option.option), option.does, option.takes, option.plan));
     if (options.children.length) card.append(options);
-    if (thing.together) card.append(made("p", "card-plan", thing.together));
+    if (thing.together) card.append(made("p", "card-plan card-together", thing.together));
     for (const words of thing.whole) card.append(made("p", "card-whole", words));
     box.append(card);
   }
