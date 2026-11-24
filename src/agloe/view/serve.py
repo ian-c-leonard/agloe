@@ -13,6 +13,7 @@ FILE changes is ended.
 """
 
 import contextlib
+import ipaddress
 import json
 import math
 import os
@@ -64,10 +65,16 @@ LOOK = 0.1  # seconds between two looks at the FILE, and at whether the view is 
 QUIET = 15.0  # seconds after which a page with nothing new is told that the view is still there
 LONGEST = 1e9  # seconds: no check takes this long, and a page can still write the number
 # The name of a host, with a port or without, as a browser sends it: parts of letters, digits
-# and hyphens with dots between them, and no part that starts or ends with a hyphen.
+# and hyphens with dots between them, and no part that starts or ends with a hyphen. A name
+# can end in a dot, and a browser then sends it with the dot.
 _PART = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
-_HOST = re.compile(rf"({_PART}(?:\.{_PART})*)(?::([0-9]{{1,5}}))?")
+_HOST = re.compile(rf"({_PART}(?:\.{_PART})*)(\.?)(?::([0-9]{{1,5}}))?")
 _LONGEST_NAME = 253  # letters and dots: the names of the internet are no longer
+# A name whose last part is a number is an address made of numbers to a browser. It rewrites
+# such an address, or refuses it. So the view takes one only as a browser writes it.
+_A_NUMBER = re.compile(r"[0-9]+|0x[0-9a-f]*")
+# The port that a browser leaves out of what it sends, for each way of reaching a gateway.
+_USUAL = {"http": 80, "https": 443}
 # The ports from 1024 up that browsers refuse to open a page on: the bad ports of the Fetch
 # Standard.
 REFUSED_BY_BROWSERS = frozenset(
@@ -185,16 +192,26 @@ class NotAHost(ValueError):
     """What was given as one more name for the view is no name of a host."""
 
 
-def _named(name: str) -> str:
-    """One more name for the view, as a browser sends it: in small letters.
+def _named(name: str) -> tuple[str, int | None]:
+    """One more name for the view, as a browser sends it: in small letters, and its port
+    where it has one.
 
     Raises NotAHost for anything but the name of a host, with a port or without. So nothing
-    that is given as a name can match a request that it was not meant for.
+    that is given as a name can match a request that it was not meant for, and nothing is
+    taken that no browser would send.
     """
     found = _HOST.fullmatch(name.lower()) if name.isascii() else None
-    fits = found is not None and len(found[1]) <= _LONGEST_NAME
-    if found is not None and fits and (found[2] is None or 1 <= int(found[2]) <= 65535):
-        return name.lower()
+    if found is not None and len(found[1]) <= _LONGEST_NAME:
+        host, port = found[1] + found[2], None if found[3] is None else int(found[3])
+        if _A_NUMBER.fullmatch(found[1].rsplit(".", 1)[-1]):
+            # An address made of numbers: four numbers up to 255, with no dot after them.
+            with contextlib.suppress(ValueError):
+                if str(ipaddress.IPv4Address(host)) == host and (
+                    port is None or 1 <= port <= 65535
+                ):
+                    return host, port
+        elif port is None or 1 <= port <= 65535:
+            return host, port
     raise NotAHost(
         f"{name!r} is no name of a host: give one like view.example.org, "
         "with the port after a colon where the gateway has one"
@@ -218,7 +235,11 @@ class View:
         self.path = path
         self.python = python
         # The name is looked at before the view takes a port, so a bad one holds nothing.
-        self.allowed_host = None if allowed_host is None else _named(allowed_host)
+        self._gateway = None if allowed_host is None else _named(allowed_host)
+        self.allowed_host: str | None = None
+        if self._gateway is not None:
+            name, at = self._gateway
+            self.allowed_host = name if at is None else f"{name}:{at}"
         self._server = _listening(port)
         self._server.view = self
         self._server.timeout = LOOK
@@ -242,12 +263,18 @@ class View:
 
         A browser on this machine reaches the view by the address of this machine. Where the
         owner has given one more name, a browser reaches it by that name too, through the
-        gateway that has the name. The gateway may speak to the browser over a secured line.
+        gateway that has the name. The gateway may speak to the browser over a secured line,
+        or over one that is not. A browser leaves the usual port of each out of what it
+        sends: 443 for a secured line, and 80 for the other. So a name with one of those
+        ports is the bare name for that line, and the name with the port for the other.
         """
         own = (f"127.0.0.1:{self._port}", f"localhost:{self._port}")
         sites = {host: {f"http://{host}"} for host in own}
-        if self.allowed_host is not None:
-            sites[self.allowed_host] = {f"{how}://{self.allowed_host}" for how in ("http", "https")}
+        if self._gateway is not None:
+            name, port = self._gateway
+            for how, usual in _USUAL.items():
+                sent = name if port is None or port == usual else f"{name}:{port}"
+                sites.setdefault(sent, set()).add(f"{how}://{sent}")
         return sites
 
     def serve(self) -> None:
@@ -475,6 +502,13 @@ class _Asked(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         view = self.server.view
+        # A request that names two hosts, or says twice where it comes from, is no request.
+        said = {
+            name: self.headers.get_all(name) or [] for name in ("Host", "Origin", "Sec-Fetch-Site")
+        }
+        if any(len(values) > 1 for values in said.values()):
+            self.send_error(HTTPStatus.BAD_REQUEST)
+            return
         if not self._for_the_view(view):
             self.send_error(HTTPStatus.FORBIDDEN)
             return
@@ -493,15 +527,21 @@ class _Asked(BaseHTTPRequestHandler):
 
         A page from elsewhere reaches this machine under a name of its own, or says in the
         request that it comes from another site. Both are refused. The names of hosts count
-        whatever the case of their letters.
+        whatever the case of their letters, and blanks around what a line says are no part
+        of it.
         """
-        sites = view.sites().get((self.headers.get("Host") or "").lower())
+
+        def said(name: str) -> str | None:
+            value = self.headers.get(name)
+            return None if value is None else value.strip(" \t")
+
+        sites = view.sites().get((said("Host") or "").lower())
         if sites is None:
             return False
-        origin = self.headers.get("Origin")
+        origin = said("Origin")
         if origin is not None and origin.lower() not in sites:
             return False
-        return self.headers.get("Sec-Fetch-Site") in {None, "same-origin", "none"}
+        return said("Sec-Fetch-Site") in {None, "same-origin", "none"}
 
     def _begin(self, kind: str, length: int | None = None) -> None:
         self.send_response(HTTPStatus.OK)

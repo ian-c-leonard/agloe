@@ -654,6 +654,43 @@ def test_the_view_tells_a_browser_to_keep_the_page_to_itself(tmp_path: Path) -> 
             assert headers["Cross-Origin-Resource-Policy"] == "same-origin", part
 
 
+def status_of(view: View, *lines: str) -> int:
+    """The status that the view gives for a request with these lines after its first, sent
+    as they are: a line can be there twice, and can end in blanks."""
+    request = "\r\n".join(["GET / HTTP/1.1", *lines, "Connection: close", "", ""])
+    with socket.create_connection(("127.0.0.1", port_of(view)), timeout=20) as line:
+        line.sendall(request.encode("latin-1"))
+        reply = line.makefile("rb").readline().decode("latin-1")
+    return int(reply.split()[1])
+
+
+def test_a_request_says_each_thing_about_itself_once(tmp_path: Path) -> None:
+    """A request that names two hosts, or says twice where it comes from, is no request: the
+    view looks at one of each, and the other could say anything."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    with serving(path, allowed_host="view.example.org") as view:
+        own = f"127.0.0.1:{port_of(view)}"
+        assert status_of(view, f"Host: {own}") == 200
+        assert status_of(view, "Host: view.example.org", "Origin: https://view.example.org") == 200
+        for twice in [
+            [f"Host: {own}", "Host: evil.example"],
+            ["Host: evil.example", f"Host: {own}"],
+            [f"Host: {own}", f"Host: {own}"],
+            [f"Host: {own}", f"Origin: http://{own}", "Origin: https://evil.example"],
+            [f"Host: {own}", "Sec-Fetch-Site: same-origin", "Sec-Fetch-Site: cross-site"],
+        ]:
+            assert status_of(view, *twice) == 400, twice
+        # A request that names no host is refused like one that names another.
+        assert status_of(view) == 403
+        # Blanks around what a line says are no part of it.
+        assert status_of(view, "Host:   view.example.org \t") == 200
+        assert status_of(view, f"Host: {own}", "Sec-Fetch-Site:  same-origin ") == 200
+        assert status_of(view, "Host: view.example.org", "Origin: https://view.example.org ") == 200
+        # A blank inside a name makes it another name.
+        assert status_of(view, "Host: view.example .org") == 403
+
+
 def test_the_view_serves_this_machine_only(tmp_path: Path) -> None:
     """A page on another site cannot reach the view under a name of its own, or as itself."""
     path = tmp_path / "trip.json"
@@ -707,12 +744,39 @@ def test_the_view_answers_under_one_more_name_that_its_owner_gives(tmp_path: Pat
             own = f"http://127.0.0.1:{port}"
             assert asked(view, part, Host=name, Origin=own)[0] == 403
             assert asked(view, part, Origin=f"https://{name}")[0] == 403
-    # A name with a port is that name with that port.
-    with serving(path, allowed_host=f"{name}:8443") as view:
-        assert asked(view, "/", Host=f"{name}:8443")[0] == 200
-        assert asked(view, "/", Host=f"{name}:8443", Origin=f"https://{name}:8443")[0] == 200
+    # A name with a port is that name with that port, written as a browser writes it.
+    for given in [f"{name}:8443", f"{name}:08443"]:
+        with serving(path, allowed_host=given) as view:
+            assert view.allowed_host == f"{name}:8443"
+            assert asked(view, "/", Host=f"{name}:8443")[0] == 200
+            for how in ["http", "https"]:
+                origin = f"{how}://{name}:8443"
+                assert asked(view, "/", Host=f"{name}:8443", Origin=origin)[0] == 200
+            assert asked(view, "/", Host=name)[0] == 403
+            assert asked(view, "/", Host=f"{name}:8443", Origin=f"https://{name}")[0] == 403
+    # A browser leaves the usual port of a secured line out of what it sends, and so the
+    # view answers the address that a person opens: https://view.example.org:443/.
+    with serving(path, allowed_host=f"{name}:443") as view:
+        assert asked(view, "/", Host=name)[0] == 200
+        assert asked(view, "/", Host=name, Origin=f"https://{name}")[0] == 200
+        assert asked(view, "/", Host=name, Origin=f"http://{name}")[0] == 403
+        # Over a line that is not secured, port 443 is not the usual one, and is sent.
+        assert asked(view, "/", Host=f"{name}:443", Origin=f"http://{name}:443")[0] == 200
+        assert asked(view, "/", Host=f"{name}:443", Origin=f"https://{name}:443")[0] == 403
+        assert asked(view, "/", Host=f"{name}:443", Origin=f"https://{name}")[0] == 403
+    # The same for port 80 and a line that is not secured.
+    with serving(path, allowed_host=f"{name}:80") as view:
+        assert asked(view, "/", Host=name, Origin=f"http://{name}")[0] == 200
+        assert asked(view, "/", Host=name, Origin=f"https://{name}")[0] == 403
+        assert asked(view, "/", Host=f"{name}:80", Origin=f"https://{name}:80")[0] == 200
+        assert asked(view, "/", Host=f"{name}:80", Origin=f"http://{name}:80")[0] == 403
+    # A name that ends in a dot is the name that a browser sends with the dot, and no other.
+    with serving(path, allowed_host=f"{name}.") as view:
+        assert asked(view, "/", Host=f"{name}.", Origin=f"https://{name}.")[0] == 200
         assert asked(view, "/", Host=name)[0] == 403
-        assert asked(view, "/", Host=f"{name}:8443", Origin=f"https://{name}")[0] == 403
+        assert asked(view, "/", Host=f"{name}.", Origin=f"https://{name}")[0] == 403
+    with serving(path, allowed_host=name) as view:
+        assert asked(view, "/", Host=f"{name}.")[0] == 403
     # Without such a name, the view answers under its own names only.
     with serving(path) as view:
         assert asked(view, "/", Host=name)[0] == 403
@@ -741,6 +805,20 @@ def test_the_view_answers_under_one_more_name_that_its_owner_gives(tmp_path: Pat
         ".".join(["a" * 63] * 4) + ".org",
         "user@view.example.org",
         "[::1]",
+        "view.example.org..",
+        ".",
+        "view.example.org.:8443x",
+        # What a browser would take for an address made of numbers, and would rewrite or refuse.
+        "999.999.999.999",
+        "127.1",
+        "1.2.3",
+        "1.2.3.4.5",
+        "010.0.0.5",
+        "10.0.0.5.",
+        "0x7f.0.0.1",
+        "host.123",
+        "example.0x10",
+        "2130706433",
         "vi\u00e9w.example.org",
         "view.example.org\n",
     ],
@@ -759,9 +837,14 @@ def test_one_more_name_for_the_view_is_the_name_of_a_host(name: str, tmp_path: P
         "view.example.org",
         "localhost",
         "trips",
+        "10.0.0.5",
         "10.0.0.5:8080",
         "a-b.c-d.example",
-        "x1.example.org:443",
+        "x1.example.org:8443",
+        "xn--vie-dma.example.org",
+        "view.example.org.",
+        "1a.example",
+        "0x.example",
     ],
 )
 def test_the_name_of_a_host_is_taken_as_one_more_name_for_the_view(
