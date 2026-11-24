@@ -10,8 +10,6 @@ What a plan would break at the longest durations is printed under the line of th
 about. So the words never have to describe which step they mean.
 """
 
-import re
-from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
@@ -21,9 +19,7 @@ from itertools import groupby
 from agloe.answers import Answer, CapRow, Carried, Cover, Missing, Plan, Report
 from agloe.file import (
     Booking,
-    Budget,
     Cap,
-    Capability,
     Complete,
     CompleteFor,
     CompleteNeedsRightFor,
@@ -40,13 +36,9 @@ from agloe.file import (
     Money,
     NeedsRight,
     NeedsRightFor,
-    Object,
     ObjectStarts,
     Offer,
-    Option,
     Payment,
-    Person,
-    Place,
     RefusesObject,
     Requires,
     RequiresObject,
@@ -56,30 +48,14 @@ from agloe.file import (
     TripEnd,
     TripStart,
     Want,
-    Way,
     WithObject,
     length_written,
     local,
     written,
 )
+from agloe.names import to_show as _names
 from agloe.reference import Broken, Constraint, Itinerary, Step, Where
 
-_WITH_AN_ID = re.compile(r" \([a-z0-9]+(-[a-z0-9]+)*\)$")  # how a name ends when its id is shown
-# The words that a report uses in place of a name: "nobody takes part", "people need a
-# right", "there is none", "none refuses the bags", "another WAY".
-_NO_NAMES = frozenset(
-    {
-        "nobody",
-        "everybody",
-        "somebody",
-        "anybody",
-        "whoever",
-        "people",
-        "none",
-        "there is none",
-        "another way",
-    }
-)
 _DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 _MONTHS = [
     "January",
@@ -1603,43 +1579,6 @@ def _starts_at(file: File, option: str | None) -> str:
     """The name of the PLACE where an OPTION starts."""
     origin = next(each.origin for each in file.options if each.id == option)
     return _names(file.places)[origin]
-
-
-def _names(
-    records: Sequence[Person | Place | Option | Way | Want | Budget | Capability | Object],
-    joins: str | None = None,
-) -> dict[str, str]:
-    """The name to show for each record, so that no two records show the same.
-
-    A record whose name another record has shows its id too. If two would still show the same,
-    every record shows its id: no two ids are the same.
-
-    A name is shown in quotes where it could be taken for something else: one with a comma,
-    a colon, a semicolon or a quote mark, one that ends like a name with its id, one that
-    holds the word ``joins``, which joins the list the names are for, and one that is a
-    word the report uses in place of a name. A PERSON can be called nobody, and "visit,
-    nobody" would read as a visit with nobody in it. The quotes go on before the id.
-    """
-    shared = Counter(record.name for record in records)
-    shown = {
-        record.id: _quoted(record.name, joins)
-        if shared[record.name] == 1
-        else f"{_quoted(record.name, joins)} ({record.id})"
-        for record in records
-    }
-    if len(set(shown.values())) < len(shown):
-        return {record.id: f"{_quoted(record.name, joins)} ({record.id})" for record in records}
-    return shown
-
-
-def _quoted(name: str, joins: str | None) -> str:
-    """A name, in quotes where it could be taken for something else."""
-    marks = any(mark in name for mark in ",:;")  # what a report puts between its own parts
-    splits = marks or (joins is not None and joins in name.casefold().split())
-    stands_in = " ".join(name.casefold().split()) in _NO_NAMES
-    if splits or stands_in or '"' in name or _WITH_AN_ID.search(name):
-        return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
-    return name
 
 
 def _name(file: File, id: str | None, joins: str | None = None) -> str:
