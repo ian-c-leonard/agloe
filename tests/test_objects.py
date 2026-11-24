@@ -3344,6 +3344,7 @@ def those_that_matter(
     orders: tuple[tuple[int, ...], ...],
     *hints: object,
     empty: AbstractSet[int] = frozenset(),
+    whether_any: bool = False,
 ) -> list[Chain] | None:
     """Every order, whatever the search says about which orders it can leave out."""
     return every_chain(file, world, who, orders, everything=False, empty=empty)
@@ -3356,6 +3357,7 @@ def all_of_them(
     orders: tuple[tuple[int, ...], ...],
     *hints: object,
     empty: AbstractSet[int] = frozenset(),
+    whether_any: bool = False,
 ) -> list[Chain] | None:
     """Every order of every OPTION, whatever the search says about which it can leave out."""
     return every_chain(file, world, who, orders, everything=True, empty=empty)
