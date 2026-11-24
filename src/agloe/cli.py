@@ -52,7 +52,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             "Serves a page on this machine that shows the COMPILER's answer and report on one "
             "FILE, with a calendar of the trip. Each time the FILE changes, the COMPILER checks "
             "it again and the page shows the new answer. Ends with 2 when the FILE is not there. "
-            "Stop it with Ctrl-C."
+            "Stop it with Ctrl-C. The view listens on this machine only, and it has no sign-in."
         ),
     )
     view.add_argument("file", type=Path, help="the trip, as a JSON FILE")
@@ -66,9 +66,18 @@ def main(arguments: Sequence[str] | None = None) -> int:
         ),
     )
     view.add_argument("--no-browser", action="store_true", help="do not open the page in a browser")
+    view.add_argument(
+        "--allowed-host",
+        metavar="NAME",
+        help=(
+            "one more name that the view answers under, such as view.example.org: the name of "
+            "a gateway of your own that passes requests on to the view. Give the view a --port "
+            "for the gateway to pass them to. The view has no sign-in, so the gateway needs one"
+        ),
+    )
     chosen = parser.parse_args(arguments)
     if chosen.command == "view":
-        return _view(chosen.file, chosen.port, not chosen.no_browser)
+        return _view(chosen.file, chosen.port, not chosen.no_browser, chosen.allowed_host)
 
     try:
         file = read(chosen.file)
@@ -106,16 +115,23 @@ def main(arguments: Sequence[str] | None = None) -> int:
     return 0 if answer is Answer.FEASIBLE else 1
 
 
-def _view(path: Path, port: int, in_a_browser: bool) -> int:
-    """Serve the view of one FILE on this machine until the command is stopped."""
+def _view(path: Path, port: int, in_a_browser: bool, allowed_host: str | None = None) -> int:
+    """Serve the view of one FILE on this machine until the command is stopped.
+
+    ``allowed_host`` is one more name that the view answers under, where the person gives one.
+    """
     if not path.is_file():
         print(f"{path}: there is no such FILE", file=sys.stderr)
         return 2
     # The view needs sockets and processes, so it is loaded only where it is asked for.
     from agloe.view import View
+    from agloe.view.serve import NotAHost
 
     try:
-        view = View(path, port)
+        view = View(path, port, allowed_host=allowed_host)
+    except NotAHost as problem:
+        print(f"{problem}.", file=sys.stderr)
+        return 2
     except ValueError as problem:
         print(f"{problem}. Leave --port out, and the view takes a free port.", file=sys.stderr)
         return 2
@@ -126,6 +142,12 @@ def _view(path: Path, port: int, in_a_browser: bool) -> int:
     signal.signal(signal.SIGTERM, _stopped)
     try:
         print(f"The view of {path} is at {view.address}", flush=True)
+        if view.allowed_host is not None:
+            print(
+                f"It also answers under the name {view.allowed_host}, for a gateway of your own "
+                "that passes requests on to it. The view has no sign-in: the gateway needs one.",
+                flush=True,
+            )
         if in_a_browser:
             # A browser can take its time, and some wait until they are closed. The view
             # serves meanwhile, or the browser would wait for a page that nobody sends.

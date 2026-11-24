@@ -70,9 +70,14 @@ def put(path: Path, content: bytes | Path) -> None:
 
 
 @contextmanager
-def serving(path: Path, python: str = sys.executable) -> Generator[View]:
-    """The view of one FILE, served on a free port of this machine until the test is done."""
-    view = View(path, port=0, python=python)
+def serving(
+    path: Path, python: str = sys.executable, allowed_host: str | None = None
+) -> Generator[View]:
+    """The view of one FILE, served on a free port of this machine until the test is done.
+
+    ``allowed_host`` is one more name that the view answers under.
+    """
+    view = View(path, port=0, python=python, allowed_host=allowed_host)
     thread = threading.Thread(target=view.serve, daemon=True)
     thread.start()
     try:
@@ -668,6 +673,131 @@ def test_the_view_serves_this_machine_only(tmp_path: Path) -> None:
                 assert asked(view, part, Sec_Fetch_Site=site)[0] == 403, site
 
 
+def test_the_view_answers_under_one_more_name_that_its_owner_gives(tmp_path: Path) -> None:
+    """The owner runs a gateway that passes requests on to the view under the gateway's name.
+    The view answers under that name, and under no other."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    name = "view.example.org"
+    with serving(path, allowed_host="View.Example.org") as view:
+        # The view still listens on this machine only, and still answers under its own names.
+        assert view.address.startswith("http://127.0.0.1:")
+        port = port_of(view)
+        for part in ["/", "/events"]:
+            assert asked(view, part)[0] == 200
+            assert asked(view, part, Host=f"localhost:{port}")[0] == 200
+            # The name of a host counts whatever the case of its letters.
+            for host in [name, "VIEW.example.ORG"]:
+                assert asked(view, part, Host=host)[0] == 200, host
+            # A page that came through the gateway is the view's own page, whether or not the
+            # gateway speaks to the browser over a secured line.
+            for origin in [f"https://{name}", f"http://{name}", "HTTPS://View.Example.Org"]:
+                got = asked(view, part, Host=name, Origin=origin, Sec_Fetch_Site="same-origin")
+                assert got[0] == 200, origin
+            # No other name is the view's.
+            others = ["example.org", f"{name}:8443", f"{name}.evil.example", f"evil.{name}"]
+            for host in others:
+                assert asked(view, part, Host=host)[0] == 403, host
+            # A page of another site is not the view's page, also not one of a site beside it.
+            for origin in ["https://evil.example", f"https://www.{name}", "null", f"ftp://{name}"]:
+                assert asked(view, part, Host=name, Origin=origin)[0] == 403, origin
+            for site in ["cross-site", "same-site"]:
+                assert asked(view, part, Host=name, Sec_Fetch_Site=site)[0] == 403, site
+            # The view's own address is no site of the gateway, and the other way round.
+            own = f"http://127.0.0.1:{port}"
+            assert asked(view, part, Host=name, Origin=own)[0] == 403
+            assert asked(view, part, Origin=f"https://{name}")[0] == 403
+    # A name with a port is that name with that port.
+    with serving(path, allowed_host=f"{name}:8443") as view:
+        assert asked(view, "/", Host=f"{name}:8443")[0] == 200
+        assert asked(view, "/", Host=f"{name}:8443", Origin=f"https://{name}:8443")[0] == 200
+        assert asked(view, "/", Host=name)[0] == 403
+        assert asked(view, "/", Host=f"{name}:8443", Origin=f"https://{name}")[0] == 403
+    # Without such a name, the view answers under its own names only.
+    with serving(path) as view:
+        assert asked(view, "/", Host=name)[0] == 403
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "",
+        " ",
+        "https://view.example.org",
+        "view.example.org/",
+        "view.example.org/trip",
+        "view example.org",
+        "view.example.org:port",
+        "view.example.org:0",
+        "view.example.org:65536",
+        "view.example.org:",
+        "-view.example.org",
+        "view-.example.org",
+        "view..example.org",
+        ".example.org",
+        "*.example.org",
+        "view_1.example.org",
+        f"{'a' * 64}.example.org",
+        ".".join(["a" * 63] * 4) + ".org",
+        "user@view.example.org",
+        "[::1]",
+        "vi\u00e9w.example.org",
+        "view.example.org\n",
+    ],
+)
+def test_one_more_name_for_the_view_is_the_name_of_a_host(name: str, tmp_path: Path) -> None:
+    """Whatever is no name of a host, with or without a port, is refused before the view serves."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    with pytest.raises(ValueError, match="no name of a host"):
+        View(path, allowed_host=name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "view.example.org",
+        "localhost",
+        "trips",
+        "10.0.0.5:8080",
+        "a-b.c-d.example",
+        "x1.example.org:443",
+    ],
+)
+def test_the_name_of_a_host_is_taken_as_one_more_name_for_the_view(
+    name: str, tmp_path: Path
+) -> None:
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    with serving(path, allowed_host=name) as view:
+        assert asked(view, "/", Host=name)[0] == 200
+
+
+def test_the_command_takes_one_more_name_for_the_view(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The command says under which name the view answers too, and that the view has no sign-in."""
+    path = tmp_path / "trip.json"
+    shutil.copy(STORY / "works.json", path)
+    # What is no name of a host is refused, and the command says which name it was given.
+    assert main(["view", str(path), "--no-browser", "--allowed-host=https://example.org"]) == 2
+    assert "https://example.org" in capsys.readouterr().err
+    started, address = command(path, allowed_host="view.example.org")
+    try:
+        assert started.stdout is not None
+        also = started.stdout.readline()
+        assert also == (
+            "It also answers under the name view.example.org, for a gateway of your own that"
+            " passes requests on to it. The view has no sign-in: the gateway needs one.\n"
+        )
+        request = urllib.request.Request(address, headers={"Host": "view.example.org"})
+        with urllib.request.urlopen(request, timeout=20) as reply:
+            assert reply.status == 200
+    finally:
+        started.kill()
+        started.wait(timeout=20)
+
+
 def test_the_page_asks_no_other_host_for_anything() -> None:
     for name in PAGE:
         assert not re.search(r"https?://|//[a-z]", (STATIC / name).read_text()), name
@@ -739,10 +869,13 @@ def test_what_the_page_hides_stays_hidden() -> None:
     assert "[hidden] { display: none !important; }" in (STATIC / "view.css").read_text()
 
 
-def command(path: Path, python: str | None = None) -> tuple[subprocess.Popen[str], str]:
+def command(
+    path: Path, python: str | None = None, allowed_host: str | None = None
+) -> tuple[subprocess.Popen[str], str]:
     """The command as a process of its own, and the address of the view that it prints.
 
-    With ``python``, the command takes that program for the Python that runs its checks.
+    With ``python``, the command takes that program for the Python that runs its checks. With
+    ``allowed_host``, the view answers under that name too.
     """
     stand_in = f"sys.executable = {python!r}; " if python else ""
     started = subprocess.Popen(
@@ -753,6 +886,7 @@ def command(path: Path, python: str | None = None) -> tuple[subprocess.Popen[str
             "view",
             str(path),
             "--no-browser",
+            *([] if allowed_host is None else [f"--allowed-host={allowed_host}"]),
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

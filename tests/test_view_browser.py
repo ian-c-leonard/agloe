@@ -14,14 +14,18 @@ each arrives. So a test also waits for what it expects to be lit, and never read
 """
 
 import contextlib
+import http.client
 import json
 import os
 import socket
 import sys
+import threading
 from collections.abc import Generator
 from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 from playwright.sync_api import Browser, Page, Route, sync_playwright
@@ -41,7 +45,7 @@ from tests.stories import (
     takes,
     way_between,
 )
-from tests.test_view import put, serving, stand_in
+from tests.test_view import port_of, put, serving, stand_in
 
 CHICAGO = "[America/Chicago]"
 # The page shows the report on the FILE, and has said what its calendar holds.
@@ -2333,3 +2337,98 @@ def test_the_page_shows_what_it_can_without_a_part_that_cannot_load(chromium: Br
         assert page.locator("#report .row").count() == 0
         assert page.locator("#calendar .mark").count() > 3
         assert page.locator("#calendar .mark.warned").count() == 0
+
+
+@contextmanager
+def gateway(view: View) -> Generator[str]:
+    """A gateway in front of the view, as its owner would run one. Gives its address.
+
+    It passes each request on to the view under the name that the browser asked for, with
+    what the browser said of itself, and passes what the view answers back as it comes. A
+    browser that takes it for its proxy reaches the view under any name.
+    """
+
+    class Passed(BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args: object) -> None:
+            """Nothing is logged."""
+
+        def do_GET(self) -> None:
+            asked = urlsplit(self.path)
+            path = f"{asked.path or '/'}{f'?{asked.query}' if asked.query else ''}"
+            between = {"connection", "proxy-connection", "transfer-encoding"}
+            said = {
+                name: value for name, value in self.headers.items() if name.lower() not in between
+            }
+            onward = http.client.HTTPConnection("127.0.0.1", port_of(view), timeout=120)
+            try:
+                onward.request("GET", path, headers=said)
+                reply = onward.getresponse()
+                self.send_response(reply.status)
+                for name, value in reply.getheaders():
+                    if name.lower() not in between:
+                        self.send_header(name, value)
+                self.end_headers()
+                while chunk := reply.read1(65536):
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+            except OSError:
+                return  # the browser or the view has gone
+            finally:
+                onward.close()
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Passed)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=20)
+
+
+def test_the_page_works_through_a_gateway_under_the_name_of_the_gateway(
+    chromium: Browser, tmp_path: Path
+) -> None:
+    """The owner of the view gives it the name of a gateway. A browser on another machine asks
+    the gateway for that name, and gets the whole page: the answer, the report, the calendar,
+    and each change to the FILE. Under another name the view refuses it."""
+    path = tmp_path / "trip.json"
+    path.write_bytes((EXAMPLES / "ending-in-denver" / "works.json").read_bytes())
+    with serving(path, allowed_host="view.example.org") as view, gateway(view) as through:
+        context = chromium.new_context(proxy={"server": through})
+        try:
+            page = context.new_page()
+            problems: list[str] = []
+            page.on("pageerror", lambda problem: problems.append(str(problem)))
+            got = page.goto("http://view.example.org/")
+            assert got is not None and got.status == 200
+            page.wait_for_function(ANSWERED, timeout=60_000)
+            assert (page.text_content("#line") or "").startswith("FEASIBLE")
+            page.locator("#calendar .mark").first.wait_for()
+            page.locator("#report .row").first.wait_for()
+            page.locator("#objects-part, #ways .item").first.wait_for()
+            # Every file of the page came under that name, and the page asked no other host.
+            assert page.evaluate("() => location.host") == "view.example.org"
+            # The page follows the FILE through the gateway.
+            changed = json.loads(path.read_text())
+            changed["persons"][0]["name"] = "Alexandra"
+            put(path, json.dumps(changed).encode())
+            page.locator("#persons .item-name", has_text="Alexandra").wait_for()
+            page.locator("#report .row", has_text="Alexandra").first.wait_for()
+            assert problems == []
+            # Under a name that the owner did not give, the view refuses the same browser.
+            other = context.new_page()
+            refused = other.goto("http://other.example.org/")
+            assert refused is not None and refused.status == 403
+        finally:
+            context.close()
+    # A view with no such name refuses the gateway's name too.
+    with serving(path) as view, gateway(view) as through:
+        context = chromium.new_context(proxy={"server": through})
+        try:
+            refused = context.new_page().goto("http://view.example.org/")
+            assert refused is not None and refused.status == 403
+        finally:
+            context.close()

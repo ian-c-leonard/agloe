@@ -1,7 +1,9 @@
 """The program behind ``agloe view FILE``: it serves the page and checks the FILE as it changes.
 
-It serves this machine only: the page, the page's own files, and what the page is to show. It
-writes nothing.
+It listens on this machine only, and serves the page, the page's own files, and what the page
+is to show. It writes nothing. It answers a browser that asks for this machine by its own
+address. Its owner can give it one more name to answer under: the name of a gateway of their
+own, which passes requests on to it. The view has no sign-in, so such a gateway needs one.
 
 A state of the FILE is its content at one look. Each new state gets a number, its revision, and
 every event that a page is sent names the revision it is about. So a page can never take an
@@ -14,6 +16,7 @@ import contextlib
 import json
 import math
 import os
+import re
 import secrets
 import socket
 import socketserver
@@ -60,6 +63,11 @@ KINDS = {".html": "text/html", ".css": "text/css", ".js": "text/javascript"}
 LOOK = 0.1  # seconds between two looks at the FILE, and at whether the view is closed
 QUIET = 15.0  # seconds after which a page with nothing new is told that the view is still there
 LONGEST = 1e9  # seconds: no check takes this long, and a page can still write the number
+# The name of a host, with a port or without, as a browser sends it: parts of letters, digits
+# and hyphens with dots between them, and no part that starts or ends with a hyphen.
+_PART = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+_HOST = re.compile(rf"({_PART}(?:\.{_PART})*)(?::([0-9]{{1,5}}))?")
+_LONGEST_NAME = 253  # letters and dots: the names of the internet are no longer
 # The ports from 1024 up that browsers refuse to open a page on: the bad ports of the Fetch
 # Standard.
 REFUSED_BY_BROWSERS = frozenset(
@@ -173,15 +181,44 @@ def _said(line: bytes) -> Event:
     return event
 
 
+class NotAHost(ValueError):
+    """What was given as one more name for the view is no name of a host."""
+
+
+def _named(name: str) -> str:
+    """One more name for the view, as a browser sends it: in small letters.
+
+    Raises NotAHost for anything but the name of a host, with a port or without. So nothing
+    that is given as a name can match a request that it was not meant for.
+    """
+    found = _HOST.fullmatch(name.lower()) if name.isascii() else None
+    fits = found is not None and len(found[1]) <= _LONGEST_NAME
+    if found is not None and fits and (found[2] is None or 1 <= int(found[2]) <= 65535):
+        return name.lower()
+    raise NotAHost(
+        f"{name!r} is no name of a host: give one like view.example.org, "
+        "with the port after a colon where the gateway has one"
+    )
+
+
 class View:
     """The view of one FILE. ``serve`` runs it until ``close``. ``address`` is where the page is.
 
-    ``python`` is the Python that runs each check.
+    ``python`` is the Python that runs each check. ``allowed_host`` is one more name that the
+    view answers under: the name of a gateway that passes requests on to it.
     """
 
-    def __init__(self, path: Path, port: int = 0, python: str = sys.executable) -> None:
+    def __init__(
+        self,
+        path: Path,
+        port: int = 0,
+        python: str = sys.executable,
+        allowed_host: str | None = None,
+    ) -> None:
         self.path = path
         self.python = python
+        # The name is looked at before the view takes a port, so a bad one holds nothing.
+        self.allowed_host = None if allowed_host is None else _named(allowed_host)
         self._server = _listening(port)
         self._server.view = self
         self._server.timeout = LOOK
@@ -199,9 +236,19 @@ class View:
         self._serving = False
         self._check: subprocess.Popen[bytes] | None = None
 
-    def hosts(self) -> set[str]:
-        """The names by which a browser on this machine reaches the view."""
-        return {f"127.0.0.1:{self._port}", f"localhost:{self._port}"}
+    def sites(self) -> dict[str, set[str]]:
+        """Each name by which a browser reaches the view, with the sites that its page can say
+        it comes from.
+
+        A browser on this machine reaches the view by the address of this machine. Where the
+        owner has given one more name, a browser reaches it by that name too, through the
+        gateway that has the name. The gateway may speak to the browser over a secured line.
+        """
+        own = (f"127.0.0.1:{self._port}", f"localhost:{self._port}")
+        sites = {host: {f"http://{host}"} for host in own}
+        if self.allowed_host is not None:
+            sites[self.allowed_host] = {f"{how}://{self.allowed_host}" for how in ("http", "https")}
+        return sites
 
     def serve(self) -> None:
         """Serve the page and watch the FILE, until ``close`` or until the command is stopped.
@@ -428,7 +475,7 @@ class _Asked(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         view = self.server.view
-        if not self._from_this_machine(view):
+        if not self._for_the_view(view):
             self.send_error(HTTPStatus.FORBIDDEN)
             return
         path = self.path.split("?", 1)[0]
@@ -441,16 +488,18 @@ class _Asked(BaseHTTPRequestHandler):
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
 
-    def _from_this_machine(self, view: View) -> bool:
-        """Whether the request is made to the view under its own name, and by its own page.
+    def _for_the_view(self, view: View) -> bool:
+        """Whether the request is made to the view under one of its names, and by its own page.
 
         A page from elsewhere reaches this machine under a name of its own, or says in the
-        request that it comes from another site. Both are refused.
+        request that it comes from another site. Both are refused. The names of hosts count
+        whatever the case of their letters.
         """
-        if self.headers.get("Host") not in view.hosts():
+        sites = view.sites().get((self.headers.get("Host") or "").lower())
+        if sites is None:
             return False
         origin = self.headers.get("Origin")
-        if origin is not None and origin not in {f"http://{host}" for host in view.hosts()}:
+        if origin is not None and origin.lower() not in sites:
             return False
         return self.headers.get("Sec-Fetch-Site") in {None, "same-origin", "none"}
 
