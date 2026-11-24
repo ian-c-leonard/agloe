@@ -221,6 +221,11 @@ class World:
     ``ticketed`` holds each OPTION and OBJECT where the OPTION needs a right for the
     OBJECT. ``uncovered`` holds those of them where nothing covers the OBJECT: no BOOKING
     of the FILE, and no other right. The sixteenth CONSTRAINT asks about those pairs only.
+
+    ``undecided`` holds each OPTION and OBJECT where the FILE does not say what the OPTION
+    does with the OBJECT, and this world does not say either. That is so in the best case,
+    for an OBJECT that another transfer brings: nothing follows it there, so ``does`` has
+    no entry for the pair. The OPTION then does what suits a plan.
     """
 
     terms: Mapping[str, Terms]
@@ -250,6 +255,7 @@ class World:
     brought: frozenset[str] = frozenset()
     ticketed: frozenset[tuple[str, str]] = frozenset()
     uncovered: frozenset[tuple[str, str]] = frozenset()
+    undecided: frozenset[tuple[str, str]] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -873,6 +879,7 @@ def _world(
     open_needs: set[tuple[str, str]] = set()
     refuses: set[tuple[str, str]] = set()
     acts: dict[tuple[str, str], str] = {}
+    undecided: set[tuple[str, str]] = set()
     begins: dict[str, Where] = {}
     begins_anywhere: set[str] = set()
     brought: set[str] = set()
@@ -936,6 +943,8 @@ def _world(
                     action = turns_out[found[0]]
             if action is not None and action != "nothing":
                 acts[pair] = action
+            elif action is None:
+                undecided.add(pair)
         start = file.object_starts(thing.id)
         with_whom = favoured.get(("starts with", None, thing.id))
         lies_at = favoured.get(("starts at", None, thing.id))
@@ -971,6 +980,7 @@ def _world(
         frozenset(brought),
         frozenset(ticketed),
         frozenset(uncovered),
+        frozenset(undecided),
     )
 
 
@@ -1093,15 +1103,16 @@ def _where_a_transfer_brings_it(file: File, world: World, itinerary: Itinerary) 
     since nobody takes the OBJECT there. Both name the PERSON who was to have it. A carry
     of the plan is in an OPTION that carries the OBJECT: the fourteenth CONSTRAINT
     otherwise, and it names everybody who takes part. Where the FILE does not say what the
-    OPTION does with the OBJECT, the world says the worst of it, and the hand-over or the
-    carry is broken. The best case says nothing of it: there the OPTION does what suits
-    the plan.
+    OPTION does with the OBJECT, the world says it: the worst of it, or what a set of
+    unknown FACTs says. The best case leaves it ``undecided``: there the OPTION does what
+    suits the plan.
 
     The sixteenth CONSTRAINT is the same. An OPTION that takes the OBJECT along with no
     choice, or might, cannot happen where nothing covers the OBJECT there:
     ``taken_with_no_right`` says when. And a plan that hands the OBJECT over there, or
-    carries it there by choice, does so with no right. The Broken names whoever is to have
-    the OBJECT, or else everybody who takes part.
+    carries it there by choice, does so with no right. A hand-over or a carry that does
+    not happen needs none. The Broken names whoever is to have the OBJECT, or else
+    everybody who takes part.
     """
     out: list[Broken] = []
     for step in itinerary:
@@ -1113,11 +1124,10 @@ def _where_a_transfer_brings_it(file: File, world: World, itinerary: Itinerary) 
             if thing.id not in world.brought:
                 continue
             pair = (step.option, thing.id)
-            action = world.does.get(pair, "nothing")
-            if pair not in world.does and file.does_with(*pair) is None:
-                action = "any"
+            action = "any" if pair in world.undecided else world.does.get(pair, "nothing")
             taker, loaded = takers.get(thing.id), thing.id in step.carried
-            if taker is not None and pair in world.refuses:
+            refused = pair in world.refuses
+            if taker is not None and refused:
                 out.append(Broken(Constraint.REFUSED, step.option, (taker,), object=thing.id))
             if taker is not None and action not in ("hands_over", "any"):
                 out.append(Broken(Constraint.AT_HAND, step.option, (taker,), object=thing.id))
@@ -1125,8 +1135,10 @@ def _where_a_transfer_brings_it(file: File, world: World, itinerary: Itinerary) 
                 out.append(Broken(Constraint.AT_HAND, step.option, everybody, object=thing.id))
             if pair not in world.uncovered:
                 continue
-            if taker is not None or loaded or taken_with_no_right(world, *pair):
-                who = everybody if taker is None else (taker,)
+            handed = taker is not None and action in ("hands_over", "any") and not refused
+            carried = loaded and action in ("carries", "any")
+            if handed or carried or taken_with_no_right(world, *pair):
+                who = (taker,) if handed and taker is not None else everybody
                 out.append(Broken(Constraint.COVERED, step.option, who, object=thing.id))
     return out
 
