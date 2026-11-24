@@ -454,6 +454,30 @@ def test_another_transfer_does_not_cover_an_object_that_the_option_takes_along()
     assert asked == [["another right for"]]
 
 
+def test_a_booking_names_persons_and_objects_so_that_no_two_look_alike() -> None:
+    """A BOOKING covers Alex, Sam and the car. Where the car is called Alex too, both show
+    their ids. Where the car is called "camera and tripod", the name is in quotes: the list
+    is joined with "and"."""
+    file = a_ferry(TICKET, NO_OTHER, booking("ferry", "alex", "car"))
+
+    def words(car: str) -> str:
+        named = replace(file, objects=(replace(file.objects[0], name=car),))
+        return next(
+            line
+            for line in report.as_text(named, checked(named)).split("\n")
+            if line.startswith("  ferry-booking: ")
+        )
+
+    assert words("alex") == (
+        "  ferry-booking: a BOOKING for ferry covers alex (alex) and alex (car);"
+        " this plan uses it for alex (car)"
+    )
+    assert words("camera and tripod") == (
+        '  ferry-booking: a BOOKING for ferry covers alex and "camera and tripod";'
+        ' this plan uses it for "camera and tripod"'
+    )
+
+
 def a_quay(*facts: Document, bike_at: str = "town") -> File:
     """A ferry goes from the quay to town at 9:00 am, and a LOCK puts Alex on it. The ferry
     needs a right for the bike, and nothing covers the bike. The FILE does not say that it
@@ -487,12 +511,14 @@ def test_another_transfer_and_an_option_of_which_nobody_knows_what_it_does() -> 
     assert found.answer is Answer.UNDETERMINED
     assert cases_of(unknown_action, found) == [
         "ferry does not carry bike and another transfer puts bike where ferry starts.",
-        "A right to ferry is found that covers bike and another transfer puts bike at hand for ferry.",
+        "A right to ferry is found that covers bike"
+        " and another transfer puts bike at hand for ferry.",
     ]
     carried = a_quay(needs, carries("ferry", "bike"))
     found = checked(carried)
     assert cases_of(carried, found) == [
-        "a right to ferry is found that covers bike and another transfer puts bike at hand for ferry."
+        "a right to ferry is found that covers bike"
+        " and another transfer puts bike at hand for ferry."
     ]
     left_alone = a_quay(needs, does_with("ferry", "bike", "nothing"))
     found = checked(left_alone)
