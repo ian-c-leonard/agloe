@@ -1,0 +1,62 @@
+{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" }
+  ],
+  "places": [
+    { "id": "milwaukee", "name": "the ferry terminal in Milwaukee" },
+    { "id": "muskegon", "name": "Muskegon" }
+  ],
+  "objects": [
+    { "id": "car", "name": "the car" },
+    { "id": "bike", "name": "the bike" }
+  ],
+  "budgets": [
+    { "id": "trip-money", "name": "the trip money", "persons": ["alex", "sam"], "objects": ["car", "bike"], "currencies": ["USD"] }
+  ],
+  "options": [
+    { "id": "ferry", "name": "Car ferry to Muskegon", "from": "milwaukee", "to": "muskegon" },
+    { "id": "afternoon-ferry", "name": "Afternoon ferry to Muskegon", "from": "milwaukee", "to": "muskegon" },
+    { "id": "drive", "name": "Drive along the shore", "place": "muskegon" }
+  ],
+  "ways": [],
+  "wants": [],
+  "facts": [
+    { "id": "alex-start", "person": "alex", "starts_from": "milwaukee" },
+    { "id": "sam-start", "person": "sam", "starts_from": "milwaukee" },
+    { "id": "ferry-time", "option": "ferry", "starts_at": "2027-07-18T06:00:00-05:00[America/Chicago]" },
+    { "id": "ferry-length", "option": "ferry", "duration": "PT2H30M" },
+    { "id": "ferry-arrival", "option": "ferry", "arrive_before_start": "PT0S" },
+    { "id": "ferry-needs-a-ticket", "option": "ferry", "needs_right": true },
+    { "id": "afternoon-time", "option": "afternoon-ferry", "starts_at": "2027-07-18T12:30:00-05:00[America/Chicago]" },
+    { "id": "afternoon-length", "option": "afternoon-ferry", "duration": "PT2H30M" },
+    { "id": "afternoon-arrival", "option": "afternoon-ferry", "arrive_before_start": "PT0S" },
+    { "id": "afternoon-needs-a-ticket", "option": "afternoon-ferry", "needs_right": true },
+    { "id": "drive-time", "option": "drive", "starts_at": "2027-07-18T16:00:00-05:00[America/Chicago]" },
+    { "id": "drive-length", "option": "drive", "duration": "PT1H" },
+    { "id": "drive-arrival", "option": "drive", "arrive_before_start": "PT0S" },
+    { "id": "drive-is-open", "option": "drive", "needs_right": false },
+    { "id": "alex-has-the-car", "object": "car", "starts_with": "alex" },
+    { "id": "drive-needs-the-car", "option": "drive", "requires": { "object": "car", "needed": true } },
+    { "id": "every-use-of-the-car", "complete": { "requires_object": "car" } },
+    { "id": "everything-that-moves-the-car", "complete": { "transfers": "car" } },
+    { "id": "ferry-needs-a-car-ticket", "option": "ferry", "needs_right_for": { "object": "car", "needed": true } },
+    { "id": "every-ticket-for-the-car", "complete": { "needs_right_for": "car" } },
+    { "id": "every-use-of-the-bike", "complete": { "requires_object": "bike" } },
+    { "id": "everything-that-moves-the-bike", "complete": { "transfers": "bike" } },
+    { "id": "ferry-needs-a-bike-ticket", "option": "ferry", "needs_right_for": { "object": "bike", "needed": true } },
+    { "id": "afternoon-needs-a-bike-ticket", "option": "afternoon-ferry", "needs_right_for": { "object": "bike", "needed": true } },
+    { "id": "every-ticket-for-the-bike", "complete": { "needs_right_for": "bike" } },
+    { "id": "ferry-ticket", "booking": { "option": "ferry", "covers": ["alex"], "paid": { "amount": "19.00", "currency": "USD", "budget": "trip-money" } } },
+    { "id": "afternoon-ticket", "booking": { "option": "afternoon-ferry", "covers": ["sam"], "paid": { "amount": "19.00", "currency": "USD", "budget": "trip-money" } } },
+    { "id": "car-deck", "offer": { "option": "ferry", "places": 3, "for_objects": ["car"], "prices": [{ "amount": "90.00", "currency": "USD" }] } },
+    { "id": "bike-rack", "offer": { "option": "ferry", "places": 4, "for_objects": ["bike"], "prices": [{ "amount": "10.00", "currency": "USD" }] } },
+    { "id": "afternoon-bike-rack", "offer": { "option": "afternoon-ferry", "places": 4, "for_objects": ["bike"], "prices": [{ "amount": "10.00", "currency": "USD" }] } }
+  ],
+  "decisions": [
+    { "id": "lock-ferry", "lock": "ferry", "persons": ["alex"] },
+    { "id": "lock-afternoon-ferry", "lock": "afternoon-ferry", "persons": ["sam"] },
+    { "id": "lock-drive", "lock": "drive", "persons": ["alex", "sam"] },
+    { "id": "trip-money-cap", "budget": "trip-money", "spend_at_most": { "amount": "140.00", "currency": "USD" } }
+  ]
+}

@@ -482,7 +482,7 @@ def test_a_place_bought_only_if_needed_is_counted_as_if_it_were() -> None:
     assert found.caps == (CapRow("trip-money-cap", 0, (), (), 0, 10000, 0),)
     assert in_words(file)[-1] == (
         "  trip-money-cap: at most 1 USD from trip-money: 0 paid; 0 still to buy;"
-        " up to 1 more to buy, depending on which OPTIONs need a right; 0 left"
+        " up to 1 more to buy, depending on which OPTIONs need a right; at least 0 left"
     )
     spent = with_tickets(booking("tour", "jo", paid="1 USD", budget="trip-money"))
     assert asked(spent) == [[Unknown("needs no right", "tour")]]

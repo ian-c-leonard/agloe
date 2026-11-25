@@ -1,0 +1,288 @@
+{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "ferry",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-07-18T06:00:00-05:00[America/Chicago]",
+      "end": "2027-07-18T08:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "ferry-ticket"
+      }
+    },
+    {
+      "option": "afternoon-ferry",
+      "persons": [
+        "sam"
+      ],
+      "start": "2027-07-18T12:30:00-05:00[America/Chicago]",
+      "end": "2027-07-18T15:00:00-05:00[America/Chicago]",
+      "rights": {
+        "sam": "afternoon-ticket"
+      }
+    },
+    {
+      "option": "drive",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-07-18T16:00:00-05:00[America/Chicago]",
+      "end": "2027-07-18T17:00:00-05:00[America/Chicago]"
+    }
+  ],
+  "relies_on": [
+    "alex-start",
+    "sam-start",
+    "ferry-time",
+    "ferry-length",
+    "ferry-arrival",
+    "ferry-needs-a-ticket",
+    "afternoon-time",
+    "afternoon-length",
+    "afternoon-arrival",
+    "afternoon-needs-a-ticket",
+    "drive-time",
+    "drive-length",
+    "drive-arrival",
+    "drive-is-open",
+    "alex-has-the-car",
+    "drive-needs-the-car",
+    "every-use-of-the-car",
+    "everything-that-moves-the-car",
+    "ferry-needs-a-car-ticket",
+    "every-ticket-for-the-car",
+    "every-use-of-the-bike",
+    "everything-that-moves-the-bike",
+    "ferry-needs-a-bike-ticket",
+    "afternoon-needs-a-bike-ticket",
+    "every-ticket-for-the-bike",
+    "ferry-ticket",
+    "afternoon-ticket",
+    "car-deck",
+    "bike-rack",
+    "afternoon-bike-rack",
+    "lock-ferry",
+    "lock-afternoon-ferry",
+    "lock-drive",
+    "trip-money-cap"
+  ],
+  "robust": true,
+  "objects": [
+    {
+      "object": "car",
+      "path": [
+        {
+          "where": [
+            {
+              "person": "alex"
+            }
+          ],
+          "since": null,
+          "how": null
+        }
+      ],
+      "required_by": [
+        {
+          "option": "drive",
+          "stated": true,
+          "where": [
+            {
+              "person": "alex"
+            }
+          ]
+        }
+      ],
+      "refused_by": [],
+      "covered_in": [
+        {
+          "option": "ferry",
+          "stated": true,
+          "where": [
+            {
+              "person": "alex"
+            }
+          ],
+          "booking": null,
+          "offer": "car-deck"
+        }
+      ]
+    },
+    {
+      "object": "bike",
+      "path": [
+        {
+          "where": [
+            {
+              "person": "alex"
+            },
+            {
+              "person": "sam"
+            },
+            {
+              "place": "milwaukee"
+            },
+            {
+              "place": "muskegon"
+            },
+            {
+              "place": null
+            }
+          ],
+          "since": null,
+          "how": null
+        }
+      ],
+      "required_by": [],
+      "refused_by": [],
+      "covered_in": [
+        {
+          "option": "ferry",
+          "stated": true,
+          "where": [
+            {
+              "person": "alex"
+            },
+            {
+              "person": "sam"
+            },
+            {
+              "place": "milwaukee"
+            },
+            {
+              "place": "muskegon"
+            },
+            {
+              "place": null
+            }
+          ],
+          "booking": null,
+          "offer": "bike-rack"
+        },
+        {
+          "option": "afternoon-ferry",
+          "stated": true,
+          "where": [
+            {
+              "person": "alex"
+            },
+            {
+              "person": "sam"
+            },
+            {
+              "place": "milwaukee"
+            },
+            {
+              "place": "muskegon"
+            },
+            {
+              "place": null
+            }
+          ],
+          "booking": null,
+          "offer": "afternoon-bike-rack"
+        }
+      ]
+    }
+  ],
+  "to_buy": [
+    {
+      "option": "ferry",
+      "offer": "car-deck",
+      "persons": [],
+      "objects": [
+        "car"
+      ],
+      "only_if_needed": false,
+      "price": {
+        "amount": "90.00",
+        "currency": "USD"
+      },
+      "budget": "trip-money"
+    },
+    {
+      "option": "ferry",
+      "offer": "bike-rack",
+      "persons": [],
+      "objects": [
+        "bike"
+      ],
+      "only_if_needed": true,
+      "price": {
+        "amount": "10.00",
+        "currency": "USD"
+      },
+      "budget": "trip-money"
+    },
+    {
+      "option": "afternoon-ferry",
+      "offer": "afternoon-bike-rack",
+      "persons": [],
+      "objects": [
+        "bike"
+      ],
+      "only_if_needed": true,
+      "price": {
+        "amount": "10.00",
+        "currency": "USD"
+      },
+      "budget": "trip-money"
+    }
+  ],
+  "places_together": [
+    {
+      "object": "bike",
+      "options": [
+        [
+          "ferry"
+        ],
+        [
+          "afternoon-ferry"
+        ]
+      ]
+    }
+  ],
+  "money": {
+    "paid": [
+      {
+        "booking": "ferry-ticket",
+        "amount": "19.00",
+        "currency": "USD",
+        "budget": "trip-money",
+        "by": null
+      },
+      {
+        "booking": "afternoon-ticket",
+        "amount": "19.00",
+        "currency": "USD",
+        "budget": "trip-money",
+        "by": null
+      }
+    ],
+    "not_stated": [],
+    "totals": [
+      {
+        "currency": "USD",
+        "paid": "38.00",
+        "to_buy": "90.00",
+        "to_buy_at_most_if_needed": "10.00"
+      }
+    ]
+  },
+  "caps": [
+    {
+      "cap": "trip-money-cap",
+      "budget": "trip-money",
+      "currency": "USD",
+      "limit": "140.00",
+      "paid": "38.00",
+      "might_be_paid": [],
+      "asked": [],
+      "to_buy": "90.00",
+      "to_buy_at_most_if_needed": "10.00",
+      "left": "2.00"
+    }
+  ]
+}

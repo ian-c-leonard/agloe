@@ -4,8 +4,8 @@
 // The view sends what the FILE says of the rights to each OPTION: whether a PERSON needs a
 // right to take part, each BOOKING with the PERSONs and the OBJECTs it covers, the name to
 // show for each of them in one list, and what it paid, each OFFER
-// with its places and the price of one, and the FACT that the FILE lists every right to the
-// OPTION. This puts
+// with its places, the OBJECTs that it names and the price of one place, and the FACT that
+// the FILE lists every right to the OPTION. This puts
 // them in words, as the report words them. Where the report shows a plan, it says who uses
 // each BOOKING and who takes a place of each OFFER in that plan, as the report states it. It
 // marks what the report names: the records that rule out every plan, and the cases in which a
@@ -21,11 +21,15 @@ import { needsARight } from "./who.js";
 /** What a case of a report can need that is about the rights to an OPTION, for a PERSON or for an OBJECT. */
 const ABOUT_RIGHTS = new Set(["another right", "needs no right", "price", "funding", "charged", "another right for", "needs no right for"]);
 
-/** An OFFER, as the report words it: its places, and what one costs. */
+/**
+ * An OFFER, as the report words it: its places, the OBJECTs that a place can cover, where it
+ * names any, and what one place costs.
+ */
 function offerOf(offer) {
   const places = offer.places === 1 ? "1 place" : `${offer.places} places`;
   const price = offer.price === null ? "; nobody knows the price" : `, for ${offer.price.amount} ${offer.price.currency}${offer.places > 1 ? " each" : ""}`;
-  return `an OFFER with ${places} that can still be bought${price}`;
+  const covers = offer.objects.length ? ` to cover ${listed(offer.objects.map((id) => offer.names[id]), "or")}` : "";
+  return `an OFFER with ${places} that can still be bought${covers}${price}`;
 }
 
 /**
@@ -87,8 +91,15 @@ export function rights(trip, report = null, stated = null) {
   // The OBJECTs that a FACT says an OPTION needs a right for, each with that FACT.
   const needing = (option) => trip.objects.flatMap((each) => each.rights.filter((right) => right.option === option && right.needed).map((right) => ({ id: each.id, name: each.name, record: right.record })));
   // The OBJECTs of which a FACT says that the FILE lists every right to an OPTION that
-  // covers them, each with that FACT.
-  const closedFor = (option) => trip.objects.flatMap((each) => each.rights_closed.filter((closed) => closed.option === option).map((closed) => ({ name: closed.called, record: closed.record })));
+  // covers them, each with that FACT and the OFFERs that it names.
+  const closedFor = (option) => trip.objects.flatMap((each) => each.rights_closed.filter((closed) => closed.option === option).map((closed) => ({ name: closed.called, record: closed.record, offers: closed.offers })));
+  // The OBJECTs that take a place of one OFFER for one OPTION in the plan, in the FILE's
+  // order: those whose right is needed, and those whose right might be needed. Nobody
+  // knows whether the OPTION needs one, or whether the OBJECT is in it.
+  const placedBy = (option, offer, ifNeeded) => {
+    const taken = toBuyIn(report).filter((buy) => buy.option === option && buy.offer === offer && Array.isArray(buy.objects) && (buy.only_if_needed === true) === ifNeeded);
+    return trip.objects.filter(({ id }) => taken.some((buy) => buy.objects.includes(id))).map(({ id }) => id);
+  };
   const shown = trip.rights
     .filter((each) => each.needs?.needed === true || each.bookings.length || each.offers.length || each.complete !== null || needing(each.option).length || closedFor(each.option).length)
     .map((each) => ({
@@ -115,17 +126,24 @@ export function rights(trip, report = null, stated = null) {
         const users = usersOf(each.option, offer.id).map((id) => person.get(id));
         const takes = `In the plan: ${listed(users)} ${users.length === 1 ? "takes" : "each take"} a place of it${ifNeeded(each.option, offer.id) ? ", if the OPTION needs a right" : ""}.`;
         const buys = (need) => Array.isArray(need.buys) && need.buys.some((buy) => buy !== null && typeof buy === "object" && buy.offer === offer.id);
+        // A place for an OBJECT: nobody takes it, so the page names the OBJECT that it
+        // covers. A name can be of one thing or of several, so no verb follows it.
+        const covering = (ids) => `a place of it covers ${ids.length === 1 ? "" : "each of "}${listed(ids.map((id) => offer.names[id] ?? thing.get(id)))}`;
+        const sure = placedBy(each.option, offer.id, false);
+        const maybe = placedBy(each.option, offer.id, true);
+        const covers = [...(sure.length ? [`In the plan: ${covering(sure)}.`] : []), ...(maybe.length ? [`In the plan: ${covering(maybe)}, if a right is needed there.`] : [])].join(" ");
+        const nobody = offer.objects.length ? "In the plan: no place of it is taken." : "In the plan: nobody takes a place of it.";
         return {
           id: offer.id,
           name: offer.id,
           says: offerOf(offer),
-          uses: !trip.itinerary ? null : users.length ? takes : "In the plan: nobody takes a place of it.",
+          uses: !trip.itinerary ? null : offer.objects.length && covers ? covers : users.length ? takes : nobody,
           ...marked([offer.id], (need) => need.offer === offer.id || buys(need), "The report names this OFFER in what the FILE does not say."),
         };
       }),
       whole: wholeOf(each.complete),
       // What the FILE says of the rights to it for an OBJECT, as the report words it.
-      closed: closedFor(each.option).map((thing) => `The FILE lists every right to it that covers ${thing.name}: nobody on the trip holds another or can get one.`),
+      closed: closedFor(each.option).map((thing) => `The FILE lists every right to it that covers ${thing.name}: nobody on the trip holds another or can get one${thing.offers.length ? `, except from ${listed(thing.offers)}` : ""}.`),
       // Its own records: the FACT about whether people need a right, the FACT that the
       // FILE lists every right for a PERSON, each FACT that it needs a right for an OBJECT,
       // and each FACT that the FILE lists every right for an OBJECT.

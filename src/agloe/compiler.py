@@ -23,7 +23,7 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence, Set
 from dataclasses import replace
 from hashlib import sha256
 from heapq import heappop, heappush
-from itertools import combinations
+from itertools import combinations, pairwise
 from math import inf
 
 from ortools.sat.python import cp_model
@@ -53,6 +53,11 @@ type _Falls = dict[tuple[int, int, int], int]
 type _InOrder = tuple[int, ...]
 type _Empty = frozenset[int]  # the OPTIONs that happen with nobody in them
 type _Choice = tuple[_Who, _Orders, _By | None, _Falls | None, _InOrder | None, _Empty]
+# What the rules said of a choice of the solver: the OPTIONs each PERSON does, in order, the
+# OPTIONs that happen with nobody in them, and the open pairs that the solver chose to hold.
+# Then None where the rules refuse the choice, or what rules 4 and 5 count for the first
+# ITINERARY that the rules make of it, where that is more than the model thought.
+type _Learned = tuple[_Orders, _Empty, frozenset[tuple[str, str]], int | None]
 # What the solver answered for each model it was asked about, by the digest of the model.
 type _Asked = dict[bytes, tuple[cp_model.CpSolver, object]]
 type _Amount = cp_model.LinearExpr | int  # seconds: a plain number, or one the solver works out
@@ -110,9 +115,33 @@ def shown(file: File, world: World) -> Itinerary | None:
         return None
     if _locked_twice_at_once(file, world) or _has_to_take_two_apart(file, world):
         return None
-    search = _Search(file, world)
-    choice = search.first_in_file_order()
-    return None if choice is None else _checked(file, world, choice, search.known)
+    learned: list[_Learned] = []
+    while True:
+        search = _Search(file, world, learned=learned)
+        choice = search.first_in_file_order()
+        if choice is None:
+            return None
+        itinerary = _checked(file, world, choice, search.known, counts_less=search.counts_less)
+        counted = None if itinerary is None else _counted(file, itinerary)
+        if itinerary is not None and counted == search.fewest:
+            return itinerary
+        if counted is not None and (search.fewest is None or counted < search.fewest):
+            raise AssertionError("the rules made a plan that the model says takes more")
+        # The rules refuse the choice, or their plan for it takes part more often than the
+        # model thought. The next model knows that, and the choice comes where it belongs.
+        learned.append((choice[1], choice[5], search.turned_out, counted))
+
+
+def _counted(file: File, itinerary: Itinerary) -> int:
+    """What rules 4 and 5 of "Which ITINERARY is shown" count for a plan, as one number.
+
+    How often PERSONs take part comes first: once for each PERSON in each OPTION, and once
+    for each time a PERSON takes a WAY. Then come the OPTIONs that happen. ``_Search`` makes
+    the same number least.
+    """
+    taking_part = sum(len(step.persons) for step in itinerary)
+    happening = sum(step.option is not None for step in itinerary)
+    return taking_part * (len(file.options) + 1) + happening
 
 
 def works(file: File, world: World, asked: _Asked | None = None) -> bool:
@@ -122,10 +151,16 @@ def works(file: File, world: World, asked: _Asked | None = None) -> bool:
         return False
     if _locked_twice_at_once(file, world) or _has_to_take_two_apart(file, world):
         return False
-    choice = _plan(_Search(file, world, plain=True), asked)
-    if choice is not None:
-        _checked(file, world, choice, any_will_do=True)
-    return choice is not None
+    refused: list[_Learned] = []
+    while True:
+        search = _Search(file, world, plain=True, learned=refused)
+        choice = _plan(search, asked)
+        if choice is None:
+            return False
+        loose = search.counts_less
+        if _checked(file, world, choice, any_will_do=True, counts_less=loose) is not None:
+            return True
+        refused.append((choice[1], choice[5], search.turned_out, None))
 
 
 def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
@@ -150,16 +185,20 @@ def can_work(remaining: Remaining, asked: _Asked | None = None) -> bool:
         return False
     if _locked_twice_at_once(file, world) or _has_to_take_two_apart(file, world, open_pairs):
         return False
-    search = _Search(file, world, open_pairs, plain=True)
-    choice = _plan(search, asked)
-    if choice is None:
-        return False
-    does = search.turned_out
-    chosen = replace(
-        world, satisfies=world.satisfies | does, might_satisfy=world.might_satisfy | does
-    )
-    _checked(file, chosen, choice, any_will_do=True)
-    return True
+    refused: list[_Learned] = []
+    while True:
+        search = _Search(file, world, open_pairs, plain=True, learned=refused)
+        choice = _plan(search, asked)
+        if choice is None:
+            return False
+        does = search.turned_out
+        chosen = replace(
+            world, satisfies=world.satisfies | does, might_satisfy=world.might_satisfy | does
+        )
+        loose = search.counts_less
+        if _checked(file, chosen, choice, any_will_do=True, counts_less=loose) is not None:
+            return True
+        refused.append((choice[1], choice[5], search.turned_out, None))
 
 
 def _with_the_ways_that_can_start(file: File, world: World) -> World:
@@ -303,7 +342,8 @@ def _checked(
     choice: _Choice,
     known: reference.Routes | None = None,
     any_will_do: bool = False,
-) -> Itinerary:
+    counts_less: bool = False,
+) -> Itinerary | None:
     """The solver's choice, timed and checked by the reference checker.
 
     For the ITINERARY shown, the reference checker picks the WAYs itself, in the order of the
@@ -315,12 +355,21 @@ def _checked(
     It then tries the OPTIONs that matter to each OBJECT in the order the solver has them
     first, and works out the hand-overs for that order itself. The solver's times keep that
     order, so the reference checker need not look for another.
+
+    The rules refuse no choice of the solver, with one exception. ``counts_less`` says that
+    the model can count less against a cap than the rules do: ``_Search`` says when. Then
+    the result is None where no ITINERARY works for these PERSONs and orders. Where an
+    OBJECT is can turn on the WAYs, so every choice of WAYs is tried before that is said.
     """
     who, orders, by, falls, in_order, empty = choice
     itinerary = reference.scheduled(
         file, world, who, orders, by, known, falls, any_will_do, in_order, empty
     )
-    if itinerary is None:
+    if itinerary is None and counts_less and by is not None:
+        itinerary = reference.scheduled(
+            file, world, who, orders, None, known, None, any_will_do, None, empty
+        )
+    if itinerary is None and not counts_less:
         raise AssertionError("the solver chose PERSONs and orders that the rules refuse")
     return itinerary
 
@@ -401,6 +450,7 @@ class _Search:
         world: World,
         open_pairs: Sequence[tuple[str, str]] = (),
         plain: bool = False,
+        learned: Sequence[_Learned] = (),
     ) -> None:
         """Build the model of this world.
 
@@ -408,8 +458,25 @@ class _Search:
         OPTION SATISFIES the WANT. The world must say that they do not. ``plain`` says that
         the model is for the plain question whether anything works, with nothing to make
         smaller.
+
+        The model says what the rules say, with one exception: ``_place_the_objects`` can
+        count less against a cap than the rules do, and then ``counts_less`` says so. A
+        choice of the solver that the rules refuse is then no mistake. It goes into
+        ``learned``, and the next model leaves out each choice in there. So where the
+        solver finds no choice, none works.
+
+        A choice that the rules accept can be one that the model ranks too well. The model
+        thought that it works with fewer WAYs than the rules need for it: its own plan for
+        the choice passes a cap by the rules' count. Then ``learned`` holds what rules 4
+        and 5 count for the plan that the rules make of the choice, and the next model
+        gives the choice no less. So the first choice whose plan counts what the model
+        thought is the first by the rules.
         """
         self.file, self.world, self.plain = file, world, plain
+        self.counts_less = False
+        # The least that rules 4 and 5 count in this model, once ``first_in_file_order``
+        # has worked it out.
+        self.fewest: int | None = None
         self.model = cp_model.CpModel()
         # The choice for each open pair, and the pairs that held in the last answer.
         self.does = {
@@ -445,6 +512,56 @@ class _Search:
             self._lay_out_path(number)
         for thing, matter in self.matters.items():
             self._follow(thing, matter)
+        if world.offered:
+            self._place_the_objects()
+            self._hold_to_the_caps()
+        for orders, empty, held, counted in learned:
+            self._learn(orders, empty, held, counted)
+
+    def _counted(self) -> cp_model.LinearExprT:
+        """What rules 4 and 5 make least, as one number: ``_counted`` says what it is."""
+        ways_taken = sum(route * length for route, length in self.legs)
+        taking_part = sum(each for row in self.takes for each in row) + ways_taken
+        return taking_part * (len(self.file.options) + 1) + sum(self.used)
+
+    def _learn(
+        self, orders: _Orders, empty: _Empty, held: Set[tuple[str, str]], counted: int | None
+    ) -> None:
+        """What the rules said of one choice: each PERSON does these OPTIONs in this order,
+        and these OPTIONs happen with nobody in them.
+
+        With no number, the rules refuse the choice, and no answer has it. With a number,
+        rules 4 and 5 count that much for the choice, and no answer has it with less.
+        Every other choice stays as it was. A PERSON's order is the arcs of their path,
+        and an OPTION that nobody does happens or not. The rules spoke of the world where
+        the open pairs in ``held`` hold and the others do not, so this is about the choice
+        with those pairs only.
+        """
+        count = len(self.file.options)
+        same: list[cp_model.LiteralT] = []
+        differs: list[cp_model.LiteralT] = []
+
+        def holds(choice: cp_model.IntVar, yes: bool = True) -> None:
+            same.append(choice if yes else choice.negated())
+            differs.append(choice.negated() if yes else choice)
+
+        for number, order in enumerate(orders):
+            follows = self.follows[number]
+            if not order:
+                holds(self.nothing[number])
+                continue
+            for here, there in pairwise((count, *order, count)):
+                holds(follows[here, there])
+        attended = {index for order in orders for index in order}
+        for index in range(count):
+            if index not in attended:
+                holds(self.used[index], index in empty)
+        for pair, does in self.does.items():
+            holds(does, pair in held)
+        if counted is None:
+            self.model.add_bool_or(differs)
+        else:
+            _when(self.model.add(self._counted() >= counted), *same)
 
     def _read_the_world(self) -> None:
         """What the world says about each OPTION and WAY."""
@@ -484,7 +601,15 @@ class _Search:
         # who takes part has it and it is not handed over there, as where the OPTION
         # refuses it. It is not carried there either.
         self.barred = world.refuses | world.uncovered
-        checked = world.needs | self.barred
+        # Where only a place of an OFFER covers the OBJECT, it takes one in those cases,
+        # and the place is paid for. So where the OBJECT is matters there too.
+        checked = world.needs | self.barred | world.offered
+        # The choice that an OBJECT takes a place of an OFFER in an OPTION, by the OBJECT
+        # and the position of the OPTION in the FILE.
+        self.places: dict[tuple[str, int], cp_model.IntVar] = {}
+        # The choice that the OBJECT is sure to take that place: it is there whatever turns
+        # out to be so.
+        self.sure: dict[tuple[str, int], cp_model.IntVar] = {}
         for thing in file.objects:
             touched = [
                 index
@@ -762,6 +887,13 @@ class _Search:
                 if (options[index].id, thing) in self.barred:
                     for row in might_have:
                         model.add(row[index] == 0)
+                if (options[index].id, thing) in world.offered:
+                    # It takes a place where a PERSON who has it, or might, takes part. That
+                    # is sure where the world says who has it.
+                    for row in might_have:
+                        model.add_implication(row[index], self._takes_a_place(thing, index))
+                    for row in holder:
+                        model.add_implication(row[index], self._surely_takes_a_place(thing, index))
             return
         origins = {options[index].origin for index in matter}
         spots = [
@@ -1187,6 +1319,19 @@ class _Search:
         here = next(n for n, spot in enumerate(spots) if spot.place == option.origin)
         refused = (option.id, thing) in self.barred
         uncovered = (option.id, thing) in world.uncovered
+        if (option.id, thing) in world.offered:
+            # Only a place of an OFFER covers the OBJECT here. It takes one where it is in
+            # the OPTION afterwards, or might be: it is carried there, by choice or with
+            # none. The other cases are a PERSON who has it and a hand-over, below.
+            buys = self._takes_a_place(thing, index)
+            if Where(option=option.id) in spots:
+                aboard = spots.index(Where(option=option.id))
+                inside = after[aboard]
+                model.add_bool_or([inside.negated(), used.negated(), buys])
+                # That is sure where the OBJECT is in the OPTION afterwards and nowhere else.
+                elsewhere = sum(after[n] for n in range(len(spots)) if n != aboard)
+                sure = self._surely_takes_a_place(thing, index)
+                _when(model.add(sure + elsewhere >= inside), used)
 
         def at_hand(*when: cp_model.LiteralT) -> None:
             """Under these conditions, each place where the OBJECT might be is at hand."""
@@ -1268,6 +1413,22 @@ class _Search:
             model.add_min_equality(held[n], [before[n], takes[n]])
         any_held = model.new_bool_var(f"somebody has {thing} in {option.id}")
         model.add_max_equality(any_held, [0, *held])
+        if (option.id, thing) in world.offered:
+            # It takes a place where a PERSON who takes part has it, or might, and where
+            # it is handed over.
+            model.add_implication(any_held, self._takes_a_place(thing, index))
+            if given is not None:
+                model.add_implication(given, self._takes_a_place(thing, index))
+            # That is sure where it is handed over, and where a PERSON who takes part has
+            # it and it can be nowhere else.
+            sure = self._surely_takes_a_place(thing, index)
+            if given is not None:
+                model.add_implication(given, sure)
+            away = sum(
+                before[n] - held[n] if spot.person is not None else before[n]
+                for n, spot in enumerate(spots)
+            )
+            model.add(sure + away >= any_held)
 
         def same(n: int, *when: cp_model.LiteralT) -> None:
             _when(model.add(after[n] == before[n]), *when)
@@ -1306,8 +1467,108 @@ class _Search:
         self.model.add(self.takes[number][index] == 0)
         self.left_out.add((number, index))
 
+    def _takes_a_place(self, thing: str, index: int) -> cp_model.IntVar:
+        """The choice that an OBJECT takes a place of an OFFER in an OPTION."""
+        if (thing, index) not in self.places:
+            name = f"{thing} takes a place in {self.file.options[index].id}"
+            self.places[thing, index] = self.model.new_bool_var(name)
+        return self.places[thing, index]
+
+    def _surely_takes_a_place(self, thing: str, index: int) -> cp_model.IntVar:
+        """The choice that an OBJECT is sure to take a place of an OFFER in an OPTION.
+
+        The model only says when it has to be so. That is enough: it makes a cap count
+        more, and never less.
+        """
+        if (thing, index) not in self.sure:
+            name = f"{thing} is sure to take a place in {self.file.options[index].id}"
+            self.sure[thing, index] = self.model.new_bool_var(name)
+        return self.sure[thing, index]
+
+    def _is_in_one_place(self, thing: str) -> bool:
+        """Whether the world says where an OBJECT is all through a plan.
+
+        It does not where nobody knows where the OBJECT starts, or what an OPTION does with
+        it. A start that the world leaves to pick is one place, and so is what an OPTION
+        does where it does whichever thing suits the plan: the solver picks.
+        """
+        world = self.world
+        if thing not in world.starts and thing not in world.starts_anywhere:
+            return False
+        return not any(
+            world.does.get((option.id, thing), "").startswith("might")
+            or world.does.get((option.id, thing)) == "carries_unless_refused"
+            or reference.goes_along(world, option.id, thing) == "might"
+            for option in self.file.options
+        )
+
+    def _place_the_objects(self) -> None:
+        """Each OBJECT that takes a place of an OFFER has one that can be paid for.
+
+        An OBJECT that another transfer brings is not followed. It takes a place where
+        the OPTION happens and takes it along with no choice, or might, as
+        ``reference.taken_along`` says. Every other OBJECT takes one where ``_follow`` says.
+
+        Each takes one of the pairs of an OFFER and a BUDGET that
+        ``reference.pairs_to_pay`` gives: an OFFER that names it, and a BUDGET that lists
+        it. No place is taken twice, and a cap counts what it costs with what the PERSONs
+        buy. An OBJECT with no pair takes no place.
+
+        An OBJECT that might be in one place or another is different. It takes a place in
+        each OPTION where it might need one, and it pays only for the places it takes
+        together, as ``reference.taken_together`` says. The model does not follow which
+        those are. For such an OBJECT a cap counts each place it is sure to take, and of
+        the others the one that costs the most. That is never more than the rules count,
+        and it is the same where the OBJECT might take one place besides the sure ones.
+        Where it might take more, ``counts_less`` says that the rules can count more.
+        """
+        model, file, world = self.model, self.file, self.world
+        position = {option.id: index for index, option in enumerate(file.options)}
+        for option, thing in sorted(world.offered):
+            if reference.taken_along(world, option, thing):
+                index = position[option]
+                model.add_implication(self.used[index], self._takes_a_place(thing, index))
+        filled: dict[str, list[cp_model.IntVar]] = {}
+        # For an OBJECT that might be in one place or another, and each cap: each price
+        # that the cap would count, with the choice that pays it and the OPTION.
+        unsure: dict[tuple[str, tuple[str, str]], list[tuple[int, cp_model.IntVar, int]]] = {}
+        for (thing, index), buys in self.places.items():
+            option = file.options[index].id
+            counted_in_full = thing in world.brought or self._is_in_one_place(thing)
+            picks: list[cp_model.IntVar] = []
+            for offer, budget, key, units in reference.pairs_to_pay(file, world, option, thing):
+                pick = model.new_bool_var(f"{thing} takes a place of {offer} paid from {budget}")
+                picks.append(pick)
+                filled.setdefault(offer, []).append(pick)
+                if key is not None and counted_in_full:
+                    self.drawn[key].append((units, pick))
+                elif key is not None:
+                    unsure.setdefault((thing, key), []).append((units, pick, index))
+            model.add(sum(picks) >= buys)
+        for option in file.options:
+            for offer in file.offers_for_objects(option.id):
+                if len(filled.get(offer.id, ())) > offer.places:
+                    model.add(sum(filled[offer.id]) <= offer.places)
+        # The most that each such OBJECT pays from each cap for a place it only might take.
+        self.at_most: dict[tuple[str, str], list[tuple[cp_model.IntVar, int]]] = {}
+        for (thing, key), prices in unsure.items():
+            highest = max(units for units, _, _ in prices)
+            most = model.new_int_var(0, highest, f"the most {thing} might pay from {key}")
+            self.at_most.setdefault(key, []).append((most, highest))
+            for units, pick, index in prices:
+                paid = model.new_bool_var(f"{pick.name}, for sure")
+                model.add(paid >= pick + self._surely_takes_a_place(thing, index) - 1)
+                model.add(most >= units * pick - units * paid)
+                self.drawn[key].append((units, paid))
+            if len({index for _, _, index in prices}) > 1:
+                self.counts_less = True
+
     def _hold_to_the_rights(self) -> None:
-        """Nobody takes part without a right in an OPTION that needs one, and no cap is passed."""
+        """Nobody takes part without a right in an OPTION that needs one, and no cap is passed.
+
+        Where an OBJECT can take a place of an OFFER, the caps are held to once those
+        places are in the model too.
+        """
         file, world = self.file, self.world
         people = list(enumerate(file.persons))
         # What the purchases draw on each cap: the price, and the choice that draws it.
@@ -1318,7 +1579,8 @@ class _Search:
             if option.id in world.needs_right:
                 without = [n for n, person in people if (option.id, person.id) not in world.rights]
                 self._share_out(index, without)
-        self._hold_to_the_caps()
+        if not world.offered:
+            self._hold_to_the_caps()
 
     def _hold_to_the_caps(self) -> None:
         """No cap is passed: what the BOOKINGs charged, plus what is bought, is within it.
@@ -1343,10 +1605,14 @@ class _Search:
                     model.add(pick == 0)
                 else:
                     fitting.append((units, pick))
-            if sum(units for units, _ in fitting) >= 2**62:
+            # What an OBJECT pays at most for the places it only might take.
+            besides = self.at_most.get(key, []) if self.world.offered else []
+            highest = sum(units for units, _ in fitting) + sum(most for _, most in besides)
+            if highest >= 2**62:
                 raise DoesNotFit("the amounts of this TRIP are too large to add up")
-            if sum(units for units, _ in fitting) > room:
-                model.add(sum(units * pick for units, pick in fitting) <= room)
+            if highest > room:
+                bought = sum(units * pick for units, pick in fitting)
+                model.add(bought + sum(most for most, _ in besides) <= room)
 
     def _share_out(self, index: int, without: Sequence[int]) -> None:
         """Each of these PERSONs who takes part in an OPTION takes a place they can pay for.
@@ -1878,12 +2144,11 @@ class _Search:
         """The choice of PERSONs and orders that "Which ITINERARY is shown" puts first."""
         model, file = self.model, self.file
         count = len(file.options)
-        ways_taken = sum(route * length for route, length in self.legs)
-        taking_part = sum(each for row in self.takes for each in row) + ways_taken
-        fewest = self._least(taking_part * (count + 1) + sum(self.used))
+        fewest = self._least(self._counted())
         if fewest is None:
             return None
-        model.add(taking_part * (count + 1) + sum(self.used) == fewest)
+        self.fewest = fewest
+        model.add(self._counted() == fewest)
         # An OPTION that somebody has to take part in happens: that is not left to choose.
         happens = {index for theirs in self.have_to.values() for index in theirs}
         open_to_choice = [index for index in range(count) if index not in happens]

@@ -303,7 +303,7 @@ def after_the_train(file: File, start: Where, *persons: str) -> set[frozenset[Wh
     reached = reference._first_hand_overs(  # pyright: ignore[reportPrivateUsage]
         worst_case(file), "bike", visits, [frozenset({start})], lambda option, person: (0, 0), {}
     )
-    return {places for places, _ in reached}
+    return {places for places, _, _ in reached}
 
 
 def without(file: File, record: str) -> File:
@@ -571,11 +571,6 @@ def test_a_file_says_that_it_lists_every_right_for_one_object() -> None:
     assert both.rights_complete_for("ferry", "car") is not None
 
 
-WITH_OFFERS: Document = {
-    "id": "full",
-    "complete": {"rights_to": "ferry", "for_object": "car", "offers": []},
-}
-
 EXTRA: Document = {"id": "whole", "complete": {"needs_right_for": "car", "extra": "car"}}
 TWO_KINDS: Document = {"id": "whole", "complete": {"needs_right_for": "car", "transfers": "car"}}
 
@@ -586,8 +581,6 @@ TWO_KINDS: Document = {"id": "whole", "complete": {"needs_right_for": "car", "tr
         ([FULL, {**FULL, "id": "again"}], "another FACT already states this about ferry and car"),
         ([no_other_right_for("ferry", "bike")], "bike is not an OBJECT in this FILE"),
         ([no_other_right_for("train", "car")], "train is not an OPTION in this FILE"),
-        # The FACT names an OBJECT, so it is meant for the OBJECT: the OFFERs are what is wrong.
-        ([WITH_OFFERS], "Additional properties are not allowed ('offers' was unexpected)"),
         ([EXTRA], "Additional properties are not allowed ('extra' was unexpected)"),
         ([TWO_KINDS], "a COMPLETE set is of one kind"),
     ],
@@ -595,7 +588,6 @@ TWO_KINDS: Document = {"id": "whole", "complete": {"needs_right_for": "car", "tr
 def test_the_format_refuses_a_set_of_rights_for_an_object_that_cannot_be_meant(
     facts: list[Document], problem: str
 ) -> None:
-    """A set for an OBJECT names no OFFER: every OFFER has places for PERSONs."""
     with pytest.raises(FileError) as refused:
         a_ferry(TICKET, *facts)
     assert problem in str(refused.value)

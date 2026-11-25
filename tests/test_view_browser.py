@@ -1664,6 +1664,26 @@ def test_pointing_ties_an_object_to_the_calendar_and_the_report(
         assert page.locator("#objects-part").is_hidden()
 
 
+def test_an_object_card_says_which_of_its_places_are_bought_together(chromium: Browser) -> None:
+    """Nobody said where the bike is. Its card says that at most one of its two places has
+    to be bought, as the report does, and that line of the report lights up the card."""
+    path = EXAMPLES / "a-car-ferry" / "nobody-said-where-the-bike-is.json"
+    with opened(chromium, path) as page:
+        page.locator("#report .row").first.wait_for()
+        bike = page.locator("#objects .card", has_text="the bike")
+        bike.wait_for()
+        said = (
+            "Of the places for the bike, at most one has to be bought:"
+            " for Car ferry to Muskegon or Afternoon ferry to Muskegon."
+        )
+        assert bike.locator(".card-together").text_content() == said
+        # The car is in one place all through the plan, and its card has no such line.
+        car = page.locator("#objects .card", has_text="the car").first
+        assert car.locator(".card-together").count() == 0
+        page.locator("#report .row", has_text="Of the places for the bike").hover()
+        lit(page, objects=["the bike"], marks=[])
+
+
 def test_pointing_ties_a_place_to_the_calendar_and_the_report(chromium: Browser) -> None:
     """Alex and Sam start from the hotel, walk to the museum, and fly from O'Hare to Denver."""
     walk = "the walk between the hotel and the Art Institute"

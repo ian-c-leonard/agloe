@@ -77,13 +77,14 @@ class Budget:
     """A named source of money.
 
     ``persons`` may draw on it for what the TRIP still has to buy, and it pays only prices in
-    the ``currencies`` it holds.
+    the ``currencies`` it holds. ``objects`` are the OBJECTs whose places it may pay for.
     """
 
     id: str
     name: str
     persons: tuple[str, ...]
     currencies: tuple[str, ...]
+    objects: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -309,13 +310,17 @@ class Booking:
 class Offer:
     """A FACT: an OFFER. Rights to one OPTION can still be bought, one for each of its places.
 
-    ``price`` is what one place costs. None: nobody knows.
+    ``price`` is what one place costs. None: nobody knows. An OFFER that names no OBJECT is
+    for PERSONs: each place is a right for one PERSON to take part. An OFFER that names
+    ``objects`` is for them: each place is a right that covers any one of those OBJECTs, and
+    no PERSON takes it.
     """
 
     id: str
     option: str
     places: int
     price: Money | None = None
+    objects: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -338,13 +343,15 @@ class CompleteRightsFor:
     """A FACT: the rights to an OPTION for one OBJECT are COMPLETE.
 
     The BOOKINGs in the FILE that cover the OBJECT secure every right to the OPTION that
-    covers it. Nobody on the TRIP can get another. The FACT says nothing of a right for a
-    PERSON, or for another OBJECT.
+    covers it. Nobody on the TRIP can get another, except by a place of an OFFER that the
+    FACT names in ``offers``. Those are all the OFFERs the FILE has for the OPTION that name
+    the OBJECT. The FACT says nothing of a right for a PERSON, or for another OBJECT.
     """
 
     id: str
     option: str
     object: str
+    offers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -604,38 +611,46 @@ class File:
         """The BOOKING that covers this PERSON for this OPTION: the first one the FILE lists."""
         return self._bookings.get((option, person))
 
-    def listed(self, person: str) -> bool:
-        """Whether some BUDGET lists this PERSON. If none does, nobody has said who pays."""
-        return person in self._listed
+    def listed(self, buyer: str) -> bool:
+        """Whether some BUDGET lists this PERSON or this OBJECT.
 
-    def pays(self, person: str, price: Money) -> Budget | None:
-        """The BUDGET that pays this price for this PERSON: the first one the FILE lists.
+        If none does, nobody has said who pays for them. Every id is unique in the FILE, so
+        the id says which of the two the buyer is.
+        """
+        return buyer in self._listed
 
-        It lists the PERSON and holds the currency. None where no BUDGET does, and for a price
+    def pays(self, buyer: str, price: Money) -> Budget | None:
+        """The BUDGET that pays this price for this PERSON or OBJECT: the first the FILE lists.
+
+        It lists the buyer and holds the currency. None where no BUDGET does, and for a price
         of nothing, which draws on no BUDGET.
         """
-        return self._payers.get((person, price.currency)) if price.amount else None
+        return self._payers.get((buyer, price.currency)) if price.amount else None
 
     @cached_property
     def _listed(self) -> frozenset[str]:
-        return frozenset(person for budget in self.budgets for person in budget.persons)
+        return frozenset(
+            buyer for budget in self.budgets for buyer in (*budget.persons, *budget.objects)
+        )
 
     @cached_property
     def _payers(self) -> dict[tuple[str, str], Budget]:
-        """The first BUDGET that lists each PERSON and holds each currency, looked up once."""
+        """The first BUDGET that lists each PERSON or OBJECT and holds each currency."""
         first: dict[tuple[str, str], Budget] = {}
         for budget in self.budgets:
-            for person in budget.persons:
+            for buyer in (*budget.persons, *budget.objects):
                 for currency in budget.currencies:
-                    first.setdefault((person, currency), budget)
+                    first.setdefault((buyer, currency), budget)
         return first
 
-    def payers(self, person: str, currency: str) -> tuple[Budget, ...]:
-        """The BUDGETs that list this PERSON and hold this currency, in the FILE's order."""
+    def payers(self, buyer: str, currency: str) -> tuple[Budget, ...]:
+        """The BUDGETs that list this PERSON or OBJECT and hold this currency, in the FILE's
+        order."""
         return tuple(
             budget
             for budget in self.budgets
-            if person in budget.persons and currency in budget.currencies
+            if (buyer in budget.persons or buyer in budget.objects)
+            and currency in budget.currencies
         )
 
     @cached_property
@@ -674,19 +689,65 @@ class File:
         return bool(money.amount) and booking.paid.budget is None and capped
 
     def offers(self, option: str) -> tuple[Offer, ...]:
-        """The OFFERs for this OPTION, in the FILE's order."""
+        """The OFFERs for PERSONs to take part in this OPTION, in the FILE's order."""
         return self._offers.get(option, ())
 
     def places_on_offer(self, option: str) -> int:
         """How many PERSONs can still buy a right to this OPTION."""
         return sum(offer.places for offer in self.offers(option))
 
+    def offers_for(self, option: str, object: str) -> tuple[Offer, ...]:
+        """The OFFERs for this OPTION that name this OBJECT, in the FILE's order."""
+        return self._offers_for.get((option, object), ())
+
+    def offers_for_objects(self, option: str) -> tuple[Offer, ...]:
+        """The OFFERs for this OPTION that name OBJECTs, in the FILE's order."""
+        return self._offers_for_objects.get(option, ())
+
+    def every_offer(self, option: str) -> tuple[Offer, ...]:
+        """Every OFFER for this OPTION, for PERSONs or for OBJECTs, in the FILE's order."""
+        return tuple(
+            fact for fact in self.facts if isinstance(fact, Offer) and fact.option == option
+        )
+
+    def offers_open_to(self, option: str, buyer: str) -> tuple[Offer, ...]:
+        """The OFFERs for this OPTION with places for this PERSON or OBJECT, in the FILE's order.
+
+        For an OBJECT they are the OFFERs that name it. For a PERSON they are the OFFERs
+        that name no OBJECT.
+        """
+        if buyer in self._object_ids:
+            return self.offers_for(option, buyer)
+        return self.offers(option)
+
+    @cached_property
+    def _object_ids(self) -> frozenset[str]:
+        return frozenset(thing.id for thing in self.objects)
+
     @cached_property
     def _offers(self) -> dict[str, tuple[Offer, ...]]:
         found: dict[str, tuple[Offer, ...]] = {}
         for fact in self.facts:
-            if isinstance(fact, Offer):
+            if isinstance(fact, Offer) and not fact.objects:
                 found[fact.option] = (*found.get(fact.option, ()), fact)
+        return found
+
+    @cached_property
+    def _offers_for_objects(self) -> dict[str, tuple[Offer, ...]]:
+        found: dict[str, tuple[Offer, ...]] = {}
+        for fact in self.facts:
+            if isinstance(fact, Offer) and fact.objects:
+                found[fact.option] = (*found.get(fact.option, ()), fact)
+        return found
+
+    @cached_property
+    def _offers_for(self) -> dict[tuple[str, str], tuple[Offer, ...]]:
+        found: dict[tuple[str, str], tuple[Offer, ...]] = {}
+        for fact in self.facts:
+            if isinstance(fact, Offer):
+                for thing in fact.objects:
+                    pair = (fact.option, thing)
+                    found[pair] = (*found.get(pair, ()), fact)
         return found
 
     def rights_complete(self, option: str) -> CompleteRights | None:
@@ -1240,7 +1301,11 @@ def load(document: object) -> File:
             known(where, person, "PERSON", person_ids)
         budgets.append(
             Budget(
-                budget["id"], budget["name"], tuple(budget["persons"]), tuple(budget["currencies"])
+                budget["id"],
+                budget["name"],
+                tuple(budget["persons"]),
+                tuple(budget["currencies"]),
+                tuple(budget.get("objects", ())),
             )
         )
 
@@ -1254,6 +1319,9 @@ def load(document: object) -> File:
     for index, thing in enumerate(objects):
         claim(f"/objects/{index}", thing.id)
     object_ids = {thing.id for thing in objects}
+    for index, budget in enumerate(budgets):
+        for thing in budget.objects:
+            known(f"/budgets/{index}", thing, "OBJECT", object_ids)
     options: list[Option] = []
     for index, option in enumerate(raw["options"]):
         where = f"/options/{index}"
@@ -1309,8 +1377,10 @@ def load(document: object) -> File:
     refused: set[tuple[str, str]] = set()  # each OPTION and OBJECT with a FACT about a refusal
     acted: set[tuple[str, str]] = set()  # each OPTION and OBJECT with a FACT about what it does
     ticketed: set[tuple[str, str]] = set()  # each OPTION and OBJECT with a FACT about a right
-    offered: list[tuple[str, str, str]] = []  # where an OFFER is, its id and its OPTION
-    closures: list[tuple[str, str, tuple[str, ...]]] = []  # the same for a COMPLETE set of rights
+    # Where an OFFER is, its id, its OPTION and the OBJECTs it names.
+    offered: list[tuple[str, str, str, tuple[str, ...]]] = []
+    # Where a COMPLETE set of rights is, its OPTION, its OBJECT if it names one, and its OFFERs.
+    closures: list[tuple[str, str, str | None, tuple[str, ...]]] = []
     for index, fact in enumerate(raw["facts"]):
         where = f"/facts/{index}"
         claim(where, fact["id"])
@@ -1355,7 +1425,9 @@ def load(document: object) -> File:
                 if (both, CompleteRightsFor) in stated:
                     problems.append(f"{where}: another FACT already states this about {both}")
                 stated.add((both, CompleteRightsFor))
-                facts.append(CompleteRightsFor(fact["id"], about, thing))
+                open_offers = tuple(whole.get("offers", ()))
+                closures.append((where, about, thing, open_offers))
+                facts.append(CompleteRightsFor(fact["id"], about, thing, open_offers))
                 continue
             if "rights_to" in whole:
                 about = whole["rights_to"]
@@ -1364,7 +1436,7 @@ def load(document: object) -> File:
                     problems.append(f"{where}: another FACT already states this about {about}")
                 stated.add((about, CompleteRights))
                 open_offers = tuple(whole.get("offers", ()))
-                closures.append((where, about, open_offers))
+                closures.append((where, about, None, open_offers))
                 facts.append(CompleteRights(fact["id"], about, open_offers))
                 continue
             origin, destination = whole.get("from"), whole.get("to")
@@ -1411,14 +1483,17 @@ def load(document: object) -> File:
             continue
         if "offer" in fact:
             known(where, fact["offer"]["option"], "OPTION", option_ids)
-            offered.append((where, fact["id"], fact["offer"]["option"]))
+            named = tuple(fact["offer"].get("for_objects", ()))
+            for thing in named:
+                known(where, thing, "OBJECT", object_ids)
+            offered.append((where, fact["id"], fact["offer"]["option"], named))
             quoted = [
                 Money(Decimal(each["amount"]), each["currency"])
                 for each in fact["offer"].get("prices", ())
             ]
             on_offer = int(fact["offer"]["places"])
             price = next(iter(quoted), None)
-            facts.append(Offer(fact["id"], fact["offer"]["option"], on_offer, price))
+            facts.append(Offer(fact["id"], fact["offer"]["option"], on_offer, price, named))
             continue
         if "has" in fact:
             known(where, fact["person"], "PERSON", person_ids)
@@ -1550,16 +1625,23 @@ def load(document: object) -> File:
             problems.append(f"{where}: another FACT already states this about {fact['option']}")
         stated.add((fact["option"], type(made)))
         facts.append(made)
-    # A COMPLETE set of rights and the OFFERs for its OPTION have to say the same thing.
-    for where, option, open_offers in closures:
+    # A COMPLETE set of rights and the OFFERs for its OPTION have to say the same thing. A
+    # set for the PERSONs names the OFFERs for PERSONs, and a set for an OBJECT names the
+    # OFFERs that name the OBJECT.
+    named_by = {id: (about, things) for _, id, about, things in offered}
+    for where, option, thing, open_offers in closures:
         for offer in open_offers:
-            if (offer, option) not in {(id, about) for _, id, about in offered}:
+            if offer not in named_by or named_by[offer][0] != option:
                 problems.append(f"{where}: {offer} is not an OFFER for {option}")
-        for at, offer, about in offered:
-            if about == option and offer not in open_offers:
-                said = (
-                    f"the rights to {option} are COMPLETE, and that FACT does not name this OFFER"
-                )
+            elif thing is None and named_by[offer][1]:
+                problems.append(f"{where}: {offer} is an OFFER for OBJECTs")
+            elif thing is not None and thing not in named_by[offer][1]:
+                problems.append(f"{where}: {offer} is not an OFFER for {thing}")
+        for at, offer, about, things in offered:
+            meant = thing in things if thing is not None else not things
+            if about == option and meant and offer not in open_offers:
+                whose = f"{option} for {thing}" if thing is not None else option
+                said = f"the rights to {whose} are COMPLETE, and that FACT does not name this OFFER"
                 problems.append(f"{at}: {said}")
 
     decisions: list[Decision] = []

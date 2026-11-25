@@ -58,6 +58,8 @@ from agloe.reference import (
     longest_case,
     no_better_than,
     one_way_each,
+    places_taken,
+    taking_a_place,
     unknowns,
     way_to_pay,
     whereabouts,
@@ -83,14 +85,26 @@ class Cover:
     ``by`` is the id of a BOOKING, or of an OFFER from which the PERSON takes a place. A place
     is ``to_buy``: nothing secures it until a BOOKING does. It has a ``price``, and the
     ``budget`` that pays it. A price of nothing has no BUDGET.
+
+    A place that covers an OBJECT names the ``object``, and no PERSON. ``might`` says that
+    the OBJECT only might be in the OPTION: nobody knows where it is, or whether the OPTION
+    takes it along. The place has to be bought only if the OBJECT is there.
+
+    ``together`` comes with a place for an OBJECT that takes places in one set of OPTIONs
+    or in another, and never in two of the sets: nobody knows where it is, and it is in one
+    place at a time. It holds each set, with the OPTIONs in the order of the plan. A cap
+    counts the set that costs the most.
     """
 
     option: str
-    person: str
+    person: str | None
     by: str
     to_buy: bool
     price: Money | None = None
     budget: str | None = None
+    object: str | None = None
+    might: bool = False
+    together: tuple[tuple[str, ...], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -130,10 +144,16 @@ class CapRow:
     might have charged it besides, with the amount where the FILE states one, and None where
     the BOOKING states no payment. ``asked`` holds those among them whose charge a set of
     unknown FACTs asks about. ``to_buy`` is what the plan buys from it, and ``if_needed`` the
-    most it buys besides, if OPTIONs turn out to need a right. ``left`` is what the cap still
+    most it buys besides, if OPTIONs turn out to need a right or an OBJECT turns out to be
+    there: ``bought_if_needed`` says which purchases that counts. ``left`` is what the cap still
     allows after all of that, with each BOOKING in ``might`` counted in full unless the set
     asks about it. Whatever else comes to be charged to the cap has to fit in it. The
     amounts are whole ten-thousandths of the cap's currency.
+
+    ``left_for`` is for an OFFER with no price yet whose places cover OBJECTs: the OFFER,
+    and what the cap allows for each place that the plan takes of it, where that is more
+    than an equal share of ``left``. The cap counts the set of an OBJECT's places that
+    costs the most, and a place is bought only with the others of its own sets.
     """
 
     cap: str
@@ -143,6 +163,7 @@ class CapRow:
     to_buy: int
     if_needed: int
     left: int
+    left_for: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -194,7 +215,8 @@ class Use:
 
     ``check`` is "needs a right for" where the OPTION needs a right for the OBJECT, or
     might, and a PERSON who takes part has the OBJECT, or it is handed over or carried
-    there. ``by`` is then the BOOKING that covers the OBJECT.
+    there. ``by`` is then the BOOKING that covers the OBJECT. Where none does, ``offer`` is
+    the OFFER that the OBJECT takes a place of there.
     """
 
     option: str
@@ -202,6 +224,7 @@ class Use:
     where: tuple[Where, ...]
     check: str = "requires"
     by: str | None = None
+    offer: str | None = None
 
 
 @dataclass(frozen=True)
@@ -327,7 +350,7 @@ def reports(
                 break
         rights = _covers(file, worst, chosen)
         supplies, brought = _supplied(file, chosen)
-        objects, held = _carried(file, worst, chosen)
+        objects, held = _carried(file, worst, chosen, rights)
         used = {cover.by for cover in rights} | brought | held
         relies_on = [fact.id for fact in file.facts if _relied_on(file, chosen, fact, used)]
         relies_on += [want.id for want in file.wants if want.musts or want.must_nots]
@@ -412,24 +435,52 @@ def _covers(file: File, world: World, itinerary: Itinerary) -> tuple[Cover, ...]
     out: no record gives it. The other PERSONs who take part take places of the OPTIONs'
     OFFERs, each paid from a BUDGET, as ``way_to_pay`` gives them for the whole TRIP. The plan
     works in this world, so there is a way to pay.
+
+    After the PERSONs of an OPTION come the OBJECTs that take a place of an OFFER there, as
+    ``taking_a_place`` gives them, each with its OFFER and the BUDGET that pays. Where an
+    OBJECT takes places in one set of OPTIONs or in another, as ``taken_together`` says,
+    each of its places comes with those sets.
     """
     order = {person.id: number for number, person in enumerate(file.persons)}
     taking_part = {step.option: step.persons for step in itinerary if step.option is not None}
-    paying = way_to_pay(file, world, taking_part)
+    taking, together = places_taken(file, world, itinerary)
+    paying = way_to_pay(file, world, taking_part, taking, together)
     if paying is None:
         raise AssertionError("a plan that works has no way to pay")
+    turn = {step.option: number for number, step in enumerate(itinerary)}
+
+    def sets_of(thing: str) -> tuple[tuple[str, ...], ...]:
+        """The sets of OPTIONs where this OBJECT takes places together, where it has several."""
+        sets = together.get(thing, ())
+        if len(sets) < 2:
+            return ()
+        in_order = [sorted(turn[option] for option in some) for some in sets]
+        return tuple(
+            tuple(itinerary[number].option or "" for number in some) for some in sorted(in_order)
+        )
+
     covers: list[Cover] = []
     for step in itinerary:
-        if step.option is None or step.option not in world.needs_right:
+        if step.option is None:
             continue
         offers = {offer.id: offer for offer in file.offers(step.option)}
-        for person in sorted(step.persons, key=order.__getitem__):
+        needed = step.option in world.needs_right
+        for person in sorted(step.persons, key=order.__getitem__) if needed else ():
             booked = file.booking(step.option, person)
             if booked is not None:
                 covers.append(Cover(step.option, person, booked.id, False))
             elif (step.option, person) in paying:
                 offer, budget = paying[step.option, person]
                 covers.append(Cover(step.option, person, offer, True, offers[offer].price, budget))
+        for_objects = {offer.id: offer for offer in file.offers_for_objects(step.option)}
+        for thing, sure in taking.get(step.option, {}).items():
+            offer, budget = paying[step.option, thing]
+            price = for_objects[offer].price
+            covers.append(
+                Cover(
+                    step.option, None, offer, True, price, budget, thing, not sure, sets_of(thing)
+                )
+            )
     return tuple(covers)
 
 
@@ -473,7 +524,7 @@ def _supplied(file: File, itinerary: Itinerary) -> tuple[tuple[Supply, ...], set
 
 
 def _carried(
-    file: File, world: World, itinerary: Itinerary
+    file: File, world: World, itinerary: Itinerary, rights: Sequence[Cover] = ()
 ) -> tuple[tuple[Carried, ...], set[str]]:
     """Where each OBJECT of a plan is, and the FACTs about OBJECTs that the plan relies on.
 
@@ -498,7 +549,9 @@ def _carried(
     states none and a FACT says that the FILE states every OPTION that needs a right for
     the OBJECT, it relies on that FACT. Where the OPTION needs the right, or might, and a
     PERSON who takes part has the OBJECT, or it is handed over or carried there, the plan
-    relies on the BOOKING that covers the OBJECT, and the report names it.
+    relies on the BOOKING that covers the OBJECT, and the report names it. Where no BOOKING
+    does and the OBJECT takes a place of an OFFER there, the report names the OFFER:
+    ``rights`` holds those places.
 
     An OBJECT that is carried is in the OPTION from its start, and lies at the PLACE where
     the OPTION ends from its end, as the plan shows that end. That is said whether or not a
@@ -553,6 +606,7 @@ def _carried(
 
     relied: set[str] = set()
     carried: list[Carried] = []
+    on_offer = {(cover.option, cover.object): cover.by for cover in rights if cover.object}
     for thing in file.objects:
         every = file.object_requirements_complete(thing.id)
         for step in steps:
@@ -616,6 +670,10 @@ def _carried(
                 relied.add(covering.id)
                 stated = file.needs_right_for(option, thing.id) is True
                 uses.append(Use(option, stated, in_order(before), "needs a right for", covering.id))
+            elif (option, thing.id) in on_offer:
+                stated = file.needs_right_for(option, thing.id) is True
+                offer = on_offer[option, thing.id]
+                uses.append(Use(option, stated, in_order(before), "needs a right for", offer=offer))
             if after != before:
                 # It is kept for sure where whoever might have it takes part.
                 sure = all(each.person in step.persons for each in before)
@@ -880,6 +938,8 @@ def _to_bring(
     OBJECT there is a check, "requires": the OBJECT has to be at hand. Each OPTION that
     refuses it there is a check, "refuses": no PERSON may have the OBJECT in it. So is each
     OPTION that needs a right for the OBJECT where nothing covers it, "needs a right for".
+    An OPTION where only a place of an OFFER could cover it is the same where the plan
+    takes no place there: the plan counts on the OBJECT being out of the OPTION.
     With each comes whether a FACT says that the OPTION requires or refuses the OBJECT, or
     needs the right, and whether
     the check holds in the same plan without another transfer: with what the FILE lists,
@@ -917,6 +977,7 @@ def _to_bring(
         world, brought=world.brought - {thing}, refuses=world.refuses - might_refuse, does=does
     )
     steps = [step for step in plan if step.option is not None]
+    placed = taking_a_place(file, world, plan)
     checks: list[tuple[str, str, bool, bool]] = []
     # Where the OBJECT might be just before each OPTION of the plan starts.
     for before, step in zip(just_before(file, listed_only, plan)[thing], steps, strict=True):
@@ -929,7 +990,8 @@ def _to_bring(
             stated = file.refuses_object(option, thing) is True
             holds = not brought_in(before, step.persons)
             checks.append((option, "refuses", stated, holds))
-        if (option, thing) in world.uncovered:
+        no_place = (option, thing) in world.offered and thing not in placed.get(option, {})
+        if (option, thing) in world.uncovered or no_place:
             # Nothing covers the OBJECT there, so no PERSON who takes part may have it:
             # another transfer has to leave it where it needs no right.
             stated = file.needs_right_for(option, thing) is True
@@ -945,8 +1007,9 @@ def _bought(file: File, enough: Sequence[Unknown], shown: Shown) -> list[tuple[C
     every other unknown FACT badly. A price is about the places of its OFFER. That a BUDGET
     can pay for a PERSON is about the places that PERSON takes and has to pay for there: at
     a price above nothing, or at a price that nobody knows and that the set does not ask
-    for. A price the set asks for turns out well, and that place goes with the price. Any
-    other FACT has none, and a set that asks nothing about money is not searched.
+    for. A price the set asks for turns out well, and that place goes with the price. That
+    a BUDGET can pay for an OBJECT is about the places that cover that OBJECT, in the same
+    way. Any other FACT has none, and a set that asks nothing about money is not searched.
     """
     if not any(unknown.what in ("price", "funding") for unknown in enough):
         return [() for _ in enough]
@@ -962,7 +1025,9 @@ def _bought(file: File, enough: Sequence[Unknown], shown: Shown) -> list[tuple[C
                 for cover in places
                 if cover.by not in quoted and (cover.price is None or cover.price.amount)
             )
-            bought.append(tuple(cover for cover in to_pay if cover.person == unknown.person))
+            # The FACT names a PERSON or an OBJECT, and a place is for one of the two.
+            asked = (unknown.person, unknown.about)
+            bought.append(tuple(cover for cover in to_pay if (cover.person, cover.object) == asked))
         else:
             bought.append(())
     return bought
@@ -1036,13 +1101,98 @@ def _cap_rows(file: File, covers: Sequence[Cover], asked: Sequence[str]) -> tupl
             and cover.budget == cap.budget
             and cover.price.currency == currency
         ]
-        sure = sum(c.price.units for c in mine if c.price and file.needs_right(c.option) is True)
-        most = sum(c.price.units for c in mine if c.price and file.needs_right(c.option) is None)
+        sure = sum(c.price.units for c in mine if c.price and right_needed(file, c) is True)
+        most = sum(c.price.units for c in bought_if_needed(file, mine) if c.price)
         named = tuple(booking for booking, _ in might if booking in asked)
         besides = sum(units or 0 for booking, units in might if booking not in named)
         left = cap.limit.units - paid - besides - sure - most
-        rows.append(CapRow(cap.id, paid, might, named, sure, most, left))
+        unpriced = [
+            cover
+            for cover in covers
+            if cover.to_buy and cover.price is None and cover.object is not None
+        ]
+        left_for = tuple(
+            (offer, each)
+            for offer in dict.fromkeys(cover.by for cover in unpriced)
+            if (each := _each_can_cost(mine, [c for c in unpriced if c.by == offer], left))
+            is not None
+        )
+        rows.append(CapRow(cap.id, paid, might, named, sure, most, left, left_for))
     return tuple(rows)
+
+
+def _each_can_cost(priced: Sequence[Cover], places: Sequence[Cover], left: int) -> int | None:
+    """What each place of one OFFER with no price can cost, where a cap leaves more for it
+    than an equal share of what it has left.
+
+    ``priced`` are the purchases that the cap counts, ``places`` the places that the plan
+    takes of the OFFER, each for an OBJECT, and ``left`` what the cap has left. One price
+    holds for every place of the OFFER. Of an OBJECT that takes places in one set of
+    OPTIONs or in another, the cap counts the set that costs the most. So a place adds
+    nothing until its own sets cost as much as the dearest one. The result is the highest
+    price at which the cap still holds, in whole ten-thousandths. None: that is no more
+    than what is left, shared equally among the places.
+    """
+    if left < 0 or not any(place.together for place in places):
+        return None
+
+    def added(price: int) -> int:
+        """What the cap counts more once each of the places has this price."""
+        more = 0
+        for place in places:
+            theirs = [cover for cover in priced if cover.object == place.object]
+            costs = [
+                sum(c.price.units for c in theirs if c.price and c.option in some)
+                for some in place.together
+            ]
+            with_it = [
+                cost + price * (place.option in some)
+                for cost, some in zip(costs, place.together, strict=True)
+            ]
+            more += max(with_it) - max(costs) if costs else price
+        return more
+
+    # The highest price that still fits: what is added only grows with the price.
+    fits, too_much = 0, left + sum(cover.price.units for cover in priced if cover.price) + 1
+    while too_much - fits > 1:
+        price = (fits + too_much) // 2
+        fits, too_much = (price, too_much) if added(price) <= left else (fits, price)
+    return fits if fits > left // len(places) else None
+
+
+def bought_if_needed(file: File, covers: Sequence[Cover]) -> list[Cover]:
+    """The purchases among these that make up the most they can cost, besides the sure ones.
+
+    The purchases are in one currency. One is sure where the FILE says that its right is
+    needed. The others are made only if an OPTION turns out to need a right, or if an
+    OBJECT turns out to be there. They are separate, so the most they can cost is their
+    sum. An OBJECT that takes places in one set of OPTIONs or in another is different. It
+    takes the places of one set, so its purchases count for the set that costs the most,
+    and for the first such set.
+    """
+    open_ones = [cover for cover in covers if right_needed(file, cover) is None]
+    counted = [cover for cover in open_ones if not cover.together]
+    for thing in dict.fromkeys(cover.object for cover in covers if cover.together):
+        theirs = [cover for cover in covers if cover.object == thing]
+        sets = theirs[0].together
+        costs = [
+            sum(c.price.units for c in theirs if c.price and c.option in some) for some in sets
+        ]
+        worst = sets[costs.index(max(costs))]
+        counted += [cover for cover in open_ones if cover.object == thing and cover.option in worst]
+    return [cover for cover in open_ones if cover in counted]
+
+
+def right_needed(file: File, cover: Cover) -> bool | None:
+    """Whether the right that a place gives is needed, as the FILE says. None: nobody knows.
+
+    For a PERSON that is whether the OPTION needs a right. For an OBJECT it is whether the
+    OPTION needs a right for the OBJECT. Nobody knows either where the OBJECT only might be
+    in the OPTION.
+    """
+    if cover.object is not None:
+        return None if cover.might else file.needs_right_for(cover.option, cover.object)
+    return file.needs_right(cover.option)
 
 
 def _with_enough_of_each(
@@ -1172,7 +1322,8 @@ def _asked_of_objects(
     A fourth thing can be unknown about an OPTION and an OBJECT: whether a right is needed
     there and something covers the OBJECT. Its unknown FACT is that the OPTION needs no
     right for the OBJECT, or that another right covers it, whichever the FILE leaves open.
-    A set that holds neither leaves the OBJECT with no right there.
+    A set that holds neither leaves the OBJECT with no right there, or with a place of an
+    OFFER for the OPTION that names it and nothing else.
 
     Some of those things are tested together in the upper bound of ``no_better_than``,
     where every unknown FACT helps whoever needs it: there each of them is put at its
@@ -1213,13 +1364,15 @@ def _asked_of_objects(
         # Whether anything works does not turn on how sure the requirement is: a plan can
         # choose the carry that a sure requirement would make.
         worst = {pair: "might_take" if pair in required else "might_keep" for pair in open_to_do}
+        on_offer = {pair for pair in no_right if file.offers_for(*pair)}
         harder = replace(
             bound,
             needs=required,
             refuses=bound.refuses | refuses,
             does={**bound.does, **worst},
             ticketed=bound.ticketed | no_right,
-            uncovered=bound.uncovered | no_right,
+            uncovered=bound.uncovered | (no_right - on_offer),
+            offered=bound.offered | on_offer,
         )
         return not works(file, harder)
 

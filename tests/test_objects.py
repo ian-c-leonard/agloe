@@ -3234,13 +3234,19 @@ def ordered_by(
     can have it in an OPTION who has it when the TRIP starts, or might, or who takes part
     before that OPTION in one that hands it over and does not refuse it. "Might" counts as
     "does". An OPTION with nobody in it hands nothing over: nobody is there to have it.
+
+    An OPTION that needs a right for the OBJECT that nothing gives is like one that
+    refuses it, and it does not carry the OBJECT either. Where only a place of an OFFER
+    gives the right, the OPTION is in the order where a PERSON who takes part can have the
+    OBJECT by then: the OBJECT takes a place there.
     """
     options = file.options
+    barred = world.refuses | world.uncovered
     hands = [
         index
         for index in happening
         if world.does.get((options[index].id, thing)) in ("hands_over", "any")
-        and (options[index].id, thing) not in world.refuses
+        and (options[index].id, thing) not in barred
         and who[index]
     ]
     if thing in world.starts:
@@ -3263,19 +3269,22 @@ def ordered_by(
         index
         for index in happening
         if world.does.get((options[index].id, thing)) in ("keeps", "might_keep")
-        and (options[index].id, thing) not in world.refuses
+        and (options[index].id, thing) not in barred
         and can_have_it_in(index)
     ]
     might_carry = ("carries", "any", "might_take", "might_carry")
     carries_it = [
-        index for index in happening if world.does.get((options[index].id, thing)) in might_carry
+        index
+        for index in happening
+        if world.does.get((options[index].id, thing)) in might_carry
+        and (options[index].id, thing) not in world.uncovered
     ]
     if not hands and not keeps_it and not carries_it:
         return []
     refuses_it = [
         index
         for index in happening
-        if (options[index].id, thing) in world.refuses and can_have_it_in(index)
+        if (options[index].id, thing) in barred | world.offered and can_have_it_in(index)
     ]
     return [
         index
@@ -3339,10 +3348,13 @@ def every_chain(
     orders: tuple[tuple[int, ...], ...],
     everything: bool,
     empty: AbstractSet[int] = frozenset(),
+    asking: AbstractSet[tuple[str, str]] = frozenset(),
 ) -> list[Chain] | None:
     """Every order of the OPTIONs of a plan with every choice of hand-overs and carries.
 
     ``empty`` holds the OPTIONs that happen with nobody in them, by position in the FILE.
+    ``asking`` holds each OPTION and OBJECT where the OPTION asks about the OBJECT besides
+    requiring or refusing it: a story about rights for OBJECTs gives those.
 
     Nothing is skipped. It stands in for the search's own way of choosing them. Every order
     is given, also one that a PERSON's own order rules out. In each OPTION that hands an
@@ -3359,7 +3371,7 @@ def every_chain(
     people = [person.id for person in file.persons]
     happening = [index for index, persons in enumerate(who) if persons or index in empty]
     things = [thing.id for thing in file.objects if thing.id not in world.brought]
-    checked_by = world.needs | world.refuses
+    checked_by = world.needs | world.refuses | asking
     followed = [
         thing.id
         for thing in file.objects
@@ -5528,8 +5540,8 @@ def least_broken(
     carried: Iterable[str] = (),
     ends_at: dict[str, str] | None = None,
 ) -> Run:
-    """What the reference checker's own walk gives for these OPTIONs."""
-    return reference._least_broken(  # pyright: ignore[reportPrivateUsage]
+    """What the reference checker's own walk gives for these OPTIONs: the first way."""
+    runs = reference._least_broken(  # pyright: ignore[reportPrivateUsage]
         world,
         thing,
         as_visits(visits),
@@ -5538,6 +5550,8 @@ def least_broken(
         set(carried),
         ends_at or {},
     )
+    broken, trail, seen, _, _ = runs[0]
+    return broken, trail, seen
 
 
 def first_hand_overs(
@@ -8761,7 +8775,7 @@ def test_the_walk_says_each_place_where_an_object_is_in_some_case() -> None:
         begins = reference._begins(file, world, thing)  # pyright: ignore[reportPrivateUsage]
         if not runs or len(begins) != 1 or not plan:
             continue
-        ((_, visits, (broken_there, trail, seen)),) = runs
+        ((_, visits, (broken_there, trail, seen, _, _)),) = runs
         names = [visit.option for visit in visits]
         ends_at = {option.id: option.destination for option in file.options}
         needed = {name for name in names if (name, thing) in world.needs}

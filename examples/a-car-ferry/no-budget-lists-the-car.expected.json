@@ -1,0 +1,43 @@
+{
+  "answer": "UNDETERMINED",
+  "missing": [
+    [
+      {
+        "what": "another right for",
+        "option": "ferry",
+        "object": "car"
+      }
+    ],
+    [
+      {
+        "what": "funding",
+        "object": "car",
+        "buys": [
+          {
+            "person": null,
+            "object": "car",
+            "option": "ferry",
+            "offer": "car-deck",
+            "price": {
+              "amount": "90.00",
+              "currency": "USD"
+            }
+          }
+        ],
+        "at_most": null
+      }
+    ]
+  ],
+  "budgets": [
+    {
+      "id": "trip-money",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "currencies": [
+        "USD"
+      ]
+    }
+  ]
+}

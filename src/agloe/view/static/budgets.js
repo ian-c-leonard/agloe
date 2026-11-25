@@ -2,6 +2,7 @@
 // this as it is.
 //
 // The view sends the BUDGETs with each report: the PERSONs who may draw on each, the
+// OBJECTs whose places it may pay for, the name to show for each of them in one list, the
 // currencies it holds, and each cap on what the TRIP spends from it. It sends what each
 // BOOKING paid, with the BUDGET that the money came from, where the BOOKING names one. This
 // puts them in words, as the report words them. It marks what the report names: the records
@@ -47,11 +48,12 @@ export function budgets(trip, report = null, stated = null) {
     ...marked([booking.id], (need) => need.booking === booking.id, "The report names this BOOKING in what the FILE does not say."),
   });
   const shown = trip.budgets.map((budget) => {
-    const who = budget.persons.map(person);
+    // PERSONs and OBJECTs in one list, each by the name that the view sends for that list.
+    const who = [...budget.persons, ...budget.objects].map((id) => budget.names[id]);
     return {
       id: budget.id,
       name: budget.name,
-      // The report says it so: for Alex and Sam; it holds USD.
+      // The report says it so: for Alex, Sam and the car; it holds USD.
       holds: `${who.length ? `For ${listed(who)}` : "It lists no PERSON"}. It holds ${listed(budget.currencies)}.`,
       caps: budget.caps.map((cap) => ({
         id: cap.id,

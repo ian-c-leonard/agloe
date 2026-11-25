@@ -14,9 +14,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+from agloe import compiler, report
 from agloe.file import read
 from tests.stories import EXAMPLES
-from tests.test_view_calendar import drawn, in_words, parts, with_its_report
+from tests.test_offers_for_objects import ALEX_EAST, ALEX_NORTH, JO_SOUTH, trains
+from tests.test_view_calendar import drawn, in_words, parts, sent_for, with_its_report
 
 STORY = EXAMPLES / "the-bags"
 FILES = sorted(
@@ -866,6 +868,97 @@ def test_an_object_says_where_the_file_lists_every_right_for_it() -> None:
     # A FILE with no such FACT says nothing of it.
     (car,) = objects_of("a-car-ferry/booked")["objects"]
     assert not [words for words in car["whole"] if "lists every right" in words]
+    # Where the FACT names an OFFER, the card names it too, as the report does.
+    short = EXAMPLES / "a-car-ferry" / "the-trip-money-is-three-dollars-short.json"
+    sent, found, text = in_words(short)
+    (car,) = all_objects([sent], [found], [text])[0]["objects"]
+    said = (
+        "The FILE lists every right to Car ferry to Muskegon that covers it:"
+        " nobody on the trip holds another or can get one, except from car-deck."
+    )
+    assert car["whole"][-1] == said
+    assert f"  every-place-for-the-car: t{said[1:-1]}".replace("it:", "the car:", 1) in text
+
+
+def test_an_object_says_which_offer_it_takes_a_place_of_in_a_plan(tmp_path: Path) -> None:
+    """The car deck still has places on OFFER, and the plan takes one for the car. The card
+    of the car says so under the ferry, in the words of the report."""
+    path = EXAMPLES / "a-car-ferry" / "a-place-on-the-car-deck.json"
+    (car,) = objects_of("a-car-ferry/a-place-on-the-car-deck")["objects"]
+    (ferry,) = car["rights"]
+    assert ferry["plan"] == (
+        "Just before it starts: with Alex. A place from car-deck covers the car, once it is bought."
+    )
+    # Nobody says whether the ferry needs a right for the car. The plan holds either way.
+    content = json.loads(path.read_text())
+    about_the_right = ("ferry-needs-a-car-ticket", "every-ticket-for-the-car")
+    content["facts"] = [fact for fact in content["facts"] if fact["id"] not in about_the_right]
+    no_ticket = {"object": "car", "needed": False}
+    content["facts"].append(
+        {"id": "drive-is-free", "option": "drive", "needs_right_for": no_ticket}
+    )
+    silent = tmp_path / "nobody-said.json"
+    silent.write_text(json.dumps(content))
+    sent, found, text = in_words(silent)
+    (car,) = all_objects([sent], [found], [text])[0]["objects"]
+    (ferry,) = car["might"]
+    assert ferry["plan"] == (
+        "Just before it starts: with Alex. A place from car-deck covers the car,"
+        " so the plan holds if it does."
+    )
+    assert (
+        "    The FILE does not say whether Car ferry to Muskegon needs a right for the car."
+        f" {ferry['plan']}" in text
+    )
+
+
+def test_an_object_says_which_of_its_places_are_bought_together() -> None:
+    """Nobody said where the bike is, and it has a place on each ferry. The card of the bike
+    says that at most one of them has to be bought, in the words of the report."""
+    path = EXAMPLES / "a-car-ferry" / "nobody-said-where-the-bike-is.json"
+    sent, found, text = in_words(path)
+    car, bike = all_objects([sent], [found], [text])[0]["objects"]
+    assert car["together"] is None
+    assert bike["together"] == (
+        "Of the places for the bike, at most one has to be bought:"
+        " for Car ferry to Muskegon or Afternoon ferry to Muskegon."
+    )
+    assert f"    {bike['together']}" in text.splitlines()
+    # Where a set has several OPTIONs, each has its own "for", and a semicolon parts the sets.
+    several = [{"object": "bike", "options": [["ferry", "drive"], ["afternoon-ferry"]]}]
+    _, bike = all_objects([sent], [{**found, "places_together": several}], [text])[0]["objects"]
+    assert bike["together"] == (
+        "Of the places for the bike, at most these have to be bought together:"
+        " for Car ferry to Muskegon, for Drive along the shore; or for Afternoon ferry to Muskegon."
+    )
+    # A report that names an OPTION that the TRIP does not hold, or one set only, or
+    # something of another shape, leaves the card with nothing about it.
+    odd: list[Any] = [
+        [{"object": "bike", "options": [["ferry"], ["cruise"]]}],
+        [{"object": "bike", "options": [["ferry"]]}],
+        [{"object": "bike", "options": [["ferry"], []]}],
+        [{"object": "bike", "options": "ferry"}],
+        "bike",
+        None,
+    ]
+    for stated in odd:
+        _, bike = all_objects([sent], [{**found, "places_together": stated}], [text])[0]["objects"]
+        assert bike["together"] is None
+
+
+def test_the_page_words_several_sets_of_places_as_the_report_does() -> None:
+    """Alex takes two trains and Jo takes one, and nobody knows where the bike starts. The
+    report names the two sets of places, and the card of the bike says the same line."""
+    file = trains("20.00", [ALEX_NORTH, JO_SOUTH, ALEX_EAST])
+    found = compiler.check(file)
+    words = report.as_text(file, found)
+    sent, said = sent_for(file, found), report.as_json(file, found)
+    (bike,) = all_objects([sent], [said], [words])[0]["objects"]
+    assert bike["together"] == (
+        "Of the places for bike, at most these have to be bought together:"
+        " for north, for east; or for south."
+    )
+    assert f"    {bike['together']}" in words.splitlines()
 
 
 def test_an_option_that_leaves_an_object_alone_or_does_not_require_it_says_so() -> None:
@@ -896,7 +989,7 @@ def test_every_example_shows_its_objects_in_the_words_of_the_report() -> None:
         [found for _, found, _ in asked],
         [words for _, _, words in asked],
     )
-    starts = needs = bars = moves = placed = 0
+    starts = needs = bars = moves = placed = sets = 0
     for path, (sent, _, words), each in zip(FILES, asked, shown, strict=True):
         file = read(path)
         name = f"{path.parent.name}/{path.stem}"
@@ -926,6 +1019,9 @@ def test_every_example_shows_its_objects_in_the_words_of_the_report() -> None:
                         check = other
                 silent = f"The FILE does not say whether {option['name']} {check} {thing['name']}"
                 again.append(f"    {silent}. {option['plan']}")
+            if thing["together"] is not None:
+                sets += 1
+                again.append(f"    {thing['together']}")
         if under:
             placed += 1
             lines = under[0].split("\n\n")[0].splitlines()
@@ -965,3 +1061,4 @@ def test_every_example_shows_its_objects_in_the_words_of_the_report() -> None:
                     assert f"  {record}: {said}" in words, name
     assert min(starts, needs, moves, placed) > 3
     assert bars > 1
+    assert sets > 0

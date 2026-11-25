@@ -39,6 +39,7 @@ class Budget(TypedDict):
     id: Id
     name: Name
     persons: list[Id]
+    objects: NotRequired[list[Id]]
     currencies: list[Currency]
 
 
@@ -219,6 +220,7 @@ class BookingFact(TypedDict):
 class Offer(TypedDict):
     option: Id
     places: int
+    for_objects: NotRequired[list[Id]]
     prices: NotRequired[list[Money]]
 
 
@@ -318,6 +320,7 @@ class NeedsRightForObject(TypedDict):
 class RightsForAnObject(TypedDict):
     rights_to: Id
     for_object: Id
+    offers: NotRequired[list[Id]]
 
 
 class CompleteRightsForAnObject(TypedDict):

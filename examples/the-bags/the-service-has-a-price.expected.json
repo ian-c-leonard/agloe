@@ -1,0 +1,177 @@
+{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "museum-visit",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T13:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T14:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "museum-tickets",
+        "sam": "museum-tickets"
+      }
+    },
+    {
+      "option": "luggage-service",
+      "persons": [],
+      "start": "2027-05-15T14:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T15:30:00-05:00[America/Chicago]",
+      "carries": [
+        "bags"
+      ]
+    },
+    {
+      "way": "blue-line",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T14:30:00-05:00[America/Chicago]",
+      "end": "2027-05-15T15:30:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "blue-line",
+      "persons": [
+        "sam"
+      ],
+      "start": "2027-05-15T14:30:00-05:00[America/Chicago]",
+      "end": "2027-05-15T15:30:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "flight",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T17:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T19:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "flight-tickets",
+        "sam": "flight-tickets"
+      }
+    }
+  ],
+  "relies_on": [
+    "alex-start",
+    "sam-start",
+    "visit-time",
+    "visit-length",
+    "visit-arrival",
+    "visit-needs-a-ticket",
+    "museum-tickets",
+    "service-time",
+    "service-length",
+    "service-arrival",
+    "service-needs-a-ticket",
+    "flight-time",
+    "flight-length",
+    "bag-drop",
+    "flight-needs-a-ticket",
+    "flight-tickets",
+    "blue-line-length",
+    "where-the-bags-start",
+    "flight-needs-the-bags",
+    "service-carries-the-bags",
+    "service-needs-a-bag-ticket",
+    "every-use-of-the-bags",
+    "everything-that-moves-the-bags",
+    "every-ticket-for-the-bags",
+    "bag-transfer",
+    "trip-start",
+    "lock-visit",
+    "lock-flight"
+  ],
+  "robust": true,
+  "objects": [
+    {
+      "object": "bags",
+      "path": [
+        {
+          "where": [
+            {
+              "place": "hotel"
+            }
+          ],
+          "since": null,
+          "how": null
+        },
+        {
+          "where": [
+            {
+              "option": "luggage-service"
+            }
+          ],
+          "since": "luggage-service",
+          "how": "carried"
+        },
+        {
+          "where": [
+            {
+              "place": "ohare"
+            }
+          ],
+          "since": "luggage-service",
+          "how": "arrived"
+        }
+      ],
+      "required_by": [
+        {
+          "option": "flight",
+          "stated": true,
+          "where": [
+            {
+              "place": "ohare"
+            }
+          ]
+        }
+      ],
+      "refused_by": [],
+      "covered_in": [
+        {
+          "option": "luggage-service",
+          "stated": true,
+          "where": [
+            {
+              "place": "hotel"
+            }
+          ],
+          "booking": null,
+          "offer": "bag-transfer"
+        }
+      ]
+    }
+  ],
+  "to_buy": [
+    {
+      "option": "luggage-service",
+      "offer": "bag-transfer",
+      "persons": [],
+      "objects": [
+        "bags"
+      ],
+      "only_if_needed": false,
+      "price": {
+        "amount": "25.00",
+        "currency": "USD"
+      },
+      "budget": "trip-money"
+    }
+  ],
+  "money": {
+    "paid": [],
+    "not_stated": [
+      "museum-tickets",
+      "flight-tickets"
+    ],
+    "totals": [
+      {
+        "currency": "USD",
+        "paid": "0",
+        "to_buy": "25.00",
+        "to_buy_at_most_if_needed": "0"
+      }
+    ]
+  }
+}

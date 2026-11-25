@@ -169,22 +169,37 @@ def booking(
 
 
 def offer(
-    option: str, places: int, id: str | None = None, price: str | None = "10.00 USD"
+    option: str,
+    places: int,
+    id: str | None = None,
+    price: str | None = "10.00 USD",
+    objects: Sequence[str] = (),
 ) -> Document:
     """An OFFER: this many PERSONs can still buy a right to an OPTION, at this price each.
 
-    With no price, nobody knows what a place costs.
+    With no price, nobody knows what a place costs. With ``objects``, the places are for
+    those OBJECTs and not for PERSONs.
     """
     offered: Document = {"option": option, "places": places}
+    if objects:
+        offered["for_objects"] = list(objects)
     if price is not None:
         amount, currency = price.split()
         offered["prices"] = [{"amount": amount, "currency": currency}]
     return {"id": id or f"{option}-offer", "offer": offered}
 
 
-def budget(id: str, *persons: str, holds: Sequence[str] = ("USD",)) -> Document:
-    """A BUDGET that these PERSONs may draw on, and the currencies it holds."""
-    return {"id": id, "name": id, "persons": list(persons), "currencies": list(holds)}
+def budget(
+    id: str, *persons: str, holds: Sequence[str] = ("USD",), objects: Sequence[str] = ()
+) -> Document:
+    """A BUDGET that these PERSONs may draw on, and the currencies it holds.
+
+    ``objects`` are the OBJECTs whose places it may pay for.
+    """
+    source: Document = {"id": id, "name": id, "persons": list(persons), "currencies": list(holds)}
+    if objects:
+        source["objects"] = list(objects)
+    return source
 
 
 def cap(pot: str, most: str, id: str | None = None) -> Document:
@@ -285,9 +300,14 @@ def every_right_for(thing: str) -> Document:
     return {"id": f"every-right-for-{thing}", "complete": {"needs_right_for": thing}}
 
 
-def no_other_right_for(option: str, thing: str) -> Document:
-    """A FACT that the FILE lists every right to this OPTION that covers this OBJECT."""
-    whole = {"rights_to": option, "for_object": thing}
+def no_other_right_for(option: str, thing: str, *offers: str) -> Document:
+    """A FACT that the FILE lists every right to this OPTION that covers this OBJECT.
+
+    It names the OFFERs for the OPTION that name the OBJECT.
+    """
+    whole: Document = {"rights_to": option, "for_object": thing}
+    if offers:
+        whole["offers"] = list(offers)
     return {"id": f"every-right-to-{option}-for-{thing}", "complete": whole}
 
 
