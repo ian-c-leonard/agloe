@@ -1802,22 +1802,20 @@ def test_a_place_with_no_price_can_cost_what_the_places_it_is_never_bought_with_
     ]
     (row,) = found.plans[0].caps
     assert (row.if_needed, row.left) == (100000, 0)
-    assert row.left_for == (("north", "north-rack", "bike", 100000),)
+    assert row.left_for == (("north-rack", 100000),)
     lines = in_words(unknown)
     assert (
         "     money-cap, on money: up to 10.00 more if OPTIONs need a right or an OBJECT is"
         " there, of at most 10.00 USD. That leaves at least 0.00 USD for whatever else is"
-        " charged to it. A place from north-rack can cost up to 10.00 USD: the places for bike"
-        " are not all bought together." in lines
+        " charged to it. A place from north-rack can cost up to 10.00 USD: not every place"
+        " counted here is bought with it." in lines
     )
     assert any(
         line.endswith(" A place of which a line above says what it can cost has that much.")
         for line in lines
     )
     said = cast("list[dict[str, Any]]", report.as_json(unknown, found)["plans"])
-    assert said[0]["caps"][0]["left_for_places"] == [
-        {"option": "north", "offer": "north-rack", "object": "bike", "left": "10.00"}
-    ]
+    assert said[0]["caps"][0]["left_for_places"] == [{"offer": "north-rack", "each": "10.00"}]
     # The other cases of the report have no such place, and say nothing of one.
     assert all("left_for_places" not in plan["caps"][0] for plan in said[1:])
     # A cap on a BUDGET that does not list the bike has no room for a place for the bike.
@@ -1831,6 +1829,54 @@ def test_a_place_with_no_price_can_cost_what_the_places_it_is_never_bought_with_
     assert checked(with_the_north_rack_at(Money(Decimal("10.00"), "USD"))).answer is Answer.FEASIBLE
     dearer = with_the_north_rack_at(Money(Decimal("10.01"), "USD"))
     assert checked(dearer).answer is Answer.UNDETERMINED
+
+
+def test_one_price_holds_for_each_place_of_an_offer_with_no_price() -> None:
+    """Alex and Jo take different trains, and a bike and a bag might each be with either of
+    them. Each train has two places on OFFER for the bike or the bag. A place on the south
+    train costs 10 dollars, and nobody knows what one costs on the north train. The money
+    may spend 30.
+
+    The bike and the bag can both be with Alex. So the cap has to pay twice the dearer of
+    the two prices, and a place on the north train can cost 15 dollars, and no more."""
+
+    def two_things(price: str | None) -> File:
+        things = ["bike", "bag"]
+        stated = [*at("north", 9), *at("south", 9)]
+        stated += [starts_from("alex", "a"), starts_from("jo", "a")]
+        stated += [each(thing) for thing in things for each in (every_use, every_transfer)]
+        stated += [every_right_for(thing) for thing in things]
+        for train, cost in (("north", price), ("south", "10.00 USD")):
+            stated.append(offer(train, 2, f"{train}-places", cost, objects=things))
+            stated += [needs_right_for(train, thing) for thing in things]
+            stated += [no_other_right_for(train, thing, f"{train}-places") for thing in things]
+        return trip(
+            ["alex", "jo"],
+            ["a", "b", "c"],
+            [moves("north", "a", "b"), moves("south", "a", "c")],
+            stated,
+            [lock("north", "alex"), lock("south", "jo"), cap("money", "30.00 USD")],
+            budgets=[budget("money", "alex", "jo", objects=things)],
+            objects=things,
+            object_rights=True,
+        )
+
+    unknown = two_things(None)
+    found = checked(unknown)
+    assert [needed.unknown for needed in found.missing[0]] == [
+        Unknown("price", "north", about="north-places")
+    ]
+    (row,) = found.plans[0].caps
+    assert (row.left, row.left_for) == (100000, (("north-places", 150000),))
+    assert any(
+        line.endswith(
+            " A place from north-places can cost up to 15.00 USD: not every place counted"
+            " here is bought with it."
+        )
+        for line in in_words(unknown)
+    )
+    assert checked(two_things("15.00 USD")).answer is Answer.FEASIBLE
+    assert checked(two_things("15.01 USD")).answer is Answer.UNDETERMINED
 
 
 PLACES = [
@@ -2091,7 +2137,7 @@ def test_a_cap_turns_on_where_an_object_is_only_in_the_currency_of_its_place() -
     assert "depending on which OPTIONs need a right and on where each OBJECT is" in dollars
     assert (
         "  euros: at most 50.00 EUR from money: 0.00 paid; 0.00 still to buy; up to 2.00 more"
-        " to buy, depending on which OPTIONs need a right; 48.00 left" in lines
+        " to buy, depending on which OPTIONs need a right; at least 48.00 left" in lines
     )
 
 

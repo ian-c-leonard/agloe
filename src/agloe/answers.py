@@ -150,10 +150,10 @@ class CapRow:
     asks about it. Whatever else comes to be charged to the cap has to fit in it. The
     amounts are whole ten-thousandths of the cap's currency.
 
-    ``left_for`` is for a place with no price yet that covers an OBJECT: the OPTION, the
-    OFFER, the OBJECT, and what the cap allows for that place, where that is more than
-    ``left``. The cap counts the set of the OBJECT's places that costs the most, and the
-    place is bought only with the others of its own sets.
+    ``left_for`` is for an OFFER with no price yet whose places cover OBJECTs: the OFFER,
+    and what the cap allows for each place that the plan takes of it, where that is more
+    than an equal share of ``left``. The cap counts the set of an OBJECT's places that
+    costs the most, and a place is bought only with the others of its own sets.
     """
 
     cap: str
@@ -163,7 +163,7 @@ class CapRow:
     to_buy: int
     if_needed: int
     left: int
-    left_for: tuple[tuple[str, str, str, int], ...] = ()
+    left_for: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1106,36 +1106,58 @@ def _cap_rows(file: File, covers: Sequence[Cover], asked: Sequence[str]) -> tupl
         named = tuple(booking for booking, _ in might if booking in asked)
         besides = sum(units or 0 for booking, units in might if booking not in named)
         left = cap.limit.units - paid - besides - sure - most
-        left_for = tuple(
-            (cover.option, cover.by, cover.object, left + spared)
+        unpriced = [
+            cover
             for cover in covers
             if cover.to_buy and cover.price is None and cover.object is not None
-            if (spared := _spared_for(mine, cover))
+        ]
+        left_for = tuple(
+            (offer, each)
+            for offer in dict.fromkeys(cover.by for cover in unpriced)
+            if (each := _each_can_cost(mine, [c for c in unpriced if c.by == offer], left))
+            is not None
         )
         rows.append(CapRow(cap.id, paid, might, named, sure, most, left, left_for))
     return tuple(rows)
 
 
-def _spared_for(priced: Sequence[Cover], place: Cover) -> int:
-    """What a cap counts for the places of an OBJECT and would not need beside one place.
+def _each_can_cost(priced: Sequence[Cover], places: Sequence[Cover], left: int) -> int | None:
+    """What each place of one OFFER with no price can cost, where a cap leaves more for it
+    than an equal share of what it has left.
 
-    ``priced`` are the purchases that the cap counts. Of an OBJECT that takes places in one
-    set of OPTIONs or in another, it counts the set that costs the most. ``place`` has no
-    price yet, and it is bought only with the other places of the sets that hold its
-    OPTION. So what the dearest set costs beyond the dearest of those is room for it. A cap
-    that counts no place of the OBJECT has no such room.
+    ``priced`` are the purchases that the cap counts, ``places`` the places that the plan
+    takes of the OFFER, each for an OBJECT, and ``left`` what the cap has left. One price
+    holds for every place of the OFFER. Of an OBJECT that takes places in one set of
+    OPTIONs or in another, the cap counts the set that costs the most. So a place adds
+    nothing until its own sets cost as much as the dearest one. The result is the highest
+    price at which the cap still holds, in whole ten-thousandths. None: that is no more
+    than what is left, shared equally among the places.
     """
-    if not place.together:
-        return 0
-    theirs = [cover for cover in priced if cover.object == place.object]
-    costs = [
-        sum(c.price.units for c in theirs if c.price and c.option in some)
-        for some in place.together
-    ]
-    with_it = [
-        cost for cost, some in zip(costs, place.together, strict=True) if place.option in some
-    ]
-    return max(costs) - max(with_it)
+    if left < 0 or not any(place.together for place in places):
+        return None
+
+    def added(price: int) -> int:
+        """What the cap counts more once each of the places has this price."""
+        more = 0
+        for place in places:
+            theirs = [cover for cover in priced if cover.object == place.object]
+            costs = [
+                sum(c.price.units for c in theirs if c.price and c.option in some)
+                for some in place.together
+            ]
+            with_it = [
+                cost + price * (place.option in some)
+                for cost, some in zip(costs, place.together, strict=True)
+            ]
+            more += max(with_it) - max(costs) if costs else price
+        return more
+
+    # The highest price that still fits: what is added only grows with the price.
+    fits, too_much = 0, left + sum(cover.price.units for cover in priced if cover.price) + 1
+    while too_much - fits > 1:
+        price = (fits + too_much) // 2
+        fits, too_much = (price, too_much) if added(price) <= left else (fits, price)
+    return fits if fits > left // len(places) else None
 
 
 def bought_if_needed(file: File, covers: Sequence[Cover]) -> list[Cover]:

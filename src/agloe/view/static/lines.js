@@ -44,11 +44,15 @@ const ONE_PLAN = "One plan that works then: ";
 const TOGETHER = "Of the places for ";
 
 /**
- * The OFFER that a warning about a purchase names: the id after the first ", from " that is in
- * no name. A name with a comma in it is in quotation marks, and an id has none.
+ * The OFFER that a warning about a purchase names. The line ends with ", from " and the id of
+ * the OFFER, and then nothing more, or that the place costs nothing, or its price and the
+ * BUDGET that pays. A name with a comma in it is in quotation marks, so the BUDGET has none
+ * outside them. Names before the OFFER can be a list with commas, and one of them can be
+ * called "from home": the line is read from its end.
  */
 function offerIn(text) {
-  const found = /, from ([a-z0-9]+(?:-[a-z0-9]+)*)(?:, |\.$)/.exec(text.replace(/"(?:[^"\\]|\\.)*"/g, '""'));
+  const bare = text.replace(/"(?:[^"\\]|\\.)*"/g, '""');
+  const found = /, from ([a-z0-9]+(?:-[a-z0-9]+)*)(?:|, at no cost|, for [^,]+ from [^,]+)\.$/.exec(bare);
   return found === null ? null : found[1];
 }
 /** The line above the sums of a plan in each currency. */

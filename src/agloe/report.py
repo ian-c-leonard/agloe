@@ -358,13 +358,8 @@ def _cap_as_json(file: File, row: CapRow) -> dict[str, object]:
         **(
             {
                 "left_for_places": [
-                    {
-                        "option": option,
-                        "offer": offer,
-                        "object": thing,
-                        "left": _amount(units, places),
-                    }
-                    for option, offer, thing, units in row.left_for
+                    {"offer": offer, "each": _amount(units, places)}
+                    for offer, units in row.left_for
                 ]
             }
             if row.left_for
@@ -1693,8 +1688,9 @@ def _cap_in_words(file: File, row: CapRow, rights: Sequence[Cover] = ()) -> str:
         where = " and on where each OBJECT is" if there else ""
         parts.append(f"up to {more} more to buy, depending on which OPTIONs need a right{where}")
     # A BOOKING that might have charged the cap is counted in full, so more may be left.
-    # So is a place that an OBJECT only might take: more is left if it is not there.
-    least = known or (there and row.if_needed)
+    # So is a place that is bought only if a right turns out to be needed, or an OBJECT
+    # turns out to be there.
+    least = known or row.if_needed
     parts.append(f"{'at least ' if least else ''}{_amount(row.left, places)} left")
     pot = _names(file.budgets)[cap.budget]
     return f"{cap.id}: at most {cap.limit} from {pot}: {'; '.join(parts)}"
@@ -1748,17 +1744,16 @@ def _plan_in_words(file: File, plan: Plan) -> list[str]:
         ]
         if row.to_buy:
             terms.append(f"{_amount(row.to_buy, places)} still to buy")
-        # A place for an OBJECT that only might be in its OPTION is bought if it is there.
-        # It is counted, so more is left if the OBJECT is not there.
-        there = bool(row.if_needed) and any(
-            _charged_to(cap, cover) and cover.might for cover in plan.buys
-        )
         if row.if_needed:
+            # A place for an OBJECT that only might be in its OPTION is bought if it is there.
+            there = any(_charged_to(cap, cover) and cover.might for cover in plan.buys)
             or_there = " or an OBJECT is there" if there else ""
             more = _amount(row.if_needed, places)
             terms.append(f"up to {more} more if OPTIONs need a right{or_there}")
         counted = "; ".join(terms) or "nothing so far"
-        left = f"{'at least ' if there else ''}{_amount(row.left, places)} {cap.limit.currency}"
+        # What is bought only if it is needed is counted, so more is left if it is not.
+        least = "at least " if row.if_needed else ""
+        left = f"{least}{_amount(row.left, places)} {cap.limit.currency}"
         open_ended = [booking for booking, units in row.might if units and booking not in row.asked]
         names = _listed(open_ended, "or")
         more = f", and more once the FILE says that {names} charged it less"
@@ -1766,13 +1761,12 @@ def _plan_in_words(file: File, plan: Plan) -> list[str]:
             f"{cap.id}, on {pots[cap.budget]}: {counted}, of at most {cap.limit}."
             f" That leaves {left} for whatever else is charged to it{more if open_ended else ''}."
         )
-        # A place with no price yet, for an OBJECT whose places are not all bought together,
-        # can cost more than that: it is never bought with every place counted here.
-        for _, offer, thing, units in row.left_for:
+        # A place of an OFFER with no price yet can cost more than its share of that, where
+        # it covers an OBJECT whose places are not all bought together.
+        for offer, units in row.left_for:
             lines[-1] += (
                 f" A place from {offer} can cost up to {_amount(units, places)}"
-                f" {cap.limit.currency}: the places for {shown[thing]} are not all bought"
-                " together."
+                f" {cap.limit.currency}: not every place counted here is bought with it."
             )
     return lines
 

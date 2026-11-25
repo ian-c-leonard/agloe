@@ -277,6 +277,20 @@ def test_a_line_that_says_who_buys_a_place_is_tied_to_the_offer() -> None:
     assert all(line["about"] == [] for line in late)
 
 
+def test_a_line_about_who_buys_is_tied_whatever_the_travelers_are_called() -> None:
+    """Four travelers still take a place each, and one of them is called "from home". Their
+    names are a list with commas, and the OFFER comes after it."""
+    asked = asked_of(EXAMPLES / "a-ticket" / "not-bought-yet.json")
+    (line,) = [each for each in lines_of([asked])[0] if each["warns"]]
+    start = "    ! Sam still has to buy a right to this, from "
+    assert line["text"].startswith(start)
+    many = "    ! alex, from home, cy and di still have to buy a right to this, from "
+    renamed = {**asked, "text": asked["text"].replace(start, many)}
+    (other,) = lines_of([renamed])
+    (line,) = [each for each in other if each["warns"]]
+    assert line["text"].startswith(many) and line["about"] == ["offer:skydeck-tickets"]
+
+
 def test_a_line_about_a_right_that_an_object_still_needs_is_tied_to_its_offer() -> None:
     """A right to the ferry still has to be bought for the car, from the OFFER car-deck."""
     asked = asked_of(EXAMPLES / "a-car-ferry" / "a-place-on-the-car-deck.json")
