@@ -2989,6 +2989,15 @@ def test_the_page_lists_what_is_open_above_everything_that_it_draws(
             row.strip().startswith("5:00 pm on Thursday 13 May 2027") for row in found["rows"]
         )
         assert page.locator("#open .entry.lit").count() == 2
+        # The other way round: pointing at the OFFER lights up its DEADLINE in the list.
+        page.locator("#report").hover()
+        page.locator("#rights .entry", has_text="skydeck-tickets").hover()
+        page.wait_for_function("() => document.querySelector('#open .entry.due.lit') !== null")
+        # The keyboard reaches the DEADLINE after the purchase, and lights up the same.
+        page.locator("#open .entry.warned").focus()
+        page.keyboard.press("ArrowDown")
+        assert page.evaluate("() => document.activeElement.classList.contains('due')")
+        lit(page, rights=["skydeck-tickets"])
     # Before the report comes, nothing says what is open, and the page has no such list.
     path = tmp_path / "trip.json"
     path.write_bytes((EXAMPLES / "flight-home" / "works.json").read_bytes())

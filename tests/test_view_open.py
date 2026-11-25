@@ -669,7 +669,12 @@ def test_every_example_lists_what_its_report_says() -> None:
         # The list holds each DEADLINE that the report lists, in its own line, and each is of
         # the BOOKING or the OFFER that the report as JSON names for it.
         lines = text.split("\n")
-        heads = [at for at, line in enumerate(lines) if "earliest first" in line]
+        # The line over them is one of two that a report has, and no name can stand in for it.
+        over_them = (
+            "DEADLINEs after that time, earliest first:",
+            "This FILE does not state the time now. So nobody knows which of its DEADLINEs have",
+        )
+        heads = [at for at, line in enumerate(lines) if line.startswith(over_them)]
         listed_lines: list[str] = []
         for at in heads[:1]:
             for line in lines[at + 1 :]:
