@@ -624,7 +624,7 @@ def test_the_calendar_marks_only_what_a_report_names() -> None:
     """For every example: each record that a mark names is one that the report names."""
     pairs = [with_its_report(path) for path in FILES]
     laid = calendars([sent for sent, _ in pairs], [found for _, found in pairs])
-    seen = 0
+    seen = with_the_time_now = 0
     for path, (sent, found), calendar_of in zip(FILES, pairs, laid, strict=True):
         name = f"{path.parent.name}/{path.stem}"
         conflict = found.get("conflict", [])
@@ -650,12 +650,20 @@ def test_the_calendar_marks_only_what_a_report_names() -> None:
             ending = (
                 f"what {len(marked)} of them {'is' if len(marked) == 1 else 'are'} about."
                 if marked
-                else "None of them is about what the calendar shows."
+                else "None of them is about a step in the calendar, or about when the TRIP"
+                " starts or ends."
             )
             assert calendar_of["says"].endswith(ending), name
+            # Where the report names the FACT about the time now, the calendar says so.
+            told = "The report names that FACT among what rules out every plan."
+            named_now = sent["now"] is not None and sent["now"]["record"] in conflict
+            assert (told in calendar_of["says"]) is named_now, name
+            with_the_time_now += named_now
         else:
             assert found["answer"] != "INFEASIBLE", name
     assert seen > 5
+    # An OFFER that has expired by the time now: that time is part of why no plan works.
+    assert with_the_time_now > 0
 
 
 def test_a_report_that_names_nothing_the_page_can_read_marks_nothing() -> None:
@@ -680,7 +688,7 @@ def test_a_report_that_names_nothing_the_page_can_read_marks_nothing() -> None:
     other = calendar(sent, {"answer": "INFEASIBLE", "conflict": ["ways-to-ohare", "train-length"]})
     assert other["says"].endswith(
         " The report names 2 records that rule out every plan."
-        " None of them is about what the calendar shows."
+        " None of them is about a step in the calendar, or about when the TRIP starts or ends."
     )
     assert other["clash"] is False
 
