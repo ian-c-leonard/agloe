@@ -17,5 +17,8 @@
   "deadlines": [],
   "no_terms_for_cancelling": [
     "alex-skydeck-ticket"
+  ],
+  "no_terms_for_changing": [
+    "alex-skydeck-ticket"
   ]
 }

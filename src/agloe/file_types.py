@@ -215,6 +215,15 @@ TermForCancelling = TypedDict(
 )
 
 
+TermForChanging = TypedDict(
+    "TermForChanging",
+    {
+        "from": NotRequired[Time],
+        "costs": NotRequired[list[Money]],
+    },
+)
+
+
 class Offer(TypedDict):
     option: Id
     places: int
@@ -397,6 +406,7 @@ class Booking(TypedDict):
     covers: list[Id]
     paid: NotRequired[Payment]
     cancelling: NotRequired[list[TermForCancelling]]
+    changing: NotRequired[list[TermForChanging]]
 
 
 class BookingFact(TypedDict):

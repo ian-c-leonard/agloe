@@ -10,7 +10,7 @@ must agree with the time zone it names.
 import json
 import re
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -305,12 +305,13 @@ class Payment:
 
 @dataclass(frozen=True)
 class Term:
-    """What cancelling a BOOKING costs from one time on, until the next term.
+    """What cancelling a BOOKING costs from one time on, until the next term. Or what the
+    seller charges for a change to it.
 
     ``since`` is that time. None: from when the BOOKING was made. ``costs`` is what the holder
-    loses by cancelling: one amount for each currency, all of them together, with no amount
-    of nothing among them. So an empty tuple says that cancelling costs nothing. None: nobody
-    has said what it costs while the term holds.
+    loses by cancelling, or the fee for a change: one amount for each currency, all of them
+    together, with no amount of nothing among them. So an empty tuple says that it costs
+    nothing. None: nobody has said what it costs while the term holds.
     """
 
     since: int | None
@@ -323,7 +324,8 @@ class Booking:
 
     ``paid`` is what it paid. None: nobody knows. ``objects`` are the OBJECTs it covers: it
     gives a right for each of them where the OPTION needs one. ``cancelling`` holds its terms
-    for cancelling, in the order of time. Empty: it states none.
+    for cancelling, in the order of time. Empty: it states none. ``changing`` holds its terms
+    for changing in the same way: what the seller charges for a change.
     """
 
     id: str
@@ -332,6 +334,11 @@ class Booking:
     paid: Payment | None = None
     objects: tuple[str, ...] = ()
     cancelling: tuple[Term, ...] = ()
+    changing: tuple[Term, ...] = ()
+
+    def terms(self, kind: str) -> tuple[Term, ...]:
+        """Its terms of one kind, "cancelling" or "changing", in the order of time."""
+        return self.changing if kind == "changing" else self.cancelling
 
 
 @dataclass(frozen=True)
@@ -1396,6 +1403,31 @@ def load(document: object) -> File:
         (zones if of_the_trip else clocks).append(text[text.index("[") + 1 : -1])
         return moment
 
+    def terms_stated(
+        where: str, stated: Sequence[shape.TermForCancelling | shape.TermForChanging]
+    ) -> tuple[Term, ...]:
+        """The terms of one list of a BOOKING, with the problems of the list noted."""
+        terms: list[Term] = []
+        for at, term in enumerate(stated):
+            there = f"{where}/{at}"
+            since = when(there, term["from"]) if "from" in term else None
+            if terms and "from" not in term:
+                problems.append(f"{there}: only the first term can leave out when it starts")
+            last = terms[-1].since if terms else None
+            if since is not None and last is not None and since <= last:
+                problems.append(f"{there}: it does not start after the term before it")
+            lost = None
+            if "costs" in term:
+                named = [each["currency"] for each in term["costs"]]
+                for each in sorted({each for each in named if named.count(each) > 1}):
+                    problems.append(f"{there}: it states {each} more than once")
+                amounts = [
+                    Money(Decimal(each["amount"]), each["currency"]) for each in term["costs"]
+                ]
+                lost = tuple(each for each in amounts if each.amount)
+            terms.append(Term(since, lost))
+        return tuple(terms)
+
     persons = tuple(Person(p["id"], p["name"]) for p in raw["persons"])
     places = tuple(Place(p["id"], p["name"]) for p in raw["places"])
     for kind, records in (("persons", persons), ("places", places)):
@@ -1589,28 +1621,15 @@ def load(document: object) -> File:
                 if payer is not None:
                     known(where, payer, "PERSON", person_ids)
                 paid = Payment(money, source, payer)
-            terms: list[Term] = []
-            for at, term in enumerate(agreed.get("cancelling", ())):
-                there = f"{where}/booking/cancelling/{at}"
-                since = when(there, term["from"]) if "from" in term else None
-                if terms and "from" not in term:
-                    problems.append(f"{there}: only the first term can leave out when it starts")
-                last = terms[-1].since if terms else None
-                if since is not None and last is not None and since <= last:
-                    problems.append(f"{there}: it does not start after the term before it")
-                lost = None
-                if "costs" in term:
-                    named = [each["currency"] for each in term["costs"]]
-                    for each in sorted({each for each in named if named.count(each) > 1}):
-                        problems.append(f"{there}: it states {each} more than once")
-                    amounts = [
-                        Money(Decimal(each["amount"]), each["currency"]) for each in term["costs"]
-                    ]
-                    lost = tuple(each for each in amounts if each.amount)
-                terms.append(Term(since, lost))
             facts.append(
                 Booking(
-                    fact["id"], agreed["option"], tuple(covers), paid, tuple(things), tuple(terms)
+                    fact["id"],
+                    agreed["option"],
+                    tuple(covers),
+                    paid,
+                    tuple(things),
+                    terms_stated(f"{where}/booking/cancelling", agreed.get("cancelling", ())),
+                    terms_stated(f"{where}/booking/changing", agreed.get("changing", ())),
                 )
             )
             continue

@@ -64,6 +64,8 @@ FILES = sorted(
 # In the report in words: the line that names a day, and a line that shows one step of the plan.
 DAY = re.compile(r"^(\w+) (\d+) (\w+) (\d+) \(times in .+\)$")
 LINE = re.compile(r"^  \d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+$")
+# How the last part of a report starts. Its DEADLINEs have lines that start with a time too.
+LAST_PART = re.compile(r"^This (report uses .+ as the time now|FILE does not state the time now)")
 MONTHS = [
     "January",
     "February",
@@ -322,7 +324,8 @@ def test_a_feasible_trip_is_sent_with_the_itinerary_of_its_report(path: Path) ->
     assert in_trip == in_report
     # The report in words names PERSONs who take a WAY together on one line. So does the page.
     words = beside(path, ".expected.txt").read_text().split("\n")
-    lines = [line for line in words if LINE.match(line)]
+    ends = next((at for at, line in enumerate(words) if LAST_PART.match(line)), len(words))
+    lines = [line for line in words[:ends] if LINE.match(line)]
     assert len(sent["steps"]) == len(lines)
     for step, line in zip(sent["steps"], lines, strict=True):
         name = step["name"] or "another WAY"

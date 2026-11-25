@@ -503,6 +503,12 @@
               "type": "array",
               "minItems": 1,
               "items": { "$ref": "#/$defs/term_for_cancelling" }
+            },
+            "changing": {
+              "description": "What the seller charges for a change to the BOOKING: terms in the order of time. Each term holds from its time until the time of the next.",
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/term_for_changing" }
             }
           }
         }
@@ -518,6 +524,22 @@
         "from": { "$ref": "#/$defs/time" },
         "costs": {
           "description": "What the holder loses by cancelling: one amount for each currency, all of them together. An amount of zero is nothing.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/money" }
+        }
+      }
+    },
+    "term_for_changing": {
+      "title": "TermForChanging",
+      "description": "What the seller charges for a change to a BOOKING from one time on. Without `from`, the term holds from when the BOOKING was made: only the first term leaves it out. Without `costs`, nobody has said what the seller charges while the term holds. A term states a time, a cost or both.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "from": { "$ref": "#/$defs/time" },
+        "costs": {
+          "description": "The fee for making a change: one amount for each currency, all of them together. An amount of zero is nothing. What the changed BOOKING costs more or less is no part of it.",
           "type": "array",
           "minItems": 1,
           "items": { "$ref": "#/$defs/money" }

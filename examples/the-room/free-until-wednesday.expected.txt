@@ -43,4 +43,6 @@ DEADLINEs after that time, earliest first:
 What cancelling costs now:
   room, the BOOKING for Night at the hotel: nothing
 
-No terms for cancelling are stated for skydeck-ticket.
+No terms for cancelling or for changing are stated for skydeck-ticket.
+
+No terms for changing are stated for room.

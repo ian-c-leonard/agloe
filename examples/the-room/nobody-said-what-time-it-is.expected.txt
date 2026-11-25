@@ -40,3 +40,5 @@ This FILE does not state the time now. So nobody knows which of its DEADLINEs ha
 
 What cancelling costs at any time:
   skydeck-ticket, the BOOKING for Skydeck visit: 32.00 USD
+
+No terms for changing are stated for room and skydeck-ticket.
