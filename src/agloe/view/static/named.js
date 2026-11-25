@@ -120,6 +120,19 @@ export function toBuyIn(report) {
 }
 
 /**
+ * What a report says of cancelling in its last part, by BOOKING: the BOOKING of each DEADLINE
+ * in the report's order, the BOOKINGs whose cost it states for the time now, those whose cost
+ * it states for any time, and those that state no terms. A list that is not of that shape is
+ * none.
+ */
+export function cancellingIn(report) {
+  const stated = report !== null && typeof report === "object" ? report : {};
+  const bookings = (list) => (Array.isArray(list) && list.every((each) => each !== null && typeof each === "object" && typeof each.booking === "string") ? list.map((each) => each.booking) : []);
+  const none = Array.isArray(stated.no_terms_for_cancelling) && stated.no_terms_for_cancelling.every((id) => typeof id === "string") ? stated.no_terms_for_cancelling : [];
+  return { deadlines: bookings(stated.deadlines), now: bookings(stated.cancelling_now), always: bookings(stated.cancelling_at_any_time), none };
+}
+
+/**
  * The OFFERs that somebody buys a place of in the one plan that a report gives for each case
  * in which the trip works: a list for each case, at the place of the case. Only a report with
  * one plan for each of its cases holds any.

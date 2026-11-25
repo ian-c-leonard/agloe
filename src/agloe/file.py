@@ -1547,10 +1547,6 @@ def load(document: object) -> File:
                         Money(Decimal(each["amount"]), each["currency"]) for each in term["costs"]
                     ]
                     lost = tuple(each for each in amounts if each.amount)
-                elif not terms or terms[-1].costs is None:
-                    # Nobody has said what cancelling costs before it, and it does not say
-                    # what cancelling costs from then on.
-                    problems.append(f"{there}: it states no cost, and no cost is stated before it")
                 terms.append(Term(since, lost))
             facts.append(
                 Booking(

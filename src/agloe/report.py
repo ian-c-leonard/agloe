@@ -850,8 +850,8 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
         for id, booking in bookings.items()
     }
     rows = [
-        f"  {clock.moment(each.at)}: cancelling {held[each.booking]}, "
-        + _change_in_words(clock, each)
+        f"  {clock.moment(each.at)}: a term for cancelling {held[each.booking]}, starts."
+        f" {_change_in_words(each)}"
         for each in deadlines(file)
     ]
     zone = f"(times in {file.zone})"
@@ -888,46 +888,30 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
     return lines
 
 
-def _change_in_words(clock: Clock, found: Deadline) -> str:
-    """What cancelling costs on each side of a DEADLINE, and the STAKE.
+def _change_in_words(found: Deadline) -> str:
+    """What cancelling costs in the term that starts at a DEADLINE and in the one before it.
 
-    Where the FILE states no cost on one side, the words say for which stretch of time: up
-    to the next time with a cost, or back to the last one.
+    The words are about those two terms and nothing else: a cost holds until the next term
+    starts, and another line says what that term states.
     """
+    before = "before it" if found.first else "for the term before it"
     if found.after is None:
-        # A DEADLINE has a cost on one side at least, so this one has a cost before.
-        ends = found.no_cost_until
-        stretch = "from then on" if ends is None else f"from then until {clock.moment(ends)}"
-        costs = f"costs {_loss(found.before or ())} before then"
-        return f"{costs}. The FILE states no cost {stretch}. The STAKE is unknown."
+        said = "The FILE states no cost for it"
+        if found.before is None:
+            return f"{said}, and none {before}. The STAKE is unknown."
+        earlier = f"Cancelling costs {_loss(found.before)} in the term before it"
+        return f"{said}. {earlier}. The STAKE is unknown."
+    later = f"Cancelling costs {_loss(found.after)} in it"
     if found.before is None:
-        starts = found.no_cost_since
-        stretch = "before then" if starts is None else f"from {clock.moment(starts)} until then"
         at_stake = "Nothing is at STAKE." if found.stake == () else "The STAKE is unknown."
-        return (
-            f"costs {_loss(found.after)} from then. The FILE states no cost {stretch}. {at_stake}"
-        )
-    sides = f"costs {_loss(found.after)} from then, and {_loss(found.before)} before."
+        return f"{later}. The FILE states no cost {before}. {at_stake}"
+    sides = f"{later}, and {_loss(found.before)} in the term before it."
     if found.stake is None:
         # More in one currency and less in another: the two are stated, and nothing is added up.
         return f"{sides} At STAKE: {_loss(found.after)}, in place of {_loss(found.before)}."
     if not found.stake:
         return f"{sides} Nothing is at STAKE."
     return f"{sides} At STAKE: {_loss(found.stake)}."
-
-
-def _no_cost_as_json(file: File, found: Deadline) -> dict[str, str | None]:
-    """The other end of a stretch with no cost, on the side of a DEADLINE that has one.
-
-    None: the stretch has no other end.
-    """
-    if found.before is None:
-        since = found.no_cost_since
-        return {"no_cost_since": None if since is None else written(since, file.zone)}
-    if found.after is None:
-        until = found.no_cost_until
-        return {"no_cost_until": None if until is None else written(until, file.zone)}
-    return {}
 
 
 def _loss(costs: Sequence[Money]) -> str:
@@ -963,7 +947,6 @@ def _terms_as_json(file: File) -> dict[str, object]:
             "from_then": amounts(each.after),
             "change": each.change,
             "stake": amounts(each.stake),
-            **_no_cost_as_json(file, each),
         }
         for each in deadlines(file)
     ]

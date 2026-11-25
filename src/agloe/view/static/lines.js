@@ -13,7 +13,7 @@
 //
 // Nothing here judges a TRIP. It finds what the report already says, line by line.
 
-import { boughtIn, cappedIn, casesIn, listed, notAtHandIn, objectsIn, requirementsIn, takenIn, toBuyIn, togetherIn, togetherInPlans } from "./named.js";
+import { boughtIn, cancellingIn, cappedIn, casesIn, listed, notAtHandIn, objectsIn, requirementsIn, takenIn, toBuyIn, togetherIn, togetherInPlans } from "./named.js";
 
 /**
  * A line that shows one step of a plan: "  2:00 pm to 3:00 pm: Museum visit, Alex and Sam". A
@@ -77,6 +77,12 @@ const EXPLAINS = "WARNING: ";
  */
 const TERMS = /^(?:This report uses .+ as the time now \(times in .+\)\.|This FILE does not state the time now\.)/;
 
+/** A line of that part for one DEADLINE: a time, and the term for cancelling that starts. */
+const DEADLINE = /^ {2}.+: a term for cancelling .+, the BOOKING for .+, starts\. /;
+/** The line above what cancelling each BOOKING costs at the time now, and at any time. */
+const COSTS_NOW = "What cancelling costs now:";
+const COSTS_AT_ANY_TIME = "What cancelling costs at any time:";
+
 /** Where the last part of a report starts among its lines, or how many lines there are. */
 const termsFrom = (texts) => {
   const at = texts.findIndex((text) => TERMS.test(text));
@@ -113,7 +119,8 @@ function listsOf(report) {
  * what else the line is about, each as the page names a thing: `offer:ID` for an OFFER that
  * the line says somebody buys a place of, `budget:ID` for a BUDGET that the line states,
  * `cap:ID` for a cap that the line states under the plan of a case, `booking:ID` for a
- * BOOKING that the line says states no payment, and `object:ID` for an OBJECT that the line is
+ * BOOKING that the line says states no payment, or whose cost of cancelling or lack of terms
+ * the line states, and `object:ID` for an OBJECT that the line is
  * about. A line about an OBJECT at a step of the plan holds that step
  * too, by its number, as the page names a step.
  *
@@ -337,6 +344,30 @@ export function lines(text, report, trip) {
       under.forEach((at, n) => Object.assign(found[at], { step: steps[n], meets: n }));
     }
   }
+  // The last part of a report says what cancelling costs. A line for each DEADLINE names its
+  // BOOKING after "cancelling", in the order of the report as JSON. Under each of two
+  // headings, a line for each BOOKING starts with its id. One line names the BOOKINGs that
+  // state no terms. Each of these lines is about its BOOKING, only where the words have one
+  // such line for each entry of the report as JSON.
+  const cancelling = cancellingIn(report);
+  const last = found.slice(ends);
+  const starting = last.filter((line) => DEADLINE.test(line.text));
+  const isOf = (line, id) => line.text.includes(`: a term for cancelling ${id}, the BOOKING for `);
+  if (starting.length === cancelling.deadlines.length && starting.every((line, n) => isOf(line, cancelling.deadlines[n]))) {
+    starting.forEach((line, n) => (line.about = [`booking:${cancelling.deadlines[n]}`]));
+  }
+  for (const [heading, ids] of [
+    [COSTS_NOW, cancelling.now],
+    [COSTS_AT_ANY_TIME, cancelling.always],
+  ]) {
+    const heads = last.flatMap((line, at) => (line.text === heading ? [at] : []));
+    const under = (n) => last[heads[0] + 1 + n];
+    if (heads.length === 1 && ids.every((id, n) => under(n) !== undefined && under(n).text.startsWith(`  ${id}, the BOOKING for `))) {
+      ids.forEach((id, n) => (under(n).about = [`booking:${id}`]));
+    }
+  }
+  const none = last.filter((line) => line.text === `No terms for cancelling are stated for ${listed(cancelling.none)}.`);
+  if (cancelling.none.length && none.length === 1) none[0].about = cancelling.none.map((id) => `booking:${id}`);
   return found;
 }
 

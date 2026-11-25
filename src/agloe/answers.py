@@ -291,35 +291,31 @@ type CanWork = Callable[[Remaining], bool]
 
 @dataclass(frozen=True)
 class Deadline:
-    """A DEADLINE: a time at which what cancelling a BOOKING costs changes, or might.
+    """A DEADLINE: the time at which a term for cancelling a BOOKING starts.
 
-    ``before`` is what cancelling costs until then, and ``after`` what it costs from then on:
-    one amount for each currency, and none where it costs nothing. None: the FILE states no
-    cost there. The two are never the same cost, and never both None.
-
-    Where ``before`` is None, ``no_cost_since`` is the time from which the FILE states no
-    cost. None: it states none at any time before. Where ``after`` is None, ``no_cost_until``
-    is the time at which it states a cost again. None: it states none at any time after.
+    ``after`` is what cancelling costs in that term, and ``before`` what it costs in the
+    term before it: one amount for each currency, and none where it costs nothing. None: the
+    FILE states no cost there. ``first`` says that the term is the first of its BOOKING, so
+    that the FILE states nothing of the time before it. The two costs are never the same
+    stated cost.
     """
 
     at: int
     booking: str
     before: tuple[Money, ...] | None
     after: tuple[Money, ...] | None
-    no_cost_since: int | None = None
-    no_cost_until: int | None = None
+    first: bool = False
 
     @property
     def change(self) -> str:
-        """How the cost changes: it "rises", "falls" or "differs", or one side is not stated.
+        """How the cost changes: it "rises", "falls" or "differs", or a side is not stated.
 
         It differs where it is more in one currency and less in another: amounts in different
         currencies are never added or compared.
         """
-        if self.before is None:
-            return "not stated before"
-        if self.after is None:
-            return "not stated from then"
+        if self.before is None or self.after is None:
+            sides = [(self.before, "before"), (self.after, "from then")]
+            return "not stated " + " or ".join(side for cost, side in sides if cost is None)
         more, less = _more_and_less(self.before, self.after)
         if more and less:
             return "differs"
@@ -330,9 +326,9 @@ class Deadline:
         """The STAKE: what cancelling costs more once the DEADLINE has passed.
 
         Empty: nothing. That is so where the cost falls, and wherever cancelling costs nothing
-        from then on, whatever it cost before. None: unknown, because the FILE states no cost
-        on one side, or not one sum, because the cost is more in one currency and less in
-        another.
+        in the new term, whatever it cost before. None: unknown, because the FILE states no
+        cost on one side or on both, or not one sum, because the cost is more in one currency
+        and less in another.
         """
         if self.after == ():
             return ()
@@ -347,7 +343,11 @@ class Deadline:
 def _more_and_less(
     before: Sequence[Money], after: Sequence[Money]
 ) -> tuple[tuple[Money, ...], bool]:
-    """What the later cost has more of, by currency, and whether it has less of any."""
+    """What the later cost has more of, by currency, and whether it has less of any.
+
+    An amount in a currency that the earlier cost does not have is more by all of it, as the
+    FILE states it.
+    """
     was = {each.currency: each for each in before}
     now = {each.currency: each for each in after}
     more = tuple(
@@ -362,10 +362,10 @@ def _more_and_less(
 def deadlines(file: File) -> tuple[Deadline, ...]:
     """The DEADLINEs that a report of this FILE lists, earliest first.
 
-    The time of a term for cancelling is a DEADLINE, unless the FILE states the same cost
-    before it and from it on. Before a first term that states its time, the FILE states no
-    cost. A FILE never has a term with no cost where it states none before, so a DEADLINE
-    has a cost on one side at least.
+    The time of a term for cancelling is a DEADLINE, unless the FILE states the same cost for
+    that term and for the one before it. A term with no stated cost is one, also after a term
+    with none: the terms change there, and nobody has said how. Before a first term that
+    states its time, the FILE states nothing.
 
     Where the FILE states the time now, these are the DEADLINEs after it. One at that very
     time has passed: its term holds already. Where it states none, they are all of them.
@@ -377,15 +377,11 @@ def deadlines(file: File) -> tuple[Deadline, ...]:
         if not isinstance(fact, Booking):
             continue
         held: Term | None = None
-        # Each term with the one after it, and the last one with none.
-        for term, later in zip(fact.cancelling, [*fact.cancelling[1:], None], strict=False):
+        for term in fact.cancelling:
             before = None if held is None else held.costs
             changes = not _the_same(before, term.costs)
             if term.since is not None and changes and (now is None or term.since > now.at):
-                # The ends of a stretch with no cost, on the side where there is one.
-                since = held.since if held is not None and before is None else None
-                until = later.since if later is not None and term.costs is None else None
-                found.append(Deadline(term.since, fact.id, before, term.costs, since, until))
+                found.append(Deadline(term.since, fact.id, before, term.costs, held is None))
             held = term
     return tuple(sorted(found, key=lambda each: each.at))
 

@@ -169,13 +169,12 @@ def test_a_term_states_a_time_or_a_cost() -> None:
     assert problems(a_night(term(FREE), {})) == f"{start}1, {nothing}"
 
 
-def test_a_term_with_no_cost_comes_after_a_cost() -> None:
-    """Such a term says that a stated cost ends. With no cost before it, it says nothing."""
-    said = "it states no cost, and no cost is stated before it"
-    assert problems(a_night(term(None, TUESDAY))) == f"/facts/3/booking/cancelling/0: {said}"
-    twice = a_night(term(FREE), term(None, TUESDAY), term(None, WEDNESDAY))
-    assert problems(twice) == f"/facts/3/booking/cancelling/2: {said}"
-    assert load(a_night(term(FREE), term(None, TUESDAY), term(ALL, WEDNESDAY)))
+def test_a_term_with_no_cost_is_taken_wherever_it_comes() -> None:
+    """The seller's terms change at a time, and nobody has said what cancelling costs."""
+    only_a_time = load(a_night(term(None, WEDNESDAY)))
+    room = next(fact for fact in only_a_time.facts if isinstance(fact, Booking))
+    assert room.cancelling == (Term(instant(WEDNESDAY), None),)
+    assert load(a_night(term(FREE), term(None, TUESDAY), term(None, WEDNESDAY)))
 
 
 def test_a_term_names_a_currency_once() -> None:
@@ -260,29 +259,77 @@ def test_the_same_cost_on_both_sides_is_no_deadline() -> None:
 def test_a_gap_between_two_costs_has_a_deadline_at_each_end() -> None:
     document = a_night(term(FREE), term(None, TUESDAY), term(ALL, WEDNESDAY))
     assert deadlines(load(document)) == (
-        Deadline(instant(TUESDAY), "room", (), None, None, instant(WEDNESDAY)),
-        Deadline(instant(WEDNESDAY), "room", None, money(("189.00", "USD")), instant(TUESDAY)),
+        Deadline(instant(TUESDAY), "room", (), None),
+        Deadline(instant(WEDNESDAY), "room", None, money(("189.00", "USD"))),
     )
     said = words(document)
     assert (
-        "  12:00 pm on Tuesday 11 May 2027: cancelling room, the BOOKING for night, costs"
-        " nothing before then. The FILE states no cost from then until 6:00 pm on Wednesday 12"
-        " May 2027. The STAKE is unknown.\n"
+        "  12:00 pm on Tuesday 11 May 2027: a term for cancelling room, the BOOKING for night,"
+        " starts. The FILE states no cost for it. Cancelling costs nothing in the term before"
+        " it. The STAKE is unknown.\n"
     ) in said
     assert (
-        "  6:00 pm on Wednesday 12 May 2027: cancelling room, the BOOKING for night, costs"
-        " 189.00 USD from then. The FILE states no cost from 12:00 pm on Tuesday 11 May 2027"
-        " until then. The STAKE is unknown.\n"
+        "  6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING for night,"
+        " starts. Cancelling costs 189.00 USD in it. The FILE states no cost for the term"
+        " before it. The STAKE is unknown.\n"
     ) in said
-    out = as_json(document)["deadlines"]
-    assert out[0]["no_cost_until"] == WEDNESDAY
-    assert "no_cost_since" not in out[0]
-    assert out[1]["no_cost_since"] == TUESDAY
-    assert "no_cost_until" not in out[1]
-    # A cost on both sides has no stretch without one.
-    whole = as_json(a_night(term(FREE), term(ALL, WEDNESDAY)))["deadlines"][0]
-    assert "no_cost_since" not in whole
-    assert "no_cost_until" not in whole
+
+
+def test_a_cost_is_said_of_its_own_term_and_of_no_other() -> None:
+    """Free, then a gap, then 50 dollars, then a gap, then 189 dollars."""
+    friday = "2027-05-14T12:00:00-05:00[America/Chicago]"
+    fifty = [("50.00", "USD")]
+    document = a_night(
+        term(FREE),
+        term(None, TUESDAY),
+        term(fifty, WEDNESDAY),
+        term(None, THURSDAY),
+        term(ALL, friday),
+    )
+    start = "a term for cancelling room, the BOOKING for night, starts."
+    unknown = "The STAKE is unknown.\n"
+    assert words(document).endswith(
+        f"  12:00 pm on Tuesday 11 May 2027: {start} The FILE states no cost for it."
+        f" Cancelling costs nothing in the term before it. {unknown}"
+        f"  6:00 pm on Wednesday 12 May 2027: {start} Cancelling costs 50.00 USD in it. The"
+        f" FILE states no cost for the term before it. {unknown}"
+        f"  9:00 am on Thursday 13 May 2027: {start} The FILE states no cost for it."
+        f" Cancelling costs 50.00 USD in the term before it. {unknown}"
+        f"  12:00 pm on Friday 14 May 2027: {start} Cancelling costs 189.00 USD in it. The"
+        f" FILE states no cost for the term before it. {unknown}"
+    )
+
+
+def test_a_term_with_no_cost_is_a_deadline_also_after_a_time_with_no_cost() -> None:
+    """ "The penalty increases at 6:00 pm on Wednesday. Ask the hotel for the charges." """
+    only_a_time = a_night(term(None, WEDNESDAY))
+    assert deadlines(load(only_a_time)) == (
+        Deadline(instant(WEDNESDAY), "room", None, None, first=True),
+    )
+    assert found(only_a_time) == [("room", WEDNESDAY, "not stated before or from then", None)]
+    assert words(only_a_time).endswith(
+        "  6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING for night,"
+        " starts. The FILE states no cost for it, and none before it. The STAKE is unknown.\n"
+    )
+    twice = a_night(term(FREE), term(None, TUESDAY), term(None, WEDNESDAY))
+    assert found(twice) == [
+        ("room", TUESDAY, "not stated from then", None),
+        ("room", WEDNESDAY, "not stated before or from then", None),
+    ]
+    assert words(twice).endswith(
+        "  6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING for night,"
+        " starts. The FILE states no cost for it, and none for the term before it. The STAKE is"
+        " unknown.\n"
+    )
+    assert as_json(twice)["deadlines"][1] == {
+        "at": WEDNESDAY,
+        "booking": "room",
+        "option": "night",
+        "before": None,
+        "from_then": None,
+        "change": "not stated before or from then",
+        "stake": None,
+    }
 
 
 def test_the_stake_does_not_turn_on_the_decimal_settings_of_the_caller() -> None:
@@ -323,7 +370,7 @@ def test_a_first_term_with_a_time_has_no_cost_before_it() -> None:
     document = a_night(term(ALL, WEDNESDAY))
     assert found(document) == [("room", WEDNESDAY, "not stated before", None)]
     assert deadlines(load(document)) == (
-        Deadline(instant(WEDNESDAY), "room", None, money(("189.00", "USD"))),
+        Deadline(instant(WEDNESDAY), "room", None, money(("189.00", "USD")), first=True),
     )
 
 
@@ -335,8 +382,8 @@ def test_nothing_is_at_stake_where_cancelling_costs_nothing_from_then_on() -> No
         ("room", WEDNESDAY, "not stated before", ()),
     ]
     assert (
-        "costs nothing from then. The FILE states no cost from 12:00 pm on Tuesday 11 May 2027"
-        " until then. Nothing is at STAKE.\n"
+        "Cancelling costs nothing in it. The FILE states no cost for the term before it. Nothing"
+        " is at STAKE.\n"
     ) in words(after_a_gap)
 
 
@@ -510,8 +557,9 @@ def test_the_report_says_which_time_it_uses_and_lists_the_deadline() -> None:
         " America/Chicago). The FACT today states it.\n"
         "\n"
         "DEADLINEs after that time, earliest first:\n"
-        "  6:00 pm on Wednesday 12 May 2027: cancelling room, the BOOKING for night, costs"
-        " 189.00 USD from then, and nothing before. At STAKE: 189.00 USD.\n"
+        "  6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING for night,"
+        " starts. Cancelling costs 189.00 USD in it, and nothing in the term before it. At"
+        " STAKE: 189.00 USD.\n"
         "\n"
         "What cancelling costs now:\n"
         "  room, the BOOKING for night: nothing\n"
@@ -538,8 +586,9 @@ def test_with_no_time_now_the_report_says_that_nobody_knows_what_has_passed() ->
         "\n"
         "This FILE does not state the time now. So nobody knows which of its DEADLINEs have"
         " passed. All of them, earliest first (times in America/Chicago):\n"
-        "  6:00 pm on Wednesday 12 May 2027: cancelling room, the BOOKING for night, costs"
-        " 189.00 USD from then, and nothing before. At STAKE: 189.00 USD.\n"
+        "  6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING for night,"
+        " starts. Cancelling costs 189.00 USD in it, and nothing in the term before it. At"
+        " STAKE: 189.00 USD.\n"
     )
     assert "costs now" not in said
 
@@ -597,48 +646,55 @@ def test_the_bookings_with_no_terms_come_after_the_others() -> None:
     [
         (
             (term([("50.00", "USD")]), term(ALL, WEDNESDAY)),
-            "costs 189.00 USD from then, and 50.00 USD before. At STAKE: 139.00 USD.",
+            "Cancelling costs 189.00 USD in it, and 50.00 USD in the term before it. At STAKE:"
+            " 139.00 USD.",
         ),
         (
             (term(ALL), term([("50.00", "USD")], WEDNESDAY)),
-            "costs 50.00 USD from then, and 189.00 USD before. Nothing is at STAKE.",
+            "Cancelling costs 50.00 USD in it, and 189.00 USD in the term before it. Nothing is"
+            " at STAKE.",
         ),
         (
             (term(ALL), term(FREE, WEDNESDAY)),
-            "costs nothing from then, and 189.00 USD before. Nothing is at STAKE.",
+            "Cancelling costs nothing in it, and 189.00 USD in the term before it. Nothing is at"
+            " STAKE.",
         ),
         (
             (term([("5000", "AA-points")]), term([("100.00", "USD")], WEDNESDAY)),
-            "costs 100.00 USD from then, and 5000 AA-points before. At STAKE: 100.00 USD, in"
-            " place of 5000 AA-points.",
+            "Cancelling costs 100.00 USD in it, and 5000 AA-points in the term before it. At"
+            " STAKE: 100.00 USD, in place of 5000 AA-points.",
         ),
         (
             (
                 term([("10000", "AA-points"), ("50.00", "USD")]),
                 term([("30000", "AA-points"), ("50.00", "USD")], WEDNESDAY),
             ),
-            "costs 30000 AA-points and 50.00 USD from then, and 10000 AA-points and 50.00 USD"
-            " before. At STAKE: 20000 AA-points.",
+            "Cancelling costs 30000 AA-points and 50.00 USD in it, and 10000 AA-points and 50.00"
+            " USD in the term before it. At STAKE: 20000 AA-points.",
         ),
         (
             (term(FREE), term(None, WEDNESDAY)),
-            "costs nothing before then. The FILE states no cost from then on. The STAKE is"
-            " unknown.",
+            "The FILE states no cost for it. Cancelling costs nothing in the term before it. The"
+            " STAKE is unknown.",
         ),
         (
             (term(ALL, WEDNESDAY),),
-            "costs 189.00 USD from then. The FILE states no cost before then. The STAKE is"
+            "Cancelling costs 189.00 USD in it. The FILE states no cost before it. The STAKE is"
             " unknown.",
         ),
         (
             (term(FREE, WEDNESDAY),),
-            "costs nothing from then. The FILE states no cost before then. Nothing is at STAKE.",
+            "Cancelling costs nothing in it. The FILE states no cost before it. Nothing is at"
+            " STAKE.",
         ),
     ],
 )
 def test_each_kind_of_deadline_has_its_line(terms: tuple[Document, ...], line: str) -> None:
     said = words(a_night(*terms))
-    start = "  6:00 pm on Wednesday 12 May 2027: cancelling room, the BOOKING for night, "
+    start = (
+        "  6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING for night,"
+        " starts. "
+    )
     assert start + line + "\n" in said
 
 
@@ -673,7 +729,7 @@ def test_a_time_on_another_clock_shows_offsets() -> None:
             fact["starts_at"] = "2027-11-05T23:30:00-05:00[America/Chicago]"
     said = words(document)
     assert "This report uses 9:00 am (UTC-5) on Friday 5 November 2027 as the time now" in said
-    assert "  6:00 pm (UTC-6) on Monday 8 November 2027: cancelling room" in said
+    assert "  6:00 pm (UTC-6) on Monday 8 November 2027: a term for cancelling room" in said
     file = load(document)
     assert report.clock_for(file, check(file)).offsets
     # The time now counts by itself: here it is the only time before the clocks change.
@@ -688,7 +744,7 @@ def test_a_time_on_another_clock_shows_offsets() -> None:
     for fact in late["facts"]:
         if "starts_at" in fact:
             fact["starts_at"] = "2027-11-05T13:00:00-05:00[America/Chicago]"
-    assert "  6:00 pm (UTC-6) on Monday 8 November 2027: cancelling room" in words(late)
+    assert "  6:00 pm (UTC-6) on Monday 8 November 2027: a term for cancelling room" in words(late)
     assert "uses 12:00 pm (UTC-5) on Friday 5 November 2027 as the time now" in words(late)
     # A DEADLINE that has passed is not shown, so its time does not count.
     passed = a_night(
@@ -720,8 +776,8 @@ def test_a_time_that_the_clocks_show_twice_has_its_offset() -> None:
     # its offset beside it.
     before = said(first, "2027-11-05T23:30:00-05:00[America/Chicago]")
     after = said(second, "2027-11-10T23:30:00-06:00[America/Chicago]")
-    assert "  1:30 am (UTC-5) on Sunday 7 November 2027: cancelling room" in before
-    assert "  1:30 am (UTC-6) on Sunday 7 November 2027: cancelling room" in after
+    assert "  1:30 am (UTC-5) on Sunday 7 November 2027: a term for cancelling room" in before
+    assert "  1:30 am (UTC-6) on Sunday 7 November 2027: a term for cancelling room" in after
     assert before.count("(UTC") == after.count("(UTC") == 1
     # A step at such a time has its offset too.
     early = a_night()
@@ -792,12 +848,10 @@ def test_the_report_as_json_says_what_is_not_stated() -> None:
             "from_then": None,
             "change": "not stated from then",
             "stake": None,
-            "no_cost_until": None,
         }
     ]
     late = as_json(a_night(term(ALL, WEDNESDAY), now=MONDAY))
     assert late["deadlines"][0]["before"] is None
-    assert late["deadlines"][0]["no_cost_since"] is None
     assert late["deadlines"][0]["change"] == "not stated before"
     assert late["cancelling_now"] == [{"booking": "room", "option": "night", "costs": None}]
     mixed = as_json(a_night(term([("5000", "AA-points")]), term([("100.00", "USD")], WEDNESDAY)))
@@ -821,7 +875,9 @@ def test_a_booking_is_named_by_its_option_as_the_rest_of_the_report_names_it() -
         {"id": "night", "name": "Night at the hotel", "place": "hotel"},
         {"id": "second-night", "name": "Night at the hotel", "place": "hotel"},
     ]
-    assert "cancelling room, the BOOKING for Night at the hotel (night), costs" in words(document)
+    assert (
+        "a term for cancelling room, the BOOKING for Night at the hotel (night), starts."
+    ) in words(document)
 
 
 # The story on the rules page.

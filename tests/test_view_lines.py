@@ -531,6 +531,56 @@ def test_the_line_about_bookings_that_state_no_payment_is_tied_to_each_of_them(
         assert all(line["about"] == [] for line in other)
 
 
+def test_the_lines_about_cancelling_are_tied_to_their_bookings(tmp_path: Path) -> None:
+    """The room has two DEADLINEs, and the ticket costs 32 dollars at any time."""
+
+    def about(asked: dict[str, Any]) -> dict[str, list[str]]:
+        (found,) = lines_of([asked])
+        return {line["text"].strip()[:60]: line["about"] for line in found if line["about"]}
+
+    start = "a term for cancelling room, the BOO"
+    steps = asked_of(EXAMPLES / "the-room" / "in-steps.json")
+    assert about(steps) == {
+        f"12:00 pm on Tuesday 11 May 2027: {start}"[:60]: ["booking:room"],
+        f"6:00 pm on Wednesday 12 May 2027: {start}"[:60]: ["booking:room"],
+        "room, the BOOKING for Night at the hotel: nothing": ["booking:room"],
+        "skydeck-ticket, the BOOKING for Skydeck visit: 32.00 USD": ["booking:skydeck-ticket"],
+    }
+    # A report as JSON that does not name the same BOOKINGs ties none of those lines.
+    report = steps["report"]
+    fewer = {**report, "deadlines": report["deadlines"][:1]}
+    assert all("a term for" not in text for text in about({**steps, "report": fewer}))
+    wrong = [{**each, "booking": "skydeck-ticket"} for each in report["deadlines"]]
+    assert all(
+        "a term for" not in text
+        for text in about({**steps, "report": {**report, "deadlines": wrong}})
+    )
+    other = {**report, "cancelling_now": list(reversed(report["cancelling_now"]))}
+    assert all("the BOOKING for" not in text[:30] for text in about({**steps, "report": other}))
+    # The one line about the BOOKINGs with no terms is about each of them.
+    free = asked_of(EXAMPLES / "the-room" / "free-until-wednesday.json")
+    assert about(free)["No terms for cancelling are stated for skydeck-ticket."] == [
+        "booking:skydeck-ticket"
+    ]
+    named = {**free["report"], "no_terms_for_cancelling": ["room"]}
+    assert "No terms for cancelling are stated for skydeck-ticket." not in about(
+        {**free, "report": named}
+    )
+    # With no time now, a line says what cancelling costs at any time.
+    untimed = asked_of(EXAMPLES / "the-room" / "nobody-said-what-time-it-is.json")
+    assert about(untimed)["skydeck-ticket, the BOOKING for Skydeck visit: 32.00 USD"] == [
+        "booking:skydeck-ticket"
+    ]
+    # A BOOKING whose id reads like a number is tied like any other.
+    content = json.loads((EXAMPLES / "the-room" / "nobody-said-what-time-it-is.json").read_text())
+    for fact in content["facts"]:
+        if fact["id"] == "skydeck-ticket":
+            fact["id"] = "24"
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    assert about(asked_of(path))["24, the BOOKING for Skydeck visit: 32.00 USD"] == ["booking:24"]
+
+
 def test_what_the_report_says_is_charged_to_a_cap_is_kept_in_its_own_words(
     tmp_path: Path,
 ) -> None:

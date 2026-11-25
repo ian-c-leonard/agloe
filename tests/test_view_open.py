@@ -467,7 +467,7 @@ def test_a_deadline_is_no_step_of_the_plan(tmp_path: Path) -> None:
 
     before = open_of("a-car-ferry/a-place-on-the-car-deck")
     listed, text = changed(tmp_path, "a-car-ferry/a-place-on-the-car-deck", with_terms)
-    assert "cancelling ferry-tickets, the BOOKING for Car ferry to Muskegon, costs" in text
+    assert "cancelling ferry-tickets, the BOOKING for Car ferry to Muskegon, starts." in text
     assert listed == before
     assert listed["says"].startswith("1 thing is open.")
     assert [item["says"] for group in listed["groups"] for item in group["items"]] == [

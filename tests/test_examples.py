@@ -52,7 +52,11 @@ def test_every_expected_result_has_its_file() -> None:
 
 @pytest.mark.parametrize("path", FILES, ids=lambda path: f"{path.parent.name}/{path.stem}")
 def test_the_clock_of_a_report_is_the_one_its_text_uses(path: Path) -> None:
-    """Times are on the clocks of the FILE's time zone, with offsets only where they change."""
+    """Times are on the clocks of the FILE's time zone, with offsets only where they change.
+
+    No example shows a time that the clocks show twice. Such a time has its offset beside it
+    though the clock has none throughout: ``tests/test_deadlines.py`` has that case.
+    """
     file = read(path)
     clock = report.clock_for(file, check(file))
     assert clock.zone == file.zone
