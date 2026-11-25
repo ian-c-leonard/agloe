@@ -308,6 +308,10 @@ class Deadline:
 
     ``kind`` is "cancelling" or "changing". For a term for changing, the two costs are what
     the seller charges for a change: the fee alone.
+
+    ``refused_after`` says that the term that starts states that the seller accepts no
+    cancellation, or no change, and ``refused_before`` that the term before it states so.
+    Such a term states no cost. The two terms never both state it.
     """
 
     at: int
@@ -316,6 +320,8 @@ class Deadline:
     after: tuple[Money, ...] | None
     first: bool = False
     kind: str = "cancelling"
+    refused_before: bool = False
+    refused_after: bool = False
 
     @property
     def change(self) -> str:
@@ -323,7 +329,15 @@ class Deadline:
 
         It differs where it is more in one currency and less in another: amounts in different
         currencies are never added or compared.
+
+        Where the seller accepts none in the term that starts, the chance "ends" after a
+        term that states a cost, and nothing is stated before otherwise. Where the seller
+        accepted none in the term before, the chance "starts" with a stated cost.
         """
+        if self.refused_after:
+            return "ends" if self.before is not None else "not stated before"
+        if self.refused_before:
+            return "starts" if self.after is not None else "not stated from then"
         if self.before is None or self.after is None:
             sides = [(self.before, "before"), (self.after, "from then")]
             return "not stated " + " or ".join(side for cost, side in sides if cost is None)
@@ -340,8 +354,15 @@ class Deadline:
         in the new term, whatever it was before. None: unknown, because the FILE states no
         cost on one side or on both, or not one sum, because the cost is more in one currency
         and less in another.
+
+        Where the seller accepts none in the term that starts, it is None: after a term with
+        a stated cost a chance is lost, and the FILE gives that no amount. Where the seller
+        accepted none in the term before, nothing is at STAKE: there was nothing to do
+        before the DEADLINE.
         """
-        if self.after == ():
+        if self.refused_after:
+            return None
+        if self.refused_before or self.after == ():
             return ()
         if self.before is None or self.after is None:
             return None
@@ -397,10 +418,21 @@ def deadlines(file: File) -> tuple[Deadline, ...]:
             held: Term | None = None
             for term in fact.terms(kind):
                 before = None if held is None else held.costs
-                changes = not _the_same(before, term.costs)
+                changes = not _say_the_same(held, term)
                 if term.since is not None and changes and (now is None or term.since > now.at):
-                    first = held is None
-                    found.append(Deadline(term.since, fact.id, before, term.costs, first, kind))
+                    was_refused = held is not None and held.refused
+                    found.append(
+                        Deadline(
+                            term.since,
+                            fact.id,
+                            before,
+                            term.costs,
+                            held is None,
+                            kind,
+                            was_refused,
+                            term.refused,
+                        )
+                    )
                 held = term
     return tuple(sorted(found, key=lambda each: each.at))
 
@@ -455,6 +487,39 @@ def _the_same(one: Sequence[Money] | None, other: Sequence[Money] | None) -> boo
     }
 
 
+def _say_the_same(one: Term | None, other: Term) -> bool:
+    """Whether a term and the one before it state the same thing.
+
+    Both say that the seller accepts none, or both state the same cost. A term with no
+    stated cost is the same as no other: nobody has said what it holds.
+    """
+    if one is None:
+        return False
+    if one.refused or other.refused:
+        return one.refused == other.refused
+    return _the_same(one.costs, other.costs)
+
+
+def _holding_now(file: File, kind: str) -> list[tuple[str, Term | None]]:
+    """The term of each BOOKING with terms that holds at the time now, in the FILE's order.
+
+    It is the last one that has started. None: none has. Empty where the FILE does not
+    state the time now.
+    """
+    now = file.now()
+    if now is None:
+        return []
+    holding: list[tuple[str, Term | None]] = []
+    for fact in file.facts:
+        if isinstance(fact, Booking) and fact.terms(kind):
+            held = None
+            for term in fact.terms(kind):
+                if term.since is None or term.since <= now.at:
+                    held = term
+            holding.append((fact.id, held))
+    return holding
+
+
 def costs_now(file: File, kind: str) -> tuple[tuple[str, tuple[Money, ...] | None], ...]:
     """What cancelling each BOOKING with terms costs at the time now, in the FILE's order.
 
@@ -462,18 +527,18 @@ def costs_now(file: File, kind: str) -> tuple[tuple[str, tuple[Money, ...] | Non
     the FILE states no cost for that time. Empty where the FILE does not state the time now.
     ``kind`` is "cancelling", or "changing" for what the seller charges for a change.
     """
-    now = file.now()
-    if now is None:
-        return ()
-    costs: list[tuple[str, tuple[Money, ...] | None]] = []
-    for fact in file.facts:
-        if isinstance(fact, Booking) and fact.terms(kind):
-            held = None
-            for term in fact.terms(kind):
-                if term.since is None or term.since <= now.at:
-                    held = term.costs
-            costs.append((fact.id, held))
-    return tuple(costs)
+    return tuple(
+        (id, None if held is None else held.costs) for id, held in _holding_now(file, kind)
+    )
+
+
+def not_accepted_now(file: File, kind: str) -> tuple[str, ...]:
+    """The BOOKINGs whose seller accepts no cancellation at the time now, or no change.
+
+    The term that holds at that time says so. They are among those of ``costs_now``, with
+    no cost. ``kind`` is "cancelling" or "changing".
+    """
+    return tuple(id for id, held in _holding_now(file, kind) if held is not None and held.refused)
 
 
 def costs_at_any_time(file: File, kind: str) -> tuple[tuple[str, tuple[Money, ...]], ...]:
@@ -492,6 +557,23 @@ def costs_at_any_time(file: File, kind: str) -> tuple[tuple[str, tuple[Money, ..
             if first.since is None and first.costs is not None and same:
                 costs.append((fact.id, first.costs))
     return tuple(costs)
+
+
+def not_accepted_at_any_time(file: File, kind: str) -> tuple[str, ...]:
+    """The BOOKINGs whose seller accepts no cancellation at any time, or no change.
+
+    The first term holds from when the BOOKING was made, and every term says that the
+    seller accepts none. They come in the FILE's order. ``kind`` is "cancelling" or
+    "changing".
+    """
+    return tuple(
+        fact.id
+        for fact in file.facts
+        if isinstance(fact, Booking)
+        and fact.terms(kind)
+        and fact.terms(kind)[0].since is None
+        and all(term.refused for term in fact.terms(kind))
+    )
 
 
 def with_no_terms(file: File, kind: str) -> tuple[str, ...]:

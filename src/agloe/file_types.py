@@ -210,6 +210,7 @@ TermForCancelling = TypedDict(
     "TermForCancelling",
     {
         "from": NotRequired[Time],
+        "accepted": NotRequired[Literal[False]],
         "costs": NotRequired[list[Money]],
     },
 )
@@ -219,6 +220,7 @@ TermForChanging = TypedDict(
     "TermForChanging",
     {
         "from": NotRequired[Time],
+        "accepted": NotRequired[Literal[False]],
         "costs": NotRequired[list[Money]],
     },
 )

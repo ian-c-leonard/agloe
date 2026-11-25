@@ -716,6 +716,34 @@ def test_the_lines_about_changing_are_tied_to_their_bookings(tmp_path: Path) -> 
     assert tied({**together, "report": {**report, "deadlines": swapped}}) == tied(together)[3:]
 
 
+def test_a_line_that_says_the_seller_accepts_none_is_tied_to_its_booking() -> None:
+    """From Tuesday the hotel accepts no change to the room. The Skydeck accepts no
+    cancellation of the ticket."""
+
+    def tied(asked: dict[str, Any]) -> list[tuple[str, list[str]]]:
+        (found,) = lines_of([asked])
+        return [(line["text"].strip()[:52], line["about"]) for line in found if line["about"]]
+
+    change = "12:00 pm on Tuesday 11 May 2027: a term for changes to room, the BOOKING"[:52]
+    cancel = "6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING"[:52]
+    ticket = "skydeck-ticket, the BOOKING for Skydeck visit: 32.00 USD"[:52]
+    monday = asked_of(EXAMPLES / "the-room" / "no-change-from-tuesday.json")
+    assert tied(monday)[:2] == [(change, ["booking:room"]), (cancel, ["booking:room"])]
+    thursday = asked_of(EXAMPLES / "the-room" / "no-change-on-thursday.json")
+    assert tied(thursday) == [
+        ("room, the BOOKING for Night at the hotel: 189.00 USD", ["booking:room"]),
+        (ticket, ["booking:skydeck-ticket"]),
+        (
+            "room, the BOOKING for Night at the hotel: the seller accepts no change"[:52],
+            ["booking:room"],
+        ),
+        ("No terms for changing are stated for skydeck-ticket.", ["booking:skydeck-ticket"]),
+    ]
+    untimed = asked_of(EXAMPLES / "the-room" / "the-ticket-cannot-be-cancelled.json")
+    never = "skydeck-ticket, the BOOKING for Skydeck visit: the seller accepts no"[:52]
+    assert tied(untimed)[1] == (never, ["booking:skydeck-ticket"])
+
+
 def test_the_lines_about_an_offer_that_expires_are_tied_to_it(tmp_path: Path) -> None:
     """Sam still has to buy a ticket, before Thursday. A second OFFER states no expiry."""
     content = json.loads((EXAMPLES / "a-ticket" / "the-offer-ends-on-thursday.json").read_text())
