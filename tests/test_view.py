@@ -416,7 +416,7 @@ EMPTY = (
     '"itinerary": true, "days": [], '
     '"until": null, "starts": null, "ends": null, "steps": [], "wants": [], "options": [], '
     '"ways": [], "complete_travel": [], "rights": [], "budgets": [], "capabilities": [], '
-    '"objects": []}'
+    '"objects": [], "now": null}'
 )
 
 

@@ -530,7 +530,7 @@ function drawRights(shown) {
     card.append(made("h3", "card-name", rights.name), made("p", "card-holds", rights.needs));
     if (rights.things !== null) card.append(made("p", "card-holds", rights.things));
     const entries = made("ul", "card-options");
-    for (const booking of rights.bookings) entries.append(entry(booking, `booking:${booking.id}`, true, booking.uses));
+    for (const booking of rights.bookings) entries.append(entry(booking, `booking:${booking.id}`, true, ...booking.terms, booking.uses));
     for (const offer of rights.offers) entries.append(entry(offer, `offer:${offer.id}`, false, offer.uses));
     if (entries.children.length) card.append(entries);
     card.append(made("p", "card-whole", rights.whole));

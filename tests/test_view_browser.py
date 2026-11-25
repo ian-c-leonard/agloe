@@ -1389,6 +1389,39 @@ def test_pointing_ties_a_booking_and_an_offer_to_the_report(chromium: Browser) -
         assert said in found["rows"]
 
 
+def test_a_booking_says_on_its_card_what_cancelling_and_changing_cost(chromium: Browser) -> None:
+    """The room can be cancelled at no cost until Wednesday at six, and changed at no fee
+    until Tuesday at noon. It is Monday at nine."""
+    with opened(chromium, EXAMPLES / "the-room" / "a-change.json") as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#rights .entry").first.wait_for()
+        # The part says which time the FILE states as the time now.
+        assert (page.text_content("#rights-says") or "").endswith(
+            " The FILE states the time now: 9:00 am (UTC-5) on Monday 10 May 2027."
+        )
+        room = page.locator("#rights .entry", has_text="room").first
+        assert room.locator(".entry-takes").all_text_contents() == [
+            "What cancelling costs: at first, nothing; from 6:00 pm (UTC-5) on Wednesday 12 May"
+            " 2027, 189.00 USD.",
+            "The fee for a change, apart from any difference in price: at first, nothing; from"
+            " 12:00 pm (UTC-5) on Tuesday 11 May 2027, 25.00 USD.",
+            "In the plan: Alex uses it.",
+        ]
+        # The card is the drawing of the BOOKING: a DEADLINE of the report lights it up.
+        page.locator("#report .row", has_text="a term for cancelling room").hover()
+        lit(page, rights=["room"])
+        # The other way round: the card lights up each line of the report about the BOOKING.
+        page.locator("#calendar").hover()
+        room.hover()
+        found = lit(page, rights=["room"])
+        assert any("a term for cancelling room" in row for row in found["rows"])
+        assert any("a term for changes to room" in row for row in found["rows"])
+    # At 360 pixels the card is no wider than the window.
+    with opened(chromium, EXAMPLES / "the-room" / "a-change.json", wide=360, tall=700) as page:
+        page.locator("#rights .entry").first.wait_for()
+        assert page.evaluate("() => document.documentElement.scrollWidth") == 360
+
+
 def test_the_rights_have_the_edges_of_what_the_report_names(chromium: Browser) -> None:
     """Only Alex has a BOOKING, and a FACT says that the FILE lists every right to the visit."""
     with opened(chromium, EXAMPLES / "a-ticket" / "cannot-work.json") as page:

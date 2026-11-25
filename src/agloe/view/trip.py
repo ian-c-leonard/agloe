@@ -37,8 +37,11 @@ take it in both directions, and how long it takes. It is sent each FACT that the
 every way of some travel: from which PLACE, to which, and within which span of time.
 
 The page is sent what the FILE says of the rights to each OPTION: whether a PERSON needs a
-right to take part, each BOOKING with the PERSONs it covers and what it paid, each OFFER with
-its places and the price of one, and the FACT that the FILE lists every right to the OPTION.
+right to take part, each BOOKING with the PERSONs it covers, what it paid and its terms for
+cancelling and for changing, each OFFER with its places and the price of one, and the FACT
+that the FILE lists every right to the OPTION. It is sent the time now, where a FACT states
+it: which term of a BOOKING holds, and whether an OFFER has expired, turns on it. Which
+DEADLINEs are still to come, and what cancelling costs now, is for the COMPILER to say.
 Who uses which right in a plan is for the COMPILER to say, and the page reads it from the
 report. The page is sent the BUDGETs of the FILE: the PERSONs who may draw on each, the
 currencies it holds, and each cap on what the TRIP spends from it.
@@ -76,7 +79,7 @@ from datetime import date, datetime, timedelta
 from typing import cast
 
 from agloe import report as reports
-from agloe.answers import Answer, Report
+from agloe.answers import KINDS_OF_TERMS, Answer, Report
 from agloe.file import (
     Complete,
     Duration,
@@ -120,7 +123,9 @@ _TRIP: _Shape = {
     "budgets": list,
     "capabilities": list,
     "objects": list,
+    "now": (dict, _NONE),
 }
+_NOW: _Shape = {"record": str, "at": str}
 _WAY: _Shape = {
     "id": str,
     "name": str,
@@ -176,7 +181,10 @@ _BOOKING: _Shape = {
     "objects": list,
     "names": dict,
     "paid": (dict, _NONE),
+    "terms": dict,
 }
+_TERMS: _Shape = {"cancelling": list, "changing": list}
+_TERM: _Shape = {"since": (str, _NONE), "costs": (list, _NONE), "refused": bool}
 _PAID: _Shape = {"amount": str, "currency": str, "budget": (str, _NONE), "by": (str, _NONE)}
 _BUDGET: _Shape = {
     "id": str,
@@ -456,6 +464,9 @@ def shown(file: File, report: Report | None = None) -> Trip | None:
             "budgets": _budgets(file),
             "capabilities": _capabilities(file, names),
             "objects": _objects(file, names),
+            # The time now, where a FACT states it, in the words of a report and with its
+            # offset from UTC. It says which OFFERs have expired and which terms hold.
+            "now": _now(file),
         }
     except Unwritable:
         return None
@@ -591,6 +602,27 @@ def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
                             **_money(booking.paid.money),
                             "budget": booking.paid.budget,
                             "by": booking.paid.by,
+                        },
+                        # Its terms for cancelling and for changing, each kind in the order
+                        # of time. A term holds from ``since``, in the words of a report and
+                        # with its offset from UTC. None: from when the BOOKING was made.
+                        # ``costs`` is what cancelling costs while it holds, or the fee for a
+                        # change: one amount for each currency. Empty: nothing. None: the
+                        # FILE does not say. ``refused``: the seller accepts none.
+                        "terms": {
+                            kind: [
+                                {
+                                    "since": None
+                                    if term.since is None
+                                    else reports.Clock(file.zone, True).moment(term.since),
+                                    "costs": None
+                                    if term.costs is None
+                                    else [_money(each) for each in term.costs],
+                                    "refused": term.refused,
+                                }
+                                for term in booking.terms(kind)
+                            ]
+                            for kind in KINDS_OF_TERMS
                         },
                     }
                     for booking in bookings
@@ -1032,6 +1064,14 @@ def _bound(file: File, at: int, days: list[_Day], closes: bool, offsets: bool) -
     return {**_time(file, at, offsets), "day": None, "second": None}
 
 
+def _now(file: File) -> Trip | None:
+    """The time now that a FACT of the FILE states, with that FACT, or None where none does."""
+    now = file.now()
+    if now is None:
+        return None
+    return {"record": now.id, "at": reports.Clock(file.zone, True).moment(now.at)}
+
+
 def holds(trip: object) -> bool:
     """Whether this is a TRIP as ``shown`` gives it: all that the page reads, and no more."""
     if not _fits(trip, _TRIP):
@@ -1075,7 +1115,18 @@ def holds(trip: object) -> bool:
         and _are_rights(sent["rights"], persons, options, budgets, _object_ids(sent["objects"]))
         and _are_capabilities(sent["capabilities"], persons, options)
         and _are_objects(sent["objects"], persons, places, options)
+        and _is_the_time_now(sent["now"])
     )
+
+
+def _is_the_time_now(now: object) -> bool:
+    """Whether this is the time now of such a TRIP: its FACT and the time in words, or None."""
+    if now is None:
+        return True
+    if not _fits(now, _NOW):
+        return False
+    said = cast("dict[str, str]", now)
+    return bool(said["record"]) and bool(said["at"].strip())
 
 
 def _the_options(
@@ -1297,6 +1348,8 @@ def _are_rights(
                 return False
             if not _is_a_payment(stated["paid"], persons, budgets):
                 return False
+            if not _are_terms(stated["terms"]):
+                return False
             ids.append(stated["id"])
         for offer in cast("list[object]", said["offers"]):
             if not _fits(offer, _OFFER):
@@ -1325,6 +1378,36 @@ def _are_rights(
         which.append(said["option"])
     found = _all_different(which)
     return found is not None and found <= options and _all_different(ids) is not None
+
+
+def _are_terms(terms: object) -> bool:
+    """Whether these are the terms of a BOOKING, of each kind, as such a TRIP holds them.
+
+    Only the first term of a kind can hold from when the BOOKING was made. A term states
+    what it costs as amounts of money, one for each currency and none of nothing, or states
+    no cost. A term that says that the seller accepts none states no cost.
+    """
+    if not _fits(terms, _TERMS):
+        return False
+    for of_a_kind in cast("dict[str, list[object]]", terms).values():
+        for place, term in enumerate(of_a_kind):
+            if not _fits(term, _TERM):
+                return False
+            said = cast("dict[str, object]", term)
+            since, costs = said["since"], cast("list[object] | None", said["costs"])
+            if (since is None and place > 0) or (
+                since is not None and not cast("str", since).strip()
+            ):
+                return False
+            if said["refused"] and costs is not None:
+                return False
+            if costs is not None:
+                if not all(each is not None and _is_money(each) for each in costs):
+                    return False
+                currencies = [cast("dict[str, str]", each)["currency"] for each in costs]
+                if len(set(currencies)) != len(currencies):
+                    return False
+    return True
 
 
 def _is_money(money: object) -> bool:

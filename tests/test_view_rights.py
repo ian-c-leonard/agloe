@@ -78,6 +78,8 @@ def test_the_rights_to_an_option_say_who_has_one_and_what_is_on_offer() -> None:
                 "a BOOKING that covers Alex; its payment: 32.00 USD, paid by Alex,"
                 " from the trip money"
             ),
+            # It states no terms for cancelling or for changing.
+            "terms": [],
             # The report says which right each PERSON uses, and the page says the same.
             "uses": "In the plan: Alex uses it.",
             "records": ["alex-skydeck-ticket"],
@@ -489,6 +491,118 @@ def test_an_offer_that_expires_says_until_when_and_whether_it_has_expired() -> N
         if each["option"] == "skydeck"
     ]
     assert skydeck["whole"].endswith("or can get one, except from skydeck-tickets (expired).")
+
+
+def bookings_of(name: str) -> dict[str, Rights]:
+    """The BOOKINGs that the page shows for an example about the room, by their ids."""
+    shown = rights_of(f"the-room/{name}")
+    return {booking["id"]: booking for each in shown["rights"] for booking in each["bookings"]}
+
+
+WEDNESDAY = "6:00 pm (UTC-5) on Wednesday 12 May 2027"
+CHANGE = "The fee for a change, apart from any difference in price"
+
+
+def test_a_booking_says_what_cancelling_and_changing_cost_as_far_as_the_file_says() -> None:
+    """The room can be cancelled at no cost until Wednesday at six. The ticket cannot."""
+    bookings = bookings_of("on-monday")
+    # Each kind of terms is one sentence, with its terms in the order of time.
+    assert bookings["room"]["terms"] == [
+        f"What cancelling costs: at first, nothing; from {WEDNESDAY}, 189.00 USD."
+    ]
+    # One term that holds from when the BOOKING was made holds at any time.
+    assert bookings["skydeck-ticket"]["terms"] == ["What cancelling costs at any time: 32.00 USD."]
+    # The card still says what the BOOKING covers, and who uses it in the plan.
+    assert bookings["room"]["says"] == "a BOOKING that covers Alex"
+    assert bookings["room"]["uses"] == "In the plan: Alex uses it."
+    # A term that states no cost says that the FILE does not say.
+    assert bookings_of("free-until-wednesday")["room"]["terms"] == [
+        f"What cancelling costs: at first, nothing; from {WEDNESDAY}, the FILE does not say."
+    ]
+    # A cost in two currencies names both, and adds nothing up.
+    assert bookings_of("points-and-dollars")["room"]["terms"] == [
+        f"What cancelling costs: at first, nothing; from {WEDNESDAY}, 30000 hotel-points and"
+        " 25.00 USD."
+    ]
+    # A term can say that the seller accepts none.
+    assert bookings_of("the-ticket-cannot-be-cancelled")["skydeck-ticket"]["terms"] == [
+        "What cancelling costs at any time: the seller accepts no cancellation."
+    ]
+    # Terms for changing state a fee, apart from what the changed BOOKING costs more or less.
+    assert bookings_of("a-change")["room"]["terms"] == [
+        f"What cancelling costs: at first, nothing; from {WEDNESDAY}, 189.00 USD.",
+        f"{CHANGE}: at first, nothing; from 12:00 pm (UTC-5) on Tuesday 11 May 2027, 25.00 USD.",
+    ]
+    assert bookings_of("no-change-on-thursday")["room"]["terms"][1].endswith(
+        ", the seller accepts no change."
+    )
+    # A BOOKING that states no terms says nothing of them.
+    assert bookings_of("a-change")["skydeck-ticket"]["terms"] == [
+        "What cancelling costs at any time: 32.00 USD."
+    ]
+    tickets = rights_of("a-ticket/works")["rights"][0]["bookings"]
+    assert [ticket["terms"] for ticket in tickets] == [[], []]
+
+
+def test_the_part_says_the_time_now_that_the_file_states() -> None:
+    """Which term holds, and whether an OFFER has expired, turns on the time now."""
+    now = " The FILE states the time now: 9:00 am (UTC-5) on Monday 10 May 2027."
+    assert rights_of("the-room/on-monday")["says"] == SAYS + now
+    assert rights_of("a-ticket/the-offer-ends-on-thursday")["says"] == SAYS + now
+    # A FILE with terms or with an OFFER that expires, and no time now, says that it has none.
+    unsaid = " The FILE does not state the time now."
+    assert rights_of("the-room/nobody-said-what-time-it-is")["says"] == SAYS + unsaid
+    assert rights_of("a-ticket/nobody-said-whether-the-offer-has-expired")["says"].startswith(
+        SAYS + unsaid
+    )
+    # A FILE with neither says nothing of the time now.
+    assert rights_of("a-ticket/works")["says"] == SAYS
+
+
+def test_every_example_words_a_cost_as_its_report_does() -> None:
+    """Where a BOOKING has one term that holds at any time, the report states that cost in
+    its last part: for the time now, or for any time. The page says the same words."""
+    heads = {
+        "What cancelling costs": (
+            "What cancelling costs now:",
+            "What cancelling costs at any time:",
+        ),
+        f"{CHANGE.removesuffix(', apart from any difference in price')}": (
+            "The fee for a change now, apart from any difference in price:",
+            "The fee for a change at any time, apart from any difference in price:",
+        ),
+    }
+    asked = [in_words(path) for path in FILES]
+    shown = all_rights(
+        [sent for sent, _, _ in asked],
+        [found for _, found, _ in asked],
+        [words for _, _, words in asked],
+    )
+    held: list[str] = []
+    for path, (_, _, words), each in zip(FILES, asked, shown, strict=True):
+        name = f"{path.parent.name}/{path.stem}"
+        lines = words.split("\n")
+        # What the report says of each BOOKING under each of its headings about a cost.
+        rows: dict[tuple[str, str], str] = {}
+        over = ""
+        for line in lines:
+            if not line.startswith("  "):
+                over = line
+            elif ", the BOOKING for " in line and ": " in line:
+                rows[over, line.strip().split(",")[0]] = line.rsplit(": ", 1)[1]
+        for booking in (booking for rights in each["rights"] for booking in rights["bookings"]):
+            for sentence in booking["terms"]:
+                start, _, value = sentence.partition(": ")
+                for head, (now, always) in heads.items():
+                    if not start.startswith(f"{head} at any time"):
+                        continue
+                    for heading in (now, always):
+                        if (heading, booking["id"]) in rows:
+                            assert value == f"{rows[heading, booking['id']]}.", (name, sentence)
+                            held.append(value)
+    # A cost in dollars, and a seller who accepts none.
+    assert len(held) >= 10
+    assert {"32.00 USD.", "the seller accepts no cancellation."} <= set(held), set(held)
 
 
 def test_every_example_shows_its_rights_in_the_words_of_the_report(tmp_path: Path) -> None:
