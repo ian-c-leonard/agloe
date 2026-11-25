@@ -611,10 +611,12 @@ def test_every_example_words_a_cost_as_its_report_does() -> None:
                 for head, (now, always) in heads.items():
                     if not start.startswith(f"{head} at any time"):
                         continue
-                    for heading in (now, always):
-                        if (heading, booking["id"]) in rows:
-                            assert value == f"{rows[heading, booking['id']]}.", (name, sentence)
-                            held.append(value)
+                    # The report states the cost under one of its two headings: for the
+                    # time now where the FILE states it, and for any time where it does not.
+                    under = [each for each in (now, always) if (each, booking["id"]) in rows]
+                    assert len(under) == 1, (name, sentence)
+                    assert value == f"{rows[under[0], booking['id']]}.", (name, sentence)
+                    held.append(value)
     # A cost in dollars, and a seller who accepts none.
     assert len(held) >= 10
     assert {"32.00 USD.", "the seller accepts no cancellation."} <= set(held), set(held)

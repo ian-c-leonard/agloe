@@ -2670,6 +2670,12 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
             "changing": [],
         }
     ),
+    "a term with an amount of nothing": _booking(
+        terms={
+            "cancelling": [_term(costs=[{"amount": "0.00", "currency": "USD"}])],
+            "changing": [],
+        }
+    ),
     "a term that accepts none and states a cost": _booking(
         terms={"cancelling": [_term(refused=True)], "changing": []}
     ),
@@ -2837,6 +2843,9 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
         "now", to={"record": "", "at": "9:00 am on Monday 10 May 2027"}
     ),
     "a time now at no time": _set("now", to={"record": "today", "at": " "}),
+    "a time now whose FACT has a blank id": _set(
+        "now", to={"record": " ", "at": "9:00 am on Monday 10 May 2027"}
+    ),
     "a time now with one thing more": _set(
         "now", to={"record": "today", "at": "9:00 am on Monday 10 May 2027", "more": 1}
     ),

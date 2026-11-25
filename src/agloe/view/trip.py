@@ -1126,7 +1126,7 @@ def _is_the_time_now(now: object) -> bool:
     if not _fits(now, _NOW):
         return False
     said = cast("dict[str, str]", now)
-    return bool(said["record"]) and bool(said["at"].strip())
+    return bool(said["record"].strip()) and bool(said["at"].strip())
 
 
 def _the_options(
@@ -1404,8 +1404,12 @@ def _are_terms(terms: object) -> bool:
             if costs is not None:
                 if not all(each is not None and _is_money(each) for each in costs):
                     return False
-                currencies = [cast("dict[str, str]", each)["currency"] for each in costs]
+                amounts = cast("list[dict[str, str]]", costs)
+                currencies = [each["currency"] for each in amounts]
                 if len(set(currencies)) != len(currencies):
+                    return False
+                # A cost of nothing is an empty list: no amount of nothing is among them.
+                if any(float(each["amount"]) == 0 for each in amounts):
                     return False
     return True
 

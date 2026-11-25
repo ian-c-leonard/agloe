@@ -200,7 +200,10 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
   // shows it: on its days, or among the steps with no time.
   const asked = steps.some((step) => step.cases.length && (step.parts.length || step.when === null));
   const asks = !needed.length ? "" : asked ? " A yellow edge marks each step shown that the report names in what the FILE does not say." : " What the report says the FILE does not say is not about a step shown here.";
-  const says = saysOf(trip, steps.length - untimed.length) + rulesOut(ruled.size, marked.size) + warns + asks;
+  // The time now is a FACT of the FILE about time, whatever else the FILE holds: the
+  // calendar says it, as soon as the FILE is read.
+  const now = trip.now === null ? "" : ` The FILE states the time now: ${trip.now.at}.`;
+  const says = saysOf(trip, steps.length - untimed.length) + now + rulesOut(ruled.size, marked.size) + warns + asks;
   if (!trip.days.length) return { ...none, says, zone: trip.zone, itinerary: trip.itinerary, clash: marked.size > 0, asked, persons: trip.persons, untimed };
 
   // ---- the hours that every day shows: from the earliest start of a step on any day to the
