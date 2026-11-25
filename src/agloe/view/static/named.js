@@ -129,22 +129,33 @@ export function withExpired(offers, expired) {
   return offers.map((id) => (expired.has(id) ? `${id} (expired)` : id));
 }
 
+/** The two kinds of terms that a BOOKING states, in the order a report names them. */
+export const KINDS_OF_TERMS = ["cancelling", "changing"];
+
 /**
  * What a report says in its last part, by BOOKING and by OFFER. `deadlines` holds each
- * DEADLINE in the report's order: the `booking` whose term for cancelling starts, or the
- * `offer` that expires. `now` and `always` hold the BOOKINGs whose cost of cancelling it
- * states for the time now and for any time, and `none` those that state no terms. `undated`
- * holds the OFFERs that state no time of expiry. A list that is not of that shape is none.
+ * DEADLINE in the report's order: the `booking` whose term starts, with the `kind` of the
+ * term, "cancelling" or "changing", or the `offer` that expires. `now` and `always` hold,
+ * for each kind of term, the BOOKINGs whose cost the report states for the time now and for
+ * any time, and `none` those that state no terms of that kind. `undated` holds the OFFERs
+ * that state no time of expiry. A list that is not of that shape is none.
  */
-export function cancellingIn(report) {
+export function termsIn(report) {
   const stated = report !== null && typeof report === "object" ? report : {};
   const isRecord = (each) => each !== null && typeof each === "object";
   const bookings = (list) => (Array.isArray(list) && list.every((each) => isRecord(each) && typeof each.booking === "string") ? list.map((each) => each.booking) : []);
   const ids = (list) => (Array.isArray(list) && list.every((id) => typeof id === "string") ? list : []);
   // A DEADLINE of each kind names its own record and not the other.
-  const isDeadline = (each) => isRecord(each) && (each.kind === "expiry" ? typeof each.offer === "string" && each.booking === undefined : each.kind === "cancelling" && typeof each.booking === "string" && each.offer === undefined);
-  const deadlines = Array.isArray(stated.deadlines) && stated.deadlines.every(isDeadline) ? stated.deadlines.map((each) => (each.kind === "expiry" ? { offer: each.offer } : { booking: each.booking })) : [];
-  return { deadlines, now: bookings(stated.cancelling_now), always: bookings(stated.cancelling_at_any_time), none: ids(stated.no_terms_for_cancelling), undated: ids(stated.no_expiry_stated) };
+  const isDeadline = (each) => isRecord(each) && (each.kind === "expiry" ? typeof each.offer === "string" && each.booking === undefined : KINDS_OF_TERMS.includes(each.kind) && typeof each.booking === "string" && each.offer === undefined);
+  const deadlines = Array.isArray(stated.deadlines) && stated.deadlines.every(isDeadline) ? stated.deadlines.map((each) => (each.kind === "expiry" ? { offer: each.offer } : { booking: each.booking, kind: each.kind })) : [];
+  const byKind = (read) => Object.fromEntries(KINDS_OF_TERMS.map((kind) => [kind, read(kind)]));
+  return {
+    deadlines,
+    now: byKind((kind) => bookings(stated[`${kind}_now`])),
+    always: byKind((kind) => bookings(stated[`${kind}_at_any_time`])),
+    none: byKind((kind) => ids(stated[`no_terms_for_${kind}`])),
+    undated: ids(stated.no_expiry_stated),
+  };
 }
 
 /**

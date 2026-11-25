@@ -125,5 +125,9 @@
         }
       ]
     }
+  ],
+  "no_terms_for_changing": [
+    "room",
+    "skydeck-ticket"
   ]
 }

@@ -567,6 +567,10 @@ def test_the_lines_about_cancelling_are_tied_to_their_bookings(tmp_path: Path) -
         f"6:00 pm on Wednesday 12 May 2027: {start}"[:60]: ["booking:room"],
         "room, the BOOKING for Night at the hotel: nothing": ["booking:room"],
         "skydeck-ticket, the BOOKING for Skydeck visit: 32.00 USD": ["booking:skydeck-ticket"],
+        "No terms for changing are stated for room and skydeck-ticket."[:60]: [
+            "booking:room",
+            "booking:skydeck-ticket",
+        ],
     }
     # A report as JSON that does not name the same BOOKINGs ties none of those lines.
     report = steps["report"]
@@ -610,14 +614,18 @@ def test_the_lines_about_cancelling_are_tied_to_their_bookings(tmp_path: Path) -
             for text in about({**steps, "report": {**report, "deadlines": odd_kind}})
         )
     # The one line about the BOOKINGs with no terms is about each of them.
+    # The ticket states neither kind of terms, and the room none for changing.
     free = asked_of(EXAMPLES / "the-room" / "free-until-wednesday.json")
-    assert about(free)["No terms for cancelling are stated for skydeck-ticket."] == [
-        "booking:skydeck-ticket"
-    ]
+    neither = "No terms for cancelling or for changing are stated for skydeck-ticket."[:60]
+    only = "No terms for changing are stated for room."
+    assert about(free)[neither] == ["booking:skydeck-ticket"]
+    assert about(free)[only] == ["booking:room"]
     named = {**free["report"], "no_terms_for_cancelling": ["room"]}
-    assert "No terms for cancelling are stated for skydeck-ticket." not in about(
-        {**free, "report": named}
-    )
+    assert not {neither, only} & set(about({**free, "report": named}))
+    # Each of the lines is tied by itself: the one that still names what the JSON names is.
+    fewer = {**free["report"], "no_terms_for_changing": ["room"]}
+    assert neither not in about({**free, "report": fewer})
+    assert about({**free, "report": fewer})[only] == ["booking:room"]
     # With no time now, a line says what cancelling costs at any time.
     untimed = asked_of(EXAMPLES / "the-room" / "nobody-said-what-time-it-is.json")
     assert about(untimed)["skydeck-ticket, the BOOKING for Skydeck visit: 32.00 USD"] == [
@@ -632,6 +640,74 @@ def test_the_lines_about_cancelling_are_tied_to_their_bookings(tmp_path: Path) -
     path = tmp_path / "trip.json"
     path.write_text(json.dumps(content))
     assert about(asked_of(path))["24, the BOOKING for Skydeck visit: 32.00 USD"] == ["booking:24"]
+
+
+def test_the_lines_about_changing_are_tied_to_their_bookings(tmp_path: Path) -> None:
+    """A change to the room costs 25 dollars from Tuesday, and cancelling it 189 from Wednesday."""
+
+    def tied(asked: dict[str, Any]) -> list[tuple[str, list[str]]]:
+        (found,) = lines_of([asked])
+        return [(line["text"].strip()[:52], line["about"]) for line in found if line["about"]]
+
+    change = "12:00 pm on Tuesday 11 May 2027: a term for changes to room, the BOOKING"[:52]
+    cancel = "6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING"[:52]
+    room = "room, the BOOKING for Night at the hotel: nothing"
+    ticket = "skydeck-ticket, the BOOKING for Skydeck visit: 32.00 USD"[:52]
+    asked = asked_of(EXAMPLES / "the-room" / "a-change.json")
+    assert tied(asked) == [
+        (change, ["booking:room"]),
+        (cancel, ["booking:room"]),
+        (room, ["booking:room"]),
+        (ticket, ["booking:skydeck-ticket"]),
+        (room, ["booking:room"]),
+        ("No terms for changing are stated for skydeck-ticket.", ["booking:skydeck-ticket"]),
+    ]
+    # A line says which kind of term starts, and the report as JSON has to say the same.
+    report = asked["report"]
+    kinds = {"changing": "cancelling", "cancelling": "changing"}
+    swapped = [{**each, "kind": kinds[each["kind"]]} for each in report["deadlines"]]
+    assert tied({**asked, "report": {**report, "deadlines": swapped}}) == tied(asked)[2:]
+    # The fees are tied under their own heading, apart from what cancelling costs.
+    no_fee = {key: value for key, value in report.items() if key != "changing_now"}
+    assert tied({**asked, "report": no_fee}) == [*tied(asked)[:4], tied(asked)[5]]
+    both = {**report, "changing_now": [*report["changing_now"], report["cancelling_now"][1]]}
+    assert tied({**asked, "report": both}) == [*tied(asked)[:4], tied(asked)[5]]
+    no_cost = {key: value for key, value in report.items() if key != "cancelling_now"}
+    assert tied({**asked, "report": no_cost}) == [*tied(asked)[:2], *tied(asked)[4:]]
+    # With no time now, a line says what a change costs at any time.
+    untimed = asked_of(EXAMPLES / "the-room" / "a-change-with-no-time-now.json")
+    assert tied(untimed) == [
+        (change, ["booking:room"]),
+        (cancel, ["booking:room"]),
+        (ticket, ["booking:skydeck-ticket"]),
+        (
+            "skydeck-ticket, the BOOKING for Skydeck visit: 5.00 USD"[:52],
+            ["booking:skydeck-ticket"],
+        ),
+    ]
+    # A term of each kind for one BOOKING at one instant, beside an OFFER that expires then.
+    content = json.loads((EXAMPLES / "the-room" / "a-change.json").read_text())
+    wednesday = "2027-05-12T18:00:00-05:00[America/Chicago]"
+    for fact in content["facts"]:
+        if fact["id"] == "room":
+            fact["booking"]["changing"][1]["from"] = wednesday
+    content["facts"].append(
+        {"id": "late-checkout", "offer": {"option": "night", "places": 1, "expires": wednesday}}
+    )
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    together = asked_of(path)
+    at = "6:00 pm on Wednesday 12 May 2027: "
+    assert tied(together)[:3] == [
+        (f"{at}a term for cancelling room, the BOOKING"[:52], ["booking:room"]),
+        (f"{at}a term for changes to room, the BOOKING"[:52], ["booking:room"]),
+        (f"{at}late-checkout, the OFFER for Night at the hotel"[:52], ["offer:late-checkout"]),
+    ]
+    report = together["report"]
+    swapped = [
+        {**each, "kind": kinds.get(each["kind"], each["kind"])} for each in report["deadlines"]
+    ]
+    assert tied({**together, "report": {**report, "deadlines": swapped}}) == tied(together)[3:]
 
 
 def test_the_lines_about_an_offer_that_expires_are_tied_to_it(tmp_path: Path) -> None:

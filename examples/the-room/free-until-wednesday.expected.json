@@ -108,5 +108,9 @@
   ],
   "no_terms_for_cancelling": [
     "skydeck-ticket"
+  ],
+  "no_terms_for_changing": [
+    "room",
+    "skydeck-ticket"
   ]
 }

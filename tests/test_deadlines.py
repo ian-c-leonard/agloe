@@ -11,9 +11,9 @@ from agloe import compiler, report
 from agloe.answers import (
     Answer,
     Deadline,
-    cancelling_at_any_time,
-    cancelling_now,
     check,
+    costs_at_any_time,
+    costs_now,
     deadlines,
     with_no_terms,
 )
@@ -21,6 +21,9 @@ from agloe.file import Booking, FileError, Money, Now, Term, instant, load, writ
 from tests.stories import EXAMPLES, Document, lasts, lock, named, starts_at, stays
 
 type Costs = list[tuple[str, str]]
+
+# A BOOKING of these stories that states terms for cancelling states none for changing.
+NO_CHANGING = "\nNo terms for changing are stated for room.\n"
 
 MONDAY = "2027-05-10T09:00:00-05:00[America/Chicago]"
 TUESDAY = "2027-05-11T12:00:00-05:00[America/Chicago]"
@@ -298,6 +301,7 @@ def test_a_cost_is_said_of_its_own_term_and_of_no_other() -> None:
         f" before it. {unknown}"
         f"  12:00 pm on Friday 14 May 2027: {start} Cancelling costs 189.00 USD in it. The"
         f" FILE does not say what it costs in the term before it. {unknown}"
+        f"{NO_CHANGING}"
     )
 
 
@@ -311,7 +315,7 @@ def test_a_term_with_no_cost_is_a_deadline_also_after_a_time_with_no_cost() -> N
     assert words(only_a_time).endswith(
         "  6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING for night,"
         " starts. The FILE does not say what cancelling costs in it, or before it. The STAKE is"
-        " unknown.\n"
+        " unknown.\n" + NO_CHANGING
     )
     twice = a_night(term(FREE), term(None, TUESDAY), term(None, WEDNESDAY))
     assert found(twice) == [
@@ -321,7 +325,7 @@ def test_a_term_with_no_cost_is_a_deadline_also_after_a_time_with_no_cost() -> N
     assert words(twice).endswith(
         "  6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING for night,"
         " starts. The FILE does not say what cancelling costs in it, or in the term before it."
-        " The STAKE is unknown.\n"
+        " The STAKE is unknown.\n" + NO_CHANGING
     )
     assert as_json(twice)["deadlines"][1] == {
         "at": WEDNESDAY,
@@ -469,33 +473,35 @@ def test_what_cancelling_costs_now_is_the_cost_of_the_term_that_holds() -> None:
     def steps(now: str | None) -> Document:
         return a_night(term(FREE), term([("50.00", "USD")], TUESDAY), term(ALL, WEDNESDAY), now=now)
 
-    assert cancelling_now(load(steps(MONDAY))) == (("room", ()),)
-    assert cancelling_now(load(steps(TUESDAY))) == (("room", money(("50.00", "USD"))),)
-    assert cancelling_now(load(steps(THURSDAY))) == (("room", money(("189.00", "USD"))),)
-    assert cancelling_now(load(steps(None))) == ()
+    assert costs_now(load(steps(MONDAY)), "cancelling") == (("room", ()),)
+    assert costs_now(load(steps(TUESDAY)), "cancelling") == (("room", money(("50.00", "USD"))),)
+    assert costs_now(load(steps(THURSDAY)), "cancelling") == (("room", money(("189.00", "USD"))),)
+    assert costs_now(load(steps(None)), "cancelling") == ()
 
 
 def test_no_cost_is_known_now_before_the_first_term_or_in_a_term_with_none() -> None:
-    assert cancelling_now(load(a_night(term(ALL, WEDNESDAY), now=MONDAY))) == (("room", None),)
-    assert cancelling_now(load(a_night(term(ALL, WEDNESDAY), now=WEDNESDAY))) == (
+    assert costs_now(load(a_night(term(ALL, WEDNESDAY), now=MONDAY)), "cancelling") == (
+        ("room", None),
+    )
+    assert costs_now(load(a_night(term(ALL, WEDNESDAY), now=WEDNESDAY)), "cancelling") == (
         ("room", money(("189.00", "USD"))),
     )
     ends = a_night(term(FREE), term(None, WEDNESDAY), now=THURSDAY)
-    assert cancelling_now(load(ends)) == (("room", None),)
+    assert costs_now(load(ends), "cancelling") == (("room", None),)
 
 
 def test_a_booking_with_no_terms_is_named() -> None:
     document = a_night(term(FREE), others=(a_ticket("spare"), a_ticket("other")))
     file = load(document)
-    assert with_no_terms(file) == ("spare", "other")
-    assert cancelling_now(load(a_night(now=MONDAY, others=(a_ticket("spare", term(ALL)),)))) == (
-        ("spare", money(("189.00", "USD"))),
-    )
+    assert with_no_terms(file, "cancelling") == ("spare", "other")
+    assert costs_now(
+        load(a_night(now=MONDAY, others=(a_ticket("spare", term(ALL)),))), "cancelling"
+    ) == (("spare", money(("189.00", "USD"))),)
 
 
 def test_a_cost_that_holds_at_any_time_is_known_with_no_time_now() -> None:
     def at_any_time(*terms: Document) -> tuple[tuple[str, tuple[Money, ...]], ...]:
-        return cancelling_at_any_time(load(a_night(*terms)))
+        return costs_at_any_time(load(a_night(*terms)), "cancelling")
 
     all_of_it = (("room", money(("189.00", "USD"))),)
     assert at_any_time(term(ALL)) == all_of_it
@@ -566,7 +572,7 @@ def test_the_report_says_which_time_it_uses_and_lists_the_deadline() -> None:
         " STAKE: 189.00 USD.\n"
         "\n"
         "What cancelling costs now:\n"
-        "  room, the BOOKING for night: nothing\n"
+        "  room, the BOOKING for night: nothing\n" + NO_CHANGING
     )
 
 
@@ -580,7 +586,7 @@ def test_the_report_says_that_no_deadline_is_left() -> None:
         "No DEADLINE comes after that time.\n"
         "\n"
         "What cancelling costs now:\n"
-        "  room, the BOOKING for night: 189.00 USD\n"
+        "  room, the BOOKING for night: 189.00 USD\n" + NO_CHANGING
     )
 
 
@@ -592,7 +598,7 @@ def test_with_no_time_now_the_report_says_that_nobody_knows_what_has_passed() ->
         " passed. All of them, earliest first (times in America/Chicago):\n"
         "  6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING for night,"
         " starts. Cancelling costs 189.00 USD in it, and nothing in the term before it. At"
-        " STAKE: 189.00 USD.\n"
+        " STAKE: 189.00 USD.\n" + NO_CHANGING
     )
     assert "costs now" not in said
 
@@ -603,14 +609,14 @@ def test_terms_that_never_change_have_no_deadline_with_or_without_a_time() -> No
         "This FILE does not state the time now. Its terms have no DEADLINE.\n"
         "\n"
         "What cancelling costs at any time:\n"
-        "  room, the BOOKING for night: 189.00 USD\n"
+        "  room, the BOOKING for night: 189.00 USD\n" + NO_CHANGING
     )
     assert words(a_night(term(ALL), now=MONDAY)).endswith(
         "\n"
         "No DEADLINE comes after that time.\n"
         "\n"
         "What cancelling costs now:\n"
-        "  room, the BOOKING for night: 189.00 USD\n"
+        "  room, the BOOKING for night: 189.00 USD\n" + NO_CHANGING
     )
 
 
@@ -621,7 +627,7 @@ def test_a_time_now_with_no_terms_names_each_booking() -> None:
         "This report uses 9:00 am on Monday 10 May 2027 as the time now (times in"
         " America/Chicago). The FACT today states it.\n"
         "\n"
-        "No terms for cancelling are stated for room and spare.\n"
+        "No terms for cancelling or for changing are stated for room and spare.\n"
     )
 
 
@@ -631,7 +637,7 @@ def test_the_bookings_with_no_terms_come_after_the_others() -> None:
         "What cancelling costs now:\n"
         "  room, the BOOKING for night: 189.00 USD\n"
         "\n"
-        "No terms for cancelling are stated for spare.\n"
+        "No terms for cancelling or for changing are stated for spare.\n" + NO_CHANGING
     )
     untimed = words(a_night(term(ALL), others=(a_ticket("spare"),)))
     assert untimed.endswith(
@@ -640,7 +646,7 @@ def test_the_bookings_with_no_terms_come_after_the_others() -> None:
         "What cancelling costs at any time:\n"
         "  room, the BOOKING for night: 189.00 USD\n"
         "\n"
-        "No terms for cancelling are stated for spare.\n"
+        "No terms for cancelling or for changing are stated for spare.\n" + NO_CHANGING
     )
 
 

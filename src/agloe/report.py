@@ -17,6 +17,7 @@ from decimal import Decimal
 from itertools import groupby
 
 from agloe.answers import (
+    KINDS_OF_TERMS,
     Answer,
     CapRow,
     Carried,
@@ -28,8 +29,8 @@ from agloe.answers import (
     Report,
     as_seen,
     bought_if_needed,
-    cancelling_at_any_time,
-    cancelling_now,
+    costs_at_any_time,
+    costs_now,
     every_deadline,
     right_needed,
     with_no_expiry,
@@ -893,8 +894,8 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
     }
     offers = {fact.id: fact for fact in file.facts if isinstance(fact, Offer)}
     rows = [
-        f"  {clock.moment(each.at)}: a term for cancelling {held[each.booking]}, starts."
-        f" {_change_in_words(each)}"
+        f"  {clock.moment(each.at)}: a term for {_TERMS[each.kind].of} {held[each.booking]},"
+        f" starts. {_change_in_words(each)}"
         if isinstance(each, Deadline)
         else f"  {clock.moment(each.at)}: {_expiry_in_words(file, offers[each.offer])}"
         for each in every_deadline(file)
@@ -910,26 +911,35 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
             lines += rows
         else:
             lines[-1] += " Its terms have no DEADLINE."
-        always = cancelling_at_any_time(file)
-        if always:
-            lines += ["", "What cancelling costs at any time:"]
-            lines += [f"  {held[id]}: {_loss(cost)}" for id, cost in always]
+        for kind in KINDS_OF_TERMS:
+            always = costs_at_any_time(file, kind)
+            if always:
+                lines += ["", _TERMS[kind].at_any_time]
+                lines += [f"  {held[id]}: {_loss(cost)}" for id, cost in always]
     else:
         used = f"This report uses {clock.moment(now.at)} as the time now {zone}."
         lines = ["", f"{used} The FACT {now.id} states it."]
-        costs = cancelling_now(file)
+        stated = any(costs_now(file, kind) for kind in KINDS_OF_TERMS)
         if rows:
             lines += ["", "DEADLINEs after that time, earliest first:", *rows]
-        elif costs or file.dated_offers():
+        elif stated or file.dated_offers():
             lines += ["", "No DEADLINE comes after that time."]
-        if costs:
-            lines += ["", "What cancelling costs now:"]
-            for id, cost in costs:
-                said = "the FILE does not say" if cost is None else _loss(cost)
-                lines.append(f"  {held[id]}: {said}")
-    unstated = with_no_terms(file)
-    if unstated:
-        lines += ["", f"No terms for cancelling are stated for {_listed(unstated)}."]
+        for kind in KINDS_OF_TERMS:
+            costs = costs_now(file, kind)
+            if costs:
+                lines += ["", _TERMS[kind].now]
+                for id, cost in costs:
+                    said = "the FILE does not say" if cost is None else _loss(cost)
+                    lines.append(f"  {held[id]}: {said}")
+    # A BOOKING that states neither kind of terms is named once, for both.
+    no_terms = [with_no_terms(file, kind) for kind in KINDS_OF_TERMS]
+    neither = [id for id in no_terms[0] if id in no_terms[1]]
+    if neither:
+        lines += ["", f"No terms for cancelling or for changing are stated for {_listed(neither)}."]
+    for kind, unstated in zip(KINDS_OF_TERMS, no_terms, strict=True):
+        only = [id for id in unstated if id not in neither]
+        if only:
+            lines += ["", f"No terms for {kind} are stated for {_listed(only)}."]
     undated = with_no_expiry(file)
     if undated:
         lines += ["", f"No time of expiry is stated for {_listed(undated)}."]
@@ -939,10 +949,12 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
 def _states_terms(file: File) -> bool:
     """Whether a report of this FILE has a last part: the time now, DEADLINEs, terms.
 
-    It has one where the FILE states the time now, terms for cancelling a BOOKING, or when
-    an OFFER expires.
+    It has one where the FILE states the time now, terms for cancelling a BOOKING or for
+    changing it, or when an OFFER expires.
     """
-    stated = any(isinstance(fact, Booking) and fact.cancelling for fact in file.facts)
+    stated = any(
+        isinstance(fact, Booking) and (fact.cancelling or fact.changing) for fact in file.facts
+    )
     return file.now() is not None or stated or bool(file.dated_offers())
 
 
@@ -974,31 +986,80 @@ def _expiry_in_words(file: File, offer: Offer) -> str:
     return f"{offer.id}, the OFFER for {_name(file, offer.option)}, expires. {ends}"
 
 
+@dataclass(frozen=True)
+class _Terms:
+    """The words for one kind of terms of a BOOKING: those for cancelling, or for changing.
+
+    The terms for changing state a fee: what the seller charges for making a change. What
+    the changed BOOKING costs more or less is no part of it, so its STAKE is in the fee.
+    """
+
+    of: str  # what a term is for, after "a term for"
+    now: str  # the line above what it costs at the time now
+    at_any_time: str  # the line above what it costs at any time
+    it_costs: str  # before the cost in the term that starts
+    in_it: str  # after that cost
+    unsaid: str  # after "The FILE does not say what", about the term that starts
+    before: str  # the same about the time before it
+    it_cost: str  # before the cost in the term before it
+    stake: str  # after "STAKE", where the STAKE is of one part only
+
+
+_TERMS = {
+    "cancelling": _Terms(
+        of="cancelling",
+        now="What cancelling costs now:",
+        at_any_time="What cancelling costs at any time:",
+        it_costs="Cancelling costs",
+        in_it="in it",
+        unsaid="cancelling costs in it",
+        before="it costs",
+        it_cost="It costs",
+        stake="",
+    ),
+    "changing": _Terms(
+        of="changes to",
+        now="The fee for a change now, apart from any difference in price:",
+        at_any_time="The fee for a change at any time, apart from any difference in price:",
+        it_costs="The seller charges",
+        in_it="for a change in it",
+        unsaid="the seller charges for a change in it",
+        before="the seller charges",
+        it_cost="The seller charges",
+        stake=" in the fee",
+    ),
+}
+
+
 def _change_in_words(found: Deadline) -> str:
     """What cancelling costs in the term that starts at a DEADLINE and in the one before it.
 
     The words are about those two terms and nothing else: a cost holds until the next term
-    starts, and another line says what that term states.
+    starts, and another line says what that term states. A term for changing has the same
+    words about what the seller charges for a change.
     """
+    words = _TERMS[found.kind]
     before = "before it" if found.first else "in the term before it"
+    unknown = f"The STAKE{words.stake} is unknown."
     if found.after is None:
-        unsaid = "The FILE does not say what cancelling costs in it"
+        unsaid = f"The FILE does not say what {words.unsaid}"
         if found.before is None:
-            return f"{unsaid}, or {before}. The STAKE is unknown."
-        return (
-            f"{unsaid}. It costs {_loss(found.before)} in the term before it. The STAKE is unknown."
-        )
-    later = f"Cancelling costs {_loss(found.after)} in it"
+            return f"{unsaid}, or {before}. {unknown}"
+        earlier = f"{words.it_cost} {_loss(found.before)} in the term before it"
+        return f"{unsaid}. {earlier}. {unknown}"
+    later = f"{words.it_costs} {_loss(found.after)} {words.in_it}"
+    nothing = f"Nothing is at STAKE{words.stake}."
     if found.before is None:
-        at_stake = "Nothing is at STAKE." if found.stake == () else "The STAKE is unknown."
-        return f"{later}. The FILE does not say what it costs {before}. {at_stake}"
+        at_stake = nothing if found.stake == () else unknown
+        return f"{later}. The FILE does not say what {words.before} {before}. {at_stake}"
     sides = f"{later}, and {_loss(found.before)} in the term before it."
     if found.stake is None:
         # More in one currency and less in another: the two are stated, and nothing is added up.
-        return f"{sides} At STAKE: {_loss(found.after)}, in place of {_loss(found.before)}."
+        both = f"{_loss(found.after)}, in place of {_loss(found.before)}"
+        return f"{sides} At STAKE{words.stake}: {both}."
     if not found.stake:
-        return f"{sides} Nothing is at STAKE."
-    return f"{sides} At STAKE: {_loss(found.stake)}."
+        return f"{sides} {nothing}"
+    return f"{sides} At STAKE{words.stake}: {_loss(found.stake)}."
 
 
 def _loss(costs: Sequence[Money]) -> str:
@@ -1029,7 +1090,7 @@ def _terms_as_json(file: File) -> dict[str, object]:
     out["deadlines"] = [
         {
             "at": written(each.at, file.zone),
-            "kind": "cancelling",
+            "kind": each.kind,
             "booking": each.booking,
             "option": bookings[each.booking].option,
             "before": amounts(each.before),
@@ -1042,21 +1103,23 @@ def _terms_as_json(file: File) -> dict[str, object]:
         else _expiry_as_json(file, each, offers[each.offer])
         for each in every_deadline(file)
     ]
-    costs = cancelling_now(file)
-    if costs:
-        out["cancelling_now"] = [
-            {"booking": id, "option": bookings[id].option, "costs": amounts(cost)}
-            for id, cost in costs
-        ]
-    always = cancelling_at_any_time(file)
-    if now is None and always:
-        out["cancelling_at_any_time"] = [
-            {"booking": id, "option": bookings[id].option, "costs": amounts(cost)}
-            for id, cost in always
-        ]
-    unstated = with_no_terms(file)
-    if unstated:
-        out["no_terms_for_cancelling"] = list(unstated)
+    for kind in KINDS_OF_TERMS:
+        costs = costs_now(file, kind)
+        if costs:
+            out[f"{kind}_now"] = [
+                {"booking": id, "option": bookings[id].option, "costs": amounts(cost)}
+                for id, cost in costs
+            ]
+        always = costs_at_any_time(file, kind)
+        if now is None and always:
+            out[f"{kind}_at_any_time"] = [
+                {"booking": id, "option": bookings[id].option, "costs": amounts(cost)}
+                for id, cost in always
+            ]
+    for kind in KINDS_OF_TERMS:
+        unstated = with_no_terms(file, kind)
+        if unstated:
+            out[f"no_terms_for_{kind}"] = list(unstated)
     undated = with_no_expiry(file)
     if undated:
         out["no_expiry_stated"] = list(undated)
