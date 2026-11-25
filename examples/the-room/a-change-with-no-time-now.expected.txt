@@ -36,7 +36,7 @@ The plan relies on these FACTs and DECISIONs:
   lock-skydeck: Alex takes part in Skydeck visit
 
 This FILE does not state the time now. So nobody knows which of its DEADLINEs have passed. All of them, earliest first (times in America/Chicago):
-  12:00 pm on Tuesday 11 May 2027: a term for changes to room, the BOOKING for Night at the hotel, starts. The seller charges 25.00 USD for a change in it, and nothing in the term before it. At STAKE in the fee: 25.00 USD.
+  12:00 pm on Tuesday 11 May 2027: a term for changes to room, the BOOKING for Night at the hotel, starts. The fee for a change is 25.00 USD in it, and nothing in the term before it. At STAKE in the fee: 25.00 USD.
   6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING for Night at the hotel, starts. Cancelling costs 189.00 USD in it, and nothing in the term before it. At STAKE: 189.00 USD.
 
 What cancelling costs at any time:

@@ -226,8 +226,8 @@ def test_the_report_lists_both_kinds_of_deadline_and_both_costs_now() -> None:
     assert said.endswith(
         "\n"
         "DEADLINEs after that time, earliest first:\n"
-        f"  12:00 pm on Tuesday 11 May 2027: {START} The seller charges 25.00 USD for a change in"
-        " it, and nothing in the term before it. At STAKE in the fee: 25.00 USD.\n"
+        f"  12:00 pm on Tuesday 11 May 2027: {START} The fee for a change is 25.00 USD in it,"
+        " and nothing in the term before it. At STAKE in the fee: 25.00 USD.\n"
         "  6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING for night,"
         " starts. Cancelling costs 189.00 USD in it, and nothing in the term before it. At"
         " STAKE: 189.00 USD.\n"
@@ -244,40 +244,49 @@ def test_the_report_lists_both_kinds_of_deadline_and_both_costs_now() -> None:
     ("terms", "line"),
     [
         (
+            (term(FEE), term([("40.00", "USD")], TUESDAY)),
+            "The fee for a change is 40.00 USD in it, and 25.00 USD in the term before it. At"
+            " STAKE in the fee: 15.00 USD.",
+        ),
+        (
             (term(FEE), term(FREE, TUESDAY)),
-            "The seller charges nothing for a change in it, and 25.00 USD in the term before it."
-            " Nothing is at STAKE in the fee.",
+            "The fee for a change is nothing in it, and 25.00 USD in the term before it. Nothing"
+            " is at STAKE in the fee.",
         ),
         (
             (term([("25.00", "USD"), ("100", "points")]), term([("40.00", "USD")], TUESDAY)),
-            "The seller charges 40.00 USD for a change in it, and 25.00 USD and 100 points in"
-            " the term before it. At STAKE in the fee: 40.00 USD, in place of 25.00 USD and 100"
-            " points.",
+            "The fee for a change is 40.00 USD in it, and 25.00 USD and 100 points in the term"
+            " before it. At STAKE in the fee: 40.00 USD, in place of 25.00 USD and 100 points.",
         ),
         (
             (term(FEE), term(None, TUESDAY)),
-            "The FILE does not say what the seller charges for a change in it. The seller charges"
-            " 25.00 USD in the term before it. The STAKE in the fee is unknown.",
+            "The FILE does not state the fee for a change in it. The fee is 25.00 USD in the term"
+            " before it. The STAKE in the fee is unknown.",
         ),
         (
             (term(None, TUESDAY),),
-            "The FILE does not say what the seller charges for a change in it, or before it. The"
-            " STAKE in the fee is unknown.",
+            "The FILE does not state the fee for a change in it, or before it. The STAKE in the"
+            " fee is unknown.",
         ),
         (
             (term(FEE, TUESDAY),),
-            "The seller charges 25.00 USD for a change in it. The FILE does not say what the"
-            " seller charges before it. The STAKE in the fee is unknown.",
+            "The fee for a change is 25.00 USD in it. The FILE does not state the fee before it."
+            " The STAKE in the fee is unknown.",
         ),
         (
             (term(FREE, TUESDAY),),
-            "The seller charges nothing for a change in it. The FILE does not say what the seller"
-            " charges before it. Nothing is at STAKE in the fee.",
+            "The fee for a change is nothing in it. The FILE does not state the fee before it."
+            " Nothing is at STAKE in the fee.",
         ),
         (
             (term(None, MONDAY), term(FEE, TUESDAY)),
-            "The seller charges 25.00 USD for a change in it. The FILE does not say what the"
-            " seller charges in the term before it. The STAKE in the fee is unknown.",
+            "The fee for a change is 25.00 USD in it. The FILE does not state the fee in the term"
+            " before it. The STAKE in the fee is unknown.",
+        ),
+        (
+            (term(None, MONDAY), term(None, TUESDAY)),
+            "The FILE does not state the fee for a change in it, or in the term before it. The"
+            " STAKE in the fee is unknown.",
         ),
     ],
 )
@@ -288,7 +297,6 @@ def test_each_way_a_fee_can_change_in_words(terms: tuple[Document, ...], line: s
     plain = words(a_night(*terms))
     assert "a term for cancelling room, the BOOKING for night, starts." in plain
     assert "fee" not in plain
-    assert "seller" not in plain
 
 
 def test_a_fee_that_the_file_does_not_state_for_the_time_now() -> None:
@@ -302,8 +310,8 @@ def test_a_file_with_terms_for_changing_alone_has_the_last_part() -> None:
         "\n"
         "This FILE does not state the time now. So nobody knows which of its DEADLINEs have"
         " passed. All of them, earliest first (times in America/Chicago):\n"
-        f"  12:00 pm on Tuesday 11 May 2027: {START} The seller charges 25.00 USD for a change in"
-        " it, and nothing in the term before it. At STAKE in the fee: 25.00 USD.\n"
+        f"  12:00 pm on Tuesday 11 May 2027: {START} The fee for a change is 25.00 USD in it,"
+        " and nothing in the term before it. At STAKE in the fee: 25.00 USD.\n"
         "\n"
         "No terms for cancelling are stated for room.\n"
     )
@@ -360,6 +368,29 @@ def test_a_booking_with_no_terms_is_named_once_for_each_kind_it_lacks() -> None:
     shown = as_json(document)
     assert shown["no_terms_for_cancelling"] == ["neither", "moved"]
     assert shown["no_terms_for_changing"] == ["neither", "cancelled"]
+
+
+def test_a_fee_that_rises_has_the_rise_at_stake() -> None:
+    """From 25 dollars to 40: 15 dollars are at STAKE in the fee, in words and as JSON."""
+    document = a_room(term(FEE), term([("40.00", "USD")], TUESDAY), now=MONDAY)
+    (found,) = deadlines(load(document))
+    assert found.stake == money(("15.00", "USD"))
+    (shown,) = as_json(document)["deadlines"]
+    assert shown["stake"] == [{"amount": "15.00", "currency": "USD"}]
+    assert shown["before"] == [{"amount": "25.00", "currency": "USD"}]
+    assert shown["from_then"] == [{"amount": "40.00", "currency": "USD"}]
+    assert "At STAKE in the fee: 15.00 USD.\n" in words(document)
+
+
+def test_a_report_that_cannot_tell_has_the_terms_for_changing() -> None:
+    """Nobody has said when the night starts, and a LOCK asks for it."""
+    document = a_room(term(FREE), term(FEE, TUESDAY), now=MONDAY)
+    document["facts"] = [fact for fact in document["facts"] if fact["id"] != "night-time"]
+    file = load(document)
+    assert check(file).answer is Answer.UNDETERMINED
+    said = report.as_text(file, check(file))
+    assert f"  12:00 pm on Tuesday 11 May 2027: {START}" in said
+    assert f"\n{NOW}\n  room, the BOOKING for night: nothing\n" in said
 
 
 def test_every_kind_of_report_has_the_terms_for_changing() -> None:

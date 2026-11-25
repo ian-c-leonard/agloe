@@ -991,17 +991,17 @@ class _Terms:
     """The words for one kind of terms of a BOOKING: those for cancelling, or for changing.
 
     The terms for changing state a fee: what the seller charges for making a change. What
-    the changed BOOKING costs more or less is no part of it, so its STAKE is in the fee.
+    the changed BOOKING costs more or less is no part of it. So each line about a term for
+    changing names the fee, and its STAKE is in the fee.
     """
 
     of: str  # what a term is for, after "a term for"
     now: str  # the line above what it costs at the time now
     at_any_time: str  # the line above what it costs at any time
-    it_costs: str  # before the cost in the term that starts
-    in_it: str  # after that cost
-    unsaid: str  # after "The FILE does not say what", about the term that starts
-    before: str  # the same about the time before it
+    costs: str  # before the cost in the term that starts, which "in it" follows
+    unsaid: str  # that the FILE states no cost in the term that starts
     it_cost: str  # before the cost in the term before it
+    unsaid_before: str  # that the FILE states no cost, before where it states none
     stake: str  # after "STAKE", where the STAKE is of one part only
 
 
@@ -1010,22 +1010,20 @@ _TERMS = {
         of="cancelling",
         now="What cancelling costs now:",
         at_any_time="What cancelling costs at any time:",
-        it_costs="Cancelling costs",
-        in_it="in it",
-        unsaid="cancelling costs in it",
-        before="it costs",
+        costs="Cancelling costs",
+        unsaid="The FILE does not say what cancelling costs in it",
         it_cost="It costs",
+        unsaid_before="The FILE does not say what it costs",
         stake="",
     ),
     "changing": _Terms(
         of="changes to",
         now="The fee for a change now, apart from any difference in price:",
         at_any_time="The fee for a change at any time, apart from any difference in price:",
-        it_costs="The seller charges",
-        in_it="for a change in it",
-        unsaid="the seller charges for a change in it",
-        before="the seller charges",
-        it_cost="The seller charges",
+        costs="The fee for a change is",
+        unsaid="The FILE does not state the fee for a change in it",
+        it_cost="The fee is",
+        unsaid_before="The FILE does not state the fee",
         stake=" in the fee",
     ),
 }
@@ -1036,22 +1034,21 @@ def _change_in_words(found: Deadline) -> str:
 
     The words are about those two terms and nothing else: a cost holds until the next term
     starts, and another line says what that term states. A term for changing has the same
-    words about what the seller charges for a change.
+    words about the fee for a change.
     """
     words = _TERMS[found.kind]
     before = "before it" if found.first else "in the term before it"
     unknown = f"The STAKE{words.stake} is unknown."
     if found.after is None:
-        unsaid = f"The FILE does not say what {words.unsaid}"
         if found.before is None:
-            return f"{unsaid}, or {before}. {unknown}"
+            return f"{words.unsaid}, or {before}. {unknown}"
         earlier = f"{words.it_cost} {_loss(found.before)} in the term before it"
-        return f"{unsaid}. {earlier}. {unknown}"
-    later = f"{words.it_costs} {_loss(found.after)} {words.in_it}"
+        return f"{words.unsaid}. {earlier}. {unknown}"
+    later = f"{words.costs} {_loss(found.after)} in it"
     nothing = f"Nothing is at STAKE{words.stake}."
     if found.before is None:
         at_stake = nothing if found.stake == () else unknown
-        return f"{later}. The FILE does not say what {words.before} {before}. {at_stake}"
+        return f"{later}. {words.unsaid_before} {before}. {at_stake}"
     sides = f"{later}, and {_loss(found.before)} in the term before it."
     if found.stake is None:
         # More in one currency and less in another: the two are stated, and nothing is added up.
