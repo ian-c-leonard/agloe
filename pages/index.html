@@ -36,6 +36,7 @@
       <svg class="word" viewBox="64 -728 2584 927" role="img" aria-label="Agloe"><path fill="currentColor" transform="scale(1,-1)" d="M594 599 277 93C252 51 223 30 172 25L166 0H388L394 25C318 30 301 49 326 87L405 215H678L696 87C701 45 679 30 603 25L596 0H856L863 25C817 30 800 51 794 98L714 700H688C641 700 592 706 544 712C489 720 424 728 375 728C175 728 64 617 64 481C64 376 128 311 222 311C315 311 382 373 382 452C382 488 357 520 318 520C286 520 261 496 261 461C261 436 276 419 276 398C276 371 253 357 217 357C154 357 115 407 115 481C115 602 217 683 372 683C431 683 514 671 560 658C596 648 620 640 594 599ZM433 259 629 573 672 259ZM1049 -199C1195 -199 1290 -141 1290 -55C1290 13 1244 47 1101 52C965 56 935 62 935 95C935 116 956 135 1001 135C1060 135 1063 113 1133 113C1265 113 1350 204 1350 318C1350 352 1336 395 1296 425C1309 439 1331 455 1349 455C1373 455 1377 429 1405 429C1434 429 1450 452 1450 474C1450 499 1426 514 1395 514C1355 514 1304 496 1261 444C1241 457 1211 466 1172 466C1040 466 955 375 955 261C955 226 967 194 991 169C924 165 864 128 864 70C864 37 877 11 909 -5C865 -21 831 -52 831 -98C831 -176 920 -199 1049 -199ZM1134 152C1078 152 1043 180 1043 243C1043 327 1085 427 1171 427C1227 427 1261 400 1261 335C1261 252 1220 152 1134 152ZM1054 -160C956 -160 893 -137 893 -90C893 -59 911 -36 958 -23C989 -30 1027 -34 1075 -35C1174 -37 1206 -52 1206 -87C1206 -123 1162 -160 1054 -160ZM1354 0H1577L1583 25C1530 30 1521 41 1530 77L1688 715H1656L1511 637L1507 617H1543C1565 617 1571 608 1565 584L1440 77C1431 41 1416 30 1360 25ZM1881 440 1871 461C1775 425 1675 342 1675 190C1675 72 1758 -15 1888 -15C2049 -15 2160 109 2160 262C2160 383 2078 460 1982 460C1904 460 1847 399 1847 312C1847 248 1884 201 1930 203C1962 203 1980 224 1980 249C1980 272 1966 290 1937 295C1913 298 1896 313 1896 345C1896 386 1922 421 1973 421C2030 421 2069 383 2069 295C2069 194 2019 24 1890 24C1805 24 1767 78 1767 157C1767 272 1816 398 1881 440ZM2416 -15C2539 -15 2626 76 2626 151C2626 174 2614 199 2580 199C2554 199 2526 178 2526 143C2526 125 2537 113 2537 94C2537 66 2496 27 2428 27C2335 27 2299 87 2299 167C2299 180 2299 192 2301 209L2648 317C2648 423 2558 466 2469 466C2328 466 2205 359 2205 185C2205 73 2283 -15 2416 -15ZM2472 427C2530 427 2569 400 2567 335L2308 254C2325 339 2371 427 2472 427Z"/></svg>
     </a>
     <nav class="links" aria-label="Main">
+      <a href="/#why">Why</a>
       <a href="/#how">How it works</a>
       <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">Rules</a>
       <a href="/examples/">Examples</a>
@@ -542,25 +543,137 @@ The plan relies on these FACTs and DECISIONs:
     </div>
   </section>
 
-  <section class="band tint" id="what" aria-labelledby="what-title">
-    <div class="wrap split">
+  <section class="band tint" id="why" aria-labelledby="why-title">
+    <div class="wrap">
       <div class="stack">
-        <h2 id="what-title">One of three answers, each with its evidence.</h2>
-        <ul class="key">
-          <li class="feasible" data-from="README.md"><strong>FEASIBLE:</strong> the trip works. The report shows a plan, and warns when the plan holds only if uncertain durations stay short.</li>
-          <li class="infeasible" data-from="README.md"><strong>INFEASIBLE:</strong> the trip cannot work. The report names the FACTs, WANTs and DECISIONs that clash.</li>
-          <li class="undetermined" data-from="README.md"><strong>UNDETERMINED:</strong> the file does not say enough to tell. The report names what it would have to say for the trip to work.</li>
-        </ul>
-        <p class="small" data-from="README.md">The <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">rules</a> say exactly what it checks, and every trip under <a href="https://github.com/ian-c-leonard/agloe/tree/main/examples"><code>examples/</code></a> is one of its tests.</p>
+        <h2 id="why-title">Why Agloe</h2>
+        <p class="lead" data-from="docs/VISION.md">AI agents are starting to plan trips.</p>
       </div>
-      <div class="after">
-        <p data-from="docs/VISION.md">AI agents are starting to plan trips. An agent can seat eight friends at dinner in its head. Seating 800 is different: it needs the guest list written down, the rules codified, and something that checks every seat against every rule. A real trip is the 800 case: many people, legs, bookings and times, all affecting each other.</p>
-        <p><span data-from="docs/VISION.md">People planning without AI benefit in the same way.</span> <span data-from="README.md">See the <a href="https://github.com/ian-c-leonard/agloe/blob/main/docs/ROADMAP.md">roadmap</a> for what each release contains.</span></p>
-      </div>
+      <ol class="whys">
+        <li class="why" id="why-file">
+          <div class="stack">
+            <h3>A FILE for agents to record a trip as it develops</h3>
+            <p>An agent may start a new session without the details from the last one. People also switch agents. With the plan in a FILE, the next agent or person can open it and carry on.</p>
+            <p class="small">A FILE is JSON. Its <a href="https://github.com/ian-c-leonard/agloe/blob/main/src/agloe/schema/file.schema.json">published schema</a> defines its structure. People can read it, and software can parse it. An agent updates the FILE as it learns more.</p>
+          </div>
+          <figure class="grows" id="file-grows">
+            <figcaption>One FILE at three moments</figcaption>
+            <p class="story" data-from="spec/rules.md">The Skydeck sells tickets for a set time, and Alex bought one for 10:00 am before Sam decided to come. Both are LOCKed into the visit.</p>
+            <ol>
+              <li data-file="a-ticket/depends-on-a-ticket">
+                <p class="told" data-from="spec/rules.md">Only Alex has a BOOKING.</p>
+                <p class="answer-line unsure" data-lines-from="examples/a-ticket/depends-on-a-ticket.expected.txt">UNDETERMINED: the FILE does not say enough to tell.</p>
+                <p class="plan-line" data-lines-from="examples/a-ticket/depends-on-a-ticket.expected.txt">The trip works if a right to Skydeck visit is found for Sam.</p>
+              </li>
+              <li data-file="a-ticket/not-bought-yet">
+                <p class="told">An agent adds the seller's OFFER, the trip money and what Alex paid.</p>
+                <p class="answer-line" data-lines-from="examples/a-ticket/not-bought-yet.expected.txt">FEASIBLE, with a WARNING: this trip works, but not everything is booked yet.</p>
+                <p class="plan-line" data-lines-from="examples/a-ticket/not-bought-yet.expected.txt">! Sam still has to buy a right to this, from skydeck-tickets, for 32.00 USD from the trip money.</p>
+              </li>
+              <li data-buys-from="a-ticket/not-bought-yet" data-buyer="sam" data-offer="skydeck-tickets">
+                <p class="told">Sam buys a place. The agent records his BOOKING and lowers the OFFER to one place.</p>
+                <p class="answer-line">FEASIBLE: this trip works.</p>
+              </li>
+            </ol>
+            <p class="small"><a href="/examples/#a-ticket">Skydeck ticket examples</a></p>
+          </figure>
+        </li>
+        <li class="why" id="why-wants">
+          <div class="stack">
+            <h3>What an agent can record in a FILE</h3>
+            <p>An agent records what a PERSON wants apart from the OPTIONs that could deliver it. Alex must have deep-dish pizza, and the WANT has no restaurant in it. Each dinner is an OPTION, and the agent records whether it SATISFIES the WANT.</p>
+            <p>The agent can swap one dinner for another and leave the WANT alone. In another FILE of the story, no dinner on the list works. The 7:45 pm dinner at the deep-dish place ends after the show starts, and the tavern serves no deep-dish pizza. The COMPILER's report then reads:</p>
+            <p class="plan-line quoted" data-lines-from="examples/a-must/depends-on-another-place.expected.txt">The trip works if another OPTION that SATISFIES deep-dish pizza is found for Alex.</p>
+          </div>
+          <figure class="wanted" id="want-and-options" data-file="a-must/works">
+            <figcaption>One WANT and three OPTIONs</figcaption>
+            <p class="want" data-want="deep-dish"><span class="kind">WANT</span><strong>deep-dish pizza</strong><span class="how">a must for Alex</span></p>
+            <ul>
+              <li class="does" data-option="dinner-pizzeria" data-degree="9"><span class="kind">OPTION</span><strong>Dinner at the deep-dish place</strong><span class="how">SATISFIES it, 9 out of 10</span></li>
+              <li data-option="dinner-tavern" data-degree="0"><span class="kind">OPTION</span><strong>Dinner at the tavern</strong><span class="how">does not SATISFY it</span></li>
+              <li data-option="blues-show" data-degree="0"><span class="kind">OPTION</span><strong>Blues show</strong><span class="how">does not SATISFY it</span></li>
+            </ul>
+            <p class="small"><a href="/examples/#a-must">Deep-dish pizza examples</a></p>
+          </figure>
+          <div class="also">
+            <h4>What else an agent can record</h4>
+            <dl>
+              <div>
+                <dt data-from="spec/rules.md">A cab is listed, but nobody has recorded how long it takes.</dt>
+                <dd>An agent can leave the travel time out. Alex and Sam can catch their flight if the cab takes 45 minutes or less.</dd>
+              </div>
+              <div>
+                <dt>From noon to 6:00 pm, only the Blue Line leaves straight for O'Hare.</dt>
+                <dd>An agent can mark the list of direct routes to O'Hare that afternoon as COMPLETE. Without that mark, a faster way might still exist.</dd>
+              </div>
+              <div>
+                <dt>The Blue Line can take up to 80 minutes.</dt>
+                <dd>An agent can record a range for a ride that the travelers do not control. <span data-from="spec/rules.md">At 80 minutes they reach O'Hare five minutes after bag drop closes.</span></dd>
+              </div>
+              <div>
+                <dt>The seller has two places left, at 32.00 USD each.</dt>
+                <dd>An agent records the seller's OFFER apart from a BOOKING. Alex has a BOOKING, and Sam still has to buy a place.</dd>
+              </div>
+              <div>
+                <dt>Alex and Sam have decided to go up the Skydeck.</dt>
+                <dd>The agent records that DECISION as a LOCK. For the trip to work, Alex and Sam must both visit the Skydeck.</dd>
+              </div>
+              <div>
+                <dt>From 6:00 pm on Wednesday, cancelling the room costs 189 dollars.</dt>
+                <dd>An agent can record dated cancellation fees in the BOOKING. On Monday the report lists that DEADLINE, with 189 dollars at STAKE.</dd>
+              </div>
+            </dl>
+          </div>
+        </li>
+        <li class="why" id="why-compiler">
+          <div class="stack">
+            <h3>A COMPILER to check the whole plan</h3>
+            <p>An agent can seat eight friends at dinner in its head. Seating 800 takes a written guest list and a program that checks each seat against each rule. A real trip is like the 800: its people, legs, bookings and times all affect each other.</p>
+            <p><a href="https://arxiv.org/abs/2402.01817">Kambhampati and colleagues (2024)</a> describe a neuro-symbolic approach to planning, in which an outside verifier checks each plan that a language model proposes. An agent can write an Agloe FILE, and the COMPILER uses a solver to check it.</p>
+            <p class="small">The COMPILER gives the same answer each time, with the reason for each problem it finds.</p>
+          </div>
+          <figure class="meters" id="with-a-solver">
+            <figcaption>Share of 180 TravelPlanner tasks solved by each method</figcaption>
+            <ul>
+              <li style="--share: 0.6" title="GPT-4 Turbo plans after looking up travel details: 0.6% of the tasks solved"><span class="who">GPT-4 Turbo plans after looking up travel details</span><span class="track"><i></i></span><span class="share">0.6%</span></li>
+              <li style="--share: 4.4" title="GPT-4 Turbo plans with the details supplied: 4.4% of the tasks solved"><span class="who">GPT-4 Turbo plans with the details supplied</span><span class="track"><i></i></span><span class="share">4.4%</span></li>
+              <li class="solver" style="--share: 93.3" title="GPT-4 writes the constraints and the Z3 solver finds a plan: 93.3% of the tasks solved"><span class="who">GPT-4 writes the constraints and the Z3 solver finds a plan</span><span class="track"><i></i></span><span class="share">93.3%</span></li>
+            </ul>
+            <p class="small">Final pass rates on the validation set of the TravelPlanner benchmark, from Table 1 of <a href="https://arxiv.org/abs/2404.11891">Hao et al., 2024</a>. The first two are results of <a href="https://arxiv.org/abs/2402.01622">Xie et al., 2024</a>.</p>
+          </figure>
+        </li>
+        <li class="why" id="why-optimizer">
+          <div class="stack">
+            <h3>An OPTIMIZER to rank the plans that work</h3>
+            <p>The OPTIMIZER is planned for release 0.2 and is not built yet. It will rank the plans that work by how well they meet each traveler's priorities.</p>
+            <p><span data-from="docs/VISION.md">A plan can work and still be wrong for the people on it.</span> Travelers will rank their WANTs. The OPTIMIZER will show each PERSON's SCORE beside the total. It will flag plans where one PERSON scores much lower than the others.</p>
+          </div>
+          <figure class="defined">
+            <figcaption>SCORE, as the vocabulary defines it</figcaption>
+            <p data-from="spec/vocabulary.md">A number for one FEASIBLE ITINERARY: for every PERSON and every WANT they hold, the DEGREE OF WANT times the DEGREE OF SATISFACTION the ITINERARY delivers, all added up.</p>
+          </figure>
+        </li>
+      </ol>
     </div>
   </section>
 
-  <section class="band" id="how" aria-labelledby="how-title">
+  <section class="band" id="what" aria-labelledby="what-title">
+    <div class="wrap split top-aligned">
+      <div class="stack">
+        <h2 id="what-title">What the COMPILER answers</h2>
+        <p><span data-from="README.md">Today the COMPILER reads a trip file and gives one of three answers, each with its evidence</span>.</p>
+        <p class="small" data-from="README.md">The <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">rules</a> say exactly what it checks, and every trip under <a href="https://github.com/ian-c-leonard/agloe/tree/main/examples"><code>examples/</code></a> is one of its tests.</p>
+        <p class="small" data-from="README.md">See the <a href="https://github.com/ian-c-leonard/agloe/blob/main/docs/ROADMAP.md">roadmap</a> for what each release contains.</p>
+      </div>
+      <ul class="key">
+        <li class="feasible" data-from="README.md"><strong>FEASIBLE:</strong> the trip works. The report shows a plan, and warns when the plan holds only if uncertain durations stay short.</li>
+        <li class="infeasible" data-from="README.md"><strong>INFEASIBLE:</strong> the trip cannot work. The report names the FACTs, WANTs and DECISIONs that clash.</li>
+        <li class="undetermined" data-from="README.md"><strong>UNDETERMINED:</strong> the file does not say enough to tell. The report names what it would have to say for the trip to work.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="band tint" id="how" aria-labelledby="how-title">
     <div class="wrap">
       <h2 id="how-title">How it works</h2>
       <ul class="hows">
@@ -594,7 +707,7 @@ The plan relies on these FACTs and DECISIONs:
     </div>
   </section>
 
-  <section class="band tint" id="run" aria-labelledby="run-title">
+  <section class="band" id="run" aria-labelledby="run-title">
     <div class="wrap split">
       <div class="stack">
         <h2 id="run-title">Check a trip yourself.</h2>
