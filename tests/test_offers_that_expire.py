@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from agloe import answers, compiler, report
-from agloe.answers import Answer, Report, as_seen
+from agloe.answers import Answer, Report, as_seen, expiries
 from agloe.file import File, FileError, Now, Offer, instant
 from agloe.reference import (
     Broken,
@@ -538,3 +538,67 @@ def test_the_times_of_expiry_count_for_the_offsets() -> None:
     late = {"id": "today", "now": "2027-11-09T09:00:00-06:00[America/Chicago]"}
     words = said(moved(late, every_right("tour", "tour-offer")))
     assert "could be bought until 5:00 pm (UTC-5) on Friday 5 November 2027" in words
+
+
+# What each lookup and each world says of an OFFER that has expired.
+
+
+def test_no_lookup_of_a_file_gives_an_offer_that_has_expired() -> None:
+    deck = offer("ferry", 3, "car-deck", "90.00 USD", objects=["car"], expires=THURSDAY)
+    pays = [budget("money", "alex", "sam", objects=["car"])]
+    early = a_crossing(deck, MONDAY, budgets=pays)
+    late = a_crossing(deck, FRIDAY, budgets=pays)
+    assert [each.id for each in early.offers_for("ferry", "car")] == ["car-deck"]
+    assert [each.id for each in early.offers_for_objects("ferry")] == ["car-deck"]
+    assert [each.id for each in early.every_offer("ferry")] == ["car-deck"]
+    assert late.offers_for("ferry", "car") == ()
+    assert late.offers_for_objects("ferry") == ()
+    assert late.every_offer("ferry") == ()
+    assert late.offers_open_to("ferry", "car") == ()
+    assert [each.id for each in late.offers_stated("ferry")] == ["car-deck"]
+    assert tour(FRIDAY).every_offer("tour") == ()
+    assert tour(FRIDAY).offers_open_to("tour", "sam") == ()
+
+
+def test_the_file_as_of_a_moment_has_that_moment_as_its_only_time_now() -> None:
+    later = tour(MONDAY).as_of(instant(THURSDAY))
+    assert [fact.at for fact in later.facts if isinstance(fact, Now)] == [instant(THURSDAY)]
+    assert later.expired == {"tour-offer"}
+    assert tour(FRIDAY).as_of(instant(THURSDAY) - 1).expired == frozenset()
+
+
+def test_nobody_can_pay_for_a_place_of_an_offer_that_is_closed_or_has_expired() -> None:
+    assert ("tour-offer", "sam") in worst_case(tour(MONDAY)).payable
+    assert worst_case(tour(FRIDAY)).payable == frozenset()
+    assert worst_case(tour()).payable == frozenset()
+    assert ("tour-offer", "sam") in best_case(tour()).payable
+
+
+def test_an_object_whose_only_offer_is_closed_has_nothing_to_cover_it() -> None:
+    """With no time now the car deck might have expired: at worst the car has no right."""
+    deck = offer("ferry", 3, "car-deck", "90.00 USD", objects=["car"], expires=THURSDAY)
+    pays = [budget("money", "alex", "sam", objects=["car"])]
+    uncovered = [Broken(Constraint.COVERED, "ferry", ("alex",), object="car")]
+    for file in (a_crossing(deck, budgets=pays), a_crossing(deck, FRIDAY, budgets=pays)):
+        world = worst_case(file)
+        assert ("ferry", "car") in world.uncovered
+        assert ("ferry", "car") not in world.offered
+        assert broken_as_listed(file, world, BOTH) == uncovered
+    open_still = a_crossing(deck, MONDAY, budgets=pays)
+    assert ("ferry", "car") in worst_case(open_still).offered
+    assert broken_as_listed(open_still, worst_case(open_still), BOTH) == []
+
+
+def test_the_expiries_are_in_the_order_of_time() -> None:
+    file = a_boat_tour(
+        booking("tour", "alex", "sam"),
+        offer("tour", 1, id="late", expires=THURSDAY),
+        offer("tour", 1, id="early", expires=WEDNESDAY),
+        offer("tour", 1, id="also-late", expires=THURSDAY),
+    )
+    assert [each.offer for each in expiries(file)] == ["early", "late", "also-late"]
+    assert [each.at for each in expiries(file)] == [
+        instant(WEDNESDAY),
+        instant(THURSDAY),
+        instant(THURSDAY),
+    ]

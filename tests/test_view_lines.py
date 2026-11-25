@@ -609,6 +609,28 @@ def test_the_lines_about_cancelling_are_tied_to_their_bookings(tmp_path: Path) -
     assert about(asked_of(path))["24, the BOOKING for Skydeck visit: 32.00 USD"] == ["booking:24"]
 
 
+def test_the_lines_about_an_offer_that_expires_are_tied_to_it(tmp_path: Path) -> None:
+    """Sam still has to buy a ticket, before Thursday. A second OFFER states no expiry."""
+    content = json.loads((EXAMPLES / "a-ticket" / "the-offer-ends-on-thursday.json").read_text())
+    spare = {"id": "spare-tickets", "offer": {"option": "skydeck", "places": 1}}
+    content["facts"].append(spare)
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    (found,) = lines_of([asked_of(path)])
+    tied = {line["text"].strip()[:40]: line["about"] for line in found if offers_of(line)}
+    assert tied == {
+        # The purchase under its step, which ends with the time to buy before.
+        "! Sam still has to buy a right to this, ": ["offer:skydeck-tickets"],
+        # What the plan still pays in dollars.
+        "USD: 32.00 paid; 32.00 still to buy (sky": ["offer:skydeck-tickets"],
+        # The expiry among the DEADLINEs, and the OFFER that states none.
+        "5:00 pm on Thursday 13 May 2027: skydeck": ["offer:skydeck-tickets"],
+        "No time of expiry is stated for spare-ti": ["offer:spare-tickets"],
+    }
+    (purchase,) = [line for line in found if line["warns"]]
+    assert purchase["text"].endswith(", before 5:00 pm on Thursday 13 May 2027.")
+
+
 def test_what_the_report_says_is_charged_to_a_cap_is_kept_in_its_own_words(
     tmp_path: Path,
 ) -> None:
