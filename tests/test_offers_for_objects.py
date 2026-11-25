@@ -57,10 +57,12 @@ from tests.stories import (
     Document,
     booking,
     budget,
+    can,
     cap,
     carries,
     cutoff,
     does_with,
+    every_requirement,
     every_right,
     every_right_for,
     every_transfer,
@@ -78,6 +80,7 @@ from tests.stories import (
     needs_right_for,
     no_other_right_for,
     offer,
+    requires,
     requires_object,
     seconds,
     starts_at,
@@ -688,6 +691,16 @@ def test_the_search_keeps_a_choice_that_takes_fewer_places() -> None:
     }
     kept = reference._first_of(reached(file))  # pyright: ignore[reportPrivateUsage]
     assert kept == [((), ()), (((0, 1),), ())]
+    # Where Jo has the bike, a hand-over to Alex comes later and takes a place besides. It
+    # takes more than the choice before it, so it cannot be the choice shown.
+    from_jo = reference._first_hand_overs(  # pyright: ignore[reportPrivateUsage]
+        world, "bike", visits, [with_jo], rank, {}
+    )
+    assert from_jo == {
+        (with_jo, (), taken("jo")): (),
+        (with_alex, (), taken("alex", "train")): ((0, 0),),
+    }
+    assert reference._first_of(from_jo) == [((), ())]  # pyright: ignore[reportPrivateUsage]
     # With a BOOKING that covers the bike, no place is taken. The hand-over comes later
     # and counts on no less, so it cannot be the choice shown.
     booked = a_meeting(booking("train", "bike"))
@@ -1655,19 +1668,44 @@ def test_the_plan_shown_is_the_first_though_the_model_counts_less() -> None:
     to its rider. The first charges 10 dollars for the bag and for the bike, the show
     charges 10 for the bike, and the money may spend 20. Nobody knows where the bike is.
     Cy has to run a courier that can carry the bag, and gets to it by one slow WAY or by
-    two quick ones.
+    two quick ones. Only Cy can drive, and the courier requires that of each PERSON in it.
 
     On the first train, Bea pays for the bag and might pay for the bike, and again at the
     show: 30 dollars. The model counts 20, and takes that train with the slow WAY. The
     rules make a plan of that choice with the two quick WAYs, so that the courier brings
     the bag. That plan works, and it takes part five times. The second train needs four,
-    and that is the plan shown."""
-    options = [moves("first", "p", "d"), moves("second", "p", "d")]
+    and that is the plan shown. With no second train, the plan with five is the one."""
+    found = checked(a_show_to_get_to(["first", "second"]))
+    assert found.answer is Answer.FEASIBLE
+    assert [(step.option or step.way, step.persons) for step in found.itinerary] == [
+        ("direct", ("cy",)),
+        ("second", ("bea",)),
+        ("show", ("bea",)),
+        ("courier", ("cy",)),
+    ]
+    found = checked(a_show_to_get_to(["first"]))
+    assert found.answer is Answer.FEASIBLE
+    assert [(step.option or step.way, step.persons) for step in found.itinerary] == [
+        ("hop", ("cy",)),
+        ("skip", ("cy",)),
+        ("first", ("bea",)),
+        ("courier", ("cy",)),
+        ("show", ("bea",)),
+    ]
+
+
+def a_show_to_get_to(names: Sequence[str]) -> File:
+    """The show, the courier and these trains, as the test before this says."""
+    options = [*(moves(train, "p", "d") for train in names)]
     options += [stays("show", "d"), moves("courier", "p", "d")]
-    stated = [*at("first", 9), *at("second", 9), *at("show", 10), *whenever("courier", "PT30M")]
+    stated = [fact for train in names for fact in at(train, 9)]
+    stated += [*at("show", 10), *whenever("courier", "PT30M")]
     stated += [starts_from("bea", "p"), starts_from("cy", "q"), lies_at("bag", "p")]
     stated += [requires_object("show", "bag"), every_use("bag"), every_use("bike")]
-    stated += [hands_over("first", "bag"), hands_over("second", "bag"), carries("courier", "bag")]
+    stated += [hands_over(train, "bag") for train in names]
+    stated.append(carries("courier", "bag"))
+    stated += [requires("courier", "driving", "each"), can("cy", "driving")]
+    stated.append(every_requirement("driving"))
     stated += [
         each(thing) for thing in ("bag", "bike") for each in (every_transfer, every_right_for)
     ]
@@ -1677,7 +1715,7 @@ def test_the_plan_shown_is_the_first_though_the_model_counts_less() -> None:
     stated += [takes("direct", "PT3H"), takes("hop", "PT10M"), takes("skip", "PT10M")]
     ways = [way("direct", "q", "p"), way("hop", "q", "r"), way("skip", "r", "p")]
     decisions = [trip_starts(8), lock("show", "bea"), lock("courier", "cy")]
-    file = trip(
+    return trip(
         ["bea", "cy"],
         ["p", "q", "r", "d"],
         options,
@@ -1685,17 +1723,10 @@ def test_the_plan_shown_is_the_first_though_the_model_counts_less() -> None:
         [*decisions, cap("money", "20.00 USD")],
         ways=ways,
         budgets=[budget("money", "bea", "cy", objects=["bike", "bag"])],
+        capabilities=["driving"],
         objects=["bag", "bike"],
         object_rights=True,
     )
-    found = checked(file)
-    assert found.answer is Answer.FEASIBLE
-    assert [(step.option or step.way, step.persons) for step in found.itinerary] == [
-        ("direct", ("cy",)),
-        ("second", ("bea",)),
-        ("show", ("bea",)),
-        ("courier", ("cy",)),
-    ]
 
 
 def refusals_of_the_rules(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
@@ -1789,6 +1820,14 @@ def test_a_place_with_no_price_can_cost_what_the_places_it_is_never_bought_with_
     ]
     # The other cases of the report have no such place, and say nothing of one.
     assert all("left_for_places" not in plan["caps"][0] for plan in said[1:])
+    # A cap on a BUDGET that does not list the bike has no room for a place for the bike.
+    fund = Budget("fund", "fund", ("alex",), ("USD",))
+    limit = Cap("fund-cap", "fund", Money(Decimal("50.00"), "USD"))
+    two_pots = replace(
+        unknown, budgets=(*unknown.budgets, fund), decisions=(*unknown.decisions, limit)
+    )
+    rows = checked(two_pots).plans[0].caps
+    assert [(each.cap, len(each.left_for)) for each in rows] == [("money-cap", 1), ("fund-cap", 0)]
     assert checked(with_the_north_rack_at(Money(Decimal("10.00"), "USD"))).answer is Answer.FEASIBLE
     dearer = with_the_north_rack_at(Money(Decimal("10.01"), "USD"))
     assert checked(dearer).answer is Answer.UNDETERMINED
@@ -2030,6 +2069,13 @@ def test_a_place_that_an_object_is_sure_to_take_is_counted_before_any_pick(
     counting_the_checks_of_rights(monkeypatch, 200)
     assert broken_as_listed(file, best, plan) == []
     assert taking_a_place(file, best, plan) == {"first": {"bike": True}}
+    # One cent less, and the place for the bike cannot be paid for, whatever the bags do.
+    # Then each bag goes its first way: with Alex, on the first train.
+    short, plan = three_trains("1.00 USD", "9.99 USD", bike=True)
+    best = best_case(short)
+    assert broken_as_listed(short, best, plan) == [Broken(Constraint.CAP, None, ())]
+    on_the_first = {**{f"bag-{number}": True for number in range(8)}, "bike": True}
+    assert taking_a_place(short, best, plan) == {"first": on_the_first}
 
 
 def test_a_cap_turns_on_where_an_object_is_only_in_the_currency_of_its_place() -> None:
