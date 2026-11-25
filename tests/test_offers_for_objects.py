@@ -1634,6 +1634,11 @@ def test_the_model_counts_what_the_rules_count_for_an_object_that_nothing_moves(
     # Alex and Jo on different trains: the dearest train of one PERSON is counted.
     apart = two_trains("10.00")
     assert compiler.works(apart, worst_case(apart))
+    # Jo on both trains: the PERSON with the most is counted, whoever the FILE lists first.
+    jo_twice: list[Ride] = [("north", "jo", 9, "a", "b"), ("south", "jo", 10, "b", "d")]
+    for most, works in limits:
+        file = trains(most, jo_twice)
+        assert compiler.works(file, worst_case(file)) is works
     assert not any(refusals)
     built: list[object] = []
     search = compiler._Search  # pyright: ignore[reportPrivateUsage]
@@ -2703,3 +2708,31 @@ def test_a_place_with_no_price_can_cost_what_the_report_says_and_no_more() -> No
         assert at_price(each_can_cost) is Answer.FEASIBLE
         assert at_price(each_can_cost + 1) is not Answer.FEASIBLE
     assert compared > 60 and more_than_a_share > 30
+
+
+def test_places_that_every_way_takes_are_together_only_where_every_way_takes_them_so() -> None:
+    """Two ways of one OBJECT both take a place in the first OPTION and in the second. One
+    way takes both together, and the other takes one or the other. So the least that the
+    OBJECT takes is one of the two. A third place that only the first way takes is no part
+    of it."""
+    in_every_way = reference._in_every_way  # pyright: ignore[reportPrivateUsage]
+    nowhere = (frozenset[Where](),)
+    both: reference._Run = (  # pyright: ignore[reportPrivateUsage]
+        (),
+        nowhere,
+        nowhere,
+        ((0, None, True), (1, None, True), (2, None, True)),
+        frozenset({frozenset({0, 1, 2})}),
+    )
+    either: reference._Run = (  # pyright: ignore[reportPrivateUsage]
+        (),
+        nowhere,
+        nowhere,
+        ((0, None, False), (1, None, False)),
+        frozenset({frozenset({0}), frozenset({1})}),
+    )
+    least = in_every_way([both, either])
+    assert least[3] == ((0, None, True), (1, None, True))
+    assert least[4] == frozenset({frozenset({0}), frozenset({1})})
+    # Where every way takes the two together, so does the least.
+    assert in_every_way([both, both])[4] == frozenset({frozenset({0, 1, 2})})
