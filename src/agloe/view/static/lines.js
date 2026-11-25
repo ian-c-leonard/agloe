@@ -410,6 +410,11 @@ export function lines(text, report, trip) {
  * and what cancelling costs. `also` holds all of that: each paragraph up to that part, or to
  * the end of a report that has none, as the list of its lines.
  *
+ * In `deadlines`: the DEADLINEs that the report lists in its last part, or null where it
+ * lists none. `over` holds what the report says above them, line by line: which time it
+ * takes as the time now, and the line over the list. Where the FILE does not state the time
+ * now, one line says both. `lines` holds the line of each DEADLINE.
+ *
  * A line that is said again is `says`, its words without the space around them, `about`,
  * what the line is about as the page names things, and `inset`, whether the report sets it
  * in. `whole` says that every line which looks like a warning is tied to its step. Where it
@@ -454,7 +459,13 @@ export function statedIn(tied) {
   }
   const whole = tied.every((line) => line.warns || !WARNING.test(line.text));
   const explains = tied.flatMap((line) => (line.text.startsWith(EXPLAINS) ? [line.text] : []));
-  return { heading: cases.length > 1 && heading !== undefined ? heading.text : null, cases, under, also, charged, records, conflict: over < 0 ? null : tied[over].text, warnings, explains, whole };
+  // The DEADLINEs are under their one heading in the last part of the report, set in. The
+  // line that opens that part says which time the report takes as the time now.
+  const heads = tied.flatMap((line, at) => (at >= ends && DEADLINES.test(line.text) ? [at] : []));
+  const due = [];
+  for (let at = heads[0] + 1; heads.length === 1 && at < tied.length && tied[at].text.startsWith("  "); at += 1) due.push(said(tied[at]));
+  const deadlines = heads.length === 1 ? { over: [...new Set([tied[ends].text, tied[heads[0]].text])], lines: due } : null;
+  return { heading: cases.length > 1 && heading !== undefined ? heading.text : null, cases, under, also, charged, records, conflict: over < 0 ? null : tied[over].text, warnings, explains, whole, deadlines };
 }
 
 /**

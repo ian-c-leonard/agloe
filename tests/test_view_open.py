@@ -416,12 +416,95 @@ def test_a_trip_that_cannot_work_lists_what_rules_out_every_plan() -> None:
     assert listed["count"] == 6
 
 
+NOW = (
+    "This report uses 9:00 am on Monday 10 May 2027 as the time now (times in America/Chicago)."
+    " The FACT today states it."
+)
+AFTER_NOW = "DEADLINEs after that time, earliest first:"
+ROOM_TERM = (
+    "6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING for Night at the"
+    " hotel, starts. Cancelling costs 189.00 USD in it, and nothing in the term before it. At"
+    " STAKE: 189.00 USD."
+)
+
+
+def test_the_list_holds_the_deadlines_that_the_report_lists() -> None:
+    """Sam still has to buy a ticket, and the OFFER for it ends on Thursday at five. The
+    report lists that as a DEADLINE: something is to be done or decided by then."""
+    listed = open_of("a-ticket/the-offer-ends-on-thursday")
+    warnings, deadlines = listed["groups"]
+    assert warnings["kind"] == "warnings"
+    # Over the DEADLINEs is what the report says of them, in its own lines: which time it
+    # takes as the time now, and that these come after it.
+    assert (deadlines["kind"], deadlines["says"].split("\n")) == ("deadlines", [NOW, AFTER_NOW])
+    (expiry,) = deadlines["items"]
+    assert expiry["says"] == (
+        "5:00 pm on Thursday 13 May 2027: skydeck-tickets, the OFFER for Skydeck visit, expires."
+        " The chance to buy up to 2 places at 32.00 USD each ends."
+    )
+    # The item is a drawing of the OFFER, like its line of the report. So it lights up with
+    # the purchase that is still to make from that OFFER.
+    assert (expiry["name"], expiry["of"], expiry["records"], expiry["mark"]) == (
+        "",
+        ["offer:skydeck-tickets"],
+        [],
+        "due",
+    )
+    assert "offer:skydeck-tickets" in warnings["items"][0]["of"]
+    assert (expiry["when"], expiry["more"], deadlines["also"]) == (None, [], [])
+    # A DEADLINE is a time to keep in view, and no thing that is open: the purchase is.
+    assert listed["says"] == "1 thing is open. Times are on the clocks of America/Chicago."
+    assert (listed["count"], listed["clash"], listed["asked"]) == (1, False, True)
+
+
+def test_a_plan_with_nothing_open_still_lists_its_deadlines() -> None:
+    """The room can be cancelled at no cost until Wednesday at six. Everything is decided."""
+    listed = open_of("the-room/on-monday")
+    assert (listed["says"], listed["count"]) == (NOTHING, 0)
+    (deadlines,) = listed["groups"]
+    assert deadlines["kind"] == "deadlines"
+    assert [(item["says"], item["of"]) for item in deadlines["items"]] == [
+        (ROOM_TERM, ["booking:room"])
+    ]
+
+
+def test_a_file_that_does_not_state_the_time_now_lists_every_deadline() -> None:
+    """Nobody has said what time it is, so nobody knows which DEADLINEs have passed. The
+    report lists all of them and says so, and the list says it with them."""
+    listed = open_of("the-room/nobody-said-what-time-it-is")
+    deadlines = listed["groups"][-1]
+    assert (deadlines["kind"], deadlines["says"]) == (
+        "deadlines",
+        "This FILE does not state the time now. So nobody knows which of its DEADLINEs have"
+        " passed. All of them, earliest first (times in America/Chicago):",
+    )
+    assert [(item["says"], item["of"]) for item in deadlines["items"]] == [
+        (ROOM_TERM, ["booking:room"])
+    ]
+
+
+def test_a_report_with_no_deadline_to_come_lists_none() -> None:
+    """It is Wednesday at six, and the last term of the room has started."""
+    sent, found, text = in_words(EXAMPLES / "the-room" / "at-six-on-wednesday.json")
+    assert "No DEADLINE comes after that time." in text
+    (listed,) = all_open([sent], [found], [text])
+    assert "deadlines" not in {group["kind"] for group in listed["groups"]}
+    # What cancelling costs now is no thing to do, and is not in the list.
+    assert "What cancelling costs now" not in json.dumps(listed)
+
+
 def test_the_deadlines_of_a_report_are_no_part_of_what_rules_out_every_plan() -> None:
     """The night ends after breakfast starts. What cancelling the room costs is not why."""
     listed = open_of("the-room/cannot-work")
-    (group,) = listed["groups"]
+    group, deadlines = listed["groups"]
     assert group["kind"] == "conflict"
     assert group["also"] == []
+    # The DEADLINE is in a group of its own, after what rules out every plan.
+    assert (deadlines["kind"], [item["says"] for item in deadlines["items"]]) == (
+        "deadlines",
+        [ROOM_TERM],
+    )
+    assert (listed["count"], listed["clash"]) == (5, True)
     assert [item["name"] for item in group["items"]] == [
         "night-time",
         "night-length",
@@ -446,10 +529,13 @@ def test_the_deadlines_of_a_report_are_no_part_of_a_case(tmp_path: Path) -> None
 
     listed, text = changed(tmp_path, "several-days/depends-on-the-night", with_terms)
     assert "At STAKE: 189.00 USD." in text
-    (group,) = listed["groups"]
+    group, deadlines = listed["groups"]
     assert group["kind"] == "cases"
     assert group["also"] == []
     assert listed["count"] == 1
+    # The DEADLINE is in a group of its own, after the case.
+    assert deadlines["kind"] == "deadlines"
+    assert [item["of"] for item in deadlines["items"]] == [["booking:room"]]
 
 
 def test_a_deadline_is_no_step_of_the_plan(tmp_path: Path) -> None:
@@ -468,21 +554,31 @@ def test_a_deadline_is_no_step_of_the_plan(tmp_path: Path) -> None:
     before = open_of("a-car-ferry/a-place-on-the-car-deck")
     listed, text = changed(tmp_path, "a-car-ferry/a-place-on-the-car-deck", with_terms)
     assert "cancelling ferry-tickets, the BOOKING for Car ferry to Muskegon, starts." in text
-    assert listed == before
+    # What is open is as before: the DEADLINE is no step, and nothing is warned of at it.
+    warnings, deadlines = listed["groups"]
+    assert [warnings] == before["groups"]
+    assert (listed["says"], listed["count"]) == (before["says"], before["count"])
     assert listed["says"].startswith("1 thing is open.")
-    assert [item["says"] for group in listed["groups"] for item in group["items"]] == [
+    assert [item["says"] for item in warnings["items"]] == [
         "! A right to this still has to be bought for the car, from car-deck, for 90.00 USD from"
         " the trip money."
+    ]
+    # The DEADLINE is in a group of its own, and is of the BOOKING and of no step.
+    assert [(item["of"], item["when"]) for item in deadlines["items"]] == [
+        (["booking:ferry-tickets"], None)
     ]
 
 
 def test_a_case_that_holds_before_a_time_says_on_which_clocks() -> None:
     """The case names its clocks itself: a card says it again with no other line beside it."""
     listed = open_of("a-ticket/nobody-said-whether-the-offer-has-expired")
-    assert [item["says"] for group in listed["groups"] for item in group["items"]] == [
+    cases, deadlines = listed["groups"]
+    assert [item["says"] for item in cases["items"]] == [
         "1. A right to Skydeck visit is found for Sam, in addition to the places on OFFER.",
         "2. It is before 5:00 pm on Thursday 13 May 2027 (America/Chicago).",
     ]
+    # The time that the second case turns on is a DEADLINE of the report: the OFFER expires.
+    assert [item["of"] for item in deadlines["items"]] == [["offer:skydeck-tickets"]]
 
 
 def test_a_trip_with_no_report_lists_nothing() -> None:
@@ -515,6 +611,12 @@ def test_a_report_whose_words_and_json_disagree_lists_nothing(tmp_path: Path) ->
         ("a-ticket/depends-on-the-price", "  2. A place from", "  A place from"),
         # A line that the report marks with "!" is under no step.
         ("a-ticket/not-bought-yet", "    ! Sam still", "\n    ! Sam still"),
+        # The words have no line for a DEADLINE that the JSON names.
+        ("a-ticket/the-offer-ends-on-thursday", "  5:00 pm on Thursday 13 May 2027: sky", "  sky"),
+        # The words have no line over the DEADLINEs.
+        ("a-ticket/the-offer-ends-on-thursday", "DEADLINEs after that time", "After that time"),
+        # The line of a DEADLINE names another OFFER than the JSON.
+        ("the-room/cannot-work", "cancelling room, the BOOKING", "cancelling bed, the BOOKING"),
         # The words have no line for the right that the JSON says somebody has to buy.
         ("a-ticket/not-bought-yet", "    ! Sam still", "    Sam still"),
         # The words do not say what the lines marked "!" mean.
@@ -561,7 +663,30 @@ def test_every_example_lists_what_its_report_says() -> None:
         name = f"{path.parent.name}/{path.stem}"
         groups = {group["kind"]: group["items"] for group in listed_of["groups"]}
         kinds |= set(groups)
+        # A DEADLINE is a time to keep in view, and is not counted among what is open.
+        due = groups.pop("deadlines", [])
         assert listed_of["count"] == sum(len(items) for items in groups.values()), name
+        # The list holds each DEADLINE that the report lists, in its own line, and each is of
+        # the BOOKING or the OFFER that the report as JSON names for it.
+        lines = text.split("\n")
+        # The line over them is one of two that a report has, and no name can stand in for it.
+        over_them = (
+            "DEADLINEs after that time, earliest first:",
+            "This FILE does not state the time now. So nobody knows which of its DEADLINEs have",
+        )
+        heads = [at for at, line in enumerate(lines) if line.startswith(over_them)]
+        listed_lines: list[str] = []
+        for at in heads[:1]:
+            for line in lines[at + 1 :]:
+                if not line.startswith("  "):
+                    break
+                listed_lines.append(line.strip())
+        assert [item["says"] for item in due] == listed_lines, name
+        assert [item["of"] for item in due] == [
+            [f"offer:{each['offer']}" if "offer" in each else f"booking:{each['booking']}"]
+            for each in found.get("deadlines", [])
+        ], name
+        assert len(heads) == (1 if found.get("deadlines") else 0), name
         assert [item["records"] for item in groups.get("conflict", [])] == [
             [record] for record in found.get("conflict", [])
         ], name
@@ -610,6 +735,7 @@ def test_every_example_lists_what_its_report_says() -> None:
         held = [
             line
             for group in listed_of["groups"]
+            if group["kind"] != "deadlines"
             for line in [
                 group["says"],
                 *(
@@ -634,4 +760,4 @@ def test_every_example_lists_what_its_report_says() -> None:
         if last_part:
             said_of_plans = said_of_plans[: last_part[0]]
         assert held == [line.strip() for line in said_of_plans if line.strip()], name
-    assert kinds == {"conflict", "cases", "warnings", "choices"}
+    assert kinds == {"conflict", "cases", "warnings", "choices", "deadlines"}
