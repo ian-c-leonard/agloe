@@ -47,7 +47,7 @@ from functools import cache
 from html.parser import HTMLParser
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -484,6 +484,100 @@ def test_the_two_cases_of_each_file_are_what_both_checkers_find() -> None:
         assert table[worst, best] == expected, name
         seen.add(expected)
     assert seen == {"FEASIBLE", "INFEASIBLE", "UNDETERMINED"}
+
+
+def says_at_least(later: Any, earlier: Any) -> bool:
+    """Whether a record says everything an earlier form of it said, and maybe more."""
+    if isinstance(earlier, dict) and isinstance(later, dict):
+        before, after = cast("dict[str, Any]", earlier), cast("dict[str, Any]", later)
+        return all(key in after and says_at_least(after[key], said) for key, said in before.items())
+    return later == earlier
+
+
+def test_the_file_that_grows_is_one_file_with_records_added() -> None:
+    """The home page shows one FILE at three moments, with the COMPILER's answer to each.
+
+    The first two are FILEs of the examples. The second holds every record of the first, and
+    each still says what it said. The third is the second with the one record that the page
+    shows, and the first line of the COMPILER's report on it is the line the page gives.
+    """
+    figure = re.search(
+        r'<figure class="grows" id="file-grows">(.*?)</figure>', SITE_TEXT["index.html"], re.S
+    )
+    assert figure is not None
+    steps = re.findall(r'<li data-(file|adds-to)="([^"]+)">(.*?)</li>', figure.group(1), re.S)
+    assert [kind for kind, _, _ in steps] == ["file", "file", "adds-to"]
+    (_, first, _), (_, second, _), (_, grown_from, last) = steps
+    assert grown_from == second
+    before = json.loads((ROOT / "examples" / f"{first}.json").read_text())
+    after = json.loads((ROOT / "examples" / f"{second}.json").read_text())
+    for kind, records in before.items():
+        later = {record["id"]: record for record in after[kind]}
+        for record in records:
+            assert says_at_least(later[record["id"]], record), record["id"]
+    shown = re.search(r'<p class="record added">(.*?)</p>', last, re.S)
+    said = re.search(r'<p class="answer-line">(.*?)</p>', last, re.S)
+    assert shown is not None and said is not None
+    added = json.loads(html.unescape(shown.group(1)))
+    assert added["id"] not in {record["id"] for records in after.values() for record in records}
+    after["facts"].append(added)
+    file = load(after)
+    report = reports_in.as_text(file, answers.check(file))
+    assert report.splitlines()[0] == html.unescape(said.group(1))
+
+
+def test_the_want_and_its_options_are_those_of_the_file() -> None:
+    """The home page shows one WANT of an example, and what a FACT says of each OPTION and it."""
+    figure = re.search(
+        r'<figure class="wanted" id="want-and-options" data-file="([^"]+)">(.*?)</figure>',
+        SITE_TEXT["index.html"],
+        re.S,
+    )
+    assert figure is not None
+    document = json.loads((ROOT / "examples" / f"{figure.group(1)}.json").read_text())
+    body = figure.group(2)
+    named = re.search(r'data-want="([^"]+)"', body)
+    assert named is not None
+    want = next(each for each in document["wants"] if each["id"] == named.group(1))
+    assert f"<strong>{want['name']}</strong>" in body
+    persons = {person["id"]: person["name"] for person in document["persons"]}
+    for holder in want["holders"]:
+        assert holder["degree"] == 10
+        assert f'<span class="how">a must for {persons[holder["person"]]}</span>' in body
+    shown = re.findall(
+        r'<li(?: class="does")? data-option="([^"]+)" data-degree="(\d+)">.*?'
+        r'<strong>(.*?)</strong><span class="how">(.*?)</span></li>',
+        body,
+    )
+    stated = {
+        fact["option"]: fact["satisfies"]["degree"]
+        for fact in document["facts"]
+        if fact.get("satisfies", {}).get("want") == want["id"]
+    }
+    assert {option: int(degree) for option, degree, _, _ in shown} == stated
+    assert len(shown) == len(document["options"])
+    options = {option["id"]: option["name"] for option in document["options"]}
+    for option, degree, name, how in shown:
+        assert name == options[option]
+        assert how == (
+            f"SATISFIES it, {degree} out of 10" if int(degree) else "does not SATISFY it"
+        )
+
+
+def test_each_bar_is_as_long_as_the_figure_beside_it() -> None:
+    """The home page draws three shares as bars. Each bar's length is the figure printed with it."""
+    figure = re.search(
+        r'<figure class="meters" id="with-a-solver">(.*?)</figure>', SITE_TEXT["index.html"], re.S
+    )
+    assert figure is not None
+    rows = re.findall(
+        r'style="--share: ([\d.]+)" title="([^"]+)">.*?<span class="share">([\d.]+)%</span>',
+        figure.group(1),
+    )
+    assert len(rows) == 3
+    for share, title, printed in rows:
+        assert share == printed
+        assert f"{printed}% of the tasks solved" in title
 
 
 def test_the_page_gives_the_constraint_its_number_on_the_rules_page() -> None:
