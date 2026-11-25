@@ -2995,6 +2995,42 @@ def test_the_page_lists_what_is_open_above_everything_that_it_draws(
         page.locator("#report").hover()
         page.locator("#open .entry").focus()
         lit(page, marks=["Skydeck visit"], rights=["skydeck-tickets"])
+    # A DEADLINE that the report lists is in the list, after what is open, under what the
+    # report says of its DEADLINEs. It is a drawing of its OFFER, like its line of the report.
+    with opened(chromium, EXAMPLES / "a-ticket" / "the-offer-ends-on-thursday.json") as page:
+        page.locator("#report .row").first.wait_for()
+        page.locator("#open .entry.due").wait_for()
+        ticket, expiry = page.evaluate(rows)
+        assert (ticket["mark"], expiry["mark"]) == ("warned", "due")
+        assert expiry["says"] == [
+            "5:00 pm on Thursday 13 May 2027: skydeck-tickets, the OFFER for Skydeck visit,"
+            " expires. The chance to buy up to 2 places at 32.00 USD each ends."
+        ]
+        over = page.locator("#open .open-kind").last.text_content() or ""
+        assert over.split("\n") == [
+            "This report uses 9:00 am on Monday 10 May 2027 as the time now (times in"
+            " America/Chicago). The FACT today states it.",
+            "DEADLINEs after that time, earliest first:",
+        ]
+        # The DEADLINE is no thing that is open: the purchase is, and the link counts it.
+        assert page.text_content("#contents .to") == "To do and to decide1"
+        # Pointing at it lights up the OFFER, its line of the report, and the purchase that
+        # is still to make from that OFFER.
+        page.locator("#open .entry.due").hover()
+        found = lit(page, rights=["skydeck-tickets"])
+        assert any(
+            row.strip().startswith("5:00 pm on Thursday 13 May 2027") for row in found["rows"]
+        )
+        assert page.locator("#open .entry.lit").count() == 2
+        # The other way round: pointing at the OFFER lights up its DEADLINE in the list.
+        page.locator("#report").hover()
+        page.locator("#rights .entry", has_text="skydeck-tickets").hover()
+        page.wait_for_function("() => document.querySelector('#open .entry.due.lit') !== null")
+        # The keyboard reaches the DEADLINE after the purchase, and lights up the same.
+        page.locator("#open .entry.warned").focus()
+        page.keyboard.press("ArrowDown")
+        assert page.evaluate("() => document.activeElement.classList.contains('due')")
+        lit(page, rights=["skydeck-tickets"])
     # Before the report comes, nothing says what is open, and the page has no such list.
     path = tmp_path / "trip.json"
     path.write_bytes((EXAMPLES / "flight-home" / "works.json").read_bytes())
