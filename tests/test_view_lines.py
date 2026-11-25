@@ -550,6 +550,8 @@ def test_the_lines_about_cancelling_are_tied_to_their_bookings(tmp_path: Path) -
     report = steps["report"]
     fewer = {**report, "deadlines": report["deadlines"][:1]}
     assert all("a term for" not in text for text in about({**steps, "report": fewer}))
+    more = {**report, "deadlines": [*report["deadlines"], report["deadlines"][-1]]}
+    assert all("a term for" not in text for text in about({**steps, "report": more}))
     wrong = [{**each, "booking": "skydeck-ticket"} for each in report["deadlines"]]
     assert all(
         "a term for" not in text
