@@ -375,8 +375,7 @@ def deadlines(file: File) -> tuple[Deadline, ...]:
         for term in fact.cancelling:
             stated = held is not None or term.costs is not None
             changes = stated and not _the_same(held, term.costs)
-            ahead = term.since is not None and (now is None or term.since > now.at)
-            if term.since is not None and changes and ahead:
+            if term.since is not None and changes and (now is None or term.since > now.at):
                 found.append(Deadline(term.since, fact.id, held, term.costs))
             held = term.costs
     return tuple(sorted(found, key=lambda each: each.at))
