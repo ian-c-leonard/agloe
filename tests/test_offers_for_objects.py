@@ -2327,3 +2327,153 @@ def test_the_places_taken_together_are_those_of_each_way_things_can_turn_out() -
             several += len(largest) > 1
             kept += len(largest) > 1 and bool(might_keep)
     assert compared > 1200 and several > 300 and kept > 100
+
+
+def some_racks(
+    prices: dict[str, str | None], most: tuple[str, str], fund_lists_the_bike: bool = True
+) -> File:
+    """A train for each of these names. A rack on it has a place for the bike at this price,
+    in dollars. With no price, the train needs a right for PERSONs instead, and has seats
+    for 5 dollars. The money and the fund both pay for Alex, and each has a cap. The money
+    pays for the bike, and so does the fund unless ``fund_lists_the_bike`` says no."""
+    stated = [fact for train in prices for fact in at(train, 9)]
+    stated += [starts_from("alex", "a"), starts_from("jo", "a")]
+    stated += [every_use("bike"), every_transfer("bike"), every_right_for("bike")]
+    for train, price in prices.items():
+        if price is None:
+            stated += [needs_right(train), offer(train, 2, "seats", "5.00 USD")]
+            continue
+        stated += [needs_no_right(train), needs_right_for(train, "bike")]
+        stated.append(offer(train, 1, f"{train}-rack", f"{price} USD", objects=["bike"]))
+    fund = budget("fund", "alex", objects=["bike"] if fund_lists_the_bike else [])
+    return trip(
+        ["alex", "jo"],
+        ["a", "b"],
+        [moves(train, "a", "b") for train in prices],
+        stated,
+        [cap("money", f"{most[0]} USD"), cap("fund", f"{most[1]} USD")],
+        rights=True,
+        budgets=[budget("money", "alex", "jo", objects=["bike"]), fund],
+        objects=["bike"],
+        object_rights=True,
+    )
+
+
+def test_looking_ahead_a_cap_owes_an_object_its_dearest_place_and_not_the_sum() -> None:
+    """Alex buys a seat for 5 dollars, from the money or from the fund. The bike takes a
+    place on the second train or on the third, never on both, and each rack costs 10
+    dollars from the money, which may spend 10. The seat is tried from the money first,
+    and then no rack can be paid for. So the search goes back and looks ahead: the two
+    racks owe the money 10 dollars together, and it has them once the fund pays the seat."""
+    file = some_racks(
+        {"first": None, "second": "10.00", "third": "10.00"}, ("10.00", "50.00"), False
+    )
+    riders = {"first": ("alex",), "second": ("alex",), "third": ("jo",)}
+    taking = {"second": ["bike"], "third": ["bike"]}
+    sets = {"bike": {frozenset({"second"}), frozenset({"third"})}}
+    paying = way_to_pay(file, worst_case(file), riders, taking, sets)
+    assert paying == {
+        ("first", "alex"): ("seats", "fund"),
+        ("second", "bike"): ("second-rack", "money"),
+        ("third", "bike"): ("third-rack", "money"),
+    }
+    assert paying == every_way_to_pay(file, worst_case(file), riders, taking, sets)
+
+
+def test_the_search_for_a_way_to_pay_remembers_what_each_set_of_places_has_cost() -> None:
+    """The bike takes places on the first, the third and the fourth train together, or else
+    on the second. The racks cost 10, 10, 12 and 12 dollars, the money may spend 24 and the
+    fund 11. With the first rack from the money and the second from the fund, the last two
+    cannot be paid for. With the two the other way round, the caps have as much left, and
+    the last two can be paid from the money: the second rack is never bought with them.
+    The search has to tell the two apart."""
+    prices: dict[str, str | None] = {"t1": "10.00", "t2": "10.00", "t3": "12.00", "t4": "12.00"}
+    file = some_racks(prices, ("24.00", "11.00"))
+    riders = {train: ("alex",) for train in prices}
+    taking = {train: ["bike"] for train in prices}
+    sets = {"bike": {frozenset({"t1", "t3", "t4"}), frozenset({"t2"})}}
+    paying = way_to_pay(file, worst_case(file), riders, taking, sets)
+    assert paying == {
+        ("t1", "bike"): ("t1-rack", "fund"),
+        ("t2", "bike"): ("t2-rack", "money"),
+        ("t3", "bike"): ("t3-rack", "money"),
+        ("t4", "bike"): ("t4-rack", "money"),
+    }
+    assert paying == every_way_to_pay(file, worst_case(file), riders, taking, sets)
+
+
+def test_the_search_keeps_what_an_object_took_where_it_arrives() -> None:
+    """The courier carries the bag to the show, and a place on the courier covers the bag.
+    Once the courier is over, the bag lies where the show is. The search still knows there
+    that the bag took a place on the courier."""
+    options = [moves("courier", "p", "d"), stays("show", "d")]
+    stated = [*at("courier", 9), *at("show", 10), starts_from("bea", "d"), starts_from("cy", "p")]
+    stated += [lies_at("bag", "p"), carries("courier", "bag"), requires_object("show", "bag")]
+    stated += [every_use("bag"), every_transfer("bag"), every_right_for("bag")]
+    stated += [needs_right_for("courier", "bag"), offer("courier", 1, "hold", objects=["bag"])]
+    file = trip(
+        ["bea", "cy"],
+        ["p", "d"],
+        options,
+        stated,
+        [lock("courier", "cy"), lock("show", "bea")],
+        budgets=[budget("money", "bea", "cy", objects=["bag"])],
+        objects=["bag"],
+        object_rights=True,
+    )
+    visits = as_visits([("courier", ("cy",), "p"), ("show", ("bea",), "d")])
+
+    def rank(option: str, person: str | None) -> tuple[int, int]:
+        return (["courier", "show"].index(option), ["bea", "cy", None].index(person))
+
+    reached = reference._first_hand_overs(  # pyright: ignore[reportPrivateUsage]
+        worst_case(file), "bag", visits, [frozenset({Where(place="p")})], rank, {"courier": "d"}
+    )
+    there = Where(place="d")
+    on_the_courier = frozenset({(there, frozenset({frozenset({"courier"})}))})
+    assert reached == {(frozenset({there}), (("courier", "show"),), on_the_courier): ((0, 2),)}
+
+
+def test_a_choice_that_the_rules_refuse_can_work_with_an_option_that_nobody_is_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bea has to be at a show with the bag. A train goes there and hands the bag to its
+    rider, for 10 dollars for the bag and 10 for the bike. The show charges 10 for the
+    bike, and the money may spend 20. Nobody knows where the bike is. A van can carry the
+    bag there with nobody in it, and it leaves before Bea can reach it.
+
+    With the bag on the train, Bea might pay 30 dollars. The model counts 20, and the
+    rules refuse that choice. The same choice with the van running is another choice: the
+    bag goes in the van, and the plan costs 20 at most."""
+    options = [moves("first", "p", "d"), stays("show", "d"), moves("van", "p", "d")]
+    stated = [*at("first", 9), *at("show", 10), *at("van", 8), starts_from("bea", "q")]
+    stated += [lies_at("bag", "p"), requires_object("show", "bag"), every_use("bag")]
+    stated += [every_use("bike"), hands_over("first", "bag"), carries("van", "bag")]
+    stated += [
+        each(thing) for thing in ("bag", "bike") for each in (every_transfer, every_right_for)
+    ]
+    stated += [needs_right_for("first", "bike"), needs_right_for("first", "bag")]
+    stated += [needs_right_for("show", "bike"), offer("show", 2, "show-places", objects=["bike"])]
+    stated += [offer("first", 2, "first-places", objects=["bike", "bag"]), takes("walk", "PT30M")]
+    file = trip(
+        ["bea"],
+        ["q", "p", "d"],
+        options,
+        stated,
+        [trip_starts(8), lock("show", "bea"), cap("money", "20.00 USD")],
+        ways=[way("walk", "q", "p")],
+        budgets=[budget("money", "bea", objects=["bike", "bag"])],
+        objects=["bag", "bike"],
+        object_rights=True,
+    )
+    found = checked(file)
+    assert found.answer is Answer.FEASIBLE
+    assert [(step.option or step.way, step.persons) for step in found.itinerary] == [
+        ("van", ()),
+        ("walk", ("bea",)),
+        ("first", ("bea",)),
+        ("show", ("bea",)),
+    ]
+    refusals = refusals_of_the_rules(monkeypatch)
+    assert compiler.shown(file, worst_case(file)) == found.itinerary
+    assert refusals == [True, False]
