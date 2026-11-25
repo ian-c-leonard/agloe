@@ -94,7 +94,8 @@
       "before": [],
       "from_then": null,
       "change": "not stated from then",
-      "stake": null
+      "stake": null,
+      "no_cost_until": null
     }
   ],
   "cancelling_now": [

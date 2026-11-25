@@ -26,6 +26,7 @@ from agloe.answers import (
     Plan,
     Report,
     bought_if_needed,
+    cancelling_at_any_time,
     cancelling_now,
     deadlines,
     right_needed,
@@ -64,6 +65,7 @@ from agloe.file import (
     TripStart,
     Want,
     WithObject,
+    comes_twice,
     length_written,
     local,
     written,
@@ -618,7 +620,8 @@ class Clock:
     """How times are put in words: on the clocks of one time zone.
 
     With ``offsets``, each time also gives its offset from UTC, because the clocks change during
-    the times shown and a time of day alone could mean two moments.
+    the times shown and a time of day alone could mean two moments. A time that the clocks
+    show twice, as when they go back, gives its offset in any case.
     """
 
     zone: str
@@ -641,7 +644,7 @@ class Clock:
         seconds = f":{there.second:02d}" if there.second else ""
         half = "am" if there.hour < 12 else "pm"
         clock = f"{there.hour % 12 or 12}:{there.minute:02d}{seconds} {half}"
-        if self.offsets:
+        if self.offsets or comes_twice(moment, self.zone):
             clock += f" ({offset_from_utc(there.utcoffset() or timedelta())})"
         if day is None or there.date() == day:
             return clock
@@ -847,7 +850,8 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
         for id, booking in bookings.items()
     }
     rows = [
-        f"  {clock.moment(each.at)}: cancelling {held[each.booking]}, {_change_in_words(each)}"
+        f"  {clock.moment(each.at)}: cancelling {held[each.booking]}, "
+        + _change_in_words(clock, each)
         for each in deadlines(file)
     ]
     zone = f"(times in {file.zone})"
@@ -861,6 +865,10 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
             lines += rows
         else:
             lines[-1] += " The terms for cancelling that it states change at no time."
+        always = cancelling_at_any_time(file)
+        if always:
+            lines += ["", "What cancelling costs at any time:"]
+            lines += [f"  {held[id]}: {_loss(cost)}" for id, cost in always]
     else:
         used = f"This report uses {clock.moment(now.at)} as the time now {zone}."
         lines = ["", f"{used} The FACT {now.id} states it."]
@@ -880,15 +888,25 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
     return lines
 
 
-def _change_in_words(found: Deadline) -> str:
-    """What cancelling costs on each side of a DEADLINE, and the STAKE."""
+def _change_in_words(clock: Clock, found: Deadline) -> str:
+    """What cancelling costs on each side of a DEADLINE, and the STAKE.
+
+    Where the FILE states no cost on one side, the words say for which stretch of time: up
+    to the next time with a cost, or back to the last one.
+    """
     if found.after is None:
         # A DEADLINE has a cost on one side at least, so this one has a cost before.
-        until = f"costs {_loss(found.before or ())} before then"
-        return f"{until}. The FILE states no cost from then. The STAKE is unknown."
+        ends = found.no_cost_until
+        stretch = "from then on" if ends is None else f"from then until {clock.moment(ends)}"
+        costs = f"costs {_loss(found.before or ())} before then"
+        return f"{costs}. The FILE states no cost {stretch}. The STAKE is unknown."
     if found.before is None:
+        starts = found.no_cost_since
+        stretch = "before then" if starts is None else f"from {clock.moment(starts)} until then"
         at_stake = "Nothing is at STAKE." if found.stake == () else "The STAKE is unknown."
-        return f"costs {_loss(found.after)} from then. The FILE states no cost before. {at_stake}"
+        return (
+            f"costs {_loss(found.after)} from then. The FILE states no cost {stretch}. {at_stake}"
+        )
     sides = f"costs {_loss(found.after)} from then, and {_loss(found.before)} before."
     if found.stake is None:
         # More in one currency and less in another: the two are stated, and nothing is added up.
@@ -896,6 +914,20 @@ def _change_in_words(found: Deadline) -> str:
     if not found.stake:
         return f"{sides} Nothing is at STAKE."
     return f"{sides} At STAKE: {_loss(found.stake)}."
+
+
+def _no_cost_as_json(file: File, found: Deadline) -> dict[str, str | None]:
+    """The other end of a stretch with no cost, on the side of a DEADLINE that has one.
+
+    None: the stretch has no other end.
+    """
+    if found.before is None:
+        since = found.no_cost_since
+        return {"no_cost_since": None if since is None else written(since, file.zone)}
+    if found.after is None:
+        until = found.no_cost_until
+        return {"no_cost_until": None if until is None else written(until, file.zone)}
+    return {}
 
 
 def _loss(costs: Sequence[Money]) -> str:
@@ -908,7 +940,8 @@ def _terms_as_json(file: File) -> dict[str, object]:
 
     Empty for a FILE that states no time now and no terms for cancelling. A list of amounts
     that is empty says nothing. None says that the FILE states no cost, and for a STAKE that
-    it is unknown or not one sum.
+    it is unknown or not one sum. Where the FILE states no time now, the costs that hold at
+    any time stand in for the costs now.
     """
     now = file.now()
     bookings = {fact.id: fact for fact in file.facts if isinstance(fact, Booking)}
@@ -930,6 +963,7 @@ def _terms_as_json(file: File) -> dict[str, object]:
             "from_then": amounts(each.after),
             "change": each.change,
             "stake": amounts(each.stake),
+            **_no_cost_as_json(file, each),
         }
         for each in deadlines(file)
     ]
@@ -938,6 +972,12 @@ def _terms_as_json(file: File) -> dict[str, object]:
         out["cancelling_now"] = [
             {"booking": id, "option": bookings[id].option, "costs": amounts(cost)}
             for id, cost in costs
+        ]
+    always = cancelling_at_any_time(file)
+    if now is None and always:
+        out["cancelling_at_any_time"] = [
+            {"booking": id, "option": bookings[id].option, "costs": amounts(cost)}
+            for id, cost in always
         ]
     unstated = with_no_terms(file)
     if unstated:

@@ -37,6 +37,7 @@ from agloe.file import (
     RequiresObject,
     Start,
     StartsFrom,
+    Term,
     WithObject,
 )
 from agloe.reference import (
@@ -295,12 +296,18 @@ class Deadline:
     ``before`` is what cancelling costs until then, and ``after`` what it costs from then on:
     one amount for each currency, and none where it costs nothing. None: the FILE states no
     cost there. The two are never the same cost, and never both None.
+
+    Where ``before`` is None, ``no_cost_since`` is the time from which the FILE states no
+    cost. None: it states none at any time before. Where ``after`` is None, ``no_cost_until``
+    is the time at which it states a cost again. None: it states none at any time after.
     """
 
     at: int
     booking: str
     before: tuple[Money, ...] | None
     after: tuple[Money, ...] | None
+    no_cost_since: int | None = None
+    no_cost_until: int | None = None
 
     @property
     def change(self) -> str:
@@ -344,9 +351,7 @@ def _more_and_less(
     was = {each.currency: each for each in before}
     now = {each.currency: each for each in after}
     more = tuple(
-        Money(each.amount - was[each.currency].amount, each.currency)
-        if each.currency in was
-        else each
+        each.less(was[each.currency]) if each.currency in was else each
         for each in after
         if each.currency not in was or each.units > was[each.currency].units
     )
@@ -357,10 +362,10 @@ def _more_and_less(
 def deadlines(file: File) -> tuple[Deadline, ...]:
     """The DEADLINEs that a report of this FILE lists, earliest first.
 
-    The time of a term for cancelling is a DEADLINE where the FILE states a cost on at least
-    one side of it, and not the same cost on both. Two terms with no cost show no change and
-    promise nothing, and two equal costs show no change. Before a first term that states its
-    time, the FILE states no cost.
+    The time of a term for cancelling is a DEADLINE, unless the FILE states the same cost
+    before it and from it on. Before a first term that states its time, the FILE states no
+    cost. A FILE never has a term with no cost where it states none before, so a DEADLINE
+    has a cost on one side at least.
 
     Where the FILE states the time now, these are the DEADLINEs after it. One at that very
     time has passed: its term holds already. Where it states none, they are all of them.
@@ -371,13 +376,17 @@ def deadlines(file: File) -> tuple[Deadline, ...]:
     for fact in file.facts:
         if not isinstance(fact, Booking):
             continue
-        held: tuple[Money, ...] | None = None
-        for term in fact.cancelling:
-            stated = held is not None or term.costs is not None
-            changes = stated and not _the_same(held, term.costs)
+        held: Term | None = None
+        # Each term with the one after it, and the last one with none.
+        for term, later in zip(fact.cancelling, [*fact.cancelling[1:], None], strict=False):
+            before = None if held is None else held.costs
+            changes = not _the_same(before, term.costs)
             if term.since is not None and changes and (now is None or term.since > now.at):
-                found.append(Deadline(term.since, fact.id, held, term.costs))
-            held = term.costs
+                # The ends of a stretch with no cost, on the side where there is one.
+                since = held.since if held is not None and before is None else None
+                until = later.since if later is not None and term.costs is None else None
+                found.append(Deadline(term.since, fact.id, before, term.costs, since, until))
+            held = term
     return tuple(sorted(found, key=lambda each: each.at))
 
 
@@ -407,6 +416,23 @@ def cancelling_now(file: File) -> tuple[tuple[str, tuple[Money, ...] | None], ..
                 if term.since is None or term.since <= now.at:
                     held = term.costs
             costs.append((fact.id, held))
+    return tuple(costs)
+
+
+def cancelling_at_any_time(file: File) -> tuple[tuple[str, tuple[Money, ...]], ...]:
+    """What cancelling costs for each BOOKING whose terms state one cost for all time.
+
+    Its first term holds from when the BOOKING was made, and every term states that same
+    cost. So a report can say what cancelling it costs though the FILE does not state the
+    time now. They come in the FILE's order.
+    """
+    costs: list[tuple[str, tuple[Money, ...]]] = []
+    for fact in file.facts:
+        if isinstance(fact, Booking) and fact.cancelling:
+            first = fact.cancelling[0]
+            same = all(_the_same(first.costs, term.costs) for term in fact.cancelling)
+            if first.since is None and first.costs is not None and same:
+                costs.append((fact.id, first.costs))
     return tuple(costs)
 
 

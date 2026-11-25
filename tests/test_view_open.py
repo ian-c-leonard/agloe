@@ -416,6 +416,66 @@ def test_a_trip_that_cannot_work_lists_what_rules_out_every_plan() -> None:
     assert listed["count"] == 6
 
 
+def test_the_deadlines_of_a_report_are_no_part_of_what_rules_out_every_plan() -> None:
+    """The night ends after breakfast starts. What cancelling the room costs is not why."""
+    listed = open_of("the-room/cannot-work")
+    (group,) = listed["groups"]
+    assert group["kind"] == "conflict"
+    assert group["also"] == []
+    assert [item["name"] for item in group["items"]] == [
+        "night-time",
+        "night-length",
+        "breakfast-time",
+        "lock-night",
+        "lock-breakfast",
+    ]
+
+
+def test_the_deadlines_of_a_report_are_no_part_of_a_case(tmp_path: Path) -> None:
+    """Nobody has said how long the night lasts, and the room can still be cancelled."""
+
+    def with_terms(document: dict[str, Any]) -> None:
+        room = next(fact for fact in document["facts"] if fact["id"] == "room")
+        room["booking"]["cancelling"] = [
+            {"costs": [{"amount": "0.00", "currency": "USD"}]},
+            {
+                "from": "2027-05-12T18:00:00-05:00[America/Chicago]",
+                "costs": [{"amount": "189.00", "currency": "USD"}],
+            },
+        ]
+
+    listed, text = changed(tmp_path, "several-days/depends-on-the-night", with_terms)
+    assert "At STAKE: 189.00 USD." in text
+    (group,) = listed["groups"]
+    assert group["kind"] == "cases"
+    assert group["also"] == []
+    assert listed["count"] == 1
+
+
+def test_a_deadline_is_no_step_of_the_plan(tmp_path: Path) -> None:
+    """A DEADLINE has a line that starts with a time and names the ferry "to Muskegon"."""
+
+    def with_terms(document: dict[str, Any]) -> None:
+        tickets = next(fact for fact in document["facts"] if fact["id"] == "ferry-tickets")
+        tickets["booking"]["cancelling"] = [
+            {"costs": [{"amount": "0.00", "currency": "USD"}]},
+            {
+                "from": "2027-07-14T18:00:00-05:00[America/Chicago]",
+                "costs": [{"amount": "38.00", "currency": "USD"}],
+            },
+        ]
+
+    before = open_of("a-car-ferry/a-place-on-the-car-deck")
+    listed, text = changed(tmp_path, "a-car-ferry/a-place-on-the-car-deck", with_terms)
+    assert "cancelling ferry-tickets, the BOOKING for Car ferry to Muskegon, costs" in text
+    assert listed == before
+    assert listed["says"].startswith("1 thing is open.")
+    assert [item["says"] for group in listed["groups"] for item in group["items"]] == [
+        "! A right to this still has to be bought for the car, from car-deck, for 90.00 USD from"
+        " the trip money."
+    ]
+
+
 def test_a_trip_with_no_report_lists_nothing() -> None:
     """Before the COMPILER has reported, nothing says what is open."""
     sent = shown(read(EXAMPLES / "flight-home" / "works.json"))
@@ -555,5 +615,14 @@ def test_every_example_lists_what_its_report_says() -> None:
             ]
             if line
         ]
-        assert held == [line.strip() for line in text.split("\n")[1:] if line.strip()], name
+        # The last part of a report is about no plan: the time now and what cancelling costs.
+        said_of_plans = text.split("\n")[1:]
+        last_part = [
+            at
+            for at, line in enumerate(said_of_plans)
+            if line.startswith(("This report uses ", "This FILE does not state the time now."))
+        ]
+        if last_part:
+            said_of_plans = said_of_plans[: last_part[0]]
+        assert held == [line.strip() for line in said_of_plans if line.strip()], name
     assert kinds == {"conflict", "cases", "warnings", "choices"}

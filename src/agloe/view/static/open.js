@@ -57,8 +57,9 @@ function whenOf(step) {
  * `inset`. Such a line is a drawing of what it is about itself, and not of what the item is.
  *
  * `also`, of a group, holds what the report says after the items: each of its paragraphs as
- * the list of its lines, like `more`. A report that shows no plan says nothing else, so the
- * list leaves out no condition under which a case holds or a record rules out every plan.
+ * the list of its lines, like `more`. A report that shows no plan says nothing else before its
+ * last part, which is about the time now and what cancelling costs. So the list leaves out no
+ * condition under which a case holds or a record rules out every plan.
  *
  * `count` is how many items there are. `clash` and `asked` say that the list holds something
  * that is marked red, or yellow.

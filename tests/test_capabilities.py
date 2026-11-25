@@ -217,7 +217,8 @@ def test_a_capability_has_one_fact_that_its_set_is_complete() -> None:
 def test_a_complete_set_for_a_capability_names_it_by_its_id() -> None:
     document = a_document({"id": "all", "complete": {"requires": 3}})
     assert problems(document) == (
-        "/facts/0: fits no known shape; the closest miss: 3 is not of type 'string'"
+        "/facts/0: fits no known shape; the closest miss: at /facts/0/complete/requires, 3 is"
+        " not of type 'string'"
     )
 
 

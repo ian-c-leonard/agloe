@@ -102,5 +102,17 @@
         }
       ]
     }
+  ],
+  "cancelling_at_any_time": [
+    {
+      "booking": "skydeck-ticket",
+      "option": "skydeck",
+      "costs": [
+        {
+          "amount": "32.00",
+          "currency": "USD"
+        }
+      ]
+    }
   ]
 }

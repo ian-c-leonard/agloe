@@ -71,6 +71,18 @@ class Money:
         _, digits, exponent = self.amount.as_tuple()
         return int("".join(str(digit) for digit in digits)) * 10 ** (4 + int(exponent))
 
+    def less(self, other: Money) -> Money:
+        """This amount less a smaller one in the same currency, exactly.
+
+        The difference is counted in whole ten-thousandths, and it has as many decimal places
+        as the one of the two that states more. So it does not turn on the decimal settings of
+        whoever asks.
+        """
+        places = max(-int(each.amount.as_tuple().exponent) for each in (self, other))
+        whole, rest = divmod(self.units - other.units, 10**4)
+        text = f"{whole}.{rest:04d}"[: len(str(whole)) + 1 + places] if places > 0 else str(whole)
+        return Money(Decimal(text), self.currency)
+
 
 @dataclass(frozen=True)
 class Budget:
@@ -564,7 +576,9 @@ class File:
     wants: tuple[Want, ...]
     facts: tuple[Fact, ...]
     decisions: tuple[Decision, ...]
-    zone: str = "UTC"  # the time zone of the first time in the FILE; reports show times in it
+    # The time zone that reports show times in: that of the first time in the FILE, leaving
+    # out the time now unless the FILE states no other time.
+    zone: str = "UTC"
     budgets: tuple[Budget, ...] = ()
     capabilities: tuple[Capability, ...] = ()
     objects: tuple[Object, ...] = ()
@@ -1098,6 +1112,12 @@ def written(moment: int, zone: str) -> str:
     return f"{there.isoformat(timespec='seconds')}[{zone}]"
 
 
+def comes_twice(moment: int, zone: str) -> bool:
+    """Whether the clocks of a time zone show this time twice, as when they go back."""
+    there = local(moment, zone)
+    return there.replace(fold=1 - there.fold).utcoffset() != there.utcoffset()
+
+
 def local(moment: int, zone: str) -> datetime:
     """A time on the clocks of a time zone, by the time-zone database pinned with Agloe.
 
@@ -1300,8 +1320,9 @@ def load(document: object) -> File:
         return id in ids
 
     zones: list[str] = []
+    clocks: list[str] = []  # the time zone of the time now: it decides nothing where others do
 
-    def when(where: str, text: str) -> int | None:
+    def when(where: str, text: str, of_the_trip: bool = True) -> int | None:
         """The moment a time states. None, with the problem noted, where it is no real time."""
         try:
             moment = instant(text)
@@ -1312,7 +1333,7 @@ def load(document: object) -> File:
         if disagreement is not None:
             problems.append(f"{where}: {disagreement}")
             return None
-        zones.append(text[text.index("[") + 1 : -1])
+        (zones if of_the_trip else clocks).append(text[text.index("[") + 1 : -1])
         return moment
 
     persons = tuple(Person(p["id"], p["name"]) for p in raw["persons"])
@@ -1509,28 +1530,27 @@ def load(document: object) -> File:
                     known(where, payer, "PERSON", person_ids)
                 paid = Payment(money, source, payer)
             terms: list[Term] = []
-            for term in agreed.get("cancelling", ()):
-                since = when(where, term["from"]) if "from" in term else None
+            for at, term in enumerate(agreed.get("cancelling", ())):
+                there = f"{where}/booking/cancelling/{at}"
+                since = when(there, term["from"]) if "from" in term else None
                 if terms and "from" not in term:
-                    problems.append(
-                        f"{where}: only the first term for cancelling can leave out when it starts"
-                    )
+                    problems.append(f"{there}: only the first term can leave out when it starts")
                 last = terms[-1].since if terms else None
                 if since is not None and last is not None and since <= last:
-                    problems.append(
-                        f"{where}: the terms for cancelling are not in the order of time"
-                    )
+                    problems.append(f"{there}: it does not start after the term before it")
                 lost = None
                 if "costs" in term:
                     named = [each["currency"] for each in term["costs"]]
                     for each in sorted({each for each in named if named.count(each) > 1}):
-                        problems.append(
-                            f"{where}: a term for cancelling states {each} more than once"
-                        )
+                        problems.append(f"{there}: it states {each} more than once")
                     amounts = [
                         Money(Decimal(each["amount"]), each["currency"]) for each in term["costs"]
                     ]
                     lost = tuple(each for each in amounts if each.amount)
+                elif not terms or terms[-1].costs is None:
+                    # Nobody has said what cancelling costs before it, and it does not say
+                    # what cancelling costs from then on.
+                    problems.append(f"{there}: it states no cost, and no cost is stated before it")
                 terms.append(Term(since, lost))
             facts.append(
                 Booking(
@@ -1541,7 +1561,7 @@ def load(document: object) -> File:
         if "now" in fact:
             if any(isinstance(each, Now) for each in facts):
                 problems.append(f"{where}: another FACT already states this")
-            facts.append(Now(fact["id"], when(where, fact["now"]) or 0))
+            facts.append(Now(fact["id"], when(where, fact["now"], of_the_trip=False) or 0))
             continue
         if "offer" in fact:
             known(where, fact["offer"]["option"], "OPTION", option_ids)
@@ -1747,7 +1767,7 @@ def load(document: object) -> File:
         problems.append("/decisions: the TRIP ends before it starts")
     if problems:
         raise FileError(problems)
-    zone = zones[0] if zones else "UTC"
+    zone = next(iter([*zones, *clocks]), "UTC")
     return File(
         persons,
         places,
@@ -1851,4 +1871,6 @@ def _describe(error: ValidationError, shapes: dict[str, dict[str, object]]) -> s
             inside = "requires_object" if about_an_object else "requires_capability"
             misses = [miss for miss in misses if name(miss) == inside] or misses
     closest = max(misses, key=lambda miss: len(miss.absolute_path))
-    return f"{where}: fits no known shape; the closest miss: {closest.message}"
+    inside = "".join(_inside("", part) for part in closest.absolute_path)
+    at = "" if inside == where else f"at {inside}, "
+    return f"{where}: fits no known shape; the closest miss: {at}{closest.message}"

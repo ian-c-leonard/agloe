@@ -1,14 +1,22 @@
 """A FILE states the time now and what cancelling a BOOKING costs. A report lists the DEADLINEs."""
 
 import json
-from decimal import Decimal
+from decimal import Decimal, Inexact, localcontext
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from agloe import compiler, report
-from agloe.answers import Answer, Deadline, cancelling_now, check, deadlines, with_no_terms
+from agloe.answers import (
+    Answer,
+    Deadline,
+    cancelling_at_any_time,
+    cancelling_now,
+    check,
+    deadlines,
+    with_no_terms,
+)
 from agloe.file import Booking, FileError, Money, Now, Term, instant, load, written
 from tests.stories import EXAMPLES, Document, lasts, lock, named, starts_at, stays
 
@@ -136,44 +144,60 @@ def test_a_cost_has_one_amount_for_each_currency_and_none_of_nothing() -> None:
 
 def test_the_terms_come_in_the_order_of_time() -> None:
     late_first = a_night(term(FREE, WEDNESDAY), term(ALL, TUESDAY))
-    assert problems(late_first) == "/facts/3: the terms for cancelling are not in the order of time"
+    second = "/facts/3/booking/cancelling/1: it does not start after the term before it"
+    third = "/facts/3/booking/cancelling/2: it does not start after the term before it"
+    assert problems(late_first) == second
     at_once = a_night(term(FREE), term(ALL, WEDNESDAY), term(None, WEDNESDAY))
-    assert problems(at_once) == "/facts/3: the terms for cancelling are not in the order of time"
+    assert problems(at_once) == third
     # The same instant on the clocks of another zone is the same instant.
     elsewhere = "2027-05-12T19:00:00-04:00[America/New_York]"
     same = a_night(term(FREE), term(ALL, WEDNESDAY), term(None, elsewhere))
-    assert problems(same) == "/facts/3: the terms for cancelling are not in the order of time"
+    assert problems(same) == third
 
 
 def test_only_the_first_term_leaves_out_its_time() -> None:
     document = a_night(term(FREE), term(ALL))
-    assert (
-        problems(document)
-        == "/facts/3: only the first term for cancelling can leave out when it starts"
+    assert problems(document) == (
+        "/facts/3/booking/cancelling/1: only the first term can leave out when it starts"
     )
 
 
 def test_a_term_states_a_time_or_a_cost() -> None:
-    assert "/facts/3" in problems(a_night({}))
-    assert "/facts/3" in problems(a_night(term(FREE), {}))
+    nothing = "{} should be non-empty"
+    start = "/facts/3: fits no known shape; the closest miss: at /facts/3/booking/cancelling/"
+    assert problems(a_night({})) == f"{start}0, {nothing}"
+    assert problems(a_night(term(FREE), {})) == f"{start}1, {nothing}"
+
+
+def test_a_term_with_no_cost_comes_after_a_cost() -> None:
+    """Such a term says that a stated cost ends. With no cost before it, it says nothing."""
+    said = "it states no cost, and no cost is stated before it"
+    assert problems(a_night(term(None, TUESDAY))) == f"/facts/3/booking/cancelling/0: {said}"
+    twice = a_night(term(FREE), term(None, TUESDAY), term(None, WEDNESDAY))
+    assert problems(twice) == f"/facts/3/booking/cancelling/2: {said}"
+    assert load(a_night(term(FREE), term(None, TUESDAY), term(ALL, WEDNESDAY)))
 
 
 def test_a_term_names_a_currency_once() -> None:
-    document = a_night(term([("10.00", "USD"), ("5.00", "USD")]))
-    assert problems(document) == "/facts/3: a term for cancelling states USD more than once"
+    document = a_night(term(FREE), term([("10.00", "USD"), ("5.00", "USD")], WEDNESDAY))
+    assert problems(document) == "/facts/3/booking/cancelling/1: it states USD more than once"
 
 
 def test_a_list_of_terms_is_not_empty_and_a_cost_is_not_either() -> None:
+    start = "/facts/3: fits no known shape; the closest miss: at /facts/3/booking/cancelling"
     document = a_night()
     document["facts"][3]["booking"]["cancelling"] = []
-    assert "/facts/3" in problems(document)
+    assert problems(document) == f"{start}, [] should be non-empty"
     document["facts"][3]["booking"]["cancelling"] = [{"costs": []}]
-    assert "/facts/3" in problems(document)
+    assert problems(document) == f"{start}/0/costs, [] should be non-empty"
 
 
 def test_a_time_of_a_term_is_a_real_time() -> None:
-    document = a_night(term(FREE), term(ALL, "2027-05-32T18:00:00-05:00[America/Chicago]"))
-    assert "/facts/3" in problems(document)
+    wrong = "2027-02-30T18:00:00-06:00[America/Chicago]"
+    document = a_night(term(FREE), term(ALL, wrong))
+    assert problems(document) == (
+        f"/facts/3/booking/cancelling/1: {wrong} is not a real date and time"
+    )
 
 
 def test_cancelling_can_cost_more_than_the_booking_paid_and_in_another_currency() -> None:
@@ -208,6 +232,11 @@ def test_the_stake_of_a_rise_is_the_difference() -> None:
         ("room", TUESDAY, "rises", money(("50.00", "USD"))),
         ("room", WEDNESDAY, "rises", money(("139.00", "USD"))),
     ]
+    # A cost on both sides: no stretch with no cost has an end to name.
+    assert deadlines(load(steps)) == (
+        Deadline(instant(TUESDAY), "room", (), money(("50.00", "USD"))),
+        Deadline(instant(WEDNESDAY), "room", money(("50.00", "USD")), money(("189.00", "USD"))),
+    )
 
 
 def test_a_cost_that_falls_is_listed_with_nothing_at_stake() -> None:
@@ -228,10 +257,59 @@ def test_the_same_cost_on_both_sides_is_no_deadline() -> None:
     assert found(a_night(term(one), term(other, WEDNESDAY))) == []
 
 
-def test_two_terms_with_no_cost_are_no_deadline() -> None:
-    assert found(a_night(term(None, TUESDAY), term(None, WEDNESDAY))) == []
-    document = a_night(term(FREE), term(None, TUESDAY), term(None, WEDNESDAY))
-    assert found(document) == [("room", TUESDAY, "not stated from then", None)]
+def test_a_gap_between_two_costs_has_a_deadline_at_each_end() -> None:
+    document = a_night(term(FREE), term(None, TUESDAY), term(ALL, WEDNESDAY))
+    assert deadlines(load(document)) == (
+        Deadline(instant(TUESDAY), "room", (), None, None, instant(WEDNESDAY)),
+        Deadline(instant(WEDNESDAY), "room", None, money(("189.00", "USD")), instant(TUESDAY)),
+    )
+    said = words(document)
+    assert (
+        "  12:00 pm on Tuesday 11 May 2027: cancelling room, the BOOKING for night, costs"
+        " nothing before then. The FILE states no cost from then until 6:00 pm on Wednesday 12"
+        " May 2027. The STAKE is unknown.\n"
+    ) in said
+    assert (
+        "  6:00 pm on Wednesday 12 May 2027: cancelling room, the BOOKING for night, costs"
+        " 189.00 USD from then. The FILE states no cost from 12:00 pm on Tuesday 11 May 2027"
+        " until then. The STAKE is unknown.\n"
+    ) in said
+    out = as_json(document)["deadlines"]
+    assert out[0]["no_cost_until"] == WEDNESDAY
+    assert "no_cost_since" not in out[0]
+    assert out[1]["no_cost_since"] == TUESDAY
+    assert "no_cost_until" not in out[1]
+    # A cost on both sides has no stretch without one.
+    whole = as_json(a_night(term(FREE), term(ALL, WEDNESDAY)))["deadlines"][0]
+    assert "no_cost_since" not in whole
+    assert "no_cost_until" not in whole
+
+
+def test_the_stake_does_not_turn_on_the_decimal_settings_of_the_caller() -> None:
+    document = a_night(term([("50.00", "USD")]), term([("189.04", "USD")], WEDNESDAY), now=MONDAY)
+    usual = words(document)
+    assert "At STAKE: 139.04 USD." in usual
+    with localcontext() as settings:
+        settings.prec = 4
+        assert words(document) == usual
+        settings.traps[Inexact] = True
+        assert words(document) == usual
+        assert as_json(document)["deadlines"][0]["stake"] == [
+            {"amount": "139.04", "currency": "USD"}
+        ]
+
+
+def test_a_difference_has_the_decimal_places_of_the_amount_that_states_more() -> None:
+    def less(amount: str, by: str) -> str:
+        return str(Money(Decimal(amount), "USD").less(Money(Decimal(by), "USD")).amount)
+
+    assert less("189.04", "50.00") == "139.04"
+    assert less("189", "50") == "139"
+    assert less("189.00", "50") == "139.00"
+    assert less("189.5", "50.25") == "139.25"
+    assert less("1", "0.9999") == "0.0001"
+    assert less("999999999999.9999", "0.0001") == "999999999999.9998"
+    assert less("10.50", "0.5") == "10.00"
 
 
 def test_a_stated_cost_that_ends_is_a_deadline_with_an_unknown_stake() -> None:
@@ -256,6 +334,10 @@ def test_nothing_is_at_stake_where_cancelling_costs_nothing_from_then_on() -> No
         ("room", TUESDAY, "not stated from then", None),
         ("room", WEDNESDAY, "not stated before", ()),
     ]
+    assert (
+        "costs nothing from then. The FILE states no cost from 12:00 pm on Tuesday 11 May 2027"
+        " until then. Nothing is at STAKE.\n"
+    ) in words(after_a_gap)
 
 
 def test_more_in_one_currency_and_less_in_another_is_not_added_up() -> None:
@@ -360,6 +442,39 @@ def test_a_booking_with_no_terms_is_named() -> None:
     )
 
 
+def test_a_cost_that_holds_at_any_time_is_known_with_no_time_now() -> None:
+    def at_any_time(*terms: Document) -> tuple[tuple[str, tuple[Money, ...]], ...]:
+        return cancelling_at_any_time(load(a_night(*terms)))
+
+    all_of_it = (("room", money(("189.00", "USD"))),)
+    assert at_any_time(term(ALL)) == all_of_it
+    assert at_any_time(term(FREE)) == (("room", ()),)
+    # Two terms that state one cost, also written in two ways.
+    assert at_any_time(term(ALL), term([("189.0", "USD")], WEDNESDAY)) == all_of_it
+    # A cost that changes, one that ends, and one that starts at a stated time.
+    assert at_any_time(term(FREE), term(ALL, WEDNESDAY)) == ()
+    assert at_any_time(term(ALL), term(None, WEDNESDAY)) == ()
+    assert at_any_time(term(ALL, WEDNESDAY)) == ()
+    assert at_any_time() == ()
+
+
+def test_three_kinds_of_terms_with_no_time_now_have_three_reports() -> None:
+    """Free at any time, 189 dollars at any time, and a cost that only starts on Wednesday."""
+    free, kept, late = a_night(term(FREE)), a_night(term(ALL)), a_night(term(ALL, WEDNESDAY))
+    assert len({words(free), words(kept), words(late)}) == 3
+    assert as_json(free)["cancelling_at_any_time"] == [
+        {"booking": "room", "option": "night", "costs": []}
+    ]
+    assert as_json(kept)["cancelling_at_any_time"] == [
+        {"booking": "room", "option": "night", "costs": [{"amount": "189.00", "currency": "USD"}]}
+    ]
+    assert "cancelling_at_any_time" not in as_json(late)
+    # With a time now, the costs now say it.
+    timed = as_json(a_night(term(ALL), now=MONDAY))
+    assert "cancelling_at_any_time" not in timed
+    assert timed["cancelling_now"] == as_json(kept)["cancelling_at_any_time"]
+
+
 # The report.
 
 
@@ -434,6 +549,9 @@ def test_terms_that_never_change_have_no_deadline_with_or_without_a_time() -> No
         "\n"
         "This FILE does not state the time now. The terms for cancelling that it states change"
         " at no time.\n"
+        "\n"
+        "What cancelling costs at any time:\n"
+        "  room, the BOOKING for night: 189.00 USD\n"
     )
     assert words(a_night(term(ALL), now=MONDAY)).endswith(
         "\n"
@@ -464,7 +582,14 @@ def test_the_bookings_with_no_terms_come_after_the_others() -> None:
         "No terms for cancelling are stated for spare.\n"
     )
     untimed = words(a_night(term(ALL), others=(a_ticket("spare"),)))
-    assert untimed.endswith("change at no time.\n\nNo terms for cancelling are stated for spare.\n")
+    assert untimed.endswith(
+        "change at no time.\n"
+        "\n"
+        "What cancelling costs at any time:\n"
+        "  room, the BOOKING for night: 189.00 USD\n"
+        "\n"
+        "No terms for cancelling are stated for spare.\n"
+    )
 
 
 @pytest.mark.parametrize(
@@ -497,15 +622,17 @@ def test_the_bookings_with_no_terms_come_after_the_others() -> None:
         ),
         (
             (term(FREE), term(None, WEDNESDAY)),
-            "costs nothing before then. The FILE states no cost from then. The STAKE is unknown.",
+            "costs nothing before then. The FILE states no cost from then on. The STAKE is"
+            " unknown.",
         ),
         (
             (term(ALL, WEDNESDAY),),
-            "costs 189.00 USD from then. The FILE states no cost before. The STAKE is unknown.",
+            "costs 189.00 USD from then. The FILE states no cost before then. The STAKE is"
+            " unknown.",
         ),
         (
             (term(FREE, WEDNESDAY),),
-            "costs nothing from then. The FILE states no cost before. Nothing is at STAKE.",
+            "costs nothing from then. The FILE states no cost before then. Nothing is at STAKE.",
         ),
     ],
 )
@@ -576,6 +703,47 @@ def test_a_time_on_another_clock_shows_offsets() -> None:
     assert "change at no later time" in words(passed)
 
 
+def test_a_time_that_the_clocks_show_twice_has_its_offset() -> None:
+    """On Sunday 7 November 2027 the clocks of Chicago show 1:30 am twice, an hour apart."""
+    first = "2027-11-07T01:30:00-05:00[America/Chicago]"
+    second = "2027-11-07T01:30:00-06:00[America/Chicago]"
+
+    def said(cutoff: str, night: str) -> str:
+        document = a_night(term(FREE), term(ALL, cutoff))
+        for fact in document["facts"]:
+            if "starts_at" in fact:
+                fact["starts_at"] = night
+        return words(document)
+
+    # The night is before the clocks change in one FILE, and after it in the other. So the
+    # times that each report shows have one offset, and only the time that comes twice has
+    # its offset beside it.
+    before = said(first, "2027-11-05T23:30:00-05:00[America/Chicago]")
+    after = said(second, "2027-11-10T23:30:00-06:00[America/Chicago]")
+    assert "  1:30 am (UTC-5) on Sunday 7 November 2027: cancelling room" in before
+    assert "  1:30 am (UTC-6) on Sunday 7 November 2027: cancelling room" in after
+    assert before.count("(UTC") == after.count("(UTC") == 1
+    # A step at such a time has its offset too.
+    early = a_night()
+    early["facts"][0]["starts_at"] = first
+    early["facts"][1]["duration"] = "PT10M"
+    assert "  1:30 am (UTC-5) to 1:40 am (UTC-5): night, alex" in words(early)
+
+
+def test_the_time_now_does_not_decide_the_zone_of_a_report() -> None:
+    """An agent in Tokyo checks a trip to Chicago: the report is on the clocks of Chicago."""
+    tokyo = "2027-05-10T23:00:00+09:00[Asia/Tokyo]"
+    document = a_night(term(FREE), term(ALL, WEDNESDAY))
+    document["facts"].insert(0, {"id": "today", "now": tokyo})
+    assert load(document).zone == "America/Chicago"
+    assert "This report uses 9:00 am on Monday 10 May 2027 as the time now" in words(document)
+    # A FILE that states no other time has the zone of the time now.
+    alone = a_night(now=tokyo)
+    alone["facts"] = [fact for fact in alone["facts"] if "starts_at" not in fact]
+    assert load(alone).zone == "Asia/Tokyo"
+    assert "This report uses 11:00 pm on Monday 10 May 2027 as the time now" in words(alone)
+
+
 def test_the_report_as_json_has_the_time_now_and_the_deadlines() -> None:
     document = a_night(
         term(FREE),
@@ -624,10 +792,12 @@ def test_the_report_as_json_says_what_is_not_stated() -> None:
             "from_then": None,
             "change": "not stated from then",
             "stake": None,
+            "no_cost_until": None,
         }
     ]
     late = as_json(a_night(term(ALL, WEDNESDAY), now=MONDAY))
     assert late["deadlines"][0]["before"] is None
+    assert late["deadlines"][0]["no_cost_since"] is None
     assert late["deadlines"][0]["change"] == "not stated before"
     assert late["cancelling_now"] == [{"booking": "room", "option": "night", "costs": None}]
     mixed = as_json(a_night(term([("5000", "AA-points")]), term([("100.00", "USD")], WEDNESDAY)))
