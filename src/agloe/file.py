@@ -292,11 +292,26 @@ class Payment:
 
 
 @dataclass(frozen=True)
+class Term:
+    """What cancelling a BOOKING costs from one time on, until the next term.
+
+    ``since`` is that time. None: from when the BOOKING was made. ``costs`` is what the holder
+    loses by cancelling: one amount for each currency, all of them together, with no amount
+    of nothing among them. So an empty tuple says that cancelling costs nothing. None: nobody
+    has said what it costs while the term holds.
+    """
+
+    since: int | None
+    costs: tuple[Money, ...] | None
+
+
+@dataclass(frozen=True)
 class Booking:
     """A FACT: a BOOKING. It secures a right to one OPTION for each PERSON it covers.
 
     ``paid`` is what it paid. None: nobody knows. ``objects`` are the OBJECTs it covers: it
-    gives a right for each of them where the OPTION needs one.
+    gives a right for each of them where the OPTION needs one. ``cancelling`` holds its terms
+    for cancelling, in the order of time. Empty: it states none.
     """
 
     id: str
@@ -304,6 +319,7 @@ class Booking:
     covers: tuple[str, ...]
     paid: Payment | None = None
     objects: tuple[str, ...] = ()
+    cancelling: tuple[Term, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -500,6 +516,14 @@ class CompleteTransfers:
     object: str
 
 
+@dataclass(frozen=True)
+class Now:
+    """A FACT: the time now. A report treats this time as now, and says so."""
+
+    id: str
+    at: int
+
+
 type Fact = (
     Start
     | Duration
@@ -524,6 +548,7 @@ type Fact = (
     | NeedsRightFor
     | CompleteNeedsRightFor
     | CompleteRightsFor
+    | Now
 )
 type Decision = Lock | TripStart | TripEnd | Cap
 
@@ -585,6 +610,10 @@ class File:
             if isinstance(fact, Satisfies) and (fact.option, fact.want) == (option, want):
                 return fact
         return None
+
+    def now(self) -> Now | None:
+        """The FACT that states the time now, if the FILE holds one."""
+        return next((fact for fact in self.facts if isinstance(fact, Now)), None)
 
     def trip_start(self) -> TripStart | None:
         """The DECISION about when the TRIP starts, if the FILE holds one."""
@@ -1479,7 +1508,40 @@ def load(document: object) -> File:
                 if payer is not None:
                     known(where, payer, "PERSON", person_ids)
                 paid = Payment(money, source, payer)
-            facts.append(Booking(fact["id"], agreed["option"], tuple(covers), paid, tuple(things)))
+            terms: list[Term] = []
+            for term in agreed.get("cancelling", ()):
+                since = when(where, term["from"]) if "from" in term else None
+                if terms and "from" not in term:
+                    problems.append(
+                        f"{where}: only the first term for cancelling can leave out when it starts"
+                    )
+                last = terms[-1].since if terms else None
+                if since is not None and last is not None and since <= last:
+                    problems.append(
+                        f"{where}: the terms for cancelling are not in the order of time"
+                    )
+                lost = None
+                if "costs" in term:
+                    named = [each["currency"] for each in term["costs"]]
+                    for each in sorted({each for each in named if named.count(each) > 1}):
+                        problems.append(
+                            f"{where}: a term for cancelling states {each} more than once"
+                        )
+                    amounts = [
+                        Money(Decimal(each["amount"]), each["currency"]) for each in term["costs"]
+                    ]
+                    lost = tuple(each for each in amounts if each.amount)
+                terms.append(Term(since, lost))
+            facts.append(
+                Booking(
+                    fact["id"], agreed["option"], tuple(covers), paid, tuple(things), tuple(terms)
+                )
+            )
+            continue
+        if "now" in fact:
+            if any(isinstance(each, Now) for each in facts):
+                problems.append(f"{where}: another FACT already states this")
+            facts.append(Now(fact["id"], when(where, fact["now"]) or 0))
             continue
         if "offer" in fact:
             known(where, fact["offer"]["option"], "OPTION", option_ids)

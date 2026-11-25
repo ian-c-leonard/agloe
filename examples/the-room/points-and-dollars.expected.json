@@ -1,0 +1,135 @@
+{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "dinner",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-14T19:00:00-05:00[America/Chicago]",
+      "end": "2027-05-14T20:30:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "walk-to-hotel",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-14T20:30:00-05:00[America/Chicago]",
+      "end": "2027-05-14T20:55:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "night",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-14T23:30:00-05:00[America/Chicago]",
+      "end": "2027-05-15T07:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "room"
+      }
+    },
+    {
+      "option": "breakfast",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T08:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T08:45:00-05:00[America/Chicago]"
+    },
+    {
+      "way": "walk-to-tower",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T08:45:00-05:00[America/Chicago]",
+      "end": "2027-05-15T09:00:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "skydeck",
+      "persons": [
+        "alex"
+      ],
+      "start": "2027-05-15T10:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T11:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "skydeck-ticket"
+      }
+    }
+  ],
+  "relies_on": [
+    "dinner-time",
+    "dinner-length",
+    "dinner-is-walk-up",
+    "night-time",
+    "night-length",
+    "night-arrival",
+    "night-needs-a-room",
+    "room",
+    "breakfast-time",
+    "breakfast-length",
+    "breakfast-arrival",
+    "breakfast-is-walk-up",
+    "skydeck-time",
+    "skydeck-length",
+    "skydeck-arrival",
+    "skydeck-needs-a-ticket",
+    "skydeck-ticket",
+    "walk-to-hotel-length",
+    "walk-to-tower-length",
+    "lock-dinner",
+    "lock-night",
+    "lock-breakfast",
+    "lock-skydeck"
+  ],
+  "robust": true,
+  "now": {
+    "fact": "today",
+    "at": "2027-05-10T09:00:00-05:00[America/Chicago]"
+  },
+  "deadlines": [
+    {
+      "at": "2027-05-12T18:00:00-05:00[America/Chicago]",
+      "booking": "room",
+      "option": "night",
+      "before": [],
+      "from_then": [
+        {
+          "amount": "30000",
+          "currency": "hotel-points"
+        },
+        {
+          "amount": "25.00",
+          "currency": "USD"
+        }
+      ],
+      "change": "rises",
+      "stake": [
+        {
+          "amount": "30000",
+          "currency": "hotel-points"
+        },
+        {
+          "amount": "25.00",
+          "currency": "USD"
+        }
+      ]
+    }
+  ],
+  "cancelling_now": [
+    {
+      "booking": "room",
+      "option": "night",
+      "costs": []
+    },
+    {
+      "booking": "skydeck-ticket",
+      "option": "skydeck",
+      "costs": [
+        {
+          "amount": "32.00",
+          "currency": "USD"
+        }
+      ]
+    }
+  ]
+}

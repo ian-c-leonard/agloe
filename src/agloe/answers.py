@@ -29,6 +29,7 @@ from agloe.file import (
     Lock,
     Money,
     NeedsRightFor,
+    Now,
     ObjectStarts,
     Offer,
     RefusesObject,
@@ -287,6 +288,136 @@ type Works = Callable[[File, World], bool]
 type CanWork = Callable[[Remaining], bool]
 
 
+@dataclass(frozen=True)
+class Deadline:
+    """A DEADLINE: a time at which what cancelling a BOOKING costs changes, or might.
+
+    ``before`` is what cancelling costs until then, and ``after`` what it costs from then on:
+    one amount for each currency, and none where it costs nothing. None: the FILE states no
+    cost there. The two are never the same cost, and never both None.
+    """
+
+    at: int
+    booking: str
+    before: tuple[Money, ...] | None
+    after: tuple[Money, ...] | None
+
+    @property
+    def change(self) -> str:
+        """How the cost changes: it "rises", "falls" or "differs", or one side is not stated.
+
+        It differs where it is more in one currency and less in another: amounts in different
+        currencies are never added or compared.
+        """
+        if self.before is None:
+            return "not stated before"
+        if self.after is None:
+            return "not stated from then"
+        more, less = _more_and_less(self.before, self.after)
+        if more and less:
+            return "differs"
+        return "rises" if more else "falls"
+
+    @property
+    def stake(self) -> tuple[Money, ...] | None:
+        """The STAKE: what cancelling costs more once the DEADLINE has passed.
+
+        Empty: nothing. That is so where the cost falls, and wherever cancelling costs nothing
+        from then on, whatever it cost before. None: unknown, because the FILE states no cost
+        on one side, or not one sum, because the cost is more in one currency and less in
+        another.
+        """
+        if self.after == ():
+            return ()
+        if self.before is None or self.after is None:
+            return None
+        more, less = _more_and_less(self.before, self.after)
+        if less:
+            return None if more else ()
+        return more
+
+
+def _more_and_less(
+    before: Sequence[Money], after: Sequence[Money]
+) -> tuple[tuple[Money, ...], bool]:
+    """What the later cost has more of, by currency, and whether it has less of any."""
+    was = {each.currency: each for each in before}
+    now = {each.currency: each for each in after}
+    more = tuple(
+        Money(each.amount - was[each.currency].amount, each.currency)
+        if each.currency in was
+        else each
+        for each in after
+        if each.currency not in was or each.units > was[each.currency].units
+    )
+    less = any(each.currency not in now or each.units > now[each.currency].units for each in before)
+    return more, less
+
+
+def deadlines(file: File) -> tuple[Deadline, ...]:
+    """The DEADLINEs that a report of this FILE lists, earliest first.
+
+    The time of a term for cancelling is a DEADLINE where the FILE states a cost on at least
+    one side of it, and not the same cost on both. Two terms with no cost show no change and
+    promise nothing, and two equal costs show no change. Before a first term that states its
+    time, the FILE states no cost.
+
+    Where the FILE states the time now, these are the DEADLINEs after it. One at that very
+    time has passed: its term holds already. Where it states none, they are all of them.
+    DEADLINEs at one instant come in the FILE's order of BOOKINGs.
+    """
+    now = file.now()
+    found: list[Deadline] = []
+    for fact in file.facts:
+        if not isinstance(fact, Booking):
+            continue
+        held: tuple[Money, ...] | None = None
+        for term in fact.cancelling:
+            stated = held is not None or term.costs is not None
+            changes = stated and not _the_same(held, term.costs)
+            ahead = term.since is not None and (now is None or term.since > now.at)
+            if term.since is not None and changes and ahead:
+                found.append(Deadline(term.since, fact.id, held, term.costs))
+            held = term.costs
+    return tuple(sorted(found, key=lambda each: each.at))
+
+
+def _the_same(one: Sequence[Money] | None, other: Sequence[Money] | None) -> bool:
+    """Whether two costs are stated and are the same amount in every currency."""
+    if one is None or other is None:
+        return False
+    return {each.currency: each.units for each in one} == {
+        each.currency: each.units for each in other
+    }
+
+
+def cancelling_now(file: File) -> tuple[tuple[str, tuple[Money, ...] | None], ...]:
+    """What cancelling each BOOKING with terms costs at the time now, in the FILE's order.
+
+    It is the cost of the term that holds at that time: the last one that has started. None:
+    the FILE states no cost for that time. Empty where the FILE does not state the time now.
+    """
+    now = file.now()
+    if now is None:
+        return ()
+    costs: list[tuple[str, tuple[Money, ...] | None]] = []
+    for fact in file.facts:
+        if isinstance(fact, Booking) and fact.cancelling:
+            held = None
+            for term in fact.cancelling:
+                if term.since is None or term.since <= now.at:
+                    held = term.costs
+            costs.append((fact.id, held))
+    return tuple(costs)
+
+
+def with_no_terms(file: File) -> tuple[str, ...]:
+    """The BOOKINGs that state no terms for cancelling, in the FILE's order."""
+    return tuple(
+        fact.id for fact in file.facts if isinstance(fact, Booking) and not fact.cancelling
+    )
+
+
 def check(
     file: File, shown: Shown = first_shown, works: Works = any_works, can_work: CanWork = can_work
 ) -> Report:
@@ -401,7 +532,7 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> 
     ``used`` holds those. In a FILE with a cap it relies on every BOOKING: each says what it
     charged, and that is how each cap is known to hold. It relies on no FACT that the rights
     to an OPTION are COMPLETE. ``used`` also holds the FACTs about CAPABILITIES and about
-    OBJECTs that it relies on.
+    OBJECTs that it relies on. It does not rely on the time now: no CONSTRAINT reads it.
     """
     if isinstance(fact, Has | Requires | CompleteRequires):
         return fact.id in used
@@ -422,7 +553,7 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> 
     if isinstance(fact, StartsFrom):
         in_it = any(fact.person in step.persons for step in itinerary)
         return in_it or bool(has_to_end_at(file, fact.person))
-    if isinstance(fact, Complete):
+    if isinstance(fact, Complete | Now):
         return False
     return fact.option in {step.option or step.way for step in itinerary}
 

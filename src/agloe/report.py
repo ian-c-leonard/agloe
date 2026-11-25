@@ -21,11 +21,15 @@ from agloe.answers import (
     CapRow,
     Carried,
     Cover,
+    Deadline,
     Missing,
     Plan,
     Report,
     bought_if_needed,
+    cancelling_now,
+    deadlines,
     right_needed,
+    with_no_terms,
 )
 from agloe.file import (
     Booking,
@@ -46,6 +50,7 @@ from agloe.file import (
     Money,
     NeedsRight,
     NeedsRightFor,
+    Now,
     ObjectStarts,
     Offer,
     Payment,
@@ -299,6 +304,7 @@ def as_json(file: File, report: Report) -> dict[str, object]:
             }
             for each in file.budgets
         ]
+    out.update(_terms_as_json(file))
     return out
 
 
@@ -678,6 +684,9 @@ def clock_for(file: File, report: Report) -> Clock:
     moments = [step.start for step in report.itinerary]
     moments += [step.end for step in report.itinerary if step.end is not None]
     moments += _times_stated(file, (*report.relies_on, *report.conflict))
+    # The time now and the DEADLINEs are shown with every report of a FILE that states them.
+    now = file.now()
+    moments += [each.at for each in deadlines(file)] + ([] if now is None else [now.at])
     offsets = {local(moment, file.zone).utcoffset() for moment in moments}
     return Clock(file.zone, len(offsets) > 1)
 
@@ -819,7 +828,121 @@ def as_text(file: File, report: Report) -> str:
                     " to its end has it, and can still do everything else the trip asks of"
                     " them. Different PERSONs can meet different requirements."
                 )
+    lines += _terms_in_words(file, clock)
     return "\n".join(lines) + "\n"
+
+
+def _terms_in_words(file: File, clock: Clock) -> list[str]:
+    """The time now, the DEADLINEs and what cancelling costs now, after the rest of a report.
+
+    A FILE that states no time now and no terms for cancelling gets nothing here. Every other
+    FILE gets this with each of the three answers: none of it turns on a plan.
+    """
+    now = file.now()
+    bookings = {fact.id: fact for fact in file.facts if isinstance(fact, Booking)}
+    if now is None and not any(booking.cancelling for booking in bookings.values()):
+        return []
+    held = {
+        id: f"{id}, the BOOKING for {_name(file, booking.option)}"
+        for id, booking in bookings.items()
+    }
+    rows = [
+        f"  {clock.moment(each.at)}: cancelling {held[each.booking]}, {_change_in_words(each)}"
+        for each in deadlines(file)
+    ]
+    zone = f"(times in {file.zone})"
+    if now is None:
+        lines = ["", "This FILE does not state the time now."]
+        if rows:
+            lines[-1] += (
+                " So nobody knows which of its DEADLINEs have passed. All of them, earliest"
+                f" first {zone}:"
+            )
+            lines += rows
+        else:
+            lines[-1] += " The terms for cancelling that it states change at no time."
+    else:
+        used = f"This report uses {clock.moment(now.at)} as the time now {zone}."
+        lines = ["", f"{used} The FACT {now.id} states it."]
+        costs = cancelling_now(file)
+        if rows:
+            lines += ["", "DEADLINEs after that time, earliest first:", *rows]
+        elif costs:
+            lines += ["", "The terms for cancelling that this FILE states change at no later time."]
+        if costs:
+            lines += ["", "What cancelling costs now:"]
+            for id, cost in costs:
+                said = "the FILE states no cost for this time" if cost is None else _loss(cost)
+                lines.append(f"  {held[id]}: {said}")
+    unstated = with_no_terms(file)
+    if unstated:
+        lines += ["", f"No terms for cancelling are stated for {_listed(unstated)}."]
+    return lines
+
+
+def _change_in_words(found: Deadline) -> str:
+    """What cancelling costs on each side of a DEADLINE, and the STAKE."""
+    if found.after is None:
+        # A DEADLINE has a cost on one side at least, so this one has a cost before.
+        until = f"costs {_loss(found.before or ())} before then"
+        return f"{until}. The FILE states no cost from then. The STAKE is unknown."
+    if found.before is None:
+        at_stake = "Nothing is at STAKE." if found.stake == () else "The STAKE is unknown."
+        return f"costs {_loss(found.after)} from then. The FILE states no cost before. {at_stake}"
+    sides = f"costs {_loss(found.after)} from then, and {_loss(found.before)} before."
+    if found.stake is None:
+        # More in one currency and less in another: the two are stated, and nothing is added up.
+        return f"{sides} At STAKE: {_loss(found.after)}, in place of {_loss(found.before)}."
+    if not found.stake:
+        return f"{sides} Nothing is at STAKE."
+    return f"{sides} At STAKE: {_loss(found.stake)}."
+
+
+def _loss(costs: Sequence[Money]) -> str:
+    """What cancelling costs, in words: each amount with its currency, or nothing."""
+    return _listed([str(each) for each in costs]) if costs else "nothing"
+
+
+def _terms_as_json(file: File) -> dict[str, object]:
+    """The time now, the DEADLINEs and what cancelling costs now, for the report as JSON.
+
+    Empty for a FILE that states no time now and no terms for cancelling. A list of amounts
+    that is empty says nothing. None says that the FILE states no cost, and for a STAKE that
+    it is unknown or not one sum.
+    """
+    now = file.now()
+    bookings = {fact.id: fact for fact in file.facts if isinstance(fact, Booking)}
+    if now is None and not any(booking.cancelling for booking in bookings.values()):
+        return {}
+
+    def amounts(costs: Sequence[Money] | None) -> list[dict[str, str] | None] | None:
+        return None if costs is None else [_money_as_json(each) for each in costs]
+
+    out: dict[str, object] = {}
+    if now is not None:
+        out["now"] = {"fact": now.id, "at": written(now.at, file.zone)}
+    out["deadlines"] = [
+        {
+            "at": written(each.at, file.zone),
+            "booking": each.booking,
+            "option": bookings[each.booking].option,
+            "before": amounts(each.before),
+            "from_then": amounts(each.after),
+            "change": each.change,
+            "stake": amounts(each.stake),
+        }
+        for each in deadlines(file)
+    ]
+    costs = cancelling_now(file)
+    if costs:
+        out["cancelling_now"] = [
+            {"booking": id, "option": bookings[id].option, "costs": amounts(cost)}
+            for id, cost in costs
+        ]
+    unstated = with_no_terms(file)
+    if unstated:
+        out["no_terms_for_cancelling"] = list(unstated)
+    return out
 
 
 def _budgets(file: File, first: str = "") -> list[str]:
@@ -1604,6 +1727,8 @@ def _record(file: File, clock: Clock, record: str) -> str:
             return f"no OPTION in this FILE needs a right for {thing}"
         needs = "needs" if len(which) == 1 else "need"
         return f"of the OPTIONs in this FILE, only {_listed(which)} {needs} a right for {thing}"
+    if isinstance(found, Now):
+        return f"the time now is {clock.moment(found.at)}"
     name = _name(file, found.option)
     if isinstance(found, NeedsRightFor):
         needs = "needs a right" if found.needed else "needs no right"

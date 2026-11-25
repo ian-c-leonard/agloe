@@ -1,0 +1,52 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "night-time",
+    "night-length",
+    "breakfast-time",
+    "lock-night",
+    "lock-breakfast"
+  ],
+  "now": {
+    "fact": "today",
+    "at": "2027-05-10T09:00:00-05:00[America/Chicago]"
+  },
+  "deadlines": [
+    {
+      "at": "2027-05-12T18:00:00-05:00[America/Chicago]",
+      "booking": "room",
+      "option": "night",
+      "before": [],
+      "from_then": [
+        {
+          "amount": "189.00",
+          "currency": "USD"
+        }
+      ],
+      "change": "rises",
+      "stake": [
+        {
+          "amount": "189.00",
+          "currency": "USD"
+        }
+      ]
+    }
+  ],
+  "cancelling_now": [
+    {
+      "booking": "room",
+      "option": "night",
+      "costs": []
+    },
+    {
+      "booking": "skydeck-ticket",
+      "option": "skydeck",
+      "costs": [
+        {
+          "amount": "32.00",
+          "currency": "USD"
+        }
+      ]
+    }
+  ]
+}
