@@ -1,6 +1,7 @@
 """An OFFER can state when it expires. From then on nobody can take a place of it."""
 
 from dataclasses import replace
+from decimal import Decimal
 from random import Random
 from typing import Any
 
@@ -8,7 +9,7 @@ import pytest
 
 from agloe import answers, compiler, report
 from agloe.answers import Answer, Report, as_seen, expiries
-from agloe.file import File, FileError, Now, Offer, instant
+from agloe.file import Cap, File, FileError, Money, Now, Offer, instant
 from agloe.reference import (
     Broken,
     Constraint,
@@ -39,6 +40,7 @@ from tests.stories import (
     no_other_right_for,
     now,
     offer,
+    refuses_object,
     satisfies,
     starts_at,
     starts_from,
@@ -812,3 +814,147 @@ def test_a_complete_set_marks_an_offer_that_has_expired() -> None:
     )
     early = said(tour(MONDAY, every_right("tour", "tour-offer")))
     assert "(expired)" not in early
+
+
+# The FILEs of the second review of the code: a case differs in more than its FACTs.
+
+
+def test_a_case_of_an_earlier_stretch_with_another_purchase_is_kept() -> None:
+    """No BUDGET lists Alex. A fare of 3 euros expires on Wednesday, and one of 30 dollars
+    states no expiry. Before Wednesday a BUDGET that holds euros is enough."""
+    facts = [
+        *at_ten("tour"),
+        needs_right("tour"),
+        offer("tour", 1, id="euros", price="3.00 EUR", expires=WEDNESDAY),
+        offer("tour", 1, id="dollars", price="30.00 USD"),
+        every_right("tour", "euros", "dollars"),
+    ]
+    file = trip(
+        ["alex"],
+        ["dock"],
+        [stays("tour", "dock")],
+        facts,
+        [lock("tour", "alex")],
+        rights=True,
+        budgets=[],
+    )
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert found.before == (None, instant(WEDNESDAY))
+    assert [
+        [(needed.unknown.what, [cover.by for cover in needed.buys]) for needed in enough]
+        for enough in found.missing
+    ] == [[("funding", ["dollars"])], [("funding", ["euros"])]]
+
+
+def test_a_case_of_an_earlier_stretch_with_another_check_of_a_transfer_is_kept() -> None:
+    """Alex has a bike, and a visit is a must. Both visits refuse the bike. The later one
+    is listed first and needs a ticket, on OFFER until Thursday. The earlier one needs none."""
+    facts = [
+        *at_hour("late-visit", 11),
+        *at_hour("early-visit", 9),
+        satisfies("late-visit", "a-visit"),
+        satisfies("early-visit", "a-visit"),
+        every("a-visit"),
+        needs_right("late-visit"),
+        needs_no_right("early-visit"),
+        offer("late-visit", 1, expires=THURSDAY),
+        every_right("late-visit", "late-visit-offer"),
+        starts_from("alex", "museum"),
+        has_object("alex", "bike"),
+        refuses_object("late-visit", "bike"),
+        refuses_object("early-visit", "bike"),
+        every_use("bike"),
+    ]
+    options = [stays("late-visit", "museum"), stays("early-visit", "museum")]
+    file = trip(
+        ["alex"],
+        ["museum"],
+        options,
+        facts,
+        [],
+        wants=[must("a-visit", "alex")],
+        rights=True,
+        objects=["bike"],
+    )
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert found.before == (None, instant(THURSDAY))
+    assert [
+        [(needed.unknown.what, [each[0] for each in needed.at_hand_for]) for needed in enough]
+        for enough in found.missing
+    ] == [[("another transfer", ["early-visit"])], [("another transfer", ["late-visit"])]]
+
+
+def with_a_cap(file: File) -> File:
+    """The same FILE with a cap of 15 dollars on the money that pays for everybody."""
+    limit = Cap("money-cap", "money", Money(Decimal("15.00"), "USD"))
+    return replace(file, decisions=(*file.decisions, limit))
+
+
+def test_the_plans_of_the_cases_are_those_of_the_file_in_each_stretch() -> None:
+    """With a cap, each case has a plan: the one of the FILE with a time in its stretch."""
+    with_plans = 0
+    for file in map(with_a_cap, generated(120, with_now=False, seed=23)):
+        found = answers.check(file)
+        if found.answer is not Answer.UNDETERMINED:
+            continue
+        assert len(found.plans) == len(found.missing) == len(found.before)
+        ends = sorted({offer.expires for offer in file.dated_offers() if offer.expires is not None})
+        expected: list[tuple[Any, Any, int | None]] = []
+        for until in (None, *reversed(ends)):
+            at = answers.check(as_seen(file, until))
+            if at.answer is Answer.FEASIBLE:
+                break
+            for some, plan in zip(at.missing, at.plans, strict=True):
+                if (some, plan, None) not in [(a, b, None) for a, b, _ in expected]:
+                    expected.append((some, plan, until))
+        listed = list(zip(found.missing, found.plans, found.before, strict=True))
+        # The last case can be the one with no unknown FACT, which no stated time has.
+        assert listed[: len(expected)] == expected
+        assert all(not some for some, _, _ in listed[len(expected) :])
+        with_plans += any(plan.buys for _, plan, _ in listed)
+    assert with_plans > 10
+
+
+def test_a_case_at_any_time_gives_no_number_of_places_that_changes_with_the_time() -> None:
+    """Alex's BUDGET holds dollars and both seats cost euros. One of them expires on Thursday."""
+    facts = [
+        *at_ten("tour"),
+        needs_right("tour"),
+        offer("tour", 1, id="dated", price="3.00 EUR", expires=THURSDAY),
+        offer("tour", 1, id="undated", price="3.00 EUR"),
+    ]
+
+    def words(*more: Any) -> str:
+        file = trip(
+            ["alex"],
+            ["dock"],
+            [stays("tour", "dock")],
+            [*facts, *more],
+            [lock("tour", "alex")],
+            rights=True,
+        )
+        return said(file)
+
+    assert "is found for alex, in addition to the places on OFFER." in words()
+    assert "is found for alex, in addition to the 2 places on OFFER." in words(MONDAY)
+    assert "is found for alex, in addition to the 1 place on OFFER." in words(FRIDAY)
+    # An OPTION whose OFFERs state no expiry has the same places at any time.
+    two = trip(
+        ["alex"],
+        ["dock"],
+        [stays("tour", "dock"), stays("cruise", "dock")],
+        [
+            *at_ten("tour"),
+            needs_right("tour"),
+            offer("tour", 1, price="3.00 EUR"),
+            *at_hour("cruise", 12),
+            needs_no_right("cruise"),
+            offer("cruise", 1, expires=THURSDAY),
+        ],
+        [lock("tour", "alex")],
+        rights=True,
+    )
+    assert two.now() is None and two.dated_offers()
+    assert "is found for alex, in addition to the 1 place on OFFER" in said(two)

@@ -26,6 +26,7 @@ from tests.stories import (
     EXAMPLES,
     at,
     budget,
+    cap,
     cutoff,
     every_use,
     has_object,
@@ -680,6 +681,33 @@ def test_cases_are_tied_under_a_heading_that_says_some_are_not_settled() -> None
     assert "The trip works, or might work, in any of these cases:\n" in asked["text"]
     (found,) = lines_of([asked])
     assert [line["case"] for line in found if line["case"] is not None] == [0, 1]
+    # With a cap, each case has a plan. Alex needs a seat too, from an OFFER with no price.
+    # The plan under the case that is not settled might work, and both name the OFFER.
+    fare = [needs_right("train"), offer("train", 1, "fare", None)]
+    capped = trip(
+        ["alex"],
+        ["home", "town"],
+        [moves("train", "home", "town")],
+        [*facts, *fare],
+        [lock("train", "alex"), cap("money", "1.00 USD")],
+        rights=True,
+        objects=["bike"],
+    )
+    asked = asked_about(capped)
+    (found,) = lines_of([asked])
+    plans = {
+        line["text"].strip()[:30]: offers_of(line)
+        for line in found
+        if line["text"].strip().startswith("One plan that")
+    }
+    assert plans == {
+        # Another transfer and the price of the seat, at any time: not settled.
+        "One plan that might work then:": ["fare"],
+        # The price of the seat, before the rack expires: the bike takes a place too.
+        "One plan that works then: alex": ["fare", "rack"],
+        # Another right for Alex, before the rack expires.
+        "One plan that works then: a pl": ["rack"],
+    }
 
 
 def test_what_the_report_says_is_charged_to_a_cap_is_kept_in_its_own_words(

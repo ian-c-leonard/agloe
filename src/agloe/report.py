@@ -740,7 +740,7 @@ def as_text(file: File, report: Report) -> str:
         untils = report.before or [None] * len(report.missing)
         seen = [file if not report.before else as_seen(file, until) for until in untils]
         cases = [
-            _timed(clock, _case(at, enough) if enough else "", until)
+            _timed(clock, _case(at, enough, not report.before) if enough else "", until)
             for at, enough, until in zip(seen, report.missing, untils, strict=True)
         ]
         # A set with another transfer is not settled. Among the sets of one stretch of time,
@@ -1506,7 +1506,7 @@ def _timed(clock: Clock, case: str, until: int | None) -> str:
     )
 
 
-def _case(file: File, enough: Sequence[Missing]) -> str:
+def _case(file: File, enough: Sequence[Missing], timed: bool = True) -> str:
     """One set of unknown FACTs that would be enough, in words.
 
     PERSONs who need another OPTION for the same WANT are named together, as "each of". The
@@ -1515,6 +1515,10 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
     set. So are the PERSONs who need a right to one OPTION. The OPTIONs that need a right for
     one OBJECT, or have to need none for it, are named together wherever they come in the
     set, at the place of the first. Nothing else changes the order.
+
+    ``timed`` is False for a FILE that states no time now. Then nobody knows how many places
+    are on OFFER for an OPTION with an OFFER that states when it expires, so the words give
+    no number of them.
     """
     parts: list[str] = []
     for_whom: dict[str | None, list[str]] = {}
@@ -1533,6 +1537,10 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
             # A right that is found is one more than the places on OFFER, and the words say so.
             places = file.places_on_offer(unknown.option or "")
             more = "" if not places else f", in addition to the {_places(places)} on OFFER"
+            stated = file.offers_stated(unknown.option or "")
+            if not timed and any(each.expires is not None and not each.objects for each in stated):
+                # The number of places on OFFER changes with the time, and nobody knows it.
+                more = ", in addition to the places on OFFER"
             more += ", at a cost that fits the caps" if file.caps else ""
             each = "each of " if len(group) > 1 else ""
             who = _people(file, tuple(needed.unknown.person or "" for needed in group))

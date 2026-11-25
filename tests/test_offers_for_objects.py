@@ -1413,7 +1413,7 @@ def test_a_plan_for_a_case_counts_the_place_of_an_object_that_another_transfer_b
     (row,) = plan.caps
     assert (row.to_buy, row.left) == (ten.units, 2 * ten.units)
     assert (
-        "  One plan that works then: a place from rack covers bike, for 10.00 USD from money."
+        "  One plan that might work then: a place from rack covers bike, for 10.00 USD from money."
         in in_words(file)
     )
 
