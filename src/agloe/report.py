@@ -701,7 +701,6 @@ def clock_for(file: File, report: Report) -> Clock:
     # The time now and the DEADLINEs are shown with every report of a FILE that states them.
     now = file.now()
     moments += [each.at for each in every_deadline(file)] + ([] if now is None else [now.at])
-    moments += [until for until in report.before if until is not None]
     offsets = {local(moment, file.zone).utcoffset() for moment in moments}
     return Clock(file.zone, len(offsets) > 1)
 

@@ -9,14 +9,25 @@ import pytest
 from agloe import answers, compiler, report
 from agloe.answers import Answer, Report, as_seen
 from agloe.file import File, FileError, Now, Offer, instant
-from agloe.reference import any_works, best_case, first_shown, with_these_at_best, worst_case
+from agloe.reference import (
+    Broken,
+    Constraint,
+    any_works,
+    best_case,
+    broken_as_listed,
+    first_shown,
+    with_these_at_best,
+    worst_case,
+)
 from tests.stories import (
     at,
     booking,
+    budget,
     cap,
     every_right,
     lock,
     needs_right,
+    no_other_right_for,
     now,
     offer,
     stays,
@@ -24,6 +35,7 @@ from tests.stories import (
 )
 from tests.test_cross_check import random_trip
 from tests.test_offers import EVERYONE, a_boat_tour, at_ten, two_tours_with_offers
+from tests.test_offers_for_objects import BOTH, a_crossing
 
 THURSDAY = at(17, day=13)  # when the OFFER of these stories expires: 5:00 pm on 13 May
 MONDAY = now(9, day=10)
@@ -322,3 +334,207 @@ def test_an_expired_free_place_does_not_hide_the_price_that_the_answer_turns_on(
     assert [[(n.unknown.what, n.unknown.about) for n in enough] for enough in found.missing] == [
         [("price", "other")]
     ]
+
+
+# OFFERs for OBJECTs.
+
+
+def test_a_place_for_an_object_cannot_be_taken_once_its_offer_has_expired() -> None:
+    """The car needs a place on the ferry. The car deck is on OFFER until Thursday."""
+    deck = offer("ferry", 3, "car-deck", "90.00 USD", objects=["car"], expires=THURSDAY)
+    pays = [budget("money", "alex", "sam", objects=["car"])]
+    whole = no_other_right_for("ferry", "car", "car-deck")
+    early = checked(a_crossing(deck, whole, MONDAY, budgets=pays))
+    assert early.answer is Answer.FEASIBLE
+    assert "today" in early.relies_on
+    late = checked(a_crossing(deck, whole, FRIDAY, budgets=pays))
+    assert late.answer is Answer.INFEASIBLE
+    assert {"car-deck", "today"} <= set(late.conflict)
+    # With no time now nobody knows, and the one case is that it is before Thursday.
+    untimed = checked(a_crossing(deck, whole, budgets=pays))
+    assert untimed.answer is Answer.UNDETERMINED
+    assert (untimed.missing, untimed.before) == (((),), (instant(THURSDAY),))
+    # Without the FACT that these are all the rights, another right might be found.
+    open_to_more = checked(a_crossing(deck, FRIDAY, budgets=pays))
+    assert open_to_more.answer is Answer.UNDETERMINED
+    assert [[n.unknown.what for n in enough] for enough in open_to_more.missing] == [
+        ["another right for"]
+    ]
+
+
+def test_an_expired_place_is_not_put_back_when_objects_are_matched_to_places() -> None:
+    """Two OBJECTs need a place and one OFFER has one for either. A second place has expired.
+
+    More money cannot put two OBJECTs on one place: the one without a place has no right.
+    """
+    either = offer("ferry", 1, "deck", "10.00 USD", objects=["car", "bike"])
+    gone = offer("ferry", 1, "rack", "10.00 USD", objects=["bike"], expires=WEDNESDAY)
+    pays = [budget("money", "alex", "sam", objects=["car", "bike"])]
+    for moment in ([FRIDAY], []):
+        file = a_crossing(either, gone, *moment, budgets=pays, bike=True)
+        found = broken_as_listed(file, worst_case(file), BOTH)
+        assert found == [Broken(Constraint.COVERED, "ferry", ("sam",), object="bike")]
+    # While the rack is open, each has a place and both are paid for.
+    early = a_crossing(either, gone, MONDAY, budgets=pays, bike=True)
+    assert broken_as_listed(early, worst_case(early), BOTH) == []
+
+
+# The report.
+
+
+def said(file: File) -> str:
+    return report.as_text(file, answers.check(file))
+
+
+def as_json(file: File) -> dict[str, Any]:
+    return report.as_json(file, answers.check(file))
+
+
+def test_a_purchase_says_before_when_and_the_plan_relies_on_the_time_now() -> None:
+    words = said(tour(MONDAY))
+    assert (
+        "    ! sam still has to buy a right to this, from tour-offer, for 10.00 USD from money,"
+        " before 5:00 pm on Thursday 13 May 2027.\n"
+    ) in words
+    assert "  today: the time now is 9:00 am on Monday 10 May 2027\n" in words
+    assert (
+        "  tour-offer: an OFFER has 2 places for tour that can still be bought until 5:00 pm on"
+        " Thursday 13 May 2027, for 10.00 USD each\n"
+    ) in words
+    # A plan that takes no place of a dated OFFER does not rely on the time now.
+    booked = a_boat_tour(booking("tour", "alex", "sam"), offer("tour", 2, expires=THURSDAY), MONDAY)
+    assert "today" not in answers.check(booked).relies_on
+    # A purchase from an OFFER that states no expiry says no time.
+    plain = said(a_boat_tour(booking("tour", "alex"), offer("tour", 2), MONDAY))
+    assert "from tour-offer, for 10.00 USD from money.\n" in plain
+
+
+def test_an_expired_offer_is_worded_as_one_that_had_its_places() -> None:
+    words = said(tour(FRIDAY, every_right("tour", "tour-offer")))
+    assert (
+        "  tour-offer: an OFFER had 2 places for tour that could be bought until 5:00 pm on"
+        " Thursday 13 May 2027, for 10.00 USD each\n"
+    ) in words
+
+
+@pytest.mark.parametrize(
+    ("places", "price", "ends"),
+    [
+        (2, "10.00 USD", "The chance to buy up to 2 places at 10.00 USD each ends."),
+        (1, "10.00 USD", "The chance to buy 1 place at 10.00 USD ends."),
+        (2, "0.00 USD", "The chance to buy up to 2 places at no cost ends."),
+        (
+            2,
+            None,
+            "The chance to buy up to 2 places ends. The FILE does not state their price.",
+        ),
+        (1, None, "The chance to buy 1 place ends. The FILE does not state its price."),
+    ],
+)
+def test_the_expiry_of_an_offer_is_a_deadline(places: int, price: str | None, ends: str) -> None:
+    dated = offer("tour", places, price=price, expires=THURSDAY)
+    words = said(a_boat_tour(booking("tour", "alex", "sam"), dated, MONDAY))
+    assert (
+        "DEADLINEs after that time, earliest first:\n"
+        f"  5:00 pm on Thursday 13 May 2027: tour-offer, the OFFER for tour, expires. {ends}\n"
+    ) in words
+
+
+def test_an_expiry_that_has_passed_is_not_listed_and_the_report_says_that_none_is_left() -> None:
+    words = said(tour(FRIDAY))
+    assert "expires." not in words
+    assert "\nNo DEADLINE comes after that time.\n" in words
+    assert as_json(tour(FRIDAY))["deadlines"] == []
+
+
+def test_with_no_time_now_every_expiry_is_listed() -> None:
+    words = said(tour())
+    assert (
+        "This FILE does not state the time now. So nobody knows which of its DEADLINEs have"
+        " passed. All of them, earliest first (times in America/Chicago):\n"
+        "  5:00 pm on Thursday 13 May 2027: tour-offer, the OFFER for tour, expires."
+    ) in words
+
+
+def test_deadlines_at_one_instant_come_in_the_files_order_of_facts() -> None:
+    """An OFFER expires when a term for cancelling starts. Whichever FACT comes first is first."""
+    held = booking("tour", "alex", "sam")
+    held["booking"]["cancelling"] = [
+        {"costs": [{"amount": "0.00", "currency": "USD"}]},
+        {"from": THURSDAY, "costs": [{"amount": "10.00", "currency": "USD"}]},
+    ]
+    dated = offer("tour", 2, expires=THURSDAY)
+    first = as_json(a_boat_tour(held, dated, MONDAY))["deadlines"]
+    assert [each["kind"] for each in first] == ["cancelling", "expiry"]
+    second = as_json(a_boat_tour(dated, held, MONDAY))["deadlines"]
+    assert [each["kind"] for each in second] == ["expiry", "cancelling"]
+    # An earlier time comes first, whatever the order of the FACTs.
+    sooner = offer("tour", 2, expires=WEDNESDAY)
+    assert [each["kind"] for each in as_json(a_boat_tour(held, sooner, MONDAY))["deadlines"]] == [
+        "expiry",
+        "cancelling",
+    ]
+
+
+def test_an_offer_with_no_time_of_expiry_is_named() -> None:
+    file = a_boat_tour(
+        booking("tour", "alex"), offer("tour", 2, expires=THURSDAY), offer("tour", 1, id="spare")
+    )
+    assert said(file).endswith("\nNo time of expiry is stated for spare.\n")
+    assert as_json(file)["no_expiry_stated"] == ["spare"]
+    assert "no_expiry_stated" not in as_json(tour(MONDAY))
+    # A FILE that states no time now, no terms and no expiry has no such part.
+    plain = a_boat_tour(booking("tour", "alex"), offer("tour", 2))
+    assert "No time of expiry" not in said(plain)
+    assert "no_expiry_stated" not in as_json(plain)
+
+
+def test_the_report_as_json_has_the_expiry_and_the_time_of_a_case() -> None:
+    assert as_json(tour(MONDAY))["deadlines"] == [
+        {
+            "at": THURSDAY,
+            "kind": "expiry",
+            "offer": "tour-offer",
+            "option": "tour",
+            "places": 2,
+            "price": {"amount": "10.00", "currency": "USD"},
+        }
+    ]
+    unpriced = a_boat_tour(
+        booking("tour", "alex", "sam"), offer("tour", 2, price=None, expires=THURSDAY)
+    )
+    assert as_json(unpriced)["deadlines"][0]["price"] is None
+    untimed = as_json(tour())
+    assert [[each["what"] for each in case] for case in untimed["missing"]] == [
+        ["another right"],
+        ["time"],
+    ]
+    assert untimed["missing"][1] == [{"what": "time", "before": THURSDAY}]
+    # A case that asks for something else too has the time as its last condition.
+    two = a_boat_tour(
+        booking("tour", "alex"),
+        offer("tour", 1, price=None, expires=THURSDAY),
+        every_right("tour", "tour-offer"),
+    )
+    (case,) = as_json(two)["missing"]
+    assert [each["what"] for each in case] == ["price", "time"]
+    assert "and it is before 5:00 pm on Thursday 13 May 2027." in said(two)
+
+
+def test_the_times_of_expiry_count_for_the_offsets() -> None:
+    """The clocks change on Sunday 7 November 2027, after the OFFER expires."""
+    early = "2027-11-05T17:00:00-05:00[America/Chicago]"
+    start = "2027-11-10T10:00:00-06:00[America/Chicago]"
+
+    def moved(*more: Any) -> File:
+        file = a_boat_tour(booking("tour", "alex"), offer("tour", 2, expires=early), *more)
+        facts = tuple(
+            replace(fact, at=instant(start)) if type(fact).__name__ == "Start" else fact
+            for fact in file.facts
+        )
+        return replace(file, facts=facts)
+
+    # In a conflict the expired OFFER names the time, the only one before the change.
+    late = {"id": "today", "now": "2027-11-09T09:00:00-06:00[America/Chicago]"}
+    words = said(moved(late, every_right("tour", "tour-offer")))
+    assert "could be bought until 5:00 pm (UTC-5) on Friday 5 November 2027" in words
