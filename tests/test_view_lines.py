@@ -584,6 +584,13 @@ def test_the_lines_about_cancelling_are_tied_to_their_bookings(tmp_path: Path) -
     mistied = about({**asked, "report": other_report})
     assert f"6:00 pm on Wednesday 12 May 2027: {start}"[:60] not in mistied
     assert mistied[f'room, the BOOKING for "{title}"'[:60]] == ["booking:room"]
+    # A DEADLINE of the report as JSON has a kind, and names the record of that kind only.
+    for wrong in ({"kind": "typo"}, {"offer": "skydeck-ticket"}, {"kind": "expiry"}):
+        odd_kind = [{**each, **wrong} for each in report["deadlines"]]
+        assert all(
+            "a term for" not in text
+            for text in about({**steps, "report": {**report, "deadlines": odd_kind}})
+        )
     # The one line about the BOOKINGs with no terms is about each of them.
     free = asked_of(EXAMPLES / "the-room" / "free-until-wednesday.json")
     assert about(free)["No terms for cancelling are stated for skydeck-ticket."] == [

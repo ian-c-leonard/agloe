@@ -131,7 +131,8 @@ export function cancellingIn(report) {
   const isRecord = (each) => each !== null && typeof each === "object";
   const bookings = (list) => (Array.isArray(list) && list.every((each) => isRecord(each) && typeof each.booking === "string") ? list.map((each) => each.booking) : []);
   const ids = (list) => (Array.isArray(list) && list.every((id) => typeof id === "string") ? list : []);
-  const isDeadline = (each) => isRecord(each) && (typeof each.booking === "string") !== (typeof each.offer === "string" && each.kind === "expiry");
+  // A DEADLINE of each kind names its own record and not the other.
+  const isDeadline = (each) => isRecord(each) && (each.kind === "expiry" ? typeof each.offer === "string" && each.booking === undefined : each.kind === "cancelling" && typeof each.booking === "string" && each.offer === undefined);
   const deadlines = Array.isArray(stated.deadlines) && stated.deadlines.every(isDeadline) ? stated.deadlines.map((each) => (each.kind === "expiry" ? { offer: each.offer } : { booking: each.booking })) : [];
   return { deadlines, now: bookings(stated.cancelling_now), always: bookings(stated.cancelling_at_any_time), none: ids(stated.no_terms_for_cancelling), undated: ids(stated.no_expiry_stated) };
 }

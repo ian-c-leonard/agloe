@@ -936,6 +936,15 @@ def _states_terms(file: File) -> bool:
     return file.now() is not None or stated or bool(file.dated_offers())
 
 
+def _with_expired(file: File, offers: Sequence[str]) -> list[str]:
+    """The OFFERs that a COMPLETE set of rights names, each marked where it has expired.
+
+    The set names an OFFER as long as the FILE holds it. Whether a place of it can still be
+    bought is another matter.
+    """
+    return [f"{id} (expired)" if id in file.expired else id for id in offers]
+
+
 def _expiry_in_words(file: File, offer: Offer) -> str:
     """What ends when an OFFER expires: the chance to buy its places, at its price.
 
@@ -1901,11 +1910,16 @@ def _record(file: File, clock: Clock, record: str) -> str:
     if isinstance(found, Offer):
         each = " each" if found.places > 1 else ""
         price = "; nobody knows the price" if found.price is None else f", for {found.price}{each}"
-        # An OFFER that has expired by the time now had its places until then.
+        # An OFFER that has expired by the time now had its places until then. Where the
+        # FILE states no time now, nobody knows whether one that states its expiry can
+        # still be bought.
         gone = found.id in file.expired
-        bought = "that could be bought" if gone else "that can still be bought"
+        bought = "that can still be bought"
         if found.expires is not None:
-            bought += f" until {clock.moment(found.expires)}"
+            can = "could be bought" if gone else "can still be bought"
+            if file.now() is None and not gone:
+                can = "can be bought"
+            bought = f"that {can} until {clock.moment(found.expires)}"
         if found.objects:
             # Each place covers one of the OBJECTs it names. They are named as a BOOKING
             # names them: no PERSON shows the same name.
@@ -1918,7 +1932,7 @@ def _record(file: File, clock: Clock, record: str) -> str:
         # Each such FACT says what it is about: the PERSONs who take part, or one OBJECT.
         closed = "nobody on the trip holds another or can get one"
         if found.offers:
-            closed += f", except from {_listed(found.offers)}"
+            closed += f", except from {_listed(_with_expired(file, found.offers))}"
         return f"the FILE lists every right for a PERSON to take part in {name}: {closed}"
     if isinstance(found, CompleteRightsFor):
         # The OBJECT is named as a BOOKING names it: no PERSON shows the same name, and a
@@ -1926,7 +1940,7 @@ def _record(file: File, clock: Clock, record: str) -> str:
         thing = _names([*file.persons, *file.objects], "and")[found.object]
         closed = "nobody on the trip holds another or can get one"
         if found.offers:
-            closed += f", except from {_listed(found.offers)}"
+            closed += f", except from {_listed(_with_expired(file, found.offers))}"
         return f"the FILE lists every right to {name} that covers {thing}: {closed}"
     return _cutoff(file, name, found)
 

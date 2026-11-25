@@ -83,7 +83,10 @@ export function open(trip, report = null, stated = null) {
     const cases = casesIn(report);
     if (!cases.length || cases.some((_, n) => typeof stated.cases[n] !== "string")) return none;
     const items = cases.map((_, n) => item("", stated.cases[n], { records: [`case:${n}`], mark: "asked", more: further(stated.under[n] ?? []) }));
-    return { says: "The FILE does not say enough to tell whether this trip works.", count: items.length, clash: false, asked: true, groups: [group("cases", stated.heading ?? "", items, stated.also)] };
+    // A case can hold only before a time: then the list says on which clocks its times are.
+    const timed = cases.some((needs) => Array.isArray(needs) && needs.some((need) => need !== null && typeof need === "object" && need.what === "time"));
+    const onClocks = timed && typeof trip.zone === "string" ? clocksOf(trip.zone) : "";
+    return { says: `The FILE does not say enough to tell whether this trip works.${onClocks}`, count: items.length, clash: false, asked: true, groups: [group("cases", stated.heading ?? "", items, stated.also)] };
   }
   if (report.answer !== "FEASIBLE" || trip.itinerary !== true || !stated.whole) return none;
   const clocks = typeof trip.zone === "string" ? clocksOf(trip.zone) : "";

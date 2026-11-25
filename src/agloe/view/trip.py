@@ -195,7 +195,7 @@ _OFFER: _Shape = {
     "objects": list,
     "names": dict,
     "until": (str, _NONE),
-    "expired": bool,
+    "expired": (bool, _NONE),
 }
 _MONEY: _Shape = {"amount": str, "currency": str}
 _ALL_RIGHTS: _Shape = {"record": str, "offers": list}
@@ -602,12 +602,18 @@ def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
                         "price": None if offer.price is None else _money(offer.price),
                         "objects": [each.id for each in file.objects if each.id in offer.objects],
                         "names": {each: either[each] for each in offer.objects},
-                        # Until when its places can be bought, in the words of a report, and
-                        # whether that time has passed by the time now that the FILE states.
+                        # Until when its places can be bought, in the words of a report and
+                        # with its offset from UTC: the card names no time zone. Then whether
+                        # that time has passed by the time now that the FILE states. None:
+                        # nobody knows, because the FILE states no time now.
                         "until": None
                         if offer.expires is None
-                        else reports.Clock(file.zone, False).moment(offer.expires),
-                        "expired": offer.id in file.expired,
+                        else reports.Clock(file.zone, True).moment(offer.expires),
+                        "expired": None
+                        if offer.expires is not None
+                        and file.now() is None
+                        and offer.id not in file.expired
+                        else offer.id in file.expired,
                     }
                     for offer in offers
                 ],

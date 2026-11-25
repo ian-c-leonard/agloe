@@ -27,16 +27,21 @@ from tests.stories import (
     cutoff,
     every,
     every_right,
+    every_use,
+    has_object,
     lasts,
     lock,
+    moves,
     must,
     needs_no_right,
     needs_right,
+    needs_right_for,
     no_other_right_for,
     now,
     offer,
     satisfies,
     starts_at,
+    starts_from,
     stays,
     trip,
 )
@@ -708,3 +713,67 @@ def test_an_offer_that_expires_at_the_first_time_a_file_can_state_is_open_at_no_
         every_right("tour", "tour-offer"),
     )
     assert checked(file).answer is Answer.INFEASIBLE
+
+
+def test_a_report_says_which_of_its_cases_are_not_settled() -> None:
+    """Alex takes a train with his bike. The only rack is free until Thursday, and something
+    that the FILE does not list might take the bike off his hands."""
+    facts = [
+        *at_hour("train", 6),
+        starts_from("alex", "home"),
+        has_object("alex", "bike"),
+        every_use("bike"),
+        needs_right_for("train", "bike"),
+        offer("train", 1, "rack", "0.00 USD", objects=["bike"], expires=THURSDAY),
+        no_other_right_for("train", "bike", "rack"),
+    ]
+    file = trip(
+        ["alex"],
+        ["home", "town"],
+        [moves("train", "home", "town")],
+        facts,
+        [lock("train", "alex")],
+        objects=["bike"],
+    )
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert [[needed.unknown.what for needed in enough] for enough in found.missing] == [
+        ["another transfer"],
+        [],
+    ]
+    assert found.before == (None, instant(THURSDAY))
+    words = said(file)
+    assert "The trip works, or might work, in any of these cases:\n" in words
+    assert "  2. It is before 5:00 pm on Thursday 13 May 2027.\n" in words
+    assert "\nCase 1 is not settled. What the FILE lists does not do that for bike" in words
+    assert "These cases are not settled" not in words
+    # With the time now stated, every case is of one kind.
+    late = said(replace(file, facts=(*file.facts, Now("today", instant(THURSDAY)))))
+    assert "The trip might work if " in late
+    assert "That is not settled." in late
+
+
+def test_the_words_of_an_offer_do_not_say_that_it_can_still_be_bought_where_nobody_knows() -> None:
+    """One place for two riders rules the trip out at any time, and the FILE states none."""
+    one_place = a_boat_tour(offer("tour", 1, expires=THURSDAY), every_right("tour", "tour-offer"))
+    words = said(one_place)
+    assert (
+        "  tour-offer: an OFFER has 1 place for tour that can be bought until 5:00 pm on Thursday"
+        " 13 May 2027, for 10.00 USD\n"
+    ) in words
+    assert "can still be bought" not in words
+    # An OFFER that states no expiry can still be bought, as its FACT says.
+    undated = a_boat_tour(offer("tour", 1), every_right("tour", "tour-offer"))
+    assert "an OFFER has 1 place for tour that can still be bought, for 10.00 USD\n" in said(
+        undated
+    )
+
+
+def test_a_complete_set_marks_an_offer_that_has_expired() -> None:
+    words = said(tour(FRIDAY, every_right("tour", "tour-offer")))
+    assert (
+        "nobody on the trip holds another or can get one, except from tour-offer (expired)\n"
+        in (words)
+    )
+    early = said(tour(MONDAY, every_right("tour", "tour-offer")))
+    assert "(expired)" not in early

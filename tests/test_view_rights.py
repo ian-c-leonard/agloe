@@ -11,6 +11,7 @@ to say: the page names who uses a right only where the report does.
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -465,6 +466,31 @@ def a_ferry_with(tmp_path: Path, name: str, change: Any) -> Path:
     return path
 
 
+def test_an_offer_that_expires_says_until_when_and_whether_it_has_expired() -> None:
+    until = "until 5:00 pm (UTC-5) on Thursday 13 May 2027, for 32.00 USD each"
+    for name, says in (
+        ("the-offer-ends-on-thursday", f"an OFFER with 2 places that can still be bought {until}"),
+        ("the-offer-has-expired", f"an OFFER that had 2 places that could be bought {until}"),
+        # With no time now, nobody knows whether a place can still be bought.
+        (
+            "nobody-said-whether-the-offer-has-expired",
+            f"an OFFER with 2 places that can be bought {until}",
+        ),
+    ):
+        (skydeck,) = [
+            each for each in rights_of(f"a-ticket/{name}")["rights"] if each["option"] == "skydeck"
+        ]
+        (tickets,) = skydeck["offers"]
+        assert tickets["says"] == says, name
+    # A COMPLETE set names an OFFER as long as the FILE holds it, and marks an expired one.
+    (skydeck,) = [
+        each
+        for each in rights_of("a-ticket/expired-and-sold-out")["rights"]
+        if each["option"] == "skydeck"
+    ]
+    assert skydeck["whole"].endswith("or can get one, except from skydeck-tickets (expired).")
+
+
 def test_every_example_shows_its_rights_in_the_words_of_the_report(tmp_path: Path) -> None:
     """Each BOOKING and each OFFER of each FILE is shown, worded as the report words it.
 
@@ -559,8 +585,11 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report(tmp_path: Pat
             for offer in rights["offers"]:
                 if f"  {offer['id']}: an OFFER" in words:
                     offers += 1
-                    said = offer["says"].replace("an OFFER with ", "an OFFER has ", 1)
-                    said = said.replace(" that can still", f" for {called} that can still", 1)
+                    # The card gives the time of expiry with its offset from UTC, and the
+                    # report only where its times have more than one offset.
+                    said = re.sub(r" \(UTC[^)]*\)", "", offer["says"])
+                    said = said.replace("an OFFER with ", "an OFFER has ", 1)
+                    said = said.replace(" that can ", f" for {called} that can ", 1)
                     # An OFFER that has expired had its places.
                     said = said.replace("an OFFER that had ", "an OFFER had ", 1)
                     said = said.replace(" that could be", f" for {called} that could be", 1)
