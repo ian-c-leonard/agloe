@@ -1,7 +1,7 @@
 # 0007. The view writes a DECISION that a person makes on the page
 
 - **Status:** Proposed
-- **Date:** 2026-11-24
+- **Date:** 2026-11-25
 - **Decided by:** Ian Leonard
 
 ## Context
@@ -28,7 +28,7 @@ The view writes a DECISION that a person makes on the page, and writes nothing e
 - The first DECISION is a LOCK. Where a plan holds an OPTION with PERSONs in it whom no LOCK names, the page offers to decide it. One click adds one LOCK to the FILE: that OPTION, with those PERSONs.
 - A write adds a record. It changes no record and removes none. The vocabulary says that a DECISION is never edited, and that changing your mind is a new DECISION that names the one it undoes. The format has no such DECISION yet. So the page cannot take a LOCK back, and it does not remove one to make it seem so.
 - The page offers a click only for what the FILE can hold. It never writes a FACT.
-- The view writes only where the command is started with `--allow-decisions`. Without it the page shows no click, and the view refuses every request to write.
+- The page opens as a viewer. A switch at the top of the page says "Viewing" or "Editing", and it says "Viewing" each time the page opens. Only the person moves it. The page offers a click only while it says "Editing". So a page that somebody opened to look changes nothing, and nobody has to start the view again to decide something.
 - A write goes through the view. The page sends the DECISION with the number of the state of the FILE that it shows. The view writes only if the FILE is still in that state. It makes the new FILE, checks it with the reader that the COMPILER uses, writes it beside the FILE, and moves it into place in one step. Then it sees the change as it sees every change, and the COMPILER checks the new FILE. Where the FILE has changed in the meantime, the view writes nothing and says so, and the page shows the FILE as it is now.
 - The view writes the whole FILE again as JSON, with its records in the order they had. A FILE that was written another way looks different afterwards, and says the same.
 - The view takes a request to write only from its own page. Such a request says which site it comes from, and the view refuses it where that is not the view's own site, or where it does not say.
@@ -41,4 +41,5 @@ The view writes a DECISION that a person makes on the page, and writes nothing e
 - A click cannot be taken back on the page until the format has a DECISION that undoes another. Until then the agent takes a LOCK out of the FILE, or a person does by hand.
 - The FILE does not say who made a DECISION, or when. The vocabulary calls a DECISION a dated choice by a PERSON, and the format has no place for either yet. A LOCK that the page writes looks like one that an agent wrote.
 - The command needs the right to write in the folder of the FILE.
+- Whoever can open the page can write a DECISION. The view has no sign-in. Where it answers under a name of its owner's, the gateway before it decides who that is.
 - Each further kind of DECISION that the page can write is a small step of its own: the time at which the TRIP starts or ends, a cap, and a DISMISSAL once the format has one.
