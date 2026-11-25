@@ -2953,7 +2953,7 @@ def _as_planned(
     that starts the same way. Eight bags that can each start in four places have 65,536
     picks, and 32 ways to try where no bag can pay. The places of an OBJECT with one way
     only are counted from the start: no pick does without them. So is each place that
-    every way of an OBJECT takes, by itself, until a way is picked for that OBJECT.
+    every way of an OBJECT takes, until a way is picked for that OBJECT.
     """
     found = list(_each_way(file, world, steps))
     first = [(thing, visits, runs[0]) for thing, visits, runs in found]
@@ -2995,15 +2995,18 @@ def _in_every_way(runs: Sequence[_Run]) -> _Run:
     """The least that one OBJECT takes, whichever of these ways it goes.
 
     It is no way of its own: it holds each place of an OFFER that every one of the ways
-    takes, each by itself. Whatever the OBJECT's way turns out to be, it takes those
-    places, so places that cannot be had or paid for with these cannot be with any of the
-    ways.
+    takes, and it takes two of them together only where every way does. Whatever the
+    OBJECT's way turns out to be, it takes those places, and those of them together. So
+    places that cannot be had or paid for with these cannot be with any of the ways.
     """
-    misses, trail, seen, bought, _ = runs[0]
+    misses, trail, seen, bought, together = runs[0]
     taken = [{position for position, _, _ in run[3]} for run in runs[1:]]
     shared = tuple(place for place in bought if all(place[0] in each for each in taken))
-    alone = frozenset(frozenset({position}) for position, _, _ in shared)
-    return misses, trail, seen, shared, alone or frozenset({frozenset[int]()})
+    kept = {position for position, _, _ in shared}
+    least = {some & kept for some in together}
+    for run in runs[1:]:
+        least = {one & other for one in least for other in run[4]}
+    return misses, trail, seen, shared, _largest(least)
 
 
 def _taking(

@@ -1751,6 +1751,9 @@ def a_show_to_get_to(names: Sequence[str]) -> File:
     stated.append(carries("courier", "bag"))
     stated += [requires("courier", "driving", "each"), can("cy", "driving")]
     stated.append(every_requirement("driving"))
+    # The show keeps the bike. That is after every place is taken, and it is enough for
+    # the model not to know which places the bike takes together.
+    stated.append(keeps("show", "bike"))
     stated += [
         each(thing) for thing in ("bag", "bike") for each in (every_transfer, every_right_for)
     ]
@@ -2583,7 +2586,22 @@ def test_a_place_that_every_way_of_an_object_takes_is_counted_before_any_pick(
 
     The bike has two ways, and the FILE lists it after the bags. Its place on the train is
     in both, so it is counted from the start, and no bag is tried on a train with every
-    pick for the bags after it."""
+    pick for the bags after it. Where the meeting charges 10 dollars for the bike too and
+    the money may spend 20, both places are in both ways, and both are counted."""
+    for storage in (False, True):
+        file, plan = a_meeting_between_two_trains(storage)
+        best = best_case(file)
+        with monkeypatch.context() as patched:
+            counting_the_checks_of_rights(patched, 200)
+            assert broken_as_listed(file, best, plan) == []
+        places = {"train": {"bike": True}, **({"meeting": {"bike": True}} if storage else {})}
+        assert taking_a_place(file, best, plan) == places
+
+
+def a_meeting_between_two_trains(storage: bool) -> tuple[File, tuple[Step, ...]]:
+    """The train, the meeting and the connection of the test before this, with their plan.
+    With ``storage``, the meeting needs a right for the bike, for 10 dollars, and the money
+    may spend 20."""
     bags = [f"bag-{number}" for number in range(8)]
     things = [*bags, "bike"]
     stated = [*at("train", 9), *at("meeting", 10), *at("connection", 11)]
@@ -2597,8 +2615,14 @@ def test_a_place_that_every_way_of_an_object_takes_is_counted_before_any_pick(
         stated.append(offer(ride, 1, f"{ride}-rack", "10.00 USD", objects=["bike"]))
         stated += [no_other_right_for(ride, bag, f"{ride}-van") for bag in bags]
         stated.append(no_other_right_for(ride, "bike", f"{ride}-rack"))
+    if storage:
+        stated += [
+            needs_right_for("meeting", "bike"),
+            no_other_right_for("meeting", "bike", "hooks"),
+        ]
+        stated.append(offer("meeting", 1, "hooks", "10.00 USD", objects=["bike"]))
     decisions = [lock("train", "alex", "jo"), lock("meeting", "alex", "jo")]
-    decisions += [lock("connection", "alex"), cap("money", "10.00 USD")]
+    decisions += [lock("connection", "alex"), cap("money", "20.00 USD" if storage else "10.00 USD")]
     file = trip(
         ["alex", "jo"],
         ["a", "b", "c"],
@@ -2615,7 +2639,4 @@ def test_a_place_that_every_way_of_an_object_takes_is_counted_before_any_pick(
         Step("meeting", "b", "b", both, seconds(10), seconds(10, 30)),
         Step("connection", "b", "c", ("alex",), seconds(11), seconds(11, 30)),
     )
-    best = best_case(file)
-    counting_the_checks_of_rights(monkeypatch, 200)
-    assert broken_as_listed(file, best, plan) == []
-    assert taking_a_place(file, best, plan) == {"train": {"bike": True}}
+    return file, plan
