@@ -1068,18 +1068,18 @@ def _change_in_words(found: Deadline) -> str:
     before = "before it" if found.first else "in the term before it"
     unknown = f"The STAKE{words.stake} is unknown."
     refuses = f"{words.none_accepted[0].upper()}{words.none_accepted[1:]}"
-    if not found.accepted_after:
+    if found.refused_after:
         # A chance ends only where the FILE says that there was one: a term with a cost.
         if found.before is None:
             return f"{refuses} in it. {words.whether_accepted} {before}. The STAKE is unknown."
         earlier = f"{words.costs} {_loss(found.before)} in the term before it"
         return f"{refuses} in it. {earlier}. At STAKE: {words.chance}."
-    if not found.accepted_before:
+    if found.refused_before:
         # There was nothing to do before the DEADLINE, so waiting loses nothing.
         states = (
             words.unsaid if found.after is None else f"{words.costs} {_loss(found.after)} in it"
         )
-        return f"{states}. {refuses} in the term before it. Nothing is at STAKE."
+        return f"{states}. {refuses} in the term before it, so nothing is at STAKE."
     if found.after is None:
         if found.before is None:
             return f"{words.unsaid}, or {before}. {unknown}"
@@ -1112,6 +1112,13 @@ def _terms_as_json(file: File) -> dict[str, object]:
     that is empty says nothing. None says that the FILE states no cost, and for a STAKE that
     it is unknown or not one sum. Where the FILE states no time now, the costs that hold at
     any time stand in for the costs now.
+
+    A term can say that the seller accepts none. Its side of a DEADLINE has no amounts, and
+    the DEADLINE has ``accepted_before`` or ``accepted_from_then`` beside it, stated as
+    false. Its ``change`` is "ends" after a stated cost and "starts" before one, and its
+    STAKE is None where a chance ends: the FILE gives that no amount. A row of what holds
+    now, or at any time, has ``accepted`` in the same way, with no costs. Without the
+    member, a side or a row with no costs says only that the FILE states none.
     """
     now = file.now()
     bookings = {fact.id: fact for fact in file.facts if isinstance(fact, Booking)}
@@ -1137,8 +1144,8 @@ def _terms_as_json(file: File) -> dict[str, object]:
             "stake": amounts(each.stake),
             "first_term": each.first,
             # Only where a term says that the seller accepts none: its side has no amounts.
-            **({} if each.accepted_before else {"accepted_before": False}),
-            **({} if each.accepted_after else {"accepted_from_then": False}),
+            **({"accepted_before": False} if each.refused_before else {}),
+            **({"accepted_from_then": False} if each.refused_after else {}),
         }
         if isinstance(each, Deadline)
         else _expiry_as_json(file, each, offers[each.offer])

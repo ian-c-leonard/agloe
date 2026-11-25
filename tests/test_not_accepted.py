@@ -53,12 +53,11 @@ def room_of(document: Document) -> Booking:
 
 def test_a_term_can_say_that_the_seller_accepts_none() -> None:
     room = room_of(a_night(term(FREE), none(WEDNESDAY)))
-    assert room.cancelling == (Term(None, ()), Term(instant(WEDNESDAY), None, accepted=False))
-    assert room_of(a_room(none())).changing == (Term(None, None, accepted=False),)
-    # Any other term is one that the seller accepts, or that says nothing of it.
-    assert all(
-        each.accepted for each in room_of(a_night(term(ALL), term(None, TUESDAY))).cancelling
-    )
+    assert room.cancelling == (Term(None, ()), Term(instant(WEDNESDAY), None, refused=True))
+    assert room_of(a_room(none())).changing == (Term(None, None, refused=True),)
+    # No other term states it: one with a cost, or one that says nothing.
+    plain = room_of(a_night(term(ALL), term(None, TUESDAY))).cancelling
+    assert not any(each.refused for each in plain)
 
 
 def test_a_term_states_a_cost_or_that_the_seller_accepts_none_and_not_both() -> None:
@@ -84,7 +83,7 @@ def test_such_a_term_follows_the_rules_of_a_list_of_terms() -> None:
 
 def test_a_chance_ends_where_a_term_with_a_cost_comes_before() -> None:
     (found,) = deadlines(load(a_night(term(FREE), none(WEDNESDAY))))
-    assert found == Deadline(instant(WEDNESDAY), "room", (), None, accepted_after=False)
+    assert found == Deadline(instant(WEDNESDAY), "room", (), None, refused_after=True)
     assert (found.change, found.stake) == ("ends", None)
     (fee,) = deadlines(load(a_room(term(FEE), none(TUESDAY))))
     assert fee == Deadline(
@@ -93,7 +92,7 @@ def test_a_chance_ends_where_a_term_with_a_cost_comes_before() -> None:
         money(("25.00", "USD")),
         None,
         kind="changing",
-        accepted_after=False,
+        refused_after=True,
     )
     assert (fee.change, fee.stake) == ("ends", None)
 
@@ -101,10 +100,10 @@ def test_a_chance_ends_where_a_term_with_a_cost_comes_before() -> None:
 def test_nobody_knows_what_ends_where_nothing_is_stated_before() -> None:
     """A first term with a time, or a term after one with no stated cost."""
     (first,) = deadlines(load(a_night(none(TUESDAY))))
-    assert (first.first, first.accepted_before, first.accepted_after) == (True, True, False)
+    assert (first.first, first.refused_before, first.refused_after) == (True, False, True)
     assert (first.change, first.stake) == ("not stated before", None)
     _, later = deadlines(load(a_night(term(None, TUESDAY), none(WEDNESDAY))))
-    assert (later.first, later.before, later.accepted_after) == (False, None, False)
+    assert (later.first, later.before, later.refused_after) == (False, None, True)
     assert (later.change, later.stake) == ("not stated before", None)
 
 
@@ -112,11 +111,11 @@ def test_nothing_is_at_stake_after_a_term_in_which_the_seller_accepts_none() -> 
     """There was nothing to do before the DEADLINE, so waiting loses nothing."""
     (cost,) = deadlines(load(a_night(none(), term(ALL, WEDNESDAY))))
     assert cost == Deadline(
-        instant(WEDNESDAY), "room", None, money(("189.00", "USD")), accepted_before=False
+        instant(WEDNESDAY), "room", None, money(("189.00", "USD")), refused_before=True
     )
     assert (cost.change, cost.stake) == ("starts", ())
     (unsaid,) = deadlines(load(a_night(none(), term(None, WEDNESDAY))))
-    assert (unsaid.accepted_before, unsaid.after) == (False, None)
+    assert (unsaid.refused_before, unsaid.after) == (True, None)
     assert (unsaid.change, unsaid.stake) == ("not stated from then", ())
 
 
@@ -152,6 +151,38 @@ def test_what_holds_now_and_at_any_time() -> None:
     assert not_accepted_at_any_time(load(a_night()), "cancelling") == ()
     assert costs_at_any_time(load(a_night(none())), "cancelling") == ()
     assert costs_at_any_time(load(a_night(term(ALL), none(WEDNESDAY))), "cancelling") == ()
+
+
+def test_the_seller_can_take_it_again_from_a_later_term() -> None:
+    """No cancellation until Tuesday, and from then on for 189 dollars."""
+
+    def at(now: str) -> Document:
+        return a_night(none(), term(ALL, TUESDAY), now=now)
+
+    cost = money(("189.00", "USD"))
+    assert not_accepted_now(load(at(MONDAY)), "cancelling") == ("room",)
+    for later in (TUESDAY, WEDNESDAY):
+        assert not_accepted_now(load(at(later)), "cancelling") == ()
+        assert costs_now(load(at(later)), "cancelling") == (("room", cost),)
+        assert "  room, the BOOKING for night: 189.00 USD\n" in words(at(later))
+        assert "accepts no" not in words(at(later))
+        assert as_json(at(later))["cancelling_now"] == [
+            {
+                "booking": "room",
+                "option": "night",
+                "costs": [{"amount": "189.00", "currency": "USD"}],
+            }
+        ]
+
+
+def test_a_term_that_says_it_again_changes_nothing_for_any_time() -> None:
+    """The seller accepts no cancellation, and says so again from Wednesday."""
+    document = a_night(none(), none(WEDNESDAY))
+    assert not_accepted_at_any_time(load(document), "cancelling") == ("room",)
+    assert "  room, the BOOKING for night: the seller accepts no cancellation\n" in words(document)
+    assert as_json(document)["cancelling_at_any_time"] == [
+        {"booking": "room", "option": "night", "costs": None, "accepted": False}
+    ]
 
 
 def test_such_a_term_changes_no_answer_and_no_plan() -> None:
@@ -198,16 +229,16 @@ def test_such_a_term_changes_no_answer_and_no_plan() -> None:
         (
             (none(), term(FEE, TUESDAY)),
             "Cancelling costs 25.00 USD in it. The seller accepts no cancellation in the term"
-            " before it. Nothing is at STAKE.",
+            " before it, so nothing is at STAKE.",
             "The fee for a change is 25.00 USD in it. The seller accepts no change in the term"
-            " before it. Nothing is at STAKE.",
+            " before it, so nothing is at STAKE.",
         ),
         (
             (none(), term(None, TUESDAY)),
             "The FILE does not say what cancelling costs in it. The seller accepts no"
-            " cancellation in the term before it. Nothing is at STAKE.",
+            " cancellation in the term before it, so nothing is at STAKE.",
             "The FILE does not state the fee for a change in it. The seller accepts no change in"
-            " the term before it. Nothing is at STAKE.",
+            " the term before it, so nothing is at STAKE.",
         ),
     ],
 )

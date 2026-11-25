@@ -313,13 +313,14 @@ class Term:
     together, with no amount of nothing among them. So an empty tuple says that it costs
     nothing. None: nobody has said what it costs while the term holds.
 
-    ``accepted`` is False where the term says that the seller accepts no cancellation, or
-    no change, while it holds. Such a term states no cost.
+    ``refused`` says that the term states that the seller accepts no cancellation, or no
+    change, while it holds. Such a term states no cost. Any other term leaves open whether
+    the seller accepts one, unless it states a cost.
     """
 
     since: int | None
     costs: tuple[Money, ...] | None
-    accepted: bool = True
+    refused: bool = False
 
 
 @dataclass(frozen=True)
@@ -1429,7 +1430,7 @@ def load(document: object) -> File:
                     Money(Decimal(each["amount"]), each["currency"]) for each in term["costs"]
                 ]
                 lost = tuple(each for each in amounts if each.amount)
-            terms.append(Term(since, lost, "accepted" not in term))
+            terms.append(Term(since, lost, "accepted" in term))
         return tuple(terms)
 
     persons = tuple(Person(p["id"], p["name"]) for p in raw["persons"])

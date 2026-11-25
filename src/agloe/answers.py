@@ -309,9 +309,9 @@ class Deadline:
     ``kind`` is "cancelling" or "changing". For a term for changing, the two costs are what
     the seller charges for a change: the fee alone.
 
-    ``accepted_after`` is False where the term that starts says that the seller accepts no
-    cancellation, or no change, and ``accepted_before`` where the term before it says so.
-    Such a term states no cost. The two terms never both say so.
+    ``refused_after`` says that the term that starts states that the seller accepts no
+    cancellation, or no change, and ``refused_before`` that the term before it states so.
+    Such a term states no cost. The two terms never both state it.
     """
 
     at: int
@@ -320,8 +320,8 @@ class Deadline:
     after: tuple[Money, ...] | None
     first: bool = False
     kind: str = "cancelling"
-    accepted_before: bool = True
-    accepted_after: bool = True
+    refused_before: bool = False
+    refused_after: bool = False
 
     @property
     def change(self) -> str:
@@ -334,9 +334,9 @@ class Deadline:
         term that states a cost, and nothing is stated before otherwise. Where the seller
         accepted none in the term before, the chance "starts" with a stated cost.
         """
-        if not self.accepted_after:
+        if self.refused_after:
             return "ends" if self.before is not None else "not stated before"
-        if not self.accepted_before:
+        if self.refused_before:
             return "starts" if self.after is not None else "not stated from then"
         if self.before is None or self.after is None:
             sides = [(self.before, "before"), (self.after, "from then")]
@@ -360,9 +360,9 @@ class Deadline:
         accepted none in the term before, nothing is at STAKE: there was nothing to do
         before the DEADLINE.
         """
-        if not self.accepted_after:
+        if self.refused_after:
             return None
-        if not self.accepted_before or self.after == ():
+        if self.refused_before or self.after == ():
             return ()
         if self.before is None or self.after is None:
             return None
@@ -420,7 +420,7 @@ def deadlines(file: File) -> tuple[Deadline, ...]:
                 before = None if held is None else held.costs
                 changes = not _say_the_same(held, term)
                 if term.since is not None and changes and (now is None or term.since > now.at):
-                    was_accepted = held is None or held.accepted
+                    was_refused = held is not None and held.refused
                     found.append(
                         Deadline(
                             term.since,
@@ -429,8 +429,8 @@ def deadlines(file: File) -> tuple[Deadline, ...]:
                             term.costs,
                             held is None,
                             kind,
-                            was_accepted,
-                            term.accepted,
+                            was_refused,
+                            term.refused,
                         )
                     )
                 held = term
@@ -495,8 +495,8 @@ def _say_the_same(one: Term | None, other: Term) -> bool:
     """
     if one is None:
         return False
-    if not one.accepted or not other.accepted:
-        return one.accepted == other.accepted
+    if one.refused or other.refused:
+        return one.refused == other.refused
     return _the_same(one.costs, other.costs)
 
 
@@ -538,9 +538,7 @@ def not_accepted_now(file: File, kind: str) -> tuple[str, ...]:
     The term that holds at that time says so. They are among those of ``costs_now``, with
     no cost. ``kind`` is "cancelling" or "changing".
     """
-    return tuple(
-        id for id, held in _holding_now(file, kind) if held is not None and not held.accepted
-    )
+    return tuple(id for id, held in _holding_now(file, kind) if held is not None and held.refused)
 
 
 def costs_at_any_time(file: File, kind: str) -> tuple[tuple[str, tuple[Money, ...]], ...]:
@@ -574,7 +572,7 @@ def not_accepted_at_any_time(file: File, kind: str) -> tuple[str, ...]:
         if isinstance(fact, Booking)
         and fact.terms(kind)
         and fact.terms(kind)[0].since is None
-        and not any(term.accepted for term in fact.terms(kind))
+        and all(term.refused for term in fact.terms(kind))
     )
 
 
