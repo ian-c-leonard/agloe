@@ -498,29 +498,43 @@ def test_the_file_that_grows_is_one_file_with_records_added() -> None:
     """The home page shows one FILE at three moments, with the COMPILER's answer to each.
 
     The first two are FILEs of the examples. The second holds every record of the first, and
-    each still says what it said. The third is the second with the one record that the page
-    shows, and the first line of the COMPILER's report on it is the line the page gives.
+    each still says what it said. In the third a PERSON has bought a place of an OFFER: the
+    FILE has their BOOKING, and the OFFER has one place fewer, as the rules page asks of
+    whoever writes a FILE. The first line of the COMPILER's report on it is the line the
+    page gives.
     """
     figure = re.search(
         r'<figure class="grows" id="file-grows">(.*?)</figure>', SITE_TEXT["index.html"], re.S
     )
     assert figure is not None
-    steps = re.findall(r'<li data-(file|adds-to)="([^"]+)">(.*?)</li>', figure.group(1), re.S)
-    assert [kind for kind, _, _ in steps] == ["file", "file", "adds-to"]
-    (_, first, _), (_, second, _), (_, grown_from, last) = steps
-    assert grown_from == second
-    before = json.loads((ROOT / "examples" / f"{first}.json").read_text())
-    after = json.loads((ROOT / "examples" / f"{second}.json").read_text())
+    steps = re.findall(r"<li ([^>]+)>(.*?)</li>", figure.group(1), re.S)
+    named = [dict(re.findall(r'data-([a-z-]+)="([^"]+)"', given)) for given, _ in steps]
+    assert [sorted(each) for each in named] == [["file"], ["file"], ["buyer", "buys-from", "offer"]]
+    first, second, last = named
+    assert last["buys-from"] == second["file"]
+    before = json.loads((ROOT / "examples" / f"{first['file']}.json").read_text())
+    after = json.loads((ROOT / "examples" / f"{second['file']}.json").read_text())
     for kind, records in before.items():
         later = {record["id"]: record for record in after[kind]}
         for record in records:
             assert says_at_least(later[record["id"]], record), record["id"]
-    shown = re.search(r'<p class="record added">(.*?)</p>', last, re.S)
-    said = re.search(r'<p class="answer-line">(.*?)</p>', last, re.S)
-    assert shown is not None and said is not None
-    added = json.loads(html.unescape(shown.group(1)))
-    assert added["id"] not in {record["id"] for records in after.values() for record in records}
-    after["facts"].append(added)
+    offer = next(fact["offer"] for fact in after["facts"] if fact["id"] == last["offer"])
+    budget = next(each["id"] for each in after["budgets"] if last["buyer"] in each["persons"])
+    price = offer["prices"][0]
+    after["facts"].append(
+        {
+            "id": f"a-right-for-{last['buyer']}",
+            "booking": {
+                "option": offer["option"],
+                "covers": [last["buyer"]],
+                "paid": {**price, "budget": budget, "by": last["buyer"]},
+            },
+        }
+    )
+    offer["places"] -= 1
+    assert offer["places"] == 1 and "lowers the OFFER to one place" in steps[2][1]
+    said = re.search(r'<p class="answer-line">(.*?)</p>', steps[2][1], re.S)
+    assert said is not None
     file = load(after)
     report = reports_in.as_text(file, answers.check(file))
     assert report.splitlines()[0] == html.unescape(said.group(1))

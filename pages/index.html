@@ -547,17 +547,18 @@ The plan relies on these FACTs and DECISIONs:
     <div class="wrap">
       <div class="stack">
         <h2 id="why-title">Why Agloe</h2>
-        <p class="lead"><span data-from="docs/VISION.md">AI agents are starting to plan trips.</span> <span data-from="README.md">They need three things: a lasting place to keep the plan, codified rules that check their work, and a way to say what people want rather than only what is possible.</span> <span data-from="docs/VISION.md">People planning without AI benefit in the same way.</span></p>
+        <p class="lead"><span data-from="docs/VISION.md">AI agents are starting to plan trips.</span> <span data-from="docs/VISION.md">People planning without AI benefit in the same way.</span></p>
       </div>
       <ol class="whys">
         <li class="why" id="why-file">
           <div class="stack">
-            <h3>The FILE keeps the plan</h3>
+            <h3>A file for agents to record a trip as it develops</h3>
             <p data-from="docs/VISION.md">Agents can read and write far more detail than people, but they forget. Conversations get compressed, sessions end, and people switch agents. The plan must live somewhere lasting that any agent or person can pick up.</p>
-            <p class="small">A FILE is JSON, and a <a href="https://github.com/ian-c-leonard/agloe/blob/main/src/agloe/schema/file.schema.json">published schema</a> says what a valid one holds. A person can read it, and so can any agent or program. Each time an agent learns something, it adds a record.</p>
+            <p class="small">A FILE is JSON, and a <a href="https://github.com/ian-c-leonard/agloe/blob/main/src/agloe/schema/file.schema.json">published schema</a> defines a valid one. A person can read it, and so can any agent or program. An agent updates the FILE as it learns more.</p>
           </div>
           <figure class="grows" id="file-grows">
-            <figcaption>One FILE at three moments, with the COMPILER's answer to each</figcaption>
+            <figcaption>One FILE at three moments, and what the COMPILER answers</figcaption>
+            <p class="story" data-from="spec/rules.md">The Skydeck sells tickets for a set time, and Alex bought one for 10:00 am before Sam decided to come. Both are LOCKed into the visit.</p>
             <ol>
               <li data-file="a-ticket/depends-on-a-ticket">
                 <p class="told" data-from="spec/rules.md">Only Alex has a BOOKING.</p>
@@ -566,13 +567,11 @@ The plan relies on these FACTs and DECISIONs:
               </li>
               <li data-file="a-ticket/not-bought-yet">
                 <p class="told">An agent adds the seller's OFFER, the trip money and what Alex paid.</p>
-                <p class="record" data-lines-from="examples/a-ticket/not-bought-yet.json">{ "id": "skydeck-tickets", "offer": { "option": "skydeck", "places": 2, "prices": [{ "amount": "32.00", "currency": "USD" }] } },</p>
                 <p class="answer-line" data-lines-from="examples/a-ticket/not-bought-yet.expected.txt">FEASIBLE, with a WARNING: this trip works, but not everything is booked yet.</p>
                 <p class="plan-line" data-lines-from="examples/a-ticket/not-bought-yet.expected.txt">! Sam still has to buy a right to this, from skydeck-tickets, for 32.00 USD from the trip money.</p>
               </li>
-              <li data-adds-to="a-ticket/not-bought-yet">
-                <p class="told">Sam buys a place, and the agent adds the BOOKING.</p>
-                <p class="record added">{ "id": "sam-skydeck-ticket", "booking": { "option": "skydeck", "covers": ["sam"], "paid": { "amount": "32.00", "currency": "USD", "budget": "trip-money", "by": "sam" } } }</p>
+              <li data-buys-from="a-ticket/not-bought-yet" data-buyer="sam" data-offer="skydeck-tickets">
+                <p class="told">Sam buys a place. The agent records his BOOKING and lowers the OFFER to one place.</p>
                 <p class="answer-line">FEASIBLE: this trip works.</p>
               </li>
             </ol>
@@ -581,9 +580,9 @@ The plan relies on these FACTs and DECISIONs:
         </li>
         <li class="why" id="why-wants">
           <div class="stack">
-            <h3>The FILE says what people want</h3>
-            <p>A FILE keeps what a PERSON wants apart from the OPTIONs that could deliver it. Alex must have deep-dish pizza, and that WANT names no restaurant. Each dinner is an OPTION, and a FACT says whether it SATISFIES the WANT.</p>
-            <p>An agent can swap one dinner for another, and the WANT stays. If no dinner in the FILE fits, the COMPILER says what to look for:</p>
+            <h3>What the format can express</h3>
+            <p>An agent records what a PERSON wants apart from the OPTIONs that could deliver it. Alex must have deep-dish pizza, and the WANT has no restaurant in it. Each dinner is an OPTION, and a FACT says whether it SATISFIES the WANT.</p>
+            <p>The agent can swap one dinner for another and leave the WANT alone. In another FILE of the story, no dinner on the list works. <span data-from="spec/rules.md">The deep-dish place has no table until 7:45 pm, and a FACT says that dinner at the tavern does not SATISFY the WANT.</span> The COMPILER says what to look for:</p>
             <p class="plan-line quoted" data-lines-from="examples/a-must/depends-on-another-place.expected.txt">The trip works if another OPTION that SATISFIES deep-dish pizza is found for Alex.</p>
           </div>
           <figure class="wanted" id="want-and-options" data-file="a-must/works">
@@ -596,62 +595,61 @@ The plan relies on these FACTs and DECISIONs:
             </ul>
           </figure>
           <div class="also">
-            <h4>A FILE can also say</h4>
+            <h4>What else an agent can record</h4>
             <dl>
               <div>
                 <dt data-from="spec/rules.md">A cab is listed, but nobody has recorded how long it takes.</dt>
                 <dd data-from="spec/rules.md">A FACT that the FILE does not state is unknown, unless a COMPLETE set settles it. The COMPILER never fills one in.</dd>
               </div>
               <div>
-                <dt>The Blue Line is the only way to O'Hare.</dt>
-                <dd>A FACT can state that a list is COMPLETE. Without that FACT, another way might exist, so the COMPILER cannot answer INFEASIBLE.</dd>
+                <dt>The Blue Line is the only way to O'Hare this afternoon.</dt>
+                <dd>A FACT can state that a list is COMPLETE. Without that FACT, a faster way might still exist.</dd>
               </div>
               <div>
                 <dt>The Blue Line can take up to 80 minutes.</dt>
-                <dd><span data-from="spec/foundation.md">A CONTROLLABLE duration is ours to choose; a CONTINGENT one the world chooses.</span> The report warns when a plan holds only if the ride stays short.</dd>
+                <dd>An agent can record a range for a ride that the travelers do not control. <span data-from="spec/rules.md">At 80 minutes they reach O'Hare five minutes after bag drop closes.</span> The report warns that no plan is sure to hold.</dd>
               </div>
               <div>
-                <dt>The seller has two places left at 32.00 USD.</dt>
+                <dt>The seller has two places left, at 32.00 USD each.</dt>
                 <dd><span data-from="spec/vocabulary.md">An OFFER grants nothing.</span> A BOOKING secures the right, and the report says who still has to buy.</dd>
               </div>
               <div>
-                <dt>Alex and Sam are going up the Skydeck.</dt>
-                <dd>A LOCK is a DECISION. <span data-from="spec/vocabulary.md">A LOCK stays until a later DECISION undoes it; no FACT undoes it.</span></dd>
+                <dt>Alex and Sam have decided to go up the Skydeck.</dt>
+                <dd>The agent records that DECISION as a LOCK. <span data-from="spec/vocabulary.md">Every ITINERARY must honor every active LOCK.</span></dd>
               </div>
               <div>
                 <dt>From 6:00 pm on Wednesday, cancelling the room costs 189 dollars.</dt>
-                <dd><span data-from="spec/vocabulary.md">A BOOKING records its dated terms, such as what cancelling or changing costs on each date.</span> The report lists each DEADLINE.</dd>
+                <dd><span data-from="spec/vocabulary.md">A BOOKING records its dated terms, such as what cancelling or changing costs on each date.</span> On Monday the report lists that DEADLINE, with 189 dollars at STAKE.</dd>
               </div>
             </dl>
-            <p class="small">The <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/vocabulary.md">vocabulary</a> defines each term, and the <a href="/examples/">examples</a> show each one in a FILE.</p>
           </div>
         </li>
         <li class="why" id="why-compiler">
           <div class="stack">
-            <h3>The COMPILER checks the whole plan</h3>
+            <h3>A compiler to check the whole plan</h3>
             <p data-from="docs/VISION.md">An agent can seat eight friends at dinner in its head. Seating 800 is different: it needs the guest list written down, the rules codified, and something that checks every seat against every rule. A real trip is the 800 case: many people, legs, bookings and times, all affecting each other.</p>
-            <p>Neuro-symbolic planning pairs a language model with symbolic tools, such as a solver (<a href="https://arxiv.org/abs/2402.01817">Kambhampati et al., 2024</a>). Agloe splits the work that way: the agent writes the FILE, and the COMPILER checks it with a solver.</p>
+            <p>In neuro-symbolic planning, a language model works with symbolic tools, such as a verifier or a solver (<a href="https://arxiv.org/abs/2402.01817">Kambhampati et al., 2024</a>). An agent can write an Agloe FILE, and the COMPILER uses a solver to check it.</p>
             <p class="small" data-from="docs/VISION.md">The same answer every time, with the reason for every problem it finds.</p>
           </div>
           <figure class="meters" id="with-a-solver">
-            <figcaption>Trip-planning tasks solved on the TravelPlanner benchmark</figcaption>
+            <figcaption>Share of 180 trip-planning tasks that GPT-4 solved</figcaption>
             <ul>
-              <li style="--share: 0.6" title="GPT-4 with no solver: 0.6% of the tasks solved"><span class="who">GPT-4 with no solver</span><span class="track"><i></i></span><span class="share">0.6%</span></li>
-              <li style="--share: 10" title="o1-preview with no solver, given all the information it needs: 10% of the tasks solved"><span class="who">o1-preview with no solver, given all the information it needs</span><span class="track"><i></i></span><span class="share">10%</span></li>
-              <li class="solver" style="--share: 93.9" title="A model that writes the constraints for a solver: 93.9% of the tasks solved"><span class="who">A model that writes the constraints for a solver</span><span class="track"><i></i></span><span class="share">93.9%</span></li>
+              <li style="--share: 0.6" title="Planning alone, after gathering the information itself: 0.6% of the tasks solved"><span class="who">Planning alone, after gathering the information itself</span><span class="track"><i></i></span><span class="share">0.6%</span></li>
+              <li style="--share: 4.4" title="Planning alone, with the information supplied: 4.4% of the tasks solved"><span class="who">Planning alone, with the information supplied</span><span class="track"><i></i></span><span class="share">4.4%</span></li>
+              <li class="solver" style="--share: 93.3" title="Writing the constraints for a solver, which finds the plan: 93.3% of the tasks solved"><span class="who">Writing the constraints for a solver, which finds the plan</span><span class="track"><i></i></span><span class="share">93.3%</span></li>
             </ul>
-            <p class="small">Each figure is the success rate that a paper reports: <a href="https://arxiv.org/abs/2402.01622">Xie et al., 2024</a> for GPT-4, and <a href="https://arxiv.org/abs/2404.11891">Hao et al., 2024</a> for the other two.</p>
+            <p class="small">Final pass rates on the validation set of the TravelPlanner benchmark, from Table 1 of <a href="https://arxiv.org/abs/2404.11891">Hao et al., 2024</a>. The first two are results of <a href="https://arxiv.org/abs/2402.01622">Xie et al., 2024</a>.</p>
           </figure>
         </li>
         <li class="why" id="why-optimizer">
           <div class="stack">
-            <h3>The OPTIMIZER finds the best plan</h3>
+            <h3>An optimizer to rank the plans that work</h3>
+            <p>The OPTIMIZER is planned for release 0.2 and is not built yet. It will rank the plans that work by how well they meet each traveler's priorities.</p>
             <p data-from="docs/VISION.md">A plan can work and still be wrong for the people on it. Travelers need to state their priorities, so the best version can be found and its trade-offs shown.</p>
-            <p><span data-from="spec/foundation.md">Every ranking shows each PERSON's own SCORE beside the total, so nobody's loss hides in a sum.</span> <span data-from="spec/foundation.md">The ranking flags any ITINERARY in which one PERSON's SCORE trails far behind the others, or in which the same PERSON loses every choice.</span></p>
-            <p class="small soon">The OPTIMIZER is release 0.2. It is not built yet.</p>
+            <p>Each ranking will show each PERSON's own SCORE beside the total. It will flag a plan in which one PERSON trails far behind the others, or loses every choice.</p>
           </div>
           <figure class="defined">
-            <figcaption>SCORE, in the vocabulary</figcaption>
+            <figcaption>SCORE, as the vocabulary defines it</figcaption>
             <p data-from="spec/vocabulary.md">A number for one FEASIBLE ITINERARY: for every PERSON and every WANT they hold, the DEGREE OF WANT times the DEGREE OF SATISFACTION the ITINERARY delivers, all added up.</p>
             <p class="small" data-from="spec/foundation.md">PERSONs rank their own WANTs instead of inventing numbers, and a fixed rule turns each ranking into DEGREEs OF WANT.</p>
           </figure>

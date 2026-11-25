@@ -688,6 +688,7 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
 .grows li::before { content: counter(moment); position: absolute; left: 0; top: 0; width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid var(--ink); font: 500 0.78rem/21px var(--mono); text-align: center; background: var(--surface); }
 .grows li:not(:last-child)::after { content: ""; position: absolute; left: 11.5px; top: 28px; bottom: -14px; border-left: 1.5px solid var(--line); }
 .grows .told { font-weight: 500; }
+.grows .story { font-size: 0.93rem; line-height: 1.5; color: var(--ink2); }
 .grows .record { font: 400 0.74rem/1.5 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
 /* A WANT, and under it each OPTION with what a FACT says of the two. */
 .wanted .want, .wanted li { display: grid; grid-template-columns: 4.6em minmax(0, 1fr); gap: 2px 12px; align-items: baseline; padding: 11px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
