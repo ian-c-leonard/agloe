@@ -1462,6 +1462,7 @@ def trains(
     rights: bool = False,
     options: Sequence[Document] = (),
     transfers: bool = True,
+    others: Sequence[str] = (),
 ) -> File:
     """Each of these trains needs a right for the bike, and a rack on each has a place for
     it, for 10 dollars. The FILE lists every right for the bike, and the money may spend
@@ -1471,9 +1472,10 @@ def trains(
     Nobody needs a right to take part, unless ``rights`` leaves that to ``facts``.
     ``options`` are OPTIONs besides the trains. Without ``transfers``, no FACT says that
     the FILE states every transfer of the bike, and a FACT says of each train that it does
-    nothing with the bike.
+    nothing with the bike. ``others`` travel with Alex and Jo, and start where they start.
     """
-    stated = [starts_from("alex", "a"), starts_from("jo", "a")]
+    people = ["alex", "jo", *others]
+    stated = [starts_from(person, "a") for person in people]
     stated += [every_use("bike"), every_right_for("bike")]
     stated += [every_transfer("bike")] if transfers else []
     for train, _, hour, _, _ in rides:
@@ -1486,13 +1488,13 @@ def trains(
         stated += [] if transfers else [does_with(train, "bike", "nothing")]
     decisions = [lock(train, rider) for train, rider, _, _, _ in rides]
     return trip(
-        ["alex", "jo"],
+        people,
         ["a", "b", "c", "d"],
         [*(moves(train, origin, to) for train, _, _, origin, to in rides), *options],
         [*stated, *facts],
         [*decisions, cap("money", f"{most} USD")],
         rights=rights,
-        budgets=[budget("money", "alex", "jo", objects=["bike"])],
+        budgets=[budget("money", *people, objects=["bike"])],
         objects=["bike"],
         object_rights=True,
     )
@@ -1585,11 +1587,16 @@ def test_the_solver_asks_again_where_the_rules_count_more_than_its_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Alex takes one train and then the other, nobody knows where the bike starts, and the
-    money may spend 15 dollars. The model counts the dearer of two places that the bike
-    only might take: 10 dollars. The rules count both. So the rules refuse the solver's
-    choice, the next model leaves that choice out, and so on until the solver has none."""
-    file = two_trains("15.00", one_rider=True)
+    money may spend 15 dollars. A locker in another town might keep the bike, so the model
+    does not follow which places the bike takes together. It counts the dearer of two
+    places that the bike only might take: 10 dollars. The rules count both. So the rules
+    refuse the solver's choice, the next model leaves that choice out, and so on until the
+    solver has none."""
+    locker = [starts_at("locker", 8, 45), lasts("locker", "PT5M"), cutoff("locker", "PT0S")]
+    rides = [ALEX_NORTH, ALEX_SOUTH]
+    file = trains("15.00", rides, *locker, options=[stays("locker", "c")], transfers=False)
     world = worst_case(file)
+    assert world.does[("locker", "bike")] == "might_keep" and "bike" not in world.starts
     refusals = refusals_of_the_rules(monkeypatch)
     assert compiler.shown(file, world) is None
     assert refusals and all(refusals)
@@ -1603,6 +1610,44 @@ def test_the_solver_asks_again_where_the_rules_count_more_than_its_model(
     assert compiler.shown(known, worst_case(known)) is None
     assert not compiler.works(known, worst_case(known))
     assert refusals == []
+
+
+def test_the_model_counts_what_the_rules_count_for_an_object_that_nothing_moves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Alex takes one train and then the other, and nobody knows where the bike starts.
+    Nothing moves the bike, so whoever has it has it on every train they take. The model
+    counts the most that one PERSON's trains cost: 20 dollars, as the rules do. With 15
+    the solver finds nothing, and the rules have nothing to refuse. Five more travelers
+    who are free to ride along change nothing: one model answers."""
+    limits = (("15.00", False), ("19.99", False), ("20.00", True))
+    for most, works in limits:
+        answer = checked(two_trains(most, one_rider=True)).answer
+        assert answer is (Answer.FEASIBLE if works else Answer.UNDETERMINED)
+    refusals = refusals_of_the_rules(monkeypatch)
+    for most, works in limits:
+        file = two_trains(most, one_rider=True)
+        world = worst_case(file)
+        assert (compiler.shown(file, world) is not None) is works
+        assert compiler.works(file, world) is works
+    assert not any(refusals)
+    # Alex and Jo on different trains: the dearest train of one PERSON is counted.
+    apart = two_trains("10.00")
+    assert compiler.works(apart, worst_case(apart))
+    assert not any(refusals)
+    built: list[object] = []
+    search = compiler._Search  # pyright: ignore[reportPrivateUsage]
+
+    class Counted(search):
+        def __init__(self, *given: Any, **named: Any) -> None:
+            built.append(None)
+            super().__init__(*given, **named)
+
+    monkeypatch.setattr(compiler, "_Search", Counted)
+    more = ["bo", "cy", "di", "ed", "flo"]
+    crowd = trains("15.00", [ALEX_NORTH, ALEX_SOUTH], others=more)
+    assert not compiler.works(crowd, worst_case(crowd))
+    assert len(built) == 1
 
 
 def test_a_plan_for_a_case_says_which_places_are_never_both_bought() -> None:
@@ -2485,25 +2530,27 @@ def test_a_choice_that_the_rules_refuse_can_work_with_an_option_that_nobody_is_i
 ) -> None:
     """Bea has to be at a show with the bag. A train goes there and hands the bag to its
     rider, for 10 dollars for the bag and 10 for the bike. The show charges 10 for the
-    bike, and the money may spend 20. Nobody knows where the bike is. A van can carry the
-    bag there with nobody in it, and it leaves before Bea can reach it.
+    bike, and the money may spend 20. Nobody knows where the bike is, and a locker that
+    nobody can get to might keep it. A van can carry the bag to the show with nobody in
+    it, and it leaves before Bea can reach it.
 
     With the bag on the train, Bea might pay 30 dollars. The model counts 20, and the
     rules refuse that choice. The same choice with the van running is another choice: the
     bag goes in the van, and the plan costs 20 at most."""
     options = [moves("first", "p", "d"), stays("show", "d"), moves("van", "p", "d")]
+    options.append(stays("locker", "x"))
     stated = [*at("first", 9), *at("show", 10), *at("van", 8), starts_from("bea", "q")]
-    stated += [lies_at("bag", "p"), requires_object("show", "bag"), every_use("bag")]
-    stated += [every_use("bike"), hands_over("first", "bag"), carries("van", "bag")]
-    stated += [
-        each(thing) for thing in ("bag", "bike") for each in (every_transfer, every_right_for)
-    ]
+    stated += [*at("locker", 8), lies_at("bag", "p"), requires_object("show", "bag")]
+    stated += [every_use("bag"), every_use("bike"), every_transfer("bag")]
+    stated += [hands_over("first", "bag"), carries("van", "bag")]
+    stated += [does_with(option, "bike", "nothing") for option in ("first", "show", "van")]
+    stated += [every_right_for("bag"), every_right_for("bike")]
     stated += [needs_right_for("first", "bike"), needs_right_for("first", "bag")]
     stated += [needs_right_for("show", "bike"), offer("show", 2, "show-places", objects=["bike"])]
     stated += [offer("first", 2, "first-places", objects=["bike", "bag"]), takes("walk", "PT30M")]
     file = trip(
         ["bea"],
-        ["q", "p", "d"],
+        ["q", "p", "d", "x"],
         options,
         stated,
         [trip_starts(8), lock("show", "bea"), cap("money", "20.00 USD")],
@@ -2523,3 +2570,52 @@ def test_a_choice_that_the_rules_refuse_can_work_with_an_option_that_nobody_is_i
     refusals = refusals_of_the_rules(monkeypatch)
     assert compiler.shown(file, worst_case(file)) == found.itinerary
     assert refusals == [True, False]
+
+
+def test_a_place_that_every_way_of_an_object_takes_is_counted_before_any_pick(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Alex and Jo take a train to a meeting, and both need the bike. Then Alex takes a
+    connection. One of the two has the bike, the best case picks who, and either way the
+    bike takes a place on the train for 10 dollars: all that the money may spend. With
+    Alex it would take a place on the connection too. Nobody knows where eight bags start,
+    and each would cost a dollar on the train or on the connection.
+
+    The bike has two ways, and the FILE lists it after the bags. Its place on the train is
+    in both, so it is counted from the start, and no bag is tried on a train with every
+    pick for the bags after it."""
+    bags = [f"bag-{number}" for number in range(8)]
+    things = [*bags, "bike"]
+    stated = [*at("train", 9), *at("meeting", 10), *at("connection", 11)]
+    stated += [starts_from("alex", "a"), starts_from("jo", "a")]
+    stated += [requires_object("train", "bike"), requires_object("meeting", "bike")]
+    stated += [each(thing) for thing in things for each in (every_use, every_transfer)]
+    stated += [every_right_for(thing) for thing in things]
+    for ride in ("train", "connection"):
+        stated += [needs_right_for(ride, thing) for thing in things]
+        stated.append(offer(ride, 8, f"{ride}-van", "1.00 USD", objects=bags))
+        stated.append(offer(ride, 1, f"{ride}-rack", "10.00 USD", objects=["bike"]))
+        stated += [no_other_right_for(ride, bag, f"{ride}-van") for bag in bags]
+        stated.append(no_other_right_for(ride, "bike", f"{ride}-rack"))
+    decisions = [lock("train", "alex", "jo"), lock("meeting", "alex", "jo")]
+    decisions += [lock("connection", "alex"), cap("money", "10.00 USD")]
+    file = trip(
+        ["alex", "jo"],
+        ["a", "b", "c"],
+        [moves("train", "a", "b"), stays("meeting", "b"), moves("connection", "b", "c")],
+        stated,
+        decisions,
+        budgets=[budget("money", "alex", "jo", objects=things)],
+        objects=things,
+        object_rights=True,
+    )
+    both = ("alex", "jo")
+    plan = (
+        Step("train", "a", "b", both, seconds(9), seconds(9, 30)),
+        Step("meeting", "b", "b", both, seconds(10), seconds(10, 30)),
+        Step("connection", "b", "c", ("alex",), seconds(11), seconds(11, 30)),
+    )
+    best = best_case(file)
+    counting_the_checks_of_rights(monkeypatch, 200)
+    assert broken_as_listed(file, best, plan) == []
+    assert taking_a_place(file, best, plan) == {"train": {"bike": True}}
