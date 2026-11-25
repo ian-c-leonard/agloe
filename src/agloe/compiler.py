@@ -610,6 +610,10 @@ class _Search:
         # The choice that the OBJECT is sure to take that place: it is there whatever turns
         # out to be so.
         self.sure: dict[tuple[str, int], cp_model.IntVar] = {}
+        # Each OBJECT that nothing moves and of which nobody knows where it starts, with
+        # the PERSONs who might have it, by position in the FILE. One of them has it all
+        # through a plan, or none of them does.
+        self.still: dict[str, list[int]] = {}
         for thing in file.objects:
             touched = [
                 index
@@ -880,6 +884,8 @@ class _Search:
             start = world.starts.get(thing, Where())
             might_have = [self.takes[number] for number in self._might_start_with(thing)]
             holder = might_have if start.person is not None else []
+            if thing not in world.starts:
+                self.still[thing] = self._might_start_with(thing)
             for index in matter:
                 required = (options[index].id, thing) in world.needs
                 if required and start.place != options[index].origin:
@@ -1516,11 +1522,18 @@ class _Search:
 
         An OBJECT that might be in one place or another is different. It takes a place in
         each OPTION where it might need one, and it pays only for the places it takes
-        together, as ``reference.taken_together`` says. The model does not follow which
-        those are. For such an OBJECT a cap counts each place it is sure to take, and of
-        the others the one that costs the most. That is never more than the rules count,
-        and it is the same where the OBJECT might take one place besides the sure ones.
-        Where it might take more, ``counts_less`` says that the rules can count more.
+        together, as ``reference.taken_together`` says.
+
+        Where nothing moves the OBJECT and nobody knows where it starts, one PERSON has it
+        all through the plan, or nobody does. With a PERSON it takes a place in each
+        OPTION that the PERSON takes part in. So a cap counts the most that those places
+        cost for one PERSON, and that is what the rules count.
+
+        For any other such OBJECT the model does not follow which places are taken
+        together. A cap counts each place it is sure to take, and of the others the one
+        that costs the most. That is never more than the rules count, and it is the same
+        where the OBJECT might take one place besides the sure ones. Where it might take
+        more, ``counts_less`` says that the rules can count more.
         """
         model, file, world = self.model, self.file, self.world
         position = {option.id: index for index, option in enumerate(file.options)}
@@ -1532,6 +1545,8 @@ class _Search:
         # For an OBJECT that might be in one place or another, and each cap: each price
         # that the cap would count, with the choice that pays it and the OPTION.
         unsure: dict[tuple[str, tuple[str, str]], list[tuple[int, cp_model.IntVar, int]]] = {}
+        # The same for an OBJECT that nothing moves, of which nobody knows who has it.
+        with_one: dict[tuple[str, tuple[str, str]], list[tuple[int, cp_model.IntVar, int]]] = {}
         for (thing, index), buys in self.places.items():
             option = file.options[index].id
             counted_in_full = thing in world.brought or self._is_in_one_place(thing)
@@ -1542,6 +1557,8 @@ class _Search:
                 filled.setdefault(offer, []).append(pick)
                 if key is not None and counted_in_full:
                     self.drawn[key].append((units, pick))
+                elif key is not None and thing in self.still:
+                    with_one.setdefault((thing, key), []).append((units, pick, index))
                 elif key is not None:
                     unsure.setdefault((thing, key), []).append((units, pick, index))
             model.add(sum(picks) >= buys)
@@ -1562,6 +1579,19 @@ class _Search:
                 self.drawn[key].append((units, paid))
             if len({index for _, _, index in prices}) > 1:
                 self.counts_less = True
+        # The most that an OBJECT that nothing moves pays from each cap: what its places
+        # cost in the OPTIONs of one PERSON who might have it, for the PERSON with the most.
+        for (thing, key), prices in with_one.items():
+            highest = sum(units for units, _, _ in prices)
+            most = model.new_int_var(0, highest, f"the most {thing} pays from {key}")
+            self.at_most.setdefault(key, []).append((most, highest))
+            for number in self.still[thing]:
+                theirs: list[cp_model.LinearExprT] = []
+                for units, pick, index in prices:
+                    both = model.new_bool_var(f"{pick.name}, with {file.persons[number].id}")
+                    model.add(both >= pick + self.takes[number][index] - 1)
+                    theirs.append(units * both)
+                model.add(most >= sum(theirs))
 
     def _hold_to_the_rights(self) -> None:
         """Nobody takes part without a right in an OPTION that needs one, and no cap is passed.

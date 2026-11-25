@@ -2952,7 +2952,8 @@ def _as_planned(
     as its places do not fit with those of the OBJECTs before it, and with it every pick
     that starts the same way. Eight bags that can each start in four places have 65,536
     picks, and 32 ways to try where no bag can pay. The places of an OBJECT with one way
-    only are counted from the start: no pick does without them.
+    only are counted from the start: no pick does without them. So is each place that
+    every way of an OBJECT takes, until a way is picked for that OBJECT.
     """
     found = list(_each_way(file, world, steps))
     first = [(thing, visits, runs[0]) for thing, visits, runs in found]
@@ -2961,11 +2962,13 @@ def _as_planned(
     taking_part = {step.option: step.persons for step in steps if step.option is not None}
     _, moved = _where_a_transfer_brings_it(file, world, tuple(steps))
     settled = [(thing, visits, runs[0]) for thing, visits, runs in found if len(runs) == 1]
-    taking, together = _taking(file, settled)
+    # The OBJECTs with several ways, each with the places that every one of its ways takes.
+    several = [each for each in found if len(each[2]) > 1]
+    at_least = [(thing, visits, _in_every_way(runs)) for thing, visits, runs in several]
+    taking, together = _taking(file, [*settled, *at_least])
     if _rights(file, world, taking_part, [*taking, *moved], together):
         return first  # these places cannot be had or paid for, whatever the other OBJECTs do
-    # The OBJECTs with several ways, the ways taken so far, and the ways still to try.
-    several = [each for each in found if len(each[2]) > 1]
+    # The ways taken so far, and the ways still to try.
     chosen: list[tuple[str, list[_Visit], _Run]] = []
     to_try = [iter(several[0][2])]
     while to_try:
@@ -2977,7 +2980,7 @@ def _as_planned(
             continue
         chosen.append((thing, visits, run))
         # A way that takes no place fits where the ways before it fit.
-        taking, together = _taking(file, [*settled, *chosen])
+        taking, together = _taking(file, [*settled, *chosen, *at_least[len(chosen) :]])
         if run[3] and _rights(file, world, taking_part, [*taking, *moved], together):
             continue
         if len(chosen) < len(several):
@@ -2986,6 +2989,24 @@ def _as_planned(
         picked = {thing: run for thing, _, run in chosen}
         return [(thing, visits, picked.get(thing, runs[0])) for thing, visits, runs in found]
     return first
+
+
+def _in_every_way(runs: Sequence[_Run]) -> _Run:
+    """The least that one OBJECT takes, whichever of these ways it goes.
+
+    It is no way of its own: it holds each place of an OFFER that every one of the ways
+    takes, and it takes two of them together only where every way does. Whatever the
+    OBJECT's way turns out to be, it takes those places, and those of them together. So
+    places that cannot be had or paid for with these cannot be with any of the ways.
+    """
+    misses, trail, seen, bought, together = runs[0]
+    taken = [{position for position, _, _ in run[3]} for run in runs[1:]]
+    shared = tuple(place for place in bought if all(place[0] in each for each in taken))
+    kept = {position for position, _, _ in shared}
+    least = {some & kept for some in together}
+    for run in runs[1:]:
+        least = {one & other for one in least for other in run[4]}
+    return misses, trail, seen, shared, _largest(least)
 
 
 def _taking(
