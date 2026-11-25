@@ -206,15 +206,13 @@ class NeedsRight(TypedDict):
     needs_right: bool
 
 
-class Booking(TypedDict):
-    option: Id
-    covers: list[Id]
-    paid: NotRequired[Payment]
-
-
-class BookingFact(TypedDict):
-    id: Id
-    booking: Booking
+TermForCancelling = TypedDict(
+    "TermForCancelling",
+    {
+        "from": NotRequired[Time],
+        "costs": NotRequired[list[Money]],
+    },
+)
 
 
 class Offer(TypedDict):
@@ -328,6 +326,11 @@ class CompleteRightsForAnObject(TypedDict):
     complete: RightsForAnObject
 
 
+class TimeNow(TypedDict):
+    id: Id
+    now: Time
+
+
 class NeedingARightForAnObject(TypedDict):
     needs_right_for: Id
 
@@ -388,6 +391,18 @@ class Lock(TypedDict):
     persons: list[Id]
 
 
+class Booking(TypedDict):
+    option: Id
+    covers: list[Id]
+    paid: NotRequired[Payment]
+    cancelling: NotRequired[list[TermForCancelling]]
+
+
+class BookingFact(TypedDict):
+    id: Id
+    booking: Booking
+
+
 class File(TypedDict):
     persons: list[Person]
     places: list[Place]
@@ -426,5 +441,6 @@ class File(TypedDict):
         | NeedsRightForObject
         | CompleteRightsNeededForAnObject
         | CompleteRightsForAnObject
+        | TimeNow
     ]
     decisions: list[Lock | TripStart | TripEnd | Cap]

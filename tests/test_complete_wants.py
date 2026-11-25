@@ -418,7 +418,7 @@ def test_a_wrong_key_in_a_complete_set_is_named_alone() -> None:
     document["facts"].append(odd)
     last = len(document["facts"]) - 1
     assert problems(document) == (
-        f"/facts/{last}: fits no known shape; the closest miss:"
+        f"/facts/{last}: fits no known shape; the closest miss: at /facts/{last}/complete,"
         " Additional properties are not allowed ('note' was unexpected)"
     )
 

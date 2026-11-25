@@ -285,7 +285,11 @@ SEATS = offer("ferry", 20, "seats")
 @pytest.mark.parametrize(
     ("facts", "problem"),
     [
-        ([NO_OBJECT], "/facts/13: fits no known shape; the closest miss: [] should be non-empty"),
+        (
+            [NO_OBJECT],
+            "/facts/13: fits no known shape; the closest miss: at /facts/13/offer/for_objects, []"
+            " should be non-empty",
+        ),
         ([TWICE], "['car', 'car'] has non-unique elements"),
         ([offer("ferry", 1, objects=["boat"])], "/facts/13: boat is not an OBJECT in this FILE"),
         ([offer("ferry", 1, objects=["alex"])], "/facts/13: alex is not an OBJECT in this FILE"),

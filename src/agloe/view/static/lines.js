@@ -13,7 +13,7 @@
 //
 // Nothing here judges a TRIP. It finds what the report already says, line by line.
 
-import { boughtIn, cappedIn, casesIn, listed, notAtHandIn, objectsIn, requirementsIn, takenIn, toBuyIn, togetherIn, togetherInPlans } from "./named.js";
+import { boughtIn, cancellingIn, cappedIn, casesIn, listed, notAtHandIn, objectsIn, requirementsIn, takenIn, toBuyIn, togetherIn, togetherInPlans } from "./named.js";
 
 /**
  * A line that shows one step of a plan: "  2:00 pm to 3:00 pm: Museum visit, Alex and Sam". A
@@ -69,6 +69,27 @@ const MEETS = "Who meets the requirements:";
 const CONFLICT = /^These .+ rule out every plan/;
 /** How a line starts that says what the lines marked "!" under the steps of a plan mean. */
 const EXPLAINS = "WARNING: ";
+/**
+ * How the line starts that opens the last part of a report: the time now, the DEADLINEs and
+ * what cancelling costs. That part is about no plan, no case and no conflict. A DEADLINE has
+ * a line that starts with a time, as a step does, and it can name an OPTION with " to " in
+ * its name.
+ */
+const TERMS = /^(?:This report uses .+ as the time now \(times in .+\)\.|This FILE does not state the time now\.)/;
+
+/** How the line above the DEADLINEs reads: one where the FILE states the time now, one where it does not. */
+const DEADLINES = /^(?:DEADLINEs after that time, earliest first:|This FILE does not state the time now\. So nobody knows which of its DEADLINEs have passed\. )/;
+/** What a line for one DEADLINE says after its time, up to the id of the BOOKING. */
+const STARTS = ": a term for cancelling ";
+/** The line above what cancelling each BOOKING costs at the time now, and at any time. */
+const COSTS_NOW = "What cancelling costs now:";
+const COSTS_AT_ANY_TIME = "What cancelling costs at any time:";
+
+/** Where the last part of a report starts among its lines, or how many lines there are. */
+const termsFrom = (texts) => {
+  const at = texts.findIndex((text) => TERMS.test(text));
+  return at < 0 ? texts.length : at;
+};
 
 /**
  * The lists of ids that a report as JSON names one after another in its words, each with what
@@ -100,7 +121,8 @@ function listsOf(report) {
  * what else the line is about, each as the page names a thing: `offer:ID` for an OFFER that
  * the line says somebody buys a place of, `budget:ID` for a BUDGET that the line states,
  * `cap:ID` for a cap that the line states under the plan of a case, `booking:ID` for a
- * BOOKING that the line says states no payment, and `object:ID` for an OBJECT that the line is
+ * BOOKING that the line says states no payment, or whose cost of cancelling or lack of terms
+ * the line states, and `object:ID` for an OBJECT that the line is
  * about. A line about an OBJECT at a step of the plan holds that step
  * too, by its number, as the page names a step.
  *
@@ -117,13 +139,16 @@ function listsOf(report) {
  */
 export function lines(text, report, trip) {
   const all = text.split("\n");
-  const plan = all.filter((line) => STEP.test(line)).length;
+  // A step is a line before the last part of the report: a DEADLINE there is none.
+  const ends = termsFrom(all);
+  const isStep = (line, n) => n < ends && STEP.test(line);
+  const plan = all.filter(isStep).length;
   const tied = trip !== null && trip.itinerary && plan === trip.steps.length;
   let step = -1;
   let under = false; // whether this line can still be a warning under the step above it
   const one = (text, at = null, warns = false) => ({ text, step: at, warns, record: null, case: null, under: null, meets: null, about: [] });
-  const found = all.map((line) => {
-    if (tied && STEP.test(line)) {
+  const found = all.map((line, n) => {
+    if (tied && isStep(line, n)) {
       step += 1;
       under = true;
       return one(line, step);
@@ -321,6 +346,32 @@ export function lines(text, report, trip) {
       under.forEach((at, n) => Object.assign(found[at], { step: steps[n], meets: n }));
     }
   }
+  // The last part of a report says what cancelling costs. Under the heading of the DEADLINEs,
+  // a line for each one names its BOOKING after its time, in the order of the report as
+  // JSON. Under each of two more headings, a line for each BOOKING starts with its id. One
+  // line names the BOOKINGs that state no terms. Each of these lines is about its BOOKING,
+  // only where the words under a heading are one line for each entry of the report as
+  // JSON, and each names the BOOKING of its entry. A line names its BOOKING before any
+  // name of an OPTION, so a name cannot stand in for it.
+  const cancelling = cancellingIn(report);
+  const last = found.slice(ends);
+  // The lines set in under the one line that is this heading: none where it is not there once.
+  const setInUnder = (isHeading) => {
+    const heads = last.flatMap((line, at) => (isHeading(line.text) ? [at] : []));
+    const rows = [];
+    for (let at = heads[0] + 1; heads.length === 1 && at < last.length && last[at].text.startsWith("  "); at += 1) rows.push(last[at]);
+    return rows;
+  };
+  const tie = (rows, ids, names) => {
+    if (rows.length === ids.length && rows.every((line, n) => names(line.text, ids[n]))) rows.forEach((line, n) => (line.about = [`booking:${ids[n]}`]));
+  };
+  const afterItsTime = (text, id) => text.includes(STARTS) && text.slice(text.indexOf(STARTS) + STARTS.length).startsWith(`${id}, the BOOKING for `);
+  const atItsStart = (text, id) => text.startsWith(`  ${id}, the BOOKING for `);
+  tie(setInUnder((text) => DEADLINES.test(text)), cancelling.deadlines, afterItsTime);
+  tie(setInUnder((text) => text === COSTS_NOW), cancelling.now, atItsStart);
+  tie(setInUnder((text) => text === COSTS_AT_ANY_TIME), cancelling.always, atItsStart);
+  const none = last.filter((line) => line.text === `No terms for cancelling are stated for ${listed(cancelling.none)}.`);
+  if (cancelling.none.length && none.length === 1) none[0].about = cancelling.none.map((id) => `booking:${id}`);
   return found;
 }
 
@@ -337,8 +388,9 @@ export function lines(text, report, trip) {
  * its lines marked "!" mean, and under which condition they come true.
  *
  * A report that shows no plan says nothing after its cases, or after the records that rule
- * out every plan, that is not about them. `also` holds all of that: each paragraph up to the
- * end of the report, as the list of its lines.
+ * out every plan, that is not about them, until its last part: the time now, the DEADLINEs
+ * and what cancelling costs. `also` holds all of that: each paragraph up to that part, or to
+ * the end of a report that has none, as the list of its lines.
  *
  * A line that is said again is `says`, its words without the space around them, `about`,
  * what the line is about as the page names things, and `inset`, whether the report sets it
@@ -374,7 +426,10 @@ export function statedIn(tied) {
   if (over >= 0) for (last = over; last + 1 < tied.length && tied[last + 1].record !== null; last += 1);
   const also = [];
   let more = false; // whether the line before this one is of the same paragraph
-  for (const line of last < 0 ? [] : tied.slice(last + 1)) {
+  // The last part of a report is about the time now and what cancelling costs: it says
+  // nothing more of a case, or of the records that rule out every plan.
+  const ends = termsFrom(tied.map((line) => line.text));
+  for (const line of last < 0 ? [] : tied.slice(last + 1, ends)) {
     if (line.text.trim() !== "" && !more) also.push([]);
     more = line.text.trim() !== "";
     if (more) also[also.length - 1].push(said(line));

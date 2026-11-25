@@ -71,6 +71,18 @@ class Money:
         _, digits, exponent = self.amount.as_tuple()
         return int("".join(str(digit) for digit in digits)) * 10 ** (4 + int(exponent))
 
+    def less(self, other: Money) -> Money:
+        """This amount less a smaller one in the same currency, exactly.
+
+        The difference is counted in whole ten-thousandths, and it has as many decimal places
+        as the one of the two that states more. So it does not turn on the decimal settings of
+        whoever asks.
+        """
+        places = max(-int(each.amount.as_tuple().exponent) for each in (self, other))
+        whole, rest = divmod(self.units - other.units, 10**4)
+        text = f"{whole}.{rest:04d}"[: len(str(whole)) + 1 + places] if places > 0 else str(whole)
+        return Money(Decimal(text), self.currency)
+
 
 @dataclass(frozen=True)
 class Budget:
@@ -292,11 +304,26 @@ class Payment:
 
 
 @dataclass(frozen=True)
+class Term:
+    """What cancelling a BOOKING costs from one time on, until the next term.
+
+    ``since`` is that time. None: from when the BOOKING was made. ``costs`` is what the holder
+    loses by cancelling: one amount for each currency, all of them together, with no amount
+    of nothing among them. So an empty tuple says that cancelling costs nothing. None: nobody
+    has said what it costs while the term holds.
+    """
+
+    since: int | None
+    costs: tuple[Money, ...] | None
+
+
+@dataclass(frozen=True)
 class Booking:
     """A FACT: a BOOKING. It secures a right to one OPTION for each PERSON it covers.
 
     ``paid`` is what it paid. None: nobody knows. ``objects`` are the OBJECTs it covers: it
-    gives a right for each of them where the OPTION needs one.
+    gives a right for each of them where the OPTION needs one. ``cancelling`` holds its terms
+    for cancelling, in the order of time. Empty: it states none.
     """
 
     id: str
@@ -304,6 +331,7 @@ class Booking:
     covers: tuple[str, ...]
     paid: Payment | None = None
     objects: tuple[str, ...] = ()
+    cancelling: tuple[Term, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -500,6 +528,14 @@ class CompleteTransfers:
     object: str
 
 
+@dataclass(frozen=True)
+class Now:
+    """A FACT: the time now. A report treats this time as now, and says so."""
+
+    id: str
+    at: int
+
+
 type Fact = (
     Start
     | Duration
@@ -524,6 +560,7 @@ type Fact = (
     | NeedsRightFor
     | CompleteNeedsRightFor
     | CompleteRightsFor
+    | Now
 )
 type Decision = Lock | TripStart | TripEnd | Cap
 
@@ -539,7 +576,9 @@ class File:
     wants: tuple[Want, ...]
     facts: tuple[Fact, ...]
     decisions: tuple[Decision, ...]
-    zone: str = "UTC"  # the time zone of the first time in the FILE; reports show times in it
+    # The time zone that reports show times in: that of the first time in the FILE, leaving
+    # out the time now unless the FILE states no other time.
+    zone: str = "UTC"
     budgets: tuple[Budget, ...] = ()
     capabilities: tuple[Capability, ...] = ()
     objects: tuple[Object, ...] = ()
@@ -585,6 +624,10 @@ class File:
             if isinstance(fact, Satisfies) and (fact.option, fact.want) == (option, want):
                 return fact
         return None
+
+    def now(self) -> Now | None:
+        """The FACT that states the time now, if the FILE holds one."""
+        return next((fact for fact in self.facts if isinstance(fact, Now)), None)
 
     def trip_start(self) -> TripStart | None:
         """The DECISION about when the TRIP starts, if the FILE holds one."""
@@ -1069,6 +1112,12 @@ def written(moment: int, zone: str) -> str:
     return f"{there.isoformat(timespec='seconds')}[{zone}]"
 
 
+def comes_twice(moment: int, zone: str) -> bool:
+    """Whether the clocks of a time zone show this time twice, as when they go back."""
+    there = local(moment, zone)
+    return there.replace(fold=1 - there.fold).utcoffset() != there.utcoffset()
+
+
 def local(moment: int, zone: str) -> datetime:
     """A time on the clocks of a time zone, by the time-zone database pinned with Agloe.
 
@@ -1271,8 +1320,9 @@ def load(document: object) -> File:
         return id in ids
 
     zones: list[str] = []
+    clocks: list[str] = []  # the time zone of the time now: it decides nothing where others do
 
-    def when(where: str, text: str) -> int | None:
+    def when(where: str, text: str, of_the_trip: bool = True) -> int | None:
         """The moment a time states. None, with the problem noted, where it is no real time."""
         try:
             moment = instant(text)
@@ -1283,7 +1333,7 @@ def load(document: object) -> File:
         if disagreement is not None:
             problems.append(f"{where}: {disagreement}")
             return None
-        zones.append(text[text.index("[") + 1 : -1])
+        (zones if of_the_trip else clocks).append(text[text.index("[") + 1 : -1])
         return moment
 
     persons = tuple(Person(p["id"], p["name"]) for p in raw["persons"])
@@ -1479,7 +1529,35 @@ def load(document: object) -> File:
                 if payer is not None:
                     known(where, payer, "PERSON", person_ids)
                 paid = Payment(money, source, payer)
-            facts.append(Booking(fact["id"], agreed["option"], tuple(covers), paid, tuple(things)))
+            terms: list[Term] = []
+            for at, term in enumerate(agreed.get("cancelling", ())):
+                there = f"{where}/booking/cancelling/{at}"
+                since = when(there, term["from"]) if "from" in term else None
+                if terms and "from" not in term:
+                    problems.append(f"{there}: only the first term can leave out when it starts")
+                last = terms[-1].since if terms else None
+                if since is not None and last is not None and since <= last:
+                    problems.append(f"{there}: it does not start after the term before it")
+                lost = None
+                if "costs" in term:
+                    named = [each["currency"] for each in term["costs"]]
+                    for each in sorted({each for each in named if named.count(each) > 1}):
+                        problems.append(f"{there}: it states {each} more than once")
+                    amounts = [
+                        Money(Decimal(each["amount"]), each["currency"]) for each in term["costs"]
+                    ]
+                    lost = tuple(each for each in amounts if each.amount)
+                terms.append(Term(since, lost))
+            facts.append(
+                Booking(
+                    fact["id"], agreed["option"], tuple(covers), paid, tuple(things), tuple(terms)
+                )
+            )
+            continue
+        if "now" in fact:
+            if any(isinstance(each, Now) for each in facts):
+                problems.append(f"{where}: another FACT already states this")
+            facts.append(Now(fact["id"], when(where, fact["now"], of_the_trip=False) or 0))
             continue
         if "offer" in fact:
             known(where, fact["offer"]["option"], "OPTION", option_ids)
@@ -1685,7 +1763,7 @@ def load(document: object) -> File:
         problems.append("/decisions: the TRIP ends before it starts")
     if problems:
         raise FileError(problems)
-    zone = zones[0] if zones else "UTC"
+    zone = next(iter([*zones, *clocks]), "UTC")
     return File(
         persons,
         places,
@@ -1789,4 +1867,6 @@ def _describe(error: ValidationError, shapes: dict[str, dict[str, object]]) -> s
             inside = "requires_object" if about_an_object else "requires_capability"
             misses = [miss for miss in misses if name(miss) == inside] or misses
     closest = max(misses, key=lambda miss: len(miss.absolute_path))
-    return f"{where}: fits no known shape; the closest miss: {closest.message}"
+    inside = "".join(_inside("", part) for part in closest.absolute_path)
+    at = "" if inside == where else f"at {inside}, "
+    return f"{where}: fits no known shape; the closest miss: {at}{closest.message}"

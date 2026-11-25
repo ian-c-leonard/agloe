@@ -154,7 +154,10 @@ def test_facts_about_rights_are_checked_like_every_other_fact() -> None:
     assert problems(every_right("cruise")) == "/facts/3: cruise is not an OPTION in this FILE"
     assert problems(booking("tour", "pat")) == "/facts/3: pat is not a PERSON in this FILE"
     assert problems(booking("tour", "alex", "alex")) == "/facts/3: alex is covered more than once"
-    nobody = "/facts/3: fits no known shape; the closest miss: [] should be non-empty"
+    nobody = (
+        "/facts/3: fits no known shape; the closest miss: at /facts/3/booking/covers, []"
+        " should be non-empty"
+    )
     assert problems(booking("tour")) == nobody
     maybe = {"id": "maybe", "option": "tour", "needs_right": "yes"}
     assert problems(maybe).endswith("'yes' is not of type 'boolean'")

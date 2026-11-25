@@ -85,6 +85,7 @@ from agloe.file import (
     NeedsRight,
     Start,
     Unwritable,
+    comes_twice,
     local,
 )
 from agloe.names import to_show as _names
@@ -863,8 +864,7 @@ def _seconds_into_the_day(file: File, moment: int) -> int:
 
 def _comes_twice(file: File, moment: int) -> bool:
     """Whether the clocks of the FILE's time zone show this time twice, as when they go back."""
-    there = local(moment, file.zone)
-    return there.replace(fold=1 - there.fold).utcoffset() != there.utcoffset()
+    return comes_twice(moment, file.zone)
 
 
 def _time(file: File, moment: int, with_its_offset: bool) -> Trip:
