@@ -220,6 +220,7 @@ class Offer(TypedDict):
     places: int
     for_objects: NotRequired[list[Id]]
     prices: NotRequired[list[Money]]
+    expires: NotRequired[Time]
 
 
 class OfferFact(TypedDict):

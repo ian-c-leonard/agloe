@@ -13,6 +13,7 @@ from enum import Enum
 from itertools import chain, combinations
 
 from agloe.file import (
+    FIRST_TIME,
     Booking,
     Cap,
     Complete,
@@ -264,6 +265,11 @@ class Report:
     In a FILE with a cap, a FEASIBLE Report has a row for each cap in ``caps``, and an
     UNDETERMINED one has a plan for each set of ``missing`` in ``plans``, in the same order.
 
+    An UNDETERMINED Report of a FILE that states no time now, and has an OFFER that states
+    when it expires, says in ``before`` until when each set of ``missing`` is enough, in the
+    same order. None: at any time. A set can be empty there: the TRIP works before that
+    time with nothing else found out. Any other Report leaves ``before`` empty.
+
     A FEASIBLE Report says in ``supplies`` who meets each requirement of an OPTION in the
     ITINERARY shown. It says in ``objects`` where each OBJECT is that an OPTION of the
     ITINERARY requires or refuses, or might.
@@ -280,6 +286,7 @@ class Report:
     missing: tuple[tuple[Missing, ...], ...] = ()
     caps: tuple[CapRow, ...] = ()
     plans: tuple[Plan, ...] = ()
+    before: tuple[int | None, ...] = ()
     supplies: tuple[Supply, ...] = ()
     objects: tuple[Carried, ...] = ()
 
@@ -384,6 +391,47 @@ def deadlines(file: File) -> tuple[Deadline, ...]:
                 found.append(Deadline(term.since, fact.id, before, term.costs, held is None))
             held = term
     return tuple(sorted(found, key=lambda each: each.at))
+
+
+@dataclass(frozen=True)
+class Expiry:
+    """A DEADLINE: the time at which an OFFER expires. Its places can be bought before it."""
+
+    at: int
+    offer: str
+
+
+def expiries(file: File) -> tuple[Expiry, ...]:
+    """The expiries that a report of this FILE lists, earliest first.
+
+    Each OFFER that states when it expires has one. Where the FILE states the time now,
+    these are the ones after it: an OFFER has expired at the time it states. Where it
+    states none, they are all of them. Expiries at one instant come in the FILE's order.
+    """
+    found = [
+        Expiry(offer.expires, offer.id)
+        for offer in file.dated_offers()
+        if offer.expires is not None and offer.id not in file.expired
+    ]
+    return tuple(sorted(found, key=lambda each: each.at))
+
+
+def every_deadline(file: File) -> tuple[Deadline | Expiry, ...]:
+    """Every DEADLINE that a report of this FILE lists, earliest first.
+
+    Those at one instant come in the FILE's order of FACTs, a BOOKING and an OFFER alike.
+    """
+    order = {fact.id: at for at, fact in enumerate(file.facts)}
+
+    def place(found: Deadline | Expiry) -> tuple[int, int]:
+        return found.at, order[found.booking if isinstance(found, Deadline) else found.offer]
+
+    return tuple(sorted([*deadlines(file), *expiries(file)], key=place))
+
+
+def with_no_expiry(file: File) -> tuple[str, ...]:
+    """The OFFERs that do not state when they expire, in the FILE's order."""
+    return tuple(fact.id for fact in file.facts if isinstance(fact, Offer) and fact.expires is None)
 
 
 def _the_same(one: Sequence[Money] | None, other: Sequence[Money] | None) -> bool:
@@ -536,9 +584,75 @@ def reports(
         return
     if ahead:
         yield Answer.UNDETERMINED
+    if file.now() is None and file.dated_offers():
+        cases = _by_stretch(file, works, shown, can_work)
+        missing = tuple(some for some, _, _ in cases)
+        before = tuple(until for _, _, until in cases)
+        plans = tuple(plan for _, plan, _ in cases if plan is not None)
+        yield Report(Answer.UNDETERMINED, missing=missing, plans=plans, before=before)
+        return
     missing = _missing(file, works, shown)
     plans = tuple(_plan(file, some, shown) for some in missing) if file.caps else ()
     yield Report(Answer.UNDETERMINED, missing=missing, plans=plans)
+
+
+def as_seen(file: File, before: int | None) -> File:
+    """A FILE that states no time now, as it is in the stretch of time that ends at a moment.
+
+    The times at which its OFFERs expire cut time into stretches, and in each stretch the
+    OFFERs that are open are known. This is the FILE with a time now in the stretch just
+    before ``before``. None: in the last stretch, after every OFFER that states when it
+    expires has expired.
+    """
+    if before is not None:
+        return file.as_of(before - 1)
+    return file.as_of(max(offer.expires or 0 for offer in file.dated_offers()))
+
+
+def _by_stretch(
+    file: File, works: Works, shown: Shown, can_work: CanWork
+) -> list[tuple[tuple[Missing, ...], Plan | None, int | None]]:
+    """The cases of a TRIP whose FILE states no time now, each with the time it holds until.
+
+    Nobody knows which OFFERs have expired. So the cases are worked out once for each
+    stretch of time between two expiries, on the FILE as it is in that stretch, from the
+    last stretch to the first. Every purchase that is possible later is possible earlier,
+    so a case of one stretch holds in every stretch before it. Each case comes with the
+    time at which its stretch ends. None: it holds at any time. In a FILE with a cap it
+    comes with its plan, as the FILE is in that stretch.
+
+    A case says more than which FACTs it asks for: how long a length of time can be, what
+    an OPTION can require, who buys which place, what another transfer has to do, what
+    each cap has left. An earlier stretch can differ in any of those, with the same FACTs.
+    So a case is left out only where a later stretch has the very same case, in all of
+    that: then the later one holds for longer. Nothing is worked out about one case
+    covering another, so a report can list a case that asks more than another one does.
+
+    Where the TRIP works in a stretch with nothing else found out, that is a case with no
+    unknown FACT, and no earlier stretch adds one: each would end sooner.
+    """
+    ends = sorted({offer.expires for offer in file.dated_offers() if offer.expires is not None})
+    cases: list[tuple[tuple[Missing, ...], Plan | None, int | None]] = []
+    listed: set[tuple[tuple[Missing, ...], Plan | None]] = set()
+    for until in (None, *reversed(ends)):
+        if until is not None and until <= FIRST_TIME:
+            # No time now is before the first time a FILE can state: this stretch is empty.
+            continue
+        seen = as_seen(file, until)
+        if works(seen, worst_case(seen)):
+            if until is None:
+                # The worst case of the FILE has every such OFFER closed, as this stretch has.
+                raise AssertionError("the TRIP works after every expiry, and not at worst")
+            cases.append(((), _plan(seen, (), shown) if file.caps else None, until))
+            break
+        if not can_work(Remaining(seen)):
+            continue
+        for some in _missing(seen, works, shown):
+            plan = _plan(seen, some, shown) if file.caps else None
+            if (some, plan) not in listed:
+                listed.add((some, plan))
+                cases.append((some, plan, until))
+    return cases
 
 
 def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> bool:
@@ -553,8 +667,11 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> 
     ``used`` holds those. In a FILE with a cap it relies on every BOOKING: each says what it
     charged, and that is how each cap is known to hold. It relies on no FACT that the rights
     to an OPTION are COMPLETE. ``used`` also holds the FACTs about CAPABILITIES and about
-    OBJECTs that it relies on. It does not rely on the time now: no CONSTRAINT reads it.
+    OBJECTs that it relies on. It relies on the time now where it takes a place of an OFFER
+    that states when it expires: the place can be bought only before that time.
     """
+    if isinstance(fact, Now):
+        return any(offer.id in used for offer in file.dated_offers())
     if isinstance(fact, Has | Requires | CompleteRequires):
         return fact.id in used
     if isinstance(fact, ObjectStarts | RequiresObject | RefusesObject | WithObject):
@@ -574,7 +691,7 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> 
     if isinstance(fact, StartsFrom):
         in_it = any(fact.person in step.persons for step in itinerary)
         return in_it or bool(has_to_end_at(file, fact.person))
-    if isinstance(fact, Complete | Now):
+    if isinstance(fact, Complete):
         return False
     return fact.option in {step.option or step.way for step in itinerary}
 

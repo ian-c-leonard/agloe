@@ -4046,7 +4046,9 @@ def test_a_case_that_is_not_settled_says_what_the_file_already_covers() -> None:
         "The trip might work if another transfer puts bag at hand for flight, and leaves bag"
         " at hand for train."
     ) in words
-    assert "  One plan that works then: alex buys a place from train-offer for 1.00 USD" in words
+    assert "  One plan that might work then: alex buys a place from train-offer for 1.00 USD" in (
+        words
+    )
     assert "That is not settled." in words
 
 

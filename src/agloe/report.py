@@ -22,14 +22,17 @@ from agloe.answers import (
     Carried,
     Cover,
     Deadline,
+    Expiry,
     Missing,
     Plan,
     Report,
+    as_seen,
     bought_if_needed,
     cancelling_at_any_time,
     cancelling_now,
-    deadlines,
+    every_deadline,
     right_needed,
+    with_no_expiry,
     with_no_terms,
 )
 from agloe.file import (
@@ -244,9 +247,15 @@ def as_json(file: File, report: Report) -> dict[str, object]:
         out["at_worst"] = [_broken_as_json(file, report, found) for found in report.at_worst]
     if report.conflict:
         out["conflict"] = list(report.conflict)
-    if report.missing:
+    if report.missing or report.before:
+        # A case that holds only before a time has that time as its last condition.
+        untils = report.before or [None] * len(report.missing)
         out["missing"] = [
-            [_missing_as_json(needed) for needed in enough] for enough in report.missing
+            [
+                *(_missing_as_json(needed) for needed in enough),
+                *([] if until is None else [{"what": "time", "before": written(until, file.zone)}]),
+            ]
+            for enough, until in zip(report.missing, untils, strict=True)
         ]
     if report.caps:
         out["caps"] = [_cap_as_json(file, row) for row in report.caps]
@@ -679,6 +688,8 @@ def _times_stated(file: File, records: tuple[str, ...]) -> list[int]:
             times += [] if found.at is None else [found.at]
         elif isinstance(found, Complete):
             times += [found.earliest, found.latest]
+        elif isinstance(found, Offer):
+            times += [] if found.expires is None else [found.expires]
     return times
 
 
@@ -689,7 +700,7 @@ def clock_for(file: File, report: Report) -> Clock:
     moments += _times_stated(file, (*report.relies_on, *report.conflict))
     # The time now and the DEADLINEs are shown with every report of a FILE that states them.
     now = file.now()
-    moments += [each.at for each in deadlines(file)] + ([] if now is None else [now.at])
+    moments += [each.at for each in every_deadline(file)] + ([] if now is None else [now.at])
     offsets = {local(moment, file.zone).utcoffset() for moment in moments}
     return Clock(file.zone, len(offsets) > 1)
 
@@ -724,13 +735,31 @@ def as_text(file: File, report: Report) -> str:
             lines += ["", *_budgets(file)]
     else:
         lines = ["UNDETERMINED: the FILE does not say enough to tell.", ""]
-        cases = [_case(file, enough) for enough in report.missing]
-        plans = [_plan_in_words(file, plan) for plan in report.plans] or [[] for _ in cases]
+        # A FILE that states no time now is seen as it is in the stretch of each case: the
+        # OFFERs that are open there are the ones its words count.
+        untils = report.before or [None] * len(report.missing)
+        seen = [file if not report.before else as_seen(file, until) for until in untils]
+        cases = [
+            _timed(clock, _case(at, enough, not report.before) if enough else "", until)
+            for at, enough, until in zip(seen, report.missing, untils, strict=True)
+        ]
+        # A set with another transfer is not settled. Among the sets of one stretch of time,
+        # a report lists such sets only where it lists no other. A FILE that states no time
+        # now can have a settled case in one stretch and an unsettled one in another.
+        unsettled = [
+            number
+            for number, enough in enumerate(report.missing, 1)
+            if any(needed.unknown.what == "another transfer" for needed in enough)
+        ]
+        plans = [
+            _plan_in_words(at, plan, number not in unsettled)
+            for number, (at, plan) in enumerate(zip(seen, report.plans, strict=False), 1)
+        ] or [[] for _ in cases]
         asked = [needed.unknown for enough in report.missing for needed in enough]
         kinds = {unknown.what for unknown in asked}
-        # A set with another transfer is not settled, and a report lists such sets only
-        # where it lists no other.
-        works = "might work" if "another transfer" in kinds else "works"
+        works = "works"
+        if unsettled:
+            works = "might work" if len(unsettled) == len(cases) else "works, or might work,"
         if len(cases) == 1:
             lines.append(f"The trip {works} if {cases[0]}.")
             lines += [f"  {line}" for line in plans[0]]
@@ -743,6 +772,10 @@ def as_text(file: File, report: Report) -> str:
             moved = {unknown.about for unknown in asked if unknown.what == "another transfer"}
             names = [_names(file.objects)[each.id] for each in file.objects if each.id in moved]
             this = "That is" if len(cases) == 1 else "These cases are"
+            if len(unsettled) < len(cases):
+                one = len(unsettled) == 1
+                which = _listed([str(number) for number in unsettled])
+                this = f"Case {which} is" if one else f"Cases {which} are"
             lines += [
                 "",
                 f"{this} not settled. What the FILE lists does not do that for"
@@ -810,6 +843,15 @@ def as_text(file: File, report: Report) -> str:
                 lines[-1] += " A place of which a line above says what it can cost has that much."
         if _turns_on_who_pays(report):
             one_way = "Who buys which place is from one plan that works in that case. "
+            if report.missing and any(
+                needed.unknown.what == "another transfer"
+                for enough in report.missing
+                for needed in enough
+            ):
+                one_way = (
+                    "Who buys which place is from one plan for that case: it works, or might"
+                    " work where the case is not settled. "
+                )
             lines += ["", *_budgets(file, one_way)]
         if "another option" in kinds:
             lines += [
@@ -843,16 +885,19 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
     """
     now = file.now()
     bookings = {fact.id: fact for fact in file.facts if isinstance(fact, Booking)}
-    if now is None and not any(booking.cancelling for booking in bookings.values()):
+    if not _states_terms(file):
         return []
     held = {
         id: f"{id}, the BOOKING for {_name(file, booking.option)}"
         for id, booking in bookings.items()
     }
+    offers = {fact.id: fact for fact in file.facts if isinstance(fact, Offer)}
     rows = [
         f"  {clock.moment(each.at)}: a term for cancelling {held[each.booking]}, starts."
         f" {_change_in_words(each)}"
-        for each in deadlines(file)
+        if isinstance(each, Deadline)
+        else f"  {clock.moment(each.at)}: {_expiry_in_words(file, offers[each.offer])}"
+        for each in every_deadline(file)
     ]
     zone = f"(times in {file.zone})"
     if now is None:
@@ -864,7 +909,7 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
             )
             lines += rows
         else:
-            lines[-1] += " Its terms for cancelling have no DEADLINE."
+            lines[-1] += " Its terms have no DEADLINE."
         always = cancelling_at_any_time(file)
         if always:
             lines += ["", "What cancelling costs at any time:"]
@@ -875,7 +920,7 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
         costs = cancelling_now(file)
         if rows:
             lines += ["", "DEADLINEs after that time, earliest first:", *rows]
-        elif costs:
+        elif costs or file.dated_offers():
             lines += ["", "No DEADLINE comes after that time."]
         if costs:
             lines += ["", "What cancelling costs now:"]
@@ -885,7 +930,48 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
     unstated = with_no_terms(file)
     if unstated:
         lines += ["", f"No terms for cancelling are stated for {_listed(unstated)}."]
+    undated = with_no_expiry(file)
+    if undated:
+        lines += ["", f"No time of expiry is stated for {_listed(undated)}."]
     return lines
+
+
+def _states_terms(file: File) -> bool:
+    """Whether a report of this FILE has a last part: the time now, DEADLINEs, terms.
+
+    It has one where the FILE states the time now, terms for cancelling a BOOKING, or when
+    an OFFER expires.
+    """
+    stated = any(isinstance(fact, Booking) and fact.cancelling for fact in file.facts)
+    return file.now() is not None or stated or bool(file.dated_offers())
+
+
+def _with_expired(file: File, offers: Sequence[str]) -> list[str]:
+    """The OFFERs that a COMPLETE set of rights names, each marked where it has expired.
+
+    The set names an OFFER as long as the FILE holds it. Whether a place of it can still be
+    bought is another matter.
+    """
+    return [f"{id} (expired)" if id in file.expired else id for id in offers]
+
+
+def _expiry_in_words(file: File, offer: Offer) -> str:
+    """What ends when an OFFER expires: the chance to buy its places, at its price.
+
+    Nothing is added up: nobody loses the price of every place by waiting.
+    """
+    one = offer.places == 1
+    places = "1 place" if one else f"up to {offer.places} places"
+    if offer.price is None:
+        price = ""
+    elif not offer.price.amount:
+        price = " at no cost"
+    else:
+        price = f" at {offer.price}{'' if one else ' each'}"
+    ends = f"The chance to buy {places}{price} ends."
+    if offer.price is None:
+        ends += f" The FILE does not state {'its' if one else 'their'} price."
+    return f"{offer.id}, the OFFER for {_name(file, offer.option)}, expires. {ends}"
 
 
 def _change_in_words(found: Deadline) -> str:
@@ -930,7 +1016,8 @@ def _terms_as_json(file: File) -> dict[str, object]:
     """
     now = file.now()
     bookings = {fact.id: fact for fact in file.facts if isinstance(fact, Booking)}
-    if now is None and not any(booking.cancelling for booking in bookings.values()):
+    offers = {fact.id: fact for fact in file.facts if isinstance(fact, Offer)}
+    if not _states_terms(file):
         return {}
 
     def amounts(costs: Sequence[Money] | None) -> list[dict[str, str] | None] | None:
@@ -942,6 +1029,7 @@ def _terms_as_json(file: File) -> dict[str, object]:
     out["deadlines"] = [
         {
             "at": written(each.at, file.zone),
+            "kind": "cancelling",
             "booking": each.booking,
             "option": bookings[each.booking].option,
             "before": amounts(each.before),
@@ -950,7 +1038,9 @@ def _terms_as_json(file: File) -> dict[str, object]:
             "stake": amounts(each.stake),
             "first_term": each.first,
         }
-        for each in deadlines(file)
+        if isinstance(each, Deadline)
+        else _expiry_as_json(file, each, offers[each.offer])
+        for each in every_deadline(file)
     ]
     costs = cancelling_now(file)
     if costs:
@@ -967,7 +1057,25 @@ def _terms_as_json(file: File) -> dict[str, object]:
     unstated = with_no_terms(file)
     if unstated:
         out["no_terms_for_cancelling"] = list(unstated)
+    undated = with_no_expiry(file)
+    if undated:
+        out["no_expiry_stated"] = list(undated)
     return out
+
+
+def _expiry_as_json(file: File, found: Expiry, offer: Offer) -> dict[str, object]:
+    """One expiry for the report as JSON: the OFFER, its places and its price.
+
+    The price is None where the FILE states none.
+    """
+    return {
+        "at": written(found.at, file.zone),
+        "kind": "expiry",
+        "offer": offer.id,
+        "option": offer.option,
+        "places": offer.places,
+        "price": _money_as_json(offer.price),
+    }
 
 
 def _budgets(file: File, first: str = "") -> list[str]:
@@ -1003,7 +1111,7 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
         lines = ["FEASIBLE, with a WARNING: this trip works, but not everything is booked yet."]
     else:
         lines = ["FEASIBLE: this trip works."]
-    marks = _marks(file, report)
+    marks = _marks(file, clock, report)
     carried = _carried_in(report)
     day = None
     for number, (step, _) in enumerate(_lines(report.itinerary)):
@@ -1266,7 +1374,7 @@ def _lines(itinerary: Itinerary) -> list[tuple[Step, list[int]]]:
     return lines
 
 
-def _marks(file: File, report: Report) -> dict[int, list[str]]:
+def _marks(file: File, clock: Clock, report: Report) -> dict[int, list[str]]:
     """The WARNINGs about a plan, in words, for each line of the plan.
 
     First who still has to buy a right to an OPTION, and from which OFFER. Then what the plan
@@ -1304,7 +1412,11 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
     marks: dict[int, list[str]] = {}
     # One list of PERSONs and OBJECTs: no two of them show the same name.
     shown = _names([*file.persons, *file.objects], "and")
+    expiries = {each.id: each.expires for each in file.dated_offers()}
     for (option, offer, budget, only_if_needed), covers in _to_buy(file, report).items():
+        # A place of an OFFER that states when it expires has to be bought before then.
+        expires = expiries.get(offer or "")
+        by_when = "" if expires is None else f", before {clock.moment(expires)}"
         buyers = [cover.person for cover in covers if cover.person is not None]
         covered = [cover.object for cover in covers if cover.object is not None]
         one = len(covers) == 1
@@ -1327,7 +1439,7 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
             if_needed = " if it needs one" if only_if_needed else ""
             who = _people(file, tuple(buyers))
             mark = f"{who} still {'has' if one else 'have'} to buy a right to this{if_needed}"
-        marks.setdefault(line_of_option[option], []).append(f"{mark}, from {offer}.")
+        marks.setdefault(line_of_option[option], []).append(f"{mark}, from {offer}{by_when}.")
     for (number, constraint, late), persons in together.items():
         who = _people(file, tuple(persons))
         if constraint is Constraint.ARRIVAL and late is not None:
@@ -1376,7 +1488,25 @@ def _with_a_capital(words: str) -> str:
     return f"{words[0].upper()}{words[1:]}" if isinstance(words, _OwnWords) else words
 
 
-def _case(file: File, enough: Sequence[Missing]) -> str:
+def _timed(clock: Clock, case: str, until: int | None) -> str:
+    """A case with the time that it holds until: the last condition of the case.
+
+    A case with no unknown FACT holds before that time and asks nothing else.
+    """
+    if until is None:
+        return case
+    # The case is said again where no other line names the clocks, so it names them itself.
+    cutoff = f"it is before {clock.moment(until)} ({clock.zone})"
+    if not case:
+        return _OwnWords(cutoff)
+    return (
+        _OwnWords(f"{case}, and {cutoff}")
+        if isinstance(case, _OwnWords)
+        else f"{case}, and {cutoff}"
+    )
+
+
+def _case(file: File, enough: Sequence[Missing], timed: bool = True) -> str:
     """One set of unknown FACTs that would be enough, in words.
 
     PERSONs who need another OPTION for the same WANT are named together, as "each of". The
@@ -1385,6 +1515,10 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
     set. So are the PERSONs who need a right to one OPTION. The OPTIONs that need a right for
     one OBJECT, or have to need none for it, are named together wherever they come in the
     set, at the place of the first. Nothing else changes the order.
+
+    ``timed`` is False for a FILE that states no time now. Then nobody knows how many places
+    are on OFFER for an OPTION with an OFFER that states when it expires, so the words give
+    no number of them.
     """
     parts: list[str] = []
     for_whom: dict[str | None, list[str]] = {}
@@ -1403,6 +1537,10 @@ def _case(file: File, enough: Sequence[Missing]) -> str:
             # A right that is found is one more than the places on OFFER, and the words say so.
             places = file.places_on_offer(unknown.option or "")
             more = "" if not places else f", in addition to the {_places(places)} on OFFER"
+            stated = file.offers_stated(unknown.option or "")
+            if not timed and any(each.expires is not None and not each.objects for each in stated):
+                # The number of places on OFFER changes with the time, and nobody knows it.
+                more = ", in addition to the places on OFFER"
             more += ", at a cost that fits the caps" if file.caps else ""
             each = "each of " if len(group) > 1 else ""
             who = _people(file, tuple(needed.unknown.person or "" for needed in group))
@@ -1791,19 +1929,29 @@ def _record(file: File, clock: Clock, record: str) -> str:
     if isinstance(found, Offer):
         each = " each" if found.places > 1 else ""
         price = "; nobody knows the price" if found.price is None else f", for {found.price}{each}"
+        # An OFFER that has expired by the time now had its places until then. Where the
+        # FILE states no time now, nobody knows whether one that states its expiry can
+        # still be bought.
+        gone = found.id in file.expired
         bought = "that can still be bought"
+        if found.expires is not None:
+            can = "could be bought" if gone else "can still be bought"
+            if file.now() is None and not gone:
+                can = "can be bought"
+            bought = f"that {can} until {clock.moment(found.expires)}"
         if found.objects:
             # Each place covers one of the OBJECTs it names. They are named as a BOOKING
             # names them: no PERSON shows the same name.
             shown = _names([*file.persons, *file.objects], "or")
             named = [shown[thing.id] for thing in file.objects if thing.id in found.objects]
             bought += f" to cover {_listed(named, 'or')}"
-        return f"an OFFER has {_places(found.places)} for {name} {bought}{price}"
+        has = "had" if gone else "has"
+        return f"an OFFER {has} {_places(found.places)} for {name} {bought}{price}"
     if isinstance(found, CompleteRights):
         # Each such FACT says what it is about: the PERSONs who take part, or one OBJECT.
         closed = "nobody on the trip holds another or can get one"
         if found.offers:
-            closed += f", except from {_listed(found.offers)}"
+            closed += f", except from {_listed(_with_expired(file, found.offers))}"
         return f"the FILE lists every right for a PERSON to take part in {name}: {closed}"
     if isinstance(found, CompleteRightsFor):
         # The OBJECT is named as a BOOKING names it: no PERSON shows the same name, and a
@@ -1811,7 +1959,7 @@ def _record(file: File, clock: Clock, record: str) -> str:
         thing = _names([*file.persons, *file.objects], "and")[found.object]
         closed = "nobody on the trip holds another or can get one"
         if found.offers:
-            closed += f", except from {_listed(found.offers)}"
+            closed += f", except from {_listed(_with_expired(file, found.offers))}"
         return f"the FILE lists every right to {name} that covers {thing}: {closed}"
     return _cutoff(file, name, found)
 
@@ -1852,8 +2000,11 @@ def _charged_to(cap: Cap, cover: Cover) -> bool:
     return cover.budget == cap.budget and price is not None and price.currency == cap.limit.currency
 
 
-def _plan_in_words(file: File, plan: Plan) -> list[str]:
-    """One plan for a set of unknown FACTs: who buys what, and the sum for each cap."""
+def _plan_in_words(file: File, plan: Plan, settled: bool = True) -> list[str]:
+    """One plan for a set of unknown FACTs: who buys what, and the sum for each cap.
+
+    Where the set is not settled, nobody has worked out whether the plan works.
+    """
     pots = _names(file.budgets)
     buys: list[str] = []
     for cover in plan.buys:
@@ -1878,7 +2029,8 @@ def _plan_in_words(file: File, plan: Plan) -> list[str]:
             place += ", if the OPTION needs a right"
         buys.append(place)
     nothing = "nobody buys a place from an OFFER of this FILE"
-    lines = [f"One plan that works then: {'; '.join(buys) or nothing}."]
+    works = "works" if settled else "might work"
+    lines = [f"One plan that {works} then: {'; '.join(buys) or nothing}."]
     shown = _names([*file.persons, *file.objects], "and")
     lines += [
         _together_in_words(file, shown[thing], sets) for thing, sets in _together(plan.buys).items()

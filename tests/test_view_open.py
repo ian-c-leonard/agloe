@@ -476,6 +476,15 @@ def test_a_deadline_is_no_step_of_the_plan(tmp_path: Path) -> None:
     ]
 
 
+def test_a_case_that_holds_before_a_time_says_on_which_clocks() -> None:
+    """The case names its clocks itself: a card says it again with no other line beside it."""
+    listed = open_of("a-ticket/nobody-said-whether-the-offer-has-expired")
+    assert [item["says"] for group in listed["groups"] for item in group["items"]] == [
+        "1. A right to Skydeck visit is found for Sam, in addition to the places on OFFER.",
+        "2. It is before 5:00 pm on Thursday 13 May 2027 (America/Chicago).",
+    ]
+
+
 def test_a_trip_with_no_report_lists_nothing() -> None:
     """Before the COMPILER has reported, nothing says what is open."""
     sent = shown(read(EXAMPLES / "flight-home" / "works.json"))

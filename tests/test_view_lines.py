@@ -22,7 +22,25 @@ import pytest
 from agloe import compiler, report
 from agloe.file import File, parse, read
 from agloe.view.trip import shown
-from tests.stories import EXAMPLES, budget, needs_right, offer
+from tests.stories import (
+    EXAMPLES,
+    at,
+    budget,
+    cap,
+    cutoff,
+    every_use,
+    has_object,
+    lasts,
+    lock,
+    moves,
+    needs_right,
+    needs_right_for,
+    no_other_right_for,
+    offer,
+    starts_at,
+    starts_from,
+    trip,
+)
 from tests.test_offers_for_objects import a_crossing, car_deck, two_trains
 
 FILES = sorted(
@@ -162,9 +180,13 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
         to_buy = {buy["offer"] for buy in said.get("to_buy", [])}
         in_plans = {buy["offer"] for plan in said.get("plans", []) for buy in plan["buys"]}
         tied_to = {offer for line in found for offer in offers_of(line)}
-        assert tied_to <= to_buy | in_plans, name
-        assert to_buy <= tied_to, name
-        purchases += bool(tied_to)
+        # The last part of a report ties a line to an OFFER too: one that says when the
+        # OFFER expires, and the one that names the OFFERs with no time of expiry.
+        expiring = {each["offer"] for each in said.get("deadlines", []) if "offer" in each}
+        undated = set(said.get("no_expiry_stated", []))
+        assert tied_to <= to_buy | in_plans | expiring | undated, name
+        assert to_buy | expiring | undated <= tied_to, name
+        purchases += bool(tied_to & (to_buy | in_plans))
         # Where the report states the BUDGETs of the FILE, each has its line, in the FILE's
         # order, and that line starts with its name.
         pots = [
@@ -580,6 +602,13 @@ def test_the_lines_about_cancelling_are_tied_to_their_bookings(tmp_path: Path) -
     mistied = about({**asked, "report": other_report})
     assert f"6:00 pm on Wednesday 12 May 2027: {start}"[:60] not in mistied
     assert mistied[f'room, the BOOKING for "{title}"'[:60]] == ["booking:room"]
+    # A DEADLINE of the report as JSON has a kind, and names the record of that kind only.
+    for wrong in ({"kind": "typo"}, {"offer": "skydeck-ticket"}, {"kind": "expiry"}):
+        odd_kind = [{**each, **wrong} for each in report["deadlines"]]
+        assert all(
+            "a term for" not in text
+            for text in about({**steps, "report": {**report, "deadlines": odd_kind}})
+        )
     # The one line about the BOOKINGs with no terms is about each of them.
     free = asked_of(EXAMPLES / "the-room" / "free-until-wednesday.json")
     assert about(free)["No terms for cancelling are stated for skydeck-ticket."] == [
@@ -603,6 +632,82 @@ def test_the_lines_about_cancelling_are_tied_to_their_bookings(tmp_path: Path) -
     path = tmp_path / "trip.json"
     path.write_text(json.dumps(content))
     assert about(asked_of(path))["24, the BOOKING for Skydeck visit: 32.00 USD"] == ["booking:24"]
+
+
+def test_the_lines_about_an_offer_that_expires_are_tied_to_it(tmp_path: Path) -> None:
+    """Sam still has to buy a ticket, before Thursday. A second OFFER states no expiry."""
+    content = json.loads((EXAMPLES / "a-ticket" / "the-offer-ends-on-thursday.json").read_text())
+    spare = {"id": "spare-tickets", "offer": {"option": "skydeck", "places": 1}}
+    content["facts"].append(spare)
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    (found,) = lines_of([asked_of(path)])
+    tied = {line["text"].strip()[:40]: line["about"] for line in found if offers_of(line)}
+    assert tied == {
+        # The purchase under its step, which ends with the time to buy before.
+        "! Sam still has to buy a right to this, ": ["offer:skydeck-tickets"],
+        # What the plan still pays in dollars.
+        "USD: 32.00 paid; 32.00 still to buy (sky": ["offer:skydeck-tickets"],
+        # The expiry among the DEADLINEs, and the OFFER that states none.
+        "5:00 pm on Thursday 13 May 2027: skydeck": ["offer:skydeck-tickets"],
+        "No time of expiry is stated for spare-ti": ["offer:spare-tickets"],
+    }
+    (purchase,) = [line for line in found if line["warns"]]
+    assert purchase["text"].endswith(", before 5:00 pm on Thursday 13 May 2027.")
+
+
+def test_cases_are_tied_under_a_heading_that_says_some_are_not_settled() -> None:
+    """A bike on a train: another transfer might help at any time, and the rack until Thursday."""
+    facts = [
+        starts_at("train", 6),
+        lasts("train", "PT1H"),
+        cutoff("train", "PT0S"),
+        starts_from("alex", "home"),
+        has_object("alex", "bike"),
+        every_use("bike"),
+        needs_right_for("train", "bike"),
+        offer("train", 1, "rack", "0.00 USD", objects=["bike"], expires=at(17, day=13)),
+        no_other_right_for("train", "bike", "rack"),
+    ]
+    file = trip(
+        ["alex"],
+        ["home", "town"],
+        [moves("train", "home", "town")],
+        facts,
+        [lock("train", "alex")],
+        objects=["bike"],
+    )
+    asked = asked_about(file)
+    assert "The trip works, or might work, in any of these cases:\n" in asked["text"]
+    (found,) = lines_of([asked])
+    assert [line["case"] for line in found if line["case"] is not None] == [0, 1]
+    # With a cap, each case has a plan. Alex needs a seat too, from an OFFER with no price.
+    # The plan under the case that is not settled might work, and both name the OFFER.
+    fare = [needs_right("train"), offer("train", 1, "fare", None)]
+    capped = trip(
+        ["alex"],
+        ["home", "town"],
+        [moves("train", "home", "town")],
+        [*facts, *fare],
+        [lock("train", "alex"), cap("money", "1.00 USD")],
+        rights=True,
+        objects=["bike"],
+    )
+    asked = asked_about(capped)
+    (found,) = lines_of([asked])
+    plans = {
+        line["text"].strip()[:30]: offers_of(line)
+        for line in found
+        if line["text"].strip().startswith("One plan that")
+    }
+    assert plans == {
+        # Another transfer and the price of the seat, at any time: not settled.
+        "One plan that might work then:": ["fare"],
+        # The price of the seat, before the rack expires: the bike takes a place too.
+        "One plan that works then: alex": ["fare", "rack"],
+        # Another right for Alex, before the rack expires.
+        "One plan that works then: a pl": ["rack"],
+    }
 
 
 def test_what_the_report_says_is_charged_to_a_cap_is_kept_in_its_own_words(

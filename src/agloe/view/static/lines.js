@@ -26,7 +26,7 @@ const WARNING = /^ {4}! /;
 /** How the line starts that states the one case in which a trip works, or might work. */
 const ONE_CASE = /^The trip (?:works|might work) if /;
 /** The line above the cases in which a trip works or might, where the report lists several. */
-const CASES = /^The trip (?:works|might work) in any of these cases:$/;
+const CASES = /^The trip (?:works|might work|works, or might work,) in any of these cases:$/;
 /**
  * A warning that says who still has to buy a right. It says "if it needs one" where nobody
  * knows whether the OPTION needs a right.
@@ -39,20 +39,20 @@ const TO_BUY = /^ {4}! .+ still ha(?:s|ve) to buy a right to this( if it needs o
  */
 const TO_COVER = /^ {4}! A right to this (might )?still ha(?:s|ve) to be bought for .+, from .+\.$/;
 /** How the line starts that gives one plan for a case: who buys which place. */
-const ONE_PLAN = "One plan that works then: ";
+const ONE_PLAN = /^One plan that (?:works|might work) then: /;
 /** How the line starts that says which places of an OBJECT are bought together at most. */
 const TOGETHER = "Of the places for ";
 
 /**
  * The OFFER that a warning about a purchase names. The line ends with ", from " and the id of
  * the OFFER, and then nothing more, or that the place costs nothing, or its price and the
- * BUDGET that pays. A name with a comma in it is in quotation marks, so the BUDGET has none
+ * BUDGET that pays. After that it can say before which time the place has to be bought. A name with a comma in it is in quotation marks, so the BUDGET has none
  * outside them. Names before the OFFER can be a list with commas, and one of them can be
  * called "from home": the line is read from its end.
  */
 function offerIn(text) {
   const bare = text.replace(/"(?:[^"\\]|\\.)*"/g, '""');
-  const found = /, from ([a-z0-9]+(?:-[a-z0-9]+)*)(?:|, at no cost|, for [^,]+ from [^,]+)\.$/.exec(bare);
+  const found = /, from ([a-z0-9]+(?:-[a-z0-9]+)*)(?:|, at no cost|, for [^,]+ from [^,]+)(?:, before [^,]+)?\.$/.exec(bare);
   return found === null ? null : found[1];
 }
 /** The line above the sums of a plan in each currency. */
@@ -80,7 +80,7 @@ const TERMS = /^(?:This report uses .+ as the time now \(times in .+\)\.|This FI
 /** How the line above the DEADLINEs reads: one where the FILE states the time now, one where it does not. */
 const DEADLINES = /^(?:DEADLINEs after that time, earliest first:|This FILE does not state the time now\. So nobody knows which of its DEADLINEs have passed\. )/;
 /** What a line for one DEADLINE says after its time, up to the id of the BOOKING. */
-const STARTS = ": a term for cancelling ";
+const STARTS = "a term for cancelling ";
 /** The line above what cancelling each BOOKING costs at the time now, and at any time. */
 const COSTS_NOW = "What cancelling costs now:";
 const COSTS_AT_ANY_TIME = "What cancelling costs at any time:";
@@ -122,7 +122,8 @@ function listsOf(report) {
  * the line says somebody buys a place of, `budget:ID` for a BUDGET that the line states,
  * `cap:ID` for a cap that the line states under the plan of a case, `booking:ID` for a
  * BOOKING that the line says states no payment, or whose cost of cancelling or lack of terms
- * the line states, and `object:ID` for an OBJECT that the line is
+ * the line states, `offer:ID` too for an OFFER whose expiry or lack of one the line states,
+ * and `object:ID` for an OBJECT that the line is
  * about. A line about an OBJECT at a step of the plan holds that step
  * too, by its number, as the page names a step.
  *
@@ -236,7 +237,7 @@ export function lines(text, report, trip) {
       found[next].under = line.case;
       if (!free(found[next])) continue;
       const words = found[next].text.trimStart();
-      if (words.startsWith(ONE_PLAN)) found[next].about = offers.map((offer) => `offer:${offer}`);
+      if (ONE_PLAN.test(words)) found[next].about = offers.map((offer) => `offer:${offer}`);
       if (words.startsWith(TOGETHER)) together.push(found[next]);
       const cap = caps.find((id) => words.startsWith(`${id}, on `));
       if (cap !== undefined) found[next].about = [`cap:${cap}`];
@@ -346,13 +347,14 @@ export function lines(text, report, trip) {
       under.forEach((at, n) => Object.assign(found[at], { step: steps[n], meets: n }));
     }
   }
-  // The last part of a report says what cancelling costs. Under the heading of the DEADLINEs,
-  // a line for each one names its BOOKING after its time, in the order of the report as
+  // The last part of a report. Under the heading of the DEADLINEs, a line for each one
+  // names its BOOKING or its OFFER right after its time, in the order of the report as
   // JSON. Under each of two more headings, a line for each BOOKING starts with its id. One
-  // line names the BOOKINGs that state no terms. Each of these lines is about its BOOKING,
-  // only where the words under a heading are one line for each entry of the report as
-  // JSON, and each names the BOOKING of its entry. A line names its BOOKING before any
-  // name of an OPTION, so a name cannot stand in for it.
+  // line names the BOOKINGs that state no terms, and one the OFFERs that state no time of
+  // expiry. Each of these lines is about what it names, only where the words under a
+  // heading are one line for each entry of the report as JSON, and each names the record
+  // of its entry. A line names its record before any name of an OPTION, so a name cannot
+  // stand in for it.
   const cancelling = cancellingIn(report);
   const last = found.slice(ends);
   // The lines set in under the one line that is this heading: none where it is not there once.
@@ -362,16 +364,23 @@ export function lines(text, report, trip) {
     for (let at = heads[0] + 1; heads.length === 1 && at < last.length && last[at].text.startsWith("  "); at += 1) rows.push(last[at]);
     return rows;
   };
-  const tie = (rows, ids, names) => {
-    if (rows.length === ids.length && rows.every((line, n) => names(line.text, ids[n]))) rows.forEach((line, n) => (line.about = [`booking:${ids[n]}`]));
+  const tie = (rows, entries) => {
+    if (rows.length === entries.length && rows.every((line, n) => entries[n].names(line.text))) rows.forEach((line, n) => (line.about = [entries[n].about]));
   };
-  const afterItsTime = (text, id) => text.includes(STARTS) && text.slice(text.indexOf(STARTS) + STARTS.length).startsWith(`${id}, the BOOKING for `);
-  const atItsStart = (text, id) => text.startsWith(`  ${id}, the BOOKING for `);
-  tie(setInUnder((text) => DEADLINES.test(text)), cancelling.deadlines, afterItsTime);
-  tie(setInUnder((text) => text === COSTS_NOW), cancelling.now, atItsStart);
-  tie(setInUnder((text) => text === COSTS_AT_ANY_TIME), cancelling.always, atItsStart);
+  // A time has no colon with a space after it, so the first one ends the time of the line.
+  const afterItsTime = (text) => (text.includes(": ") ? text.slice(text.indexOf(": ") + 2) : "");
+  const atItsStart = (id) => ({ names: (text) => text.startsWith(`  ${id}, the BOOKING for `), about: `booking:${id}` });
+  const ofDeadline = (each) =>
+    each.offer === undefined
+      ? { names: (text) => afterItsTime(text).startsWith(`${STARTS}${each.booking}, the BOOKING for `), about: `booking:${each.booking}` }
+      : { names: (text) => afterItsTime(text).startsWith(`${each.offer}, the OFFER for `), about: `offer:${each.offer}` };
+  tie(setInUnder((text) => DEADLINES.test(text)), cancelling.deadlines.map(ofDeadline));
+  tie(setInUnder((text) => text === COSTS_NOW), cancelling.now.map(atItsStart));
+  tie(setInUnder((text) => text === COSTS_AT_ANY_TIME), cancelling.always.map(atItsStart));
   const none = last.filter((line) => line.text === `No terms for cancelling are stated for ${listed(cancelling.none)}.`);
   if (cancelling.none.length && none.length === 1) none[0].about = cancelling.none.map((id) => `booking:${id}`);
+  const undated = last.filter((line) => line.text === `No time of expiry is stated for ${listed(cancelling.undated)}.`);
+  if (cancelling.undated.length && undated.length === 1) undated[0].about = cancelling.undated.map((id) => `offer:${id}`);
   return found;
 }
 

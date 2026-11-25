@@ -1,0 +1,48 @@
+{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" },
+    { "id": "jo", "name": "Jo" }
+  ],
+  "places": [
+    { "id": "willis-tower", "name": "Willis Tower" },
+    { "id": "art-institute", "name": "the Art Institute" },
+    { "id": "park", "name": "Millennium Park" }
+  ],
+  "budgets": [
+    { "id": "trip-money", "name": "the trip money", "persons": ["alex", "sam"], "currencies": ["USD"] }
+  ],
+  "options": [
+    { "id": "skydeck", "name": "Skydeck visit", "place": "willis-tower" },
+    { "id": "gallery-talk", "name": "Gallery talk", "place": "art-institute" },
+    { "id": "lunch", "name": "Lunch in the park", "place": "park" }
+  ],
+  "ways": [
+    { "id": "walk-from-tower", "name": "the walk between Willis Tower and Millennium Park", "between": ["willis-tower", "park"] },
+    { "id": "walk-from-museum", "name": "the walk between the Art Institute and Millennium Park", "between": ["art-institute", "park"] }
+  ],
+  "wants": [],
+  "facts": [
+    { "id": "skydeck-time", "option": "skydeck", "starts_at": "2027-05-15T10:00:00-05:00[America/Chicago]" },
+    { "id": "skydeck-length", "option": "skydeck", "duration": "PT1H30M" },
+    { "id": "skydeck-needs-a-ticket", "option": "skydeck", "needs_right": true },
+    { "id": "alex-skydeck-ticket", "booking": { "option": "skydeck", "covers": ["alex"], "paid": { "amount": "32.00", "currency": "USD", "budget": "trip-money", "by": "alex" } } },
+    { "id": "skydeck-tickets", "offer": { "option": "skydeck", "places": 2, "prices": [{ "amount": "32.00", "currency": "USD" }], "expires": "2027-05-13T17:00:00-05:00[America/Chicago]" } },
+    { "id": "skydeck-is-sold-out-otherwise", "complete": { "rights_to": "skydeck", "offers": ["skydeck-tickets"] } },
+    { "id": "talk-time", "option": "gallery-talk", "starts_at": "2027-05-15T10:30:00-05:00[America/Chicago]" },
+    { "id": "talk-length", "option": "gallery-talk", "duration": "PT1H" },
+    { "id": "talk-is-walk-up", "option": "gallery-talk", "needs_right": false },
+    { "id": "lunch-time", "option": "lunch", "starts_at": "2027-05-15T12:15:00-05:00[America/Chicago]" },
+    { "id": "lunch-length", "option": "lunch", "duration": "PT1H" },
+    { "id": "lunch-table", "option": "lunch", "arrive_before_start": "PT0S" },
+    { "id": "lunch-is-walk-up", "option": "lunch", "needs_right": false },
+    { "id": "walk-from-tower-length", "way": "walk-from-tower", "duration": "PT20M" },
+    { "id": "walk-from-museum-length", "way": "walk-from-museum", "duration": "PT5M" },
+    { "id": "today", "now": "2027-05-14T09:00:00-05:00[America/Chicago]" }
+  ],
+  "decisions": [
+    { "id": "lock-skydeck", "lock": "skydeck", "persons": ["alex", "sam"] },
+    { "id": "lock-gallery-talk", "lock": "gallery-talk", "persons": ["jo"] },
+    { "id": "lock-lunch", "lock": "lunch", "persons": ["alex", "sam", "jo"] }
+  ]
+}

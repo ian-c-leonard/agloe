@@ -341,7 +341,8 @@ class Offer:
     ``price`` is what one place costs. None: nobody knows. An OFFER that names no OBJECT is
     for PERSONs: each place is a right for one PERSON to take part. An OFFER that names
     ``objects`` is for them: each place is a right that covers any one of those OBJECTs, and
-    no PERSON takes it.
+    no PERSON takes it. ``expires`` is when it expires: its places can be bought before that
+    time, and no longer at it. None: nobody has said when it expires.
     """
 
     id: str
@@ -349,6 +350,7 @@ class Offer:
     places: int
     price: Money | None = None
     objects: tuple[str, ...] = ()
+    expires: int | None = None
 
 
 @dataclass(frozen=True)
@@ -731,26 +733,80 @@ class File:
         capped = any(currency == money.currency for _, currency in self.caps)
         return bool(money.amount) and booking.paid.budget is None and capped
 
+    @cached_property
+    def expired(self) -> frozenset[str]:
+        """The OFFERs that have expired by the time now, where the FILE states it.
+
+        An OFFER has expired at the time it states and from then on. With no time now, nobody
+        knows which have expired. Then this holds only an OFFER that expires at the first
+        time a FILE can state: no time now is before that. The lookups of OFFERs that follow
+        leave these out: nobody can take a place of them.
+        """
+        now = self.now()
+        at_least = FIRST_TIME if now is None else now.at
+        return frozenset(
+            fact.id
+            for fact in self.facts
+            if isinstance(fact, Offer) and fact.expires is not None and fact.expires <= at_least
+        )
+
+    def as_of(self, moment: int) -> File:
+        """The same FILE with this moment as the time now, whatever time it states.
+
+        A FILE that states no time now is checked as it is in each stretch of time between
+        two expiries. This is the FILE as it is at one moment of such a stretch. The FACT
+        that states the moment has an id that no record of a FILE can have, and no report
+        names it.
+        """
+        facts = tuple(fact for fact in self.facts if not isinstance(fact, Now))
+        return replace(self, facts=(*facts, Now("(the time now)", moment)))
+
+    def offers_stated(self, option: str) -> tuple[Offer, ...]:
+        """Every OFFER that the FILE states for this OPTION, expired or not, in its order."""
+        return tuple(
+            fact for fact in self.facts if isinstance(fact, Offer) and fact.option == option
+        )
+
+    def dated_offers(self) -> tuple[Offer, ...]:
+        """The OFFERs that state when they expire, expired or not, in the FILE's order."""
+        return tuple(
+            fact for fact in self.facts if isinstance(fact, Offer) and fact.expires is not None
+        )
+
     def offers(self, option: str) -> tuple[Offer, ...]:
-        """The OFFERs for PERSONs to take part in this OPTION, in the FILE's order."""
+        """The OFFERs for PERSONs to take part in this OPTION that have not expired.
+
+        They are in the FILE's order.
+        """
         return self._offers.get(option, ())
 
     def places_on_offer(self, option: str) -> int:
-        """How many PERSONs can still buy a right to this OPTION."""
+        """How many PERSONs can still buy a right to this OPTION, from OFFERs not expired."""
         return sum(offer.places for offer in self.offers(option))
 
     def offers_for(self, option: str, object: str) -> tuple[Offer, ...]:
-        """The OFFERs for this OPTION that name this OBJECT, in the FILE's order."""
+        """The OFFERs for this OPTION that name this OBJECT and have not expired.
+
+        They are in the FILE's order.
+        """
         return self._offers_for.get((option, object), ())
 
     def offers_for_objects(self, option: str) -> tuple[Offer, ...]:
-        """The OFFERs for this OPTION that name OBJECTs, in the FILE's order."""
+        """The OFFERs for this OPTION that name OBJECTs and have not expired.
+
+        They are in the FILE's order.
+        """
         return self._offers_for_objects.get(option, ())
 
     def every_offer(self, option: str) -> tuple[Offer, ...]:
-        """Every OFFER for this OPTION, for PERSONs or for OBJECTs, in the FILE's order."""
+        """Every OFFER for this OPTION that has not expired, in the FILE's order.
+
+        They are for PERSONs or for OBJECTs.
+        """
         return tuple(
-            fact for fact in self.facts if isinstance(fact, Offer) and fact.option == option
+            fact
+            for fact in self.facts
+            if isinstance(fact, Offer) and fact.option == option and fact.id not in self.expired
         )
 
     def offers_open_to(self, option: str, buyer: str) -> tuple[Offer, ...]:
@@ -771,7 +827,7 @@ class File:
     def _offers(self) -> dict[str, tuple[Offer, ...]]:
         found: dict[str, tuple[Offer, ...]] = {}
         for fact in self.facts:
-            if isinstance(fact, Offer) and not fact.objects:
+            if isinstance(fact, Offer) and not fact.objects and fact.id not in self.expired:
                 found[fact.option] = (*found.get(fact.option, ()), fact)
         return found
 
@@ -779,7 +835,7 @@ class File:
     def _offers_for_objects(self) -> dict[str, tuple[Offer, ...]]:
         found: dict[str, tuple[Offer, ...]] = {}
         for fact in self.facts:
-            if isinstance(fact, Offer) and fact.objects:
+            if isinstance(fact, Offer) and fact.objects and fact.id not in self.expired:
                 found[fact.option] = (*found.get(fact.option, ()), fact)
         return found
 
@@ -787,7 +843,7 @@ class File:
     def _offers_for(self) -> dict[tuple[str, str], tuple[Offer, ...]]:
         found: dict[tuple[str, str], tuple[Offer, ...]] = {}
         for fact in self.facts:
-            if isinstance(fact, Offer):
+            if isinstance(fact, Offer) and fact.id not in self.expired:
                 for thing in fact.objects:
                     pair = (fact.option, thing)
                     found[pair] = (*found.get(pair, ()), fact)
@@ -1090,6 +1146,10 @@ class File:
             facts=tuple(fact for fact in self.facts if fact.id != record),
             decisions=tuple(each for each in self.decisions if each.id != record),
         )
+
+
+# The first second that a FILE can state: the start of the year 0001 in UTC.
+FIRST_TIME = -62_135_596_800
 
 
 def instant(text: str) -> int:
@@ -1571,7 +1631,11 @@ def load(document: object) -> File:
             ]
             on_offer = int(fact["offer"]["places"])
             price = next(iter(quoted), None)
-            facts.append(Offer(fact["id"], fact["offer"]["option"], on_offer, price, named))
+            until = fact["offer"].get("expires")
+            expires = None if until is None else when(where, until)
+            facts.append(
+                Offer(fact["id"], fact["offer"]["option"], on_offer, price, named, expires)
+            )
             continue
         if "has" in fact:
             known(where, fact["person"], "PERSON", person_ids)

@@ -14,7 +14,7 @@
 // Nothing here judges a TRIP. Whether everybody who takes part has a right is for the
 // COMPILER to say: the page names who uses a right only where the report does.
 
-import { carriedIn, listed, marksBy, optionsOf, toBuyIn, usesIn } from "./named.js";
+import { carriedIn, expiredIn, listed, marksBy, optionsOf, toBuyIn, usesIn, withExpired } from "./named.js";
 import { paidOf } from "./money.js";
 import { needsARight } from "./who.js";
 
@@ -22,23 +22,29 @@ import { needsARight } from "./who.js";
 const ABOUT_RIGHTS = new Set(["another right", "needs no right", "price", "funding", "charged", "another right for", "needs no right for"]);
 
 /**
- * An OFFER, as the report words it: its places, the OBJECTs that a place can cover, where it
- * names any, and what one place costs.
+ * An OFFER, as the report words it: its places, until when they can be bought, where it
+ * states that, the OBJECTs that a place can cover, where it names any, and what one place
+ * costs. An OFFER that has expired by the time now of the FILE had its places.
  */
 function offerOf(offer) {
   const places = offer.places === 1 ? "1 place" : `${offer.places} places`;
   const price = offer.price === null ? "; nobody knows the price" : `, for ${offer.price.amount} ${offer.price.currency}${offer.places > 1 ? " each" : ""}`;
   const covers = offer.objects.length ? ` to cover ${listed(offer.objects.map((id) => offer.names[id]), "or")}` : "";
-  return `an OFFER with ${places} that can still be bought${covers}${price}`;
+  const until = typeof offer.until === "string" ? ` until ${offer.until}` : "";
+  if (offer.expired === true) return `an OFFER that had ${places} that could be bought${until}${covers}${price}`;
+  // Where the FILE states no time now, nobody knows whether that time has passed.
+  const still = offer.expired === null ? "" : " still";
+  return `an OFFER with ${places} that can${still} be bought${until}${covers}${price}`;
 }
 
 /**
  * Whether the BOOKINGs and the OFFERs under an OPTION are all the rights for a PERSON to take
  * part in it, as the report words it. A right for an OBJECT is another matter.
  */
-function wholeOf(complete) {
+function wholeOf(complete, expired) {
   if (complete === null) return "Another right for a PERSON to take part in it may exist: the FILE does not say that these are all.";
-  const except = complete.offers.length ? `, except from ${listed(complete.offers)}` : "";
+  // The set names an OFFER as long as the FILE holds it: one that has expired is marked.
+  const except = complete.offers.length ? `, except from ${listed(withExpired(complete.offers, expired))}` : "";
   return `The FILE lists every right for a PERSON to take part in it: nobody on the trip holds another or can get one${except}.`;
 }
 
@@ -90,6 +96,8 @@ export function rights(trip, report = null, stated = null) {
   const coveredBy = (option, by) => trip.objects.filter(({ id }) => carried.some((each) => each.object === id && each.covers.some((use) => use.option === option && use.booking === by))).map(({ id }) => id);
   // The OBJECTs that a FACT says an OPTION needs a right for, each with that FACT.
   const needing = (option) => trip.objects.flatMap((each) => each.rights.filter((right) => right.option === option && right.needed).map((right) => ({ id: each.id, name: each.name, record: right.record })));
+  // The OFFERs that have expired by the time now that the FILE states.
+  const expired = expiredIn(trip);
   // The OBJECTs of which a FACT says that the FILE lists every right to an OPTION that
   // covers them, each with that FACT and the OFFERs that it names.
   const closedFor = (option) => trip.objects.flatMap((each) => each.rights_closed.filter((closed) => closed.option === option).map((closed) => ({ name: closed.called, record: closed.record, offers: closed.offers })));
@@ -141,9 +149,9 @@ export function rights(trip, report = null, stated = null) {
           ...marked([offer.id], (need) => need.offer === offer.id || buys(need), "The report names this OFFER in what the FILE does not say."),
         };
       }),
-      whole: wholeOf(each.complete),
+      whole: wholeOf(each.complete, expired),
       // What the FILE says of the rights to it for an OBJECT, as the report words it.
-      closed: closedFor(each.option).map((thing) => `The FILE lists every right to it that covers ${thing.name}: nobody on the trip holds another or can get one${thing.offers.length ? `, except from ${listed(thing.offers)}` : ""}.`),
+      closed: closedFor(each.option).map((thing) => `The FILE lists every right to it that covers ${thing.name}: nobody on the trip holds another or can get one${thing.offers.length ? `, except from ${listed(withExpired(thing.offers, expired))}` : ""}.`),
       // Its own records: the FACT about whether people need a right, the FACT that the
       // FILE lists every right for a PERSON, each FACT that it needs a right for an OBJECT,
       // and each FACT that the FILE lists every right for an OBJECT.
@@ -163,7 +171,7 @@ export function rights(trip, report = null, stated = null) {
   const clash = all.some((each) => each.clash.length > 0);
   const asked = all.some((each) => each.cases.length > 0);
   const says =
-    "The BOOKINGs and the OFFERs of the FILE, each under the OPTION that it gives a right to." +
+    "The BOOKINGs and the OFFERs of the FILE, each under the OPTION that it is for." +
     (clash ? " A red edge marks what the report names among what rules out every plan." : "") +
     (asked ? " A yellow edge marks what the report names in what the FILE does not say." : "");
   return { says, clash, asked, rights: shown };

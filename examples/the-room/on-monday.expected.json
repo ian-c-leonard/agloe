@@ -89,6 +89,7 @@
   "deadlines": [
     {
       "at": "2027-05-12T18:00:00-05:00[America/Chicago]",
+      "kind": "cancelling",
       "booking": "room",
       "option": "night",
       "before": [],
