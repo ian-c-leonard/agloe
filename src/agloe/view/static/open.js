@@ -3,7 +3,9 @@
 //
 // The list is for a person who watches an agent plan a trip. It holds what has to be done or
 // decided: what the COMPILER's report says rules out every plan, the cases in which it says
-// the trip works, what it warns of, and the OPTIONs of a plan that no LOCK decides.
+// the trip works, what it warns of, and the OPTIONs of a plan that no LOCK decides. After
+// those it holds the DEADLINEs that the report lists: the times by which something is to be
+// done or decided, because a cost changes or an OFFER ends.
 //
 // Nothing here judges a TRIP. What rules out every plan, what the FILE does not say and what
 // could go wrong are for the COMPILER to say: each such item is a line of the report, in the
@@ -12,7 +14,7 @@
 // condition that the report states on another line. Which PERSON a LOCK names for an OPTION
 // is in the FILE, and the view sends it with each step.
 
-import { casesIn, listed, ruledOut, someone, toBuyIn } from "./named.js";
+import { casesIn, listed, ruledOut, someone, termsIn, toBuyIn } from "./named.js";
 import { clock, clocksOf, dateName } from "./times.js";
 
 /** When a step of a plan happens: Saturday 15 May 2027, 3:00 pm to 4:00 pm. */
@@ -44,6 +46,10 @@ function whenOf(step) {
  *   under the name of its step.
  * - `choices`, for a plan: each OPTION of the plan with the PERSONs in it whom no LOCK names
  *   for it. The COMPILER chose it for them, and nobody has decided it.
+ * - `deadlines`, for any report that lists DEADLINEs: each one in its line of the report, as
+ *   a drawing of the BOOKING or the OFFER that it is about. The heading is what the report
+ *   says above them: which time it takes as the time now, or that the FILE states none. A
+ *   DEADLINE is a time to keep in view. It is marked "due", and is not counted in `count`.
  *
  * An item has a `name`, what is said of it in `says`, and `when` it happens where it is a
  * step. `of` holds what it is a drawing of, as the page names things: its step, and whatever
@@ -71,19 +77,26 @@ export function open(trip, report = null, stated = null) {
   // Lines that the list takes from the report as they are, each with what it is of.
   const further = (lines) => lines.map((line) => ({ says: line.says, of: line.about, inset: line.inset }));
   const group = (kind, says, items, also = []) => ({ kind, says, items, also: also.map(further) });
+  // The DEADLINEs that the report lists, as the last group of the list. The report as JSON
+  // names the BOOKING or the OFFER of each, and the report in words has a line for each that
+  // is tied to it. Where the two do not agree, the page cannot say which DEADLINEs there are.
+  const named = termsIn(report).deadlines;
+  const lines = stated.deadlines === null ? [] : stated.deadlines.lines;
+  if (lines.length !== named.length || lines.some((line) => line.about.length !== 1)) return none;
+  const due = lines.length ? [group("deadlines", stated.deadlines.over.join("\n"), lines.map((line) => item("", line.says, { of: line.about, mark: "due" })))] : [];
   if (report.answer === "INFEASIBLE") {
     const records = [...ruledOut(report)];
     // The report in words names each of them under one line. Where it does not, the page
     // cannot say what rules out every plan.
     if (!records.length || records.some((id) => typeof stated.records[id] !== "string")) return none;
     const items = records.map((id) => item(id, stated.records[id], { records: [id], mark: "clash" }));
-    return { says: "No plan works.", count: items.length, clash: true, asked: false, groups: [group("conflict", stated.conflict, items, stated.also)] };
+    return { says: "No plan works.", count: items.length, clash: true, asked: false, groups: [group("conflict", stated.conflict, items, stated.also), ...due] };
   }
   if (report.answer === "UNDETERMINED") {
     const cases = casesIn(report);
     if (!cases.length || cases.some((_, n) => typeof stated.cases[n] !== "string")) return none;
     const items = cases.map((_, n) => item("", stated.cases[n], { records: [`case:${n}`], mark: "asked", more: further(stated.under[n] ?? []) }));
-    return { says: "The FILE does not say enough to tell whether this trip works.", count: items.length, clash: false, asked: true, groups: [group("cases", stated.heading ?? "", items, stated.also)] };
+    return { says: "The FILE does not say enough to tell whether this trip works.", count: items.length, clash: false, asked: true, groups: [group("cases", stated.heading ?? "", items, stated.also), ...due] };
   }
   if (report.answer !== "FEASIBLE" || trip.itinerary !== true || !stated.whole) return none;
   const clocks = typeof trip.zone === "string" ? clocksOf(trip.zone) : "";
@@ -100,7 +113,7 @@ export function open(trip, report = null, stated = null) {
     const free = step.option === null ? [] : step.persons.filter((id) => !step.locked.includes(id));
     return free.length ? [item(step.name, listed(free.map((id) => person.get(id))), { when: whenOf(step), of: [String(step.n)] })] : [];
   });
-  const groups = [...(warnings.length ? [group("warnings", stated.explains.join("\n"), warnings)] : []), ...(choices.length ? [group("choices", "No LOCK names these PERSONs for these OPTIONs of the plan:", choices)] : [])];
+  const groups = [...(warnings.length ? [group("warnings", stated.explains.join("\n"), warnings)] : []), ...(choices.length ? [group("choices", "No LOCK names these PERSONs for these OPTIONs of the plan:", choices)] : []), ...due];
   const count = warnings.length + choices.length;
   const says = count ? `${count === 1 ? "1 thing is" : `${count} things are`} open.${clocks}` : "Nothing is open. The report gives no warnings, and a LOCK names each PERSON for every OPTION they take part in.";
   return { says, count, clash: false, asked: warnings.length > 0, groups };
