@@ -549,6 +549,20 @@ def test_a_time_on_another_clock_shows_offsets() -> None:
     assert "  6:00 pm (UTC-6) on Monday 8 November 2027: cancelling room" in said
     file = load(document)
     assert report.clock_for(file, check(file)).offsets
+    # The time now counts by itself: here it is the only time before the clocks change.
+    early = a_night(term(FREE), term(ALL, after), now=before)
+    for fact in early["facts"]:
+        if "starts_at" in fact:
+            fact["starts_at"] = "2027-11-09T23:30:00-06:00[America/Chicago]"
+    assert "uses 9:00 am (UTC-5) on Friday 5 November 2027 as the time now" in words(early)
+    assert "  11:30 pm (UTC-6) to 7:30 am (UTC-6) on 10 November: night, alex" in words(early)
+    # So does a DEADLINE: here it is the only time after they change.
+    late = a_night(term(FREE), term(ALL, after), now="2027-11-05T12:00:00-05:00[America/Chicago]")
+    for fact in late["facts"]:
+        if "starts_at" in fact:
+            fact["starts_at"] = "2027-11-05T13:00:00-05:00[America/Chicago]"
+    assert "  6:00 pm (UTC-6) on Monday 8 November 2027: cancelling room" in words(late)
+    assert "uses 12:00 pm (UTC-5) on Friday 5 November 2027 as the time now" in words(late)
     # A DEADLINE that has passed is not shown, so its time does not count.
     passed = a_night(
         term(FREE),
