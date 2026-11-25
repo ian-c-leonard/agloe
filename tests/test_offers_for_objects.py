@@ -2640,3 +2640,66 @@ def a_meeting_between_two_trains(storage: bool) -> tuple[File, tuple[Step, ...]]
         Step("connection", "b", "c", ("alex",), seconds(11), seconds(11, 30)),
     )
     return file, plan
+
+
+def test_a_place_with_no_price_can_cost_what_the_report_says_and_no_more() -> None:
+    """On random trips with two or three trains, up to three OBJECTs and one OFFER with no
+    price. Where a report asks for that price alone, its plan says what each place of the
+    OFFER can cost: a line of its own, or else an equal share of what the cap has left.
+    With that price in the FILE the trip works, and with one ten-thousandth more it does
+    not."""
+    rng = Random(145)
+    compared = more_than_a_share = 0
+    for _ in range(120):
+        rides: list[Ride] = [ALEX_NORTH, JO_SOUTH]
+        if rng.random() < 0.6:
+            rides.append(ALEX_EAST if rng.random() < 0.5 else ("east", "jo", 10, "c", "d"))
+        things = ["bike", "bag", "box"][: rng.choice([1, 2, 2, 3])]
+        unpriced = f"{rng.choice(rides)[0]}-places"
+        stated = [starts_from("alex", "a"), starts_from("jo", "a")]
+        stated += [each(thing) for thing in things for each in (every_use, every_transfer)]
+        stated += [every_right_for(thing) for thing in things]
+        stated += [
+            has_object(rng.choice(["alex", "jo"]), thing) for thing in things if rng.random() < 0.2
+        ]
+        for train, _, hour, _, _ in rides:
+            name = f"{train}-places"
+            price = None if name == unpriced else f"{rng.choice([5, 10, 20])}.00 USD"
+            stated += [*at(train, hour), offer(train, 3, name, price, objects=things)]
+            stated += [needs_right_for(train, thing) for thing in things]
+            stated += [no_other_right_for(train, thing, name) for thing in things]
+        decisions = [lock(train, rider) for train, rider, _, _, _ in rides]
+        file = trip(
+            ["alex", "jo"],
+            ["a", "b", "c", "d"],
+            [moves(train, origin, to) for train, _, _, origin, to in rides],
+            stated,
+            [*decisions, cap("money", f"{rng.choice([20, 30, 40, 60])}.00 USD")],
+            budgets=[budget("money", "alex", "jo", objects=things)],
+            objects=things,
+            object_rights=True,
+        )
+        found = answers.check(file)
+        asked_for = [[needed.unknown.what for needed in enough] for enough in found.missing]
+        if ["price"] not in asked_for:
+            continue
+        plan = found.plans[asked_for.index(["price"])]
+        (row,) = plan.caps
+        places = sum(cover.by == unpriced for cover in plan.buys)
+        each_can_cost = dict(row.left_for).get(unpriced, row.left // places)
+        compared += 1
+        more_than_a_share += unpriced in dict(row.left_for)
+
+        def at_price(units: int, file: File = file, unpriced: str = unpriced) -> Answer:
+            money = Money(Decimal(units) / 10000, "USD")
+            facts = tuple(
+                replace(fact, price=money)
+                if isinstance(fact, Offer) and fact.id == unpriced
+                else fact
+                for fact in file.facts
+            )
+            return answers.check(replace(file, facts=facts)).answer
+
+        assert at_price(each_can_cost) is Answer.FEASIBLE
+        assert at_price(each_can_cost + 1) is not Answer.FEASIBLE
+    assert compared > 60 and more_than_a_share > 30
