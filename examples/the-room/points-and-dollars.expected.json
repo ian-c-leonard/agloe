@@ -112,7 +112,8 @@
           "amount": "25.00",
           "currency": "USD"
         }
-      ]
+      ],
+      "first_term": false
     }
   ],
   "cancelling_now": [

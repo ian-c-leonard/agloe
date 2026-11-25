@@ -100,7 +100,8 @@
           "amount": "189.00",
           "currency": "USD"
         }
-      ]
+      ],
+      "first_term": false
     }
   ],
   "cancelling_at_any_time": [

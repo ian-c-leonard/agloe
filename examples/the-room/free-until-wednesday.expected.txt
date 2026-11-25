@@ -38,7 +38,7 @@ The plan relies on these FACTs and DECISIONs:
 This report uses 9:00 am on Monday 10 May 2027 as the time now (times in America/Chicago). The FACT today states it.
 
 DEADLINEs after that time, earliest first:
-  6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING for Night at the hotel, starts. The FILE states no cost for it. Cancelling costs nothing in the term before it. The STAKE is unknown.
+  6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING for Night at the hotel, starts. The FILE does not say what cancelling costs in it. It costs nothing in the term before it. The STAKE is unknown.
 
 What cancelling costs now:
   room, the BOOKING for Night at the hotel: nothing

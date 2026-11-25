@@ -77,8 +77,10 @@ const EXPLAINS = "WARNING: ";
  */
 const TERMS = /^(?:This report uses .+ as the time now \(times in .+\)\.|This FILE does not state the time now\.)/;
 
-/** A line of that part for one DEADLINE: a time, and the term for cancelling that starts. */
-const DEADLINE = /^ {2}.+: a term for cancelling .+, the BOOKING for .+, starts\. /;
+/** How the line above the DEADLINEs reads: one where the FILE states the time now, one where it does not. */
+const DEADLINES = /^(?:DEADLINEs after that time, earliest first:|This FILE does not state the time now\. So nobody knows which of its DEADLINEs have passed\. )/;
+/** What a line for one DEADLINE says after its time, up to the id of the BOOKING. */
+const STARTS = ": a term for cancelling ";
 /** The line above what cancelling each BOOKING costs at the time now, and at any time. */
 const COSTS_NOW = "What cancelling costs now:";
 const COSTS_AT_ANY_TIME = "What cancelling costs at any time:";
@@ -344,28 +346,30 @@ export function lines(text, report, trip) {
       under.forEach((at, n) => Object.assign(found[at], { step: steps[n], meets: n }));
     }
   }
-  // The last part of a report says what cancelling costs. A line for each DEADLINE names its
-  // BOOKING after "cancelling", in the order of the report as JSON. Under each of two
-  // headings, a line for each BOOKING starts with its id. One line names the BOOKINGs that
-  // state no terms. Each of these lines is about its BOOKING, only where the words have one
-  // such line for each entry of the report as JSON.
+  // The last part of a report says what cancelling costs. Under the heading of the DEADLINEs,
+  // a line for each one names its BOOKING after its time, in the order of the report as
+  // JSON. Under each of two more headings, a line for each BOOKING starts with its id. One
+  // line names the BOOKINGs that state no terms. Each of these lines is about its BOOKING,
+  // only where the words under a heading are one line for each entry of the report as
+  // JSON, and each names the BOOKING of its entry. A line names its BOOKING before any
+  // name of an OPTION, so a name cannot stand in for it.
   const cancelling = cancellingIn(report);
   const last = found.slice(ends);
-  const starting = last.filter((line) => DEADLINE.test(line.text));
-  const isOf = (line, id) => line.text.includes(`: a term for cancelling ${id}, the BOOKING for `);
-  if (starting.length === cancelling.deadlines.length && starting.every((line, n) => isOf(line, cancelling.deadlines[n]))) {
-    starting.forEach((line, n) => (line.about = [`booking:${cancelling.deadlines[n]}`]));
-  }
-  for (const [heading, ids] of [
-    [COSTS_NOW, cancelling.now],
-    [COSTS_AT_ANY_TIME, cancelling.always],
-  ]) {
-    const heads = last.flatMap((line, at) => (line.text === heading ? [at] : []));
-    const under = (n) => last[heads[0] + 1 + n];
-    if (heads.length === 1 && ids.every((id, n) => under(n) !== undefined && under(n).text.startsWith(`  ${id}, the BOOKING for `))) {
-      ids.forEach((id, n) => (under(n).about = [`booking:${id}`]));
-    }
-  }
+  // The lines set in under the one line that is this heading: none where it is not there once.
+  const setInUnder = (isHeading) => {
+    const heads = last.flatMap((line, at) => (isHeading(line.text) ? [at] : []));
+    const rows = [];
+    for (let at = heads[0] + 1; heads.length === 1 && at < last.length && last[at].text.startsWith("  "); at += 1) rows.push(last[at]);
+    return rows;
+  };
+  const tie = (rows, ids, names) => {
+    if (rows.length === ids.length && rows.every((line, n) => names(line.text, ids[n]))) rows.forEach((line, n) => (line.about = [`booking:${ids[n]}`]));
+  };
+  const afterItsTime = (text, id) => text.includes(STARTS) && text.slice(text.indexOf(STARTS) + STARTS.length).startsWith(`${id}, the BOOKING for `);
+  const atItsStart = (text, id) => text.startsWith(`  ${id}, the BOOKING for `);
+  tie(setInUnder((text) => DEADLINES.test(text)), cancelling.deadlines, afterItsTime);
+  tie(setInUnder((text) => text === COSTS_NOW), cancelling.now, atItsStart);
+  tie(setInUnder((text) => text === COSTS_AT_ANY_TIME), cancelling.always, atItsStart);
   const none = last.filter((line) => line.text === `No terms for cancelling are stated for ${listed(cancelling.none)}.`);
   if (cancelling.none.length && none.length === 1) none[0].about = cancelling.none.map((id) => `booking:${id}`);
   return found;

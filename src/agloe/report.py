@@ -864,7 +864,7 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
             )
             lines += rows
         else:
-            lines[-1] += " The terms for cancelling that it states change at no time."
+            lines[-1] += " Its terms for cancelling have no DEADLINE."
         always = cancelling_at_any_time(file)
         if always:
             lines += ["", "What cancelling costs at any time:"]
@@ -876,11 +876,11 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
         if rows:
             lines += ["", "DEADLINEs after that time, earliest first:", *rows]
         elif costs:
-            lines += ["", "The terms for cancelling that this FILE states change at no later time."]
+            lines += ["", "No DEADLINE comes after that time."]
         if costs:
             lines += ["", "What cancelling costs now:"]
             for id, cost in costs:
-                said = "the FILE states no cost for this time" if cost is None else _loss(cost)
+                said = "the FILE does not say" if cost is None else _loss(cost)
                 lines.append(f"  {held[id]}: {said}")
     unstated = with_no_terms(file)
     if unstated:
@@ -894,17 +894,18 @@ def _change_in_words(found: Deadline) -> str:
     The words are about those two terms and nothing else: a cost holds until the next term
     starts, and another line says what that term states.
     """
-    before = "before it" if found.first else "for the term before it"
+    before = "before it" if found.first else "in the term before it"
     if found.after is None:
-        said = "The FILE states no cost for it"
+        unsaid = "The FILE does not say what cancelling costs in it"
         if found.before is None:
-            return f"{said}, and none {before}. The STAKE is unknown."
-        earlier = f"Cancelling costs {_loss(found.before)} in the term before it"
-        return f"{said}. {earlier}. The STAKE is unknown."
+            return f"{unsaid}, or {before}. The STAKE is unknown."
+        return (
+            f"{unsaid}. It costs {_loss(found.before)} in the term before it. The STAKE is unknown."
+        )
     later = f"Cancelling costs {_loss(found.after)} in it"
     if found.before is None:
         at_stake = "Nothing is at STAKE." if found.stake == () else "The STAKE is unknown."
-        return f"{later}. The FILE states no cost {before}. {at_stake}"
+        return f"{later}. The FILE does not say what it costs {before}. {at_stake}"
     sides = f"{later}, and {_loss(found.before)} in the term before it."
     if found.stake is None:
         # More in one currency and less in another: the two are stated, and nothing is added up.
@@ -947,6 +948,7 @@ def _terms_as_json(file: File) -> dict[str, object]:
             "from_then": amounts(each.after),
             "change": each.change,
             "stake": amounts(each.stake),
+            "first_term": each.first,
         }
         for each in deadlines(file)
     ]

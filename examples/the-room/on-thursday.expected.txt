@@ -37,7 +37,7 @@ The plan relies on these FACTs and DECISIONs:
 
 This report uses 9:00 am on Thursday 13 May 2027 as the time now (times in America/Chicago). The FACT today states it.
 
-The terms for cancelling that this FILE states change at no later time.
+No DEADLINE comes after that time.
 
 What cancelling costs now:
   room, the BOOKING for Night at the hotel: 189.00 USD

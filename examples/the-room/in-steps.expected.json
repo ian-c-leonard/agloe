@@ -104,7 +104,8 @@
           "amount": "50.00",
           "currency": "USD"
         }
-      ]
+      ],
+      "first_term": false
     },
     {
       "at": "2027-05-12T18:00:00-05:00[America/Chicago]",
@@ -128,7 +129,8 @@
           "amount": "139.00",
           "currency": "USD"
         }
-      ]
+      ],
+      "first_term": false
     }
   ],
   "cancelling_now": [

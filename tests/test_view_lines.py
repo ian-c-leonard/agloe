@@ -559,6 +559,27 @@ def test_the_lines_about_cancelling_are_tied_to_their_bookings(tmp_path: Path) -
     )
     other = {**report, "cancelling_now": list(reversed(report["cancelling_now"]))}
     assert all("the BOOKING for" not in text[:30] for text in about({**steps, "report": other}))
+    # Fewer entries for the costs now than the words have lines: none of those lines is tied.
+    partly = {**report, "cancelling_now": report["cancelling_now"][:1]}
+    assert all("the BOOKING for" not in text[:30] for text in about({**steps, "report": partly}))
+    # The name of an OPTION can read like the start of a DEADLINE line. A line names its
+    # BOOKING before that name, and only the lines under the heading are DEADLINEs.
+    odd = json.loads((EXAMPLES / "the-room" / "on-monday.json").read_text())
+    title = "Read: a term for cancelling skydeck-ticket, the BOOKING for night, starts. More"
+    for option in odd["options"]:
+        if option["id"] == "night":
+            option["name"] = title
+    path = tmp_path / "odd.json"
+    path.write_text(json.dumps(odd))
+    asked = asked_of(path)
+    tied = about(asked)
+    assert tied[f"6:00 pm on Wednesday 12 May 2027: {start}"[:60]] == ["booking:room"]
+    assert tied[f'room, the BOOKING for "{title}"'[:60]] == ["booking:room"]
+    renamed = [{**each, "booking": "skydeck-ticket"} for each in asked["report"]["deadlines"]]
+    other_report = {**asked["report"], "deadlines": renamed}
+    mistied = about({**asked, "report": other_report})
+    assert f"6:00 pm on Wednesday 12 May 2027: {start}"[:60] not in mistied
+    assert mistied[f'room, the BOOKING for "{title}"'[:60]] == ["booking:room"]
     # The one line about the BOOKINGs with no terms is about each of them.
     free = asked_of(EXAMPLES / "the-room" / "free-until-wednesday.json")
     assert about(free)["No terms for cancelling are stated for skydeck-ticket."] == [
@@ -573,6 +594,7 @@ def test_the_lines_about_cancelling_are_tied_to_their_bookings(tmp_path: Path) -
     assert about(untimed)["skydeck-ticket, the BOOKING for Skydeck visit: 32.00 USD"] == [
         "booking:skydeck-ticket"
     ]
+    assert about(untimed)[f"6:00 pm on Wednesday 12 May 2027: {start}"[:60]] == ["booking:room"]
     # A BOOKING whose id reads like a number is tied like any other.
     content = json.loads((EXAMPLES / "the-room" / "nobody-said-what-time-it-is.json").read_text())
     for fact in content["facts"]:
