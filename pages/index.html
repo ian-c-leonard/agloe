@@ -553,7 +553,7 @@ The plan relies on these FACTs and DECISIONs:
         <li class="why" id="why-file">
           <div class="stack">
             <h3>A FILE for agents to record a trip as it develops</h3>
-            <p>An agent can read and write far more detail than a person, but it forgets what it learned in an earlier session. People also switch agents. With the plan in a FILE, the next agent or person can open it and carry on.</p>
+            <p>An agent may start a new session without the details from the last one. People also switch agents. With the plan in a FILE, the next agent or person can open it and carry on.</p>
             <p class="small">A FILE is JSON. Its <a href="https://github.com/ian-c-leonard/agloe/blob/main/src/agloe/schema/file.schema.json">published schema</a> defines its structure. People can read it, and software can parse it. An agent updates the FILE as it learns more.</p>
           </div>
           <figure class="grows" id="file-grows">
@@ -600,10 +600,10 @@ The plan relies on these FACTs and DECISIONs:
             <dl>
               <div>
                 <dt data-from="spec/rules.md">A cab is listed, but nobody has recorded how long it takes.</dt>
-                <dd>The cab's travel time is unknown, and the COMPILER does not guess it.</dd>
+                <dd>An agent can leave the travel time out. Alex and Sam can catch their flight if the cab takes 45 minutes or less.</dd>
               </div>
               <div>
-                <dt>The Blue Line is the only way to O'Hare this afternoon.</dt>
+                <dt>From noon to 6:00 pm, only the Blue Line leaves straight for O'Hare.</dt>
                 <dd>An agent can mark the list of direct routes to O'Hare that afternoon as COMPLETE. Without that mark, a faster way might still exist.</dd>
               </div>
               <div>
@@ -616,7 +616,7 @@ The plan relies on these FACTs and DECISIONs:
               </div>
               <div>
                 <dt>Alex and Sam have decided to go up the Skydeck.</dt>
-                <dd>The agent records that DECISION as a LOCK. Alex and Sam visit the Skydeck in every ITINERARY.</dd>
+                <dd>The agent records that DECISION as a LOCK. For the trip to work, Alex and Sam must both visit the Skydeck.</dd>
               </div>
               <div>
                 <dt>From 6:00 pm on Wednesday, cancelling the room costs 189 dollars.</dt>
@@ -646,7 +646,7 @@ The plan relies on these FACTs and DECISIONs:
           <div class="stack">
             <h3>An OPTIMIZER to rank the plans that work</h3>
             <p>The OPTIMIZER is planned for release 0.2 and is not built yet. It will rank the plans that work by how well they meet each traveler's priorities.</p>
-            <p><span data-from="docs/VISION.md">A plan can work and still be wrong for the people on it.</span> Travelers will rank their WANTs. Each ranking of plans will show each PERSON's own SCORE beside the total, and it will flag a plan in which one PERSON's SCORE is much lower than the others'.</p>
+            <p><span data-from="docs/VISION.md">A plan can work and still be wrong for the people on it.</span> Travelers will rank their WANTs. The OPTIMIZER will show each PERSON's SCORE beside the total. It will flag plans where one PERSON scores much lower than the others.</p>
           </div>
           <figure class="defined">
             <figcaption>SCORE, as the vocabulary defines it</figcaption>
