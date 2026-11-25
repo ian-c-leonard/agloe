@@ -1,0 +1,48 @@
+{
+  "persons": [
+    { "id": "alex", "name": "Alex" }
+  ],
+  "places": [
+    { "id": "river-north", "name": "River North" },
+    { "id": "hotel", "name": "the hotel" },
+    { "id": "willis-tower", "name": "Willis Tower" }
+  ],
+  "options": [
+    { "id": "dinner", "name": "Dinner", "place": "river-north" },
+    { "id": "night", "name": "Night at the hotel", "place": "hotel" },
+    { "id": "breakfast", "name": "Breakfast", "place": "hotel" },
+    { "id": "skydeck", "name": "Skydeck visit", "place": "willis-tower" }
+  ],
+  "ways": [
+    { "id": "walk-to-hotel", "name": "the walk between River North and the hotel", "between": ["river-north", "hotel"] },
+    { "id": "walk-to-tower", "name": "the walk between the hotel and Willis Tower", "between": ["hotel", "willis-tower"] }
+  ],
+  "wants": [],
+  "facts": [
+    { "id": "dinner-time", "option": "dinner", "starts_at": "2027-05-14T19:00:00-05:00[America/Chicago]" },
+    { "id": "dinner-length", "option": "dinner", "duration": "PT1H30M" },
+    { "id": "dinner-is-walk-up", "option": "dinner", "needs_right": false },
+    { "id": "night-time", "option": "night", "starts_at": "2027-05-14T23:30:00-05:00[America/Chicago]" },
+    { "id": "night-length", "option": "night", "duration": "PT8H" },
+    { "id": "night-arrival", "option": "night", "arrive_before_start": "PT0S" },
+    { "id": "night-needs-a-room", "option": "night", "needs_right": true },
+    { "id": "room", "booking": { "option": "night", "covers": ["alex"], "cancelling": [{ "costs": [{ "amount": "0.00", "currency": "USD" }] }, { "from": "2027-05-12T18:00:00-05:00[America/Chicago]", "costs": [{ "amount": "189.00", "currency": "USD" }] }] } },
+    { "id": "breakfast-time", "option": "breakfast", "starts_at": "2027-05-15T08:00:00-05:00[America/Chicago]" },
+    { "id": "breakfast-length", "option": "breakfast", "duration": "PT45M" },
+    { "id": "breakfast-arrival", "option": "breakfast", "arrive_before_start": "PT0S" },
+    { "id": "breakfast-is-walk-up", "option": "breakfast", "needs_right": false },
+    { "id": "skydeck-time", "option": "skydeck", "starts_at": "2027-05-15T10:00:00-05:00[America/Chicago]" },
+    { "id": "skydeck-length", "option": "skydeck", "duration": "PT1H30M" },
+    { "id": "skydeck-arrival", "option": "skydeck", "arrive_before_start": "PT0S" },
+    { "id": "skydeck-needs-a-ticket", "option": "skydeck", "needs_right": true },
+    { "id": "skydeck-ticket", "booking": { "option": "skydeck", "covers": ["alex"], "cancelling": [{ "accepted": false }] } },
+    { "id": "walk-to-hotel-length", "way": "walk-to-hotel", "duration": "PT25M" },
+    { "id": "walk-to-tower-length", "way": "walk-to-tower", "duration": "PT15M" }
+  ],
+  "decisions": [
+    { "id": "lock-dinner", "lock": "dinner", "persons": ["alex"] },
+    { "id": "lock-night", "lock": "night", "persons": ["alex"] },
+    { "id": "lock-breakfast", "lock": "breakfast", "persons": ["alex"] },
+    { "id": "lock-skydeck", "lock": "skydeck", "persons": ["alex"] }
+  ]
+}

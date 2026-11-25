@@ -516,12 +516,17 @@
     },
     "term_for_cancelling": {
       "title": "TermForCancelling",
-      "description": "What cancelling a BOOKING costs from one time on. Without `from`, the term holds from when the BOOKING was made: only the first term leaves it out. Without `costs`, nobody has said what cancelling costs while the term holds. A term states a time, a cost or both.",
+      "description": "What cancelling a BOOKING costs from one time on. Without `from`, the term holds from when the BOOKING was made: only the first term leaves it out. A term states a cost, or that the seller accepts no cancellation while it holds, and never both. With neither, nobody has said what cancelling costs while the term holds. A term states something: a time, a cost, or that the seller accepts none.",
       "type": "object",
       "additionalProperties": false,
       "minProperties": 1,
+      "not": { "required": ["costs", "accepted"] },
       "properties": {
         "from": { "$ref": "#/$defs/time" },
+        "accepted": {
+          "description": "Stated as false: the seller accepts no cancellation while the term holds. The BOOKING stays as it is.",
+          "const": false
+        },
         "costs": {
           "description": "What the holder loses by cancelling: one amount for each currency, all of them together. An amount of zero is nothing.",
           "type": "array",
@@ -532,12 +537,17 @@
     },
     "term_for_changing": {
       "title": "TermForChanging",
-      "description": "What the seller charges for a change to a BOOKING from one time on. Without `from`, the term holds from when the BOOKING was made: only the first term leaves it out. Without `costs`, nobody has said what the seller charges while the term holds. A term states a time, a cost or both.",
+      "description": "What the seller charges for a change to a BOOKING from one time on. Without `from`, the term holds from when the BOOKING was made: only the first term leaves it out. A term states a cost, or that the seller accepts no change while it holds, and never both. With neither, nobody has said what the seller charges while the term holds. A term states something: a time, a cost, or that the seller accepts none.",
       "type": "object",
       "additionalProperties": false,
       "minProperties": 1,
+      "not": { "required": ["costs", "accepted"] },
       "properties": {
         "from": { "$ref": "#/$defs/time" },
+        "accepted": {
+          "description": "Stated as false: the seller accepts no change of any kind while the term holds. The BOOKING stays as it is.",
+          "const": false
+        },
         "costs": {
           "description": "The fee for making a change: one amount for each currency, all of them together. An amount of zero is nothing. What the changed BOOKING costs more or less is no part of it.",
           "type": "array",
