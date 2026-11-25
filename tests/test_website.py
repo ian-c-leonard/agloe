@@ -500,8 +500,8 @@ def test_the_file_that_grows_is_one_file_with_records_added() -> None:
     The first two are FILEs of the examples. The second holds every record of the first, and
     each still says what it said. In the third a PERSON has bought a place of an OFFER: the
     FILE has their BOOKING, and the OFFER has one place fewer, as the rules page asks of
-    whoever writes a FILE. The first line of the COMPILER's report on it is the line the
-    page gives.
+    whoever writes a FILE. Both checkers are asked, and the first line of each report on it
+    is the line the page gives.
     """
     figure = re.search(
         r'<figure class="grows" id="file-grows">(.*?)</figure>', SITE_TEXT["index.html"], re.S
@@ -536,8 +536,8 @@ def test_the_file_that_grows_is_one_file_with_records_added() -> None:
     said = re.search(r'<p class="answer-line">(.*?)</p>', steps[2][1], re.S)
     assert said is not None
     file = load(after)
-    report = reports_in.as_text(file, answers.check(file))
-    assert report.splitlines()[0] == html.unescape(said.group(1))
+    for found in (answers.check(file), compiler.check(file)):
+        assert reports_in.as_text(file, found).splitlines()[0] == html.unescape(said.group(1))
 
 
 def test_the_want_and_its_options_are_those_of_the_file() -> None:

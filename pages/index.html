@@ -547,17 +547,17 @@ The plan relies on these FACTs and DECISIONs:
     <div class="wrap">
       <div class="stack">
         <h2 id="why-title">Why Agloe</h2>
-        <p class="lead"><span data-from="docs/VISION.md">AI agents are starting to plan trips.</span> <span data-from="docs/VISION.md">People planning without AI benefit in the same way.</span></p>
+        <p class="lead" data-from="docs/VISION.md">AI agents are starting to plan trips.</p>
       </div>
       <ol class="whys">
         <li class="why" id="why-file">
           <div class="stack">
-            <h3>A file for agents to record a trip as it develops</h3>
-            <p data-from="docs/VISION.md">Agents can read and write far more detail than people, but they forget. Conversations get compressed, sessions end, and people switch agents. The plan must live somewhere lasting that any agent or person can pick up.</p>
-            <p class="small">A FILE is JSON, and a <a href="https://github.com/ian-c-leonard/agloe/blob/main/src/agloe/schema/file.schema.json">published schema</a> defines a valid one. A person can read it, and so can any agent or program. An agent updates the FILE as it learns more.</p>
+            <h3>A FILE for agents to record a trip as it develops</h3>
+            <p>An agent can read and write far more detail than a person, but it forgets what it learned in an earlier session. People also switch agents. With the plan in a FILE, the next agent or person can open it and carry on.</p>
+            <p class="small">A FILE is JSON. Its <a href="https://github.com/ian-c-leonard/agloe/blob/main/src/agloe/schema/file.schema.json">published schema</a> defines its structure. People can read it, and software can parse it. An agent updates the FILE as it learns more.</p>
           </div>
           <figure class="grows" id="file-grows">
-            <figcaption>One FILE at three moments, and what the COMPILER answers</figcaption>
+            <figcaption>One FILE at three moments</figcaption>
             <p class="story" data-from="spec/rules.md">The Skydeck sells tickets for a set time, and Alex bought one for 10:00 am before Sam decided to come. Both are LOCKed into the visit.</p>
             <ol>
               <li data-file="a-ticket/depends-on-a-ticket">
@@ -575,83 +575,82 @@ The plan relies on these FACTs and DECISIONs:
                 <p class="answer-line">FEASIBLE: this trip works.</p>
               </li>
             </ol>
-            <p class="small">The first two are FILEs of <a href="/examples/#a-ticket">the story of a ticket</a>.</p>
+            <p class="small"><a href="/examples/#a-ticket">Skydeck ticket examples</a></p>
           </figure>
         </li>
         <li class="why" id="why-wants">
           <div class="stack">
-            <h3>What the format can express</h3>
-            <p>An agent records what a PERSON wants apart from the OPTIONs that could deliver it. Alex must have deep-dish pizza, and the WANT has no restaurant in it. Each dinner is an OPTION, and a FACT says whether it SATISFIES the WANT.</p>
-            <p>The agent can swap one dinner for another and leave the WANT alone. In another FILE of the story, no dinner on the list works. <span data-from="spec/rules.md">The deep-dish place has no table until 7:45 pm, and a FACT says that dinner at the tavern does not SATISFY the WANT.</span> The COMPILER says what to look for:</p>
+            <h3>What an agent can record in a FILE</h3>
+            <p>An agent records what a PERSON wants apart from the OPTIONs that could deliver it. Alex must have deep-dish pizza, and the WANT has no restaurant in it. Each dinner is an OPTION, and the agent records whether it SATISFIES the WANT.</p>
+            <p>The agent can swap one dinner for another and leave the WANT alone. In another FILE of the story, no dinner on the list works. The 7:45 pm dinner at the deep-dish place ends after the show starts, and the tavern serves no deep-dish pizza. The COMPILER's report then reads:</p>
             <p class="plan-line quoted" data-lines-from="examples/a-must/depends-on-another-place.expected.txt">The trip works if another OPTION that SATISFIES deep-dish pizza is found for Alex.</p>
           </div>
           <figure class="wanted" id="want-and-options" data-file="a-must/works">
-            <figcaption>One WANT and three OPTIONs, in <a href="/examples/#a-must">the story of a must</a></figcaption>
+            <figcaption>One WANT and three OPTIONs</figcaption>
             <p class="want" data-want="deep-dish"><span class="kind">WANT</span><strong>deep-dish pizza</strong><span class="how">a must for Alex</span></p>
             <ul>
               <li class="does" data-option="dinner-pizzeria" data-degree="9"><span class="kind">OPTION</span><strong>Dinner at the deep-dish place</strong><span class="how">SATISFIES it, 9 out of 10</span></li>
               <li data-option="dinner-tavern" data-degree="0"><span class="kind">OPTION</span><strong>Dinner at the tavern</strong><span class="how">does not SATISFY it</span></li>
               <li data-option="blues-show" data-degree="0"><span class="kind">OPTION</span><strong>Blues show</strong><span class="how">does not SATISFY it</span></li>
             </ul>
+            <p class="small"><a href="/examples/#a-must">Deep-dish pizza examples</a></p>
           </figure>
           <div class="also">
             <h4>What else an agent can record</h4>
             <dl>
               <div>
                 <dt data-from="spec/rules.md">A cab is listed, but nobody has recorded how long it takes.</dt>
-                <dd data-from="spec/rules.md">A FACT that the FILE does not state is unknown, unless a COMPLETE set settles it. The COMPILER never fills one in.</dd>
+                <dd>The cab's travel time is unknown, and the COMPILER does not guess it.</dd>
               </div>
               <div>
                 <dt>The Blue Line is the only way to O'Hare this afternoon.</dt>
-                <dd>A FACT can state that a list is COMPLETE. Without that FACT, a faster way might still exist.</dd>
+                <dd>An agent can mark the list of direct routes to O'Hare that afternoon as COMPLETE. Without that mark, a faster way might still exist.</dd>
               </div>
               <div>
                 <dt>The Blue Line can take up to 80 minutes.</dt>
-                <dd>An agent can record a range for a ride that the travelers do not control. <span data-from="spec/rules.md">At 80 minutes they reach O'Hare five minutes after bag drop closes.</span> The report warns that no plan is sure to hold.</dd>
+                <dd>An agent can record a range for a ride that the travelers do not control. <span data-from="spec/rules.md">At 80 minutes they reach O'Hare five minutes after bag drop closes.</span></dd>
               </div>
               <div>
                 <dt>The seller has two places left, at 32.00 USD each.</dt>
-                <dd><span data-from="spec/vocabulary.md">An OFFER grants nothing.</span> A BOOKING secures the right, and the report says who still has to buy.</dd>
+                <dd>An agent records the seller's OFFER apart from a BOOKING. Alex has a BOOKING, and Sam still has to buy a place.</dd>
               </div>
               <div>
                 <dt>Alex and Sam have decided to go up the Skydeck.</dt>
-                <dd>The agent records that DECISION as a LOCK. <span data-from="spec/vocabulary.md">Every ITINERARY must honor every active LOCK.</span></dd>
+                <dd>The agent records that DECISION as a LOCK. Alex and Sam visit the Skydeck in every ITINERARY.</dd>
               </div>
               <div>
                 <dt>From 6:00 pm on Wednesday, cancelling the room costs 189 dollars.</dt>
-                <dd><span data-from="spec/vocabulary.md">A BOOKING records its dated terms, such as what cancelling or changing costs on each date.</span> On Monday the report lists that DEADLINE, with 189 dollars at STAKE.</dd>
+                <dd>An agent can record dated cancellation fees in the BOOKING. On Monday the report lists that DEADLINE, with 189 dollars at STAKE.</dd>
               </div>
             </dl>
           </div>
         </li>
         <li class="why" id="why-compiler">
           <div class="stack">
-            <h3>A compiler to check the whole plan</h3>
-            <p data-from="docs/VISION.md">An agent can seat eight friends at dinner in its head. Seating 800 is different: it needs the guest list written down, the rules codified, and something that checks every seat against every rule. A real trip is the 800 case: many people, legs, bookings and times, all affecting each other.</p>
-            <p>In neuro-symbolic planning, a language model works with symbolic tools, such as a verifier or a solver (<a href="https://arxiv.org/abs/2402.01817">Kambhampati et al., 2024</a>). An agent can write an Agloe FILE, and the COMPILER uses a solver to check it.</p>
-            <p class="small" data-from="docs/VISION.md">The same answer every time, with the reason for every problem it finds.</p>
+            <h3>A COMPILER to check the whole plan</h3>
+            <p>An agent can seat eight friends at dinner in its head. Seating 800 takes a written guest list and a program that checks each seat against each rule. A real trip is like the 800: its people, legs, bookings and times all affect each other.</p>
+            <p><a href="https://arxiv.org/abs/2402.01817">Kambhampati and colleagues (2024)</a> describe a neuro-symbolic approach to planning, in which an outside verifier checks each plan that a language model proposes. An agent can write an Agloe FILE, and the COMPILER uses a solver to check it.</p>
+            <p class="small">The COMPILER gives the same answer each time, with the reason for each problem it finds.</p>
           </div>
           <figure class="meters" id="with-a-solver">
-            <figcaption>Share of 180 trip-planning tasks that GPT-4 solved</figcaption>
+            <figcaption>Share of 180 TravelPlanner tasks solved by each method</figcaption>
             <ul>
-              <li style="--share: 0.6" title="Planning alone, after gathering the information itself: 0.6% of the tasks solved"><span class="who">Planning alone, after gathering the information itself</span><span class="track"><i></i></span><span class="share">0.6%</span></li>
-              <li style="--share: 4.4" title="Planning alone, with the information supplied: 4.4% of the tasks solved"><span class="who">Planning alone, with the information supplied</span><span class="track"><i></i></span><span class="share">4.4%</span></li>
-              <li class="solver" style="--share: 93.3" title="Writing the constraints for a solver, which finds the plan: 93.3% of the tasks solved"><span class="who">Writing the constraints for a solver, which finds the plan</span><span class="track"><i></i></span><span class="share">93.3%</span></li>
+              <li style="--share: 0.6" title="GPT-4 Turbo plans after looking up travel details: 0.6% of the tasks solved"><span class="who">GPT-4 Turbo plans after looking up travel details</span><span class="track"><i></i></span><span class="share">0.6%</span></li>
+              <li style="--share: 4.4" title="GPT-4 Turbo plans with the details supplied: 4.4% of the tasks solved"><span class="who">GPT-4 Turbo plans with the details supplied</span><span class="track"><i></i></span><span class="share">4.4%</span></li>
+              <li class="solver" style="--share: 93.3" title="GPT-4 writes the constraints and the Z3 solver finds a plan: 93.3% of the tasks solved"><span class="who">GPT-4 writes the constraints and the Z3 solver finds a plan</span><span class="track"><i></i></span><span class="share">93.3%</span></li>
             </ul>
             <p class="small">Final pass rates on the validation set of the TravelPlanner benchmark, from Table 1 of <a href="https://arxiv.org/abs/2404.11891">Hao et al., 2024</a>. The first two are results of <a href="https://arxiv.org/abs/2402.01622">Xie et al., 2024</a>.</p>
           </figure>
         </li>
         <li class="why" id="why-optimizer">
           <div class="stack">
-            <h3>An optimizer to rank the plans that work</h3>
+            <h3>An OPTIMIZER to rank the plans that work</h3>
             <p>The OPTIMIZER is planned for release 0.2 and is not built yet. It will rank the plans that work by how well they meet each traveler's priorities.</p>
-            <p data-from="docs/VISION.md">A plan can work and still be wrong for the people on it. Travelers need to state their priorities, so the best version can be found and its trade-offs shown.</p>
-            <p>Each ranking will show each PERSON's own SCORE beside the total. It will flag a plan in which one PERSON trails far behind the others, or loses every choice.</p>
+            <p><span data-from="docs/VISION.md">A plan can work and still be wrong for the people on it.</span> Travelers will rank their WANTs. Each ranking of plans will show each PERSON's own SCORE beside the total, and it will flag a plan in which one PERSON's SCORE is much lower than the others'.</p>
           </div>
           <figure class="defined">
             <figcaption>SCORE, as the vocabulary defines it</figcaption>
             <p data-from="spec/vocabulary.md">A number for one FEASIBLE ITINERARY: for every PERSON and every WANT they hold, the DEGREE OF WANT times the DEGREE OF SATISFACTION the ITINERARY delivers, all added up.</p>
-            <p class="small" data-from="spec/foundation.md">PERSONs rank their own WANTs instead of inventing numbers, and a fixed rule turns each ranking into DEGREEs OF WANT.</p>
           </figure>
         </li>
       </ol>
