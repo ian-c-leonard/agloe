@@ -1106,12 +1106,11 @@ def _cap_rows(file: File, covers: Sequence[Cover], asked: Sequence[str]) -> tupl
         named = tuple(booking for booking, _ in might if booking in asked)
         besides = sum(units or 0 for booking, units in might if booking not in named)
         left = cap.limit.units - paid - besides - sure - most
-        pot = next(each for each in file.budgets if each.id == cap.budget)
         left_for = tuple(
             (cover.option, cover.by, cover.object, left + spared)
             for cover in covers
             if cover.to_buy and cover.price is None and cover.object is not None
-            if cover.object in pot.objects and (spared := _spared_for(mine, cover))
+            if (spared := _spared_for(mine, cover))
         )
         rows.append(CapRow(cap.id, paid, might, named, sure, most, left, left_for))
     return tuple(rows)
@@ -1123,7 +1122,8 @@ def _spared_for(priced: Sequence[Cover], place: Cover) -> int:
     ``priced`` are the purchases that the cap counts. Of an OBJECT that takes places in one
     set of OPTIONs or in another, it counts the set that costs the most. ``place`` has no
     price yet, and it is bought only with the other places of the sets that hold its
-    OPTION. So what the dearest set costs beyond the dearest of those is room for it.
+    OPTION. So what the dearest set costs beyond the dearest of those is room for it. A cap
+    that counts no place of the OBJECT has no such room.
     """
     if not place.together:
         return 0
