@@ -561,6 +561,9 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report(tmp_path: Pat
                     offers += 1
                     said = offer["says"].replace("an OFFER with ", "an OFFER has ", 1)
                     said = said.replace(" that can still", f" for {called} that can still", 1)
+                    # An OFFER that has expired had its places.
+                    said = said.replace("an OFFER that had ", "an OFFER had ", 1)
+                    said = said.replace(" that could be", f" for {called} that could be", 1)
                     assert f"  {offer['id']}: {said}" in words, name
             for right in (*rights["bookings"], *rights["offers"]):
                 # Somebody uses it in the plan exactly where the report says so.

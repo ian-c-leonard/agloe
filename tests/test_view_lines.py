@@ -162,9 +162,13 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
         to_buy = {buy["offer"] for buy in said.get("to_buy", [])}
         in_plans = {buy["offer"] for plan in said.get("plans", []) for buy in plan["buys"]}
         tied_to = {offer for line in found for offer in offers_of(line)}
-        assert tied_to <= to_buy | in_plans, name
-        assert to_buy <= tied_to, name
-        purchases += bool(tied_to)
+        # The last part of a report ties a line to an OFFER too: one that says when the
+        # OFFER expires, and the one that names the OFFERs with no time of expiry.
+        expiring = {each["offer"] for each in said.get("deadlines", []) if "offer" in each}
+        undated = set(said.get("no_expiry_stated", []))
+        assert tied_to <= to_buy | in_plans | expiring | undated, name
+        assert to_buy | expiring | undated <= tied_to, name
+        purchases += bool(tied_to & (to_buy | in_plans))
         # Where the report states the BUDGETs of the FILE, each has its line, in the FILE's
         # order, and that line starts with its name.
         pots = [

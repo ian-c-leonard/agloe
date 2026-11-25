@@ -761,6 +761,12 @@ class File:
         facts = tuple(fact for fact in self.facts if not isinstance(fact, Now))
         return replace(self, facts=(*facts, Now("(the time now)", moment)))
 
+    def offers_stated(self, option: str) -> tuple[Offer, ...]:
+        """Every OFFER that the FILE states for this OPTION, expired or not, in its order."""
+        return tuple(
+            fact for fact in self.facts if isinstance(fact, Offer) and fact.option == option
+        )
+
     def dated_offers(self) -> tuple[Offer, ...]:
         """The OFFERs that state when they expire, expired or not, in the FILE's order."""
         return tuple(

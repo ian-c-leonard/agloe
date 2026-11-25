@@ -392,6 +392,47 @@ def deadlines(file: File) -> tuple[Deadline, ...]:
     return tuple(sorted(found, key=lambda each: each.at))
 
 
+@dataclass(frozen=True)
+class Expiry:
+    """A DEADLINE: the time at which an OFFER expires. Its places can be bought before it."""
+
+    at: int
+    offer: str
+
+
+def expiries(file: File) -> tuple[Expiry, ...]:
+    """The expiries that a report of this FILE lists, earliest first.
+
+    Each OFFER that states when it expires has one. Where the FILE states the time now,
+    these are the ones after it: an OFFER has expired at the time it states. Where it
+    states none, they are all of them. Expiries at one instant come in the FILE's order.
+    """
+    found = [
+        Expiry(offer.expires, offer.id)
+        for offer in file.dated_offers()
+        if offer.expires is not None and offer.id not in file.expired
+    ]
+    return tuple(sorted(found, key=lambda each: each.at))
+
+
+def every_deadline(file: File) -> tuple[Deadline | Expiry, ...]:
+    """Every DEADLINE that a report of this FILE lists, earliest first.
+
+    Those at one instant come in the FILE's order of FACTs, a BOOKING and an OFFER alike.
+    """
+    order = {fact.id: at for at, fact in enumerate(file.facts)}
+
+    def place(found: Deadline | Expiry) -> tuple[int, int]:
+        return found.at, order[found.booking if isinstance(found, Deadline) else found.offer]
+
+    return tuple(sorted([*deadlines(file), *expiries(file)], key=place))
+
+
+def with_no_expiry(file: File) -> tuple[str, ...]:
+    """The OFFERs that do not state when they expire, in the FILE's order."""
+    return tuple(fact.id for fact in file.facts if isinstance(fact, Offer) and fact.expires is None)
+
+
 def _the_same(one: Sequence[Money] | None, other: Sequence[Money] | None) -> bool:
     """Whether two costs are stated and are the same amount in every currency."""
     if one is None or other is None:
@@ -615,8 +656,11 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> 
     ``used`` holds those. In a FILE with a cap it relies on every BOOKING: each says what it
     charged, and that is how each cap is known to hold. It relies on no FACT that the rights
     to an OPTION are COMPLETE. ``used`` also holds the FACTs about CAPABILITIES and about
-    OBJECTs that it relies on. It does not rely on the time now: no CONSTRAINT reads it.
+    OBJECTs that it relies on. It relies on the time now where it takes a place of an OFFER
+    that states when it expires: the place can be bought only before that time.
     """
+    if isinstance(fact, Now):
+        return any(offer.id in used for offer in file.dated_offers())
     if isinstance(fact, Has | Requires | CompleteRequires):
         return fact.id in used
     if isinstance(fact, ObjectStarts | RequiresObject | RefusesObject | WithObject):
@@ -636,7 +680,7 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> 
     if isinstance(fact, StartsFrom):
         in_it = any(fact.person in step.persons for step in itinerary)
         return in_it or bool(has_to_end_at(file, fact.person))
-    if isinstance(fact, Complete | Now):
+    if isinstance(fact, Complete):
         return False
     return fact.option in {step.option or step.way for step in itinerary}
 

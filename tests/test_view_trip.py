@@ -687,6 +687,9 @@ def test_the_rights_to_each_option_are_sent_as_far_as_the_file_says() -> None:
                 # The OBJECTs that its places are for: none, so they are for PERSONs.
                 "objects": [],
                 "names": {},
+                # It states no time of expiry, and has not expired.
+                "until": None,
+                "expired": False,
             }
         ],
         # The FILE does not say that these are all the rights to the visit.
@@ -810,6 +813,8 @@ def test_the_objects_of_the_file_are_sent_with_what_the_file_says_of_each() -> N
             "price": {"amount": "90.00", "currency": "USD"},
             "objects": ["car"],
             "names": {"car": "the car"},
+            "until": None,
+            "expired": False,
         }
     ]
     assert on_offer["objects"][0]["rights_closed"][0]["offers"] == ["car-deck"]
@@ -2100,6 +2105,8 @@ RIGHTS: dict[str, Any] = {
             "price": {"amount": "120.00", "currency": "USD"},
             "objects": [],
             "names": {},
+            "until": None,
+            "expired": False,
         }
     ],
     "complete": {"record": "every-room", "offers": ["rooms"]},

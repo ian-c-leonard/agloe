@@ -1,0 +1,15 @@
+INFEASIBLE: this trip cannot work.
+
+These FACTs and DECISIONs rule out every plan by themselves. Take any one away and they no longer do. A FACT that is taken away leaves what it said unknown. Times are in America/Chicago.
+  skydeck-needs-a-ticket: people need a right to take part in Skydeck visit
+  alex-skydeck-ticket: a BOOKING for Skydeck visit covers Alex
+  skydeck-tickets: an OFFER had 2 places for Skydeck visit that could be bought until 5:00 pm on Thursday 13 May 2027, for 32.00 USD each
+  skydeck-is-sold-out-otherwise: the FILE lists every right for a PERSON to take part in Skydeck visit: nobody on the trip holds another or can get one, except from skydeck-tickets
+  today: the time now is 9:00 am on Friday 14 May 2027
+  lock-skydeck: Alex and Sam take part in Skydeck visit
+
+This report uses 9:00 am on Friday 14 May 2027 as the time now (times in America/Chicago). The FACT today states it.
+
+No DEADLINE comes after that time.
+
+No terms for cancelling are stated for alex-skydeck-ticket.

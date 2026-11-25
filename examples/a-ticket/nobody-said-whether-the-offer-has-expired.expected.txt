@@ -1,0 +1,10 @@
+UNDETERMINED: the FILE does not say enough to tell.
+
+The trip works in any of these cases:
+  1. A right to Skydeck visit is found for Sam.
+  2. It is before 5:00 pm on Thursday 13 May 2027.
+
+This FILE does not state the time now. So nobody knows which of its DEADLINEs have passed. All of them, earliest first (times in America/Chicago):
+  5:00 pm on Thursday 13 May 2027: skydeck-tickets, the OFFER for Skydeck visit, expires. The chance to buy up to 2 places at 32.00 USD each ends.
+
+No terms for cancelling are stated for alex-skydeck-ticket.

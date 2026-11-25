@@ -22,6 +22,7 @@ from agloe.answers import (
     Carried,
     Cover,
     Deadline,
+    Expiry,
     Missing,
     Plan,
     Report,
@@ -29,8 +30,9 @@ from agloe.answers import (
     bought_if_needed,
     cancelling_at_any_time,
     cancelling_now,
-    deadlines,
+    every_deadline,
     right_needed,
+    with_no_expiry,
     with_no_terms,
 )
 from agloe.file import (
@@ -686,6 +688,8 @@ def _times_stated(file: File, records: tuple[str, ...]) -> list[int]:
             times += [] if found.at is None else [found.at]
         elif isinstance(found, Complete):
             times += [found.earliest, found.latest]
+        elif isinstance(found, Offer):
+            times += [] if found.expires is None else [found.expires]
     return times
 
 
@@ -696,7 +700,7 @@ def clock_for(file: File, report: Report) -> Clock:
     moments += _times_stated(file, (*report.relies_on, *report.conflict))
     # The time now and the DEADLINEs are shown with every report of a FILE that states them.
     now = file.now()
-    moments += [each.at for each in deadlines(file)] + ([] if now is None else [now.at])
+    moments += [each.at for each in every_deadline(file)] + ([] if now is None else [now.at])
     moments += [until for until in report.before if until is not None]
     offsets = {local(moment, file.zone).utcoffset() for moment in moments}
     return Clock(file.zone, len(offsets) > 1)
@@ -860,16 +864,19 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
     """
     now = file.now()
     bookings = {fact.id: fact for fact in file.facts if isinstance(fact, Booking)}
-    if now is None and not any(booking.cancelling for booking in bookings.values()):
+    if not _states_terms(file):
         return []
     held = {
         id: f"{id}, the BOOKING for {_name(file, booking.option)}"
         for id, booking in bookings.items()
     }
+    offers = {fact.id: fact for fact in file.facts if isinstance(fact, Offer)}
     rows = [
         f"  {clock.moment(each.at)}: a term for cancelling {held[each.booking]}, starts."
         f" {_change_in_words(each)}"
-        for each in deadlines(file)
+        if isinstance(each, Deadline)
+        else f"  {clock.moment(each.at)}: {_expiry_in_words(file, offers[each.offer])}"
+        for each in every_deadline(file)
     ]
     zone = f"(times in {file.zone})"
     if now is None:
@@ -881,7 +888,7 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
             )
             lines += rows
         else:
-            lines[-1] += " Its terms for cancelling have no DEADLINE."
+            lines[-1] += " Its terms have no DEADLINE."
         always = cancelling_at_any_time(file)
         if always:
             lines += ["", "What cancelling costs at any time:"]
@@ -892,7 +899,7 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
         costs = cancelling_now(file)
         if rows:
             lines += ["", "DEADLINEs after that time, earliest first:", *rows]
-        elif costs:
+        elif costs or file.dated_offers():
             lines += ["", "No DEADLINE comes after that time."]
         if costs:
             lines += ["", "What cancelling costs now:"]
@@ -902,7 +909,39 @@ def _terms_in_words(file: File, clock: Clock) -> list[str]:
     unstated = with_no_terms(file)
     if unstated:
         lines += ["", f"No terms for cancelling are stated for {_listed(unstated)}."]
+    undated = with_no_expiry(file)
+    if undated:
+        lines += ["", f"No time of expiry is stated for {_listed(undated)}."]
     return lines
+
+
+def _states_terms(file: File) -> bool:
+    """Whether a report of this FILE has a last part: the time now, DEADLINEs, terms.
+
+    It has one where the FILE states the time now, terms for cancelling a BOOKING, or when
+    an OFFER expires.
+    """
+    stated = any(isinstance(fact, Booking) and fact.cancelling for fact in file.facts)
+    return file.now() is not None or stated or bool(file.dated_offers())
+
+
+def _expiry_in_words(file: File, offer: Offer) -> str:
+    """What ends when an OFFER expires: the chance to buy its places, at its price.
+
+    Nothing is added up: nobody loses the price of every place by waiting.
+    """
+    one = offer.places == 1
+    places = "1 place" if one else f"up to {offer.places} places"
+    if offer.price is None:
+        price = ""
+    elif not offer.price.amount:
+        price = " at no cost"
+    else:
+        price = f" at {offer.price}{'' if one else ' each'}"
+    ends = f"The chance to buy {places}{price} ends."
+    if offer.price is None:
+        ends += f" The FILE does not state {'its' if one else 'their'} price."
+    return f"{offer.id}, the OFFER for {_name(file, offer.option)}, expires. {ends}"
 
 
 def _change_in_words(found: Deadline) -> str:
@@ -947,7 +986,8 @@ def _terms_as_json(file: File) -> dict[str, object]:
     """
     now = file.now()
     bookings = {fact.id: fact for fact in file.facts if isinstance(fact, Booking)}
-    if now is None and not any(booking.cancelling for booking in bookings.values()):
+    offers = {fact.id: fact for fact in file.facts if isinstance(fact, Offer)}
+    if not _states_terms(file):
         return {}
 
     def amounts(costs: Sequence[Money] | None) -> list[dict[str, str] | None] | None:
@@ -959,6 +999,7 @@ def _terms_as_json(file: File) -> dict[str, object]:
     out["deadlines"] = [
         {
             "at": written(each.at, file.zone),
+            "kind": "cancelling",
             "booking": each.booking,
             "option": bookings[each.booking].option,
             "before": amounts(each.before),
@@ -967,7 +1008,9 @@ def _terms_as_json(file: File) -> dict[str, object]:
             "stake": amounts(each.stake),
             "first_term": each.first,
         }
-        for each in deadlines(file)
+        if isinstance(each, Deadline)
+        else _expiry_as_json(file, each, offers[each.offer])
+        for each in every_deadline(file)
     ]
     costs = cancelling_now(file)
     if costs:
@@ -984,7 +1027,25 @@ def _terms_as_json(file: File) -> dict[str, object]:
     unstated = with_no_terms(file)
     if unstated:
         out["no_terms_for_cancelling"] = list(unstated)
+    undated = with_no_expiry(file)
+    if undated:
+        out["no_expiry_stated"] = list(undated)
     return out
+
+
+def _expiry_as_json(file: File, found: Expiry, offer: Offer) -> dict[str, object]:
+    """One expiry for the report as JSON: the OFFER, its places and its price.
+
+    The price is None where the FILE states none.
+    """
+    return {
+        "at": written(found.at, file.zone),
+        "kind": "expiry",
+        "offer": offer.id,
+        "option": offer.option,
+        "places": offer.places,
+        "price": _money_as_json(offer.price),
+    }
 
 
 def _budgets(file: File, first: str = "") -> list[str]:
@@ -1020,7 +1081,7 @@ def _feasible(file: File, clock: Clock, report: Report) -> list[str]:
         lines = ["FEASIBLE, with a WARNING: this trip works, but not everything is booked yet."]
     else:
         lines = ["FEASIBLE: this trip works."]
-    marks = _marks(file, report)
+    marks = _marks(file, clock, report)
     carried = _carried_in(report)
     day = None
     for number, (step, _) in enumerate(_lines(report.itinerary)):
@@ -1283,7 +1344,7 @@ def _lines(itinerary: Itinerary) -> list[tuple[Step, list[int]]]:
     return lines
 
 
-def _marks(file: File, report: Report) -> dict[int, list[str]]:
+def _marks(file: File, clock: Clock, report: Report) -> dict[int, list[str]]:
     """The WARNINGs about a plan, in words, for each line of the plan.
 
     First who still has to buy a right to an OPTION, and from which OFFER. Then what the plan
@@ -1321,7 +1382,11 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
     marks: dict[int, list[str]] = {}
     # One list of PERSONs and OBJECTs: no two of them show the same name.
     shown = _names([*file.persons, *file.objects], "and")
+    expiries = {each.id: each.expires for each in file.dated_offers()}
     for (option, offer, budget, only_if_needed), covers in _to_buy(file, report).items():
+        # A place of an OFFER that states when it expires has to be bought before then.
+        expires = expiries.get(offer or "")
+        by_when = "" if expires is None else f", before {clock.moment(expires)}"
         buyers = [cover.person for cover in covers if cover.person is not None]
         covered = [cover.object for cover in covers if cover.object is not None]
         one = len(covers) == 1
@@ -1344,7 +1409,7 @@ def _marks(file: File, report: Report) -> dict[int, list[str]]:
             if_needed = " if it needs one" if only_if_needed else ""
             who = _people(file, tuple(buyers))
             mark = f"{who} still {'has' if one else 'have'} to buy a right to this{if_needed}"
-        marks.setdefault(line_of_option[option], []).append(f"{mark}, from {offer}.")
+        marks.setdefault(line_of_option[option], []).append(f"{mark}, from {offer}{by_when}.")
     for (number, constraint, late), persons in together.items():
         who = _people(file, tuple(persons))
         if constraint is Constraint.ARRIVAL and late is not None:
@@ -1401,7 +1466,13 @@ def _timed(clock: Clock, case: str, until: int | None) -> str:
     if until is None:
         return case
     cutoff = f"it is before {clock.moment(until)}"
-    return f"{case}, and {cutoff}" if case else cutoff
+    if not case:
+        return _OwnWords(cutoff)
+    return (
+        _OwnWords(f"{case}, and {cutoff}")
+        if isinstance(case, _OwnWords)
+        else f"{case}, and {cutoff}"
+    )
 
 
 def _case(file: File, enough: Sequence[Missing]) -> str:
@@ -1819,14 +1890,19 @@ def _record(file: File, clock: Clock, record: str) -> str:
     if isinstance(found, Offer):
         each = " each" if found.places > 1 else ""
         price = "; nobody knows the price" if found.price is None else f", for {found.price}{each}"
-        bought = "that can still be bought"
+        # An OFFER that has expired by the time now had its places until then.
+        gone = found.id in file.expired
+        bought = "that could be bought" if gone else "that can still be bought"
+        if found.expires is not None:
+            bought += f" until {clock.moment(found.expires)}"
         if found.objects:
             # Each place covers one of the OBJECTs it names. They are named as a BOOKING
             # names them: no PERSON shows the same name.
             shown = _names([*file.persons, *file.objects], "or")
             named = [shown[thing.id] for thing in file.objects if thing.id in found.objects]
             bought += f" to cover {_listed(named, 'or')}"
-        return f"an OFFER has {_places(found.places)} for {name} {bought}{price}"
+        has = "had" if gone else "has"
+        return f"an OFFER {has} {_places(found.places)} for {name} {bought}{price}"
     if isinstance(found, CompleteRights):
         # Each such FACT says what it is about: the PERSONs who take part, or one OBJECT.
         closed = "nobody on the trip holds another or can get one"

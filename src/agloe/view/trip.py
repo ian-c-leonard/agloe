@@ -194,6 +194,8 @@ _OFFER: _Shape = {
     "price": (dict, _NONE),
     "objects": list,
     "names": dict,
+    "until": (str, _NONE),
+    "expired": bool,
 }
 _MONEY: _Shape = {"amount": str, "currency": str}
 _ALL_RIGHTS: _Shape = {"record": str, "offers": list}
@@ -556,7 +558,8 @@ def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
     for option in file.options:
         need, complete = needs.get(option.id), file.rights_complete(option.id)
         bookings = file.bookings(option.id)
-        offers = file.every_offer(option.id)
+        # Every OFFER that the FILE states: one that has expired is drawn too, and says so.
+        offers = file.offers_stated(option.id)
         # An OPTION that needs a right for an OBJECT has rights to show too.
         ticketed = any(
             file.needs_right_for(option.id, thing.id) is True
@@ -599,6 +602,12 @@ def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
                         "price": None if offer.price is None else _money(offer.price),
                         "objects": [each.id for each in file.objects if each.id in offer.objects],
                         "names": {each: either[each] for each in offer.objects},
+                        # Until when its places can be bought, in the words of a report, and
+                        # whether that time has passed by the time now that the FILE states.
+                        "until": None
+                        if offer.expires is None
+                        else reports.Clock(file.zone, False).moment(offer.expires),
+                        "expired": offer.id in file.expired,
                     }
                     for offer in offers
                 ],

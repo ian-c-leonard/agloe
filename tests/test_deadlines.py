@@ -325,6 +325,7 @@ def test_a_term_with_no_cost_is_a_deadline_also_after_a_time_with_no_cost() -> N
     )
     assert as_json(twice)["deadlines"][1] == {
         "at": WEDNESDAY,
+        "kind": "cancelling",
         "booking": "room",
         "option": "night",
         "before": None,
@@ -599,7 +600,7 @@ def test_with_no_time_now_the_report_says_that_nobody_knows_what_has_passed() ->
 def test_terms_that_never_change_have_no_deadline_with_or_without_a_time() -> None:
     assert words(a_night(term(ALL))).endswith(
         "\n"
-        "This FILE does not state the time now. Its terms for cancelling have no DEADLINE.\n"
+        "This FILE does not state the time now. Its terms have no DEADLINE.\n"
         "\n"
         "What cancelling costs at any time:\n"
         "  room, the BOOKING for night: 189.00 USD\n"
@@ -634,7 +635,7 @@ def test_the_bookings_with_no_terms_come_after_the_others() -> None:
     )
     untimed = words(a_night(term(ALL), others=(a_ticket("spare"),)))
     assert untimed.endswith(
-        "Its terms for cancelling have no DEADLINE.\n"
+        "Its terms have no DEADLINE.\n"
         "\n"
         "What cancelling costs at any time:\n"
         "  room, the BOOKING for night: 189.00 USD\n"
@@ -707,7 +708,7 @@ def test_a_term_that_starts_with_the_same_cost_is_no_deadline_and_the_report_doe
     same = (term([("25", "USD")]), term([("25.00", "USD")], WEDNESDAY))
     timed, untimed = words(a_night(*same, now=MONDAY)), words(a_night(*same))
     assert "\nNo DEADLINE comes after that time.\n" in timed
-    assert "Its terms for cancelling have no DEADLINE.\n" in untimed
+    assert "Its terms have no DEADLINE.\n" in untimed
     assert "change" not in timed + untimed
     assert as_json(a_night(*same))["deadlines"] == []
 
@@ -839,6 +840,7 @@ def test_the_report_as_json_has_the_time_now_and_the_deadlines() -> None:
     assert out["deadlines"] == [
         {
             "at": TUESDAY,
+            "kind": "cancelling",
             "booking": "room",
             "option": "night",
             "before": [],
@@ -849,6 +851,7 @@ def test_the_report_as_json_has_the_time_now_and_the_deadlines() -> None:
         },
         {
             "at": WEDNESDAY,
+            "kind": "cancelling",
             "booking": "room",
             "option": "night",
             "before": [{"amount": "50.00", "currency": "USD"}],
@@ -870,6 +873,7 @@ def test_the_report_as_json_says_what_is_not_stated() -> None:
     assert out["deadlines"] == [
         {
             "at": WEDNESDAY,
+            "kind": "cancelling",
             "booking": "room",
             "option": "night",
             "before": [],

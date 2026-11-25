@@ -22,14 +22,17 @@ import { needsARight } from "./who.js";
 const ABOUT_RIGHTS = new Set(["another right", "needs no right", "price", "funding", "charged", "another right for", "needs no right for"]);
 
 /**
- * An OFFER, as the report words it: its places, the OBJECTs that a place can cover, where it
- * names any, and what one place costs.
+ * An OFFER, as the report words it: its places, until when they can be bought, where it
+ * states that, the OBJECTs that a place can cover, where it names any, and what one place
+ * costs. An OFFER that has expired by the time now of the FILE had its places.
  */
 function offerOf(offer) {
   const places = offer.places === 1 ? "1 place" : `${offer.places} places`;
   const price = offer.price === null ? "; nobody knows the price" : `, for ${offer.price.amount} ${offer.price.currency}${offer.places > 1 ? " each" : ""}`;
   const covers = offer.objects.length ? ` to cover ${listed(offer.objects.map((id) => offer.names[id]), "or")}` : "";
-  return `an OFFER with ${places} that can still be bought${covers}${price}`;
+  const until = typeof offer.until === "string" ? ` until ${offer.until}` : "";
+  if (offer.expired === true) return `an OFFER that had ${places} that could be bought${until}${covers}${price}`;
+  return `an OFFER with ${places} that can still be bought${until}${covers}${price}`;
 }
 
 /**
