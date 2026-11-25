@@ -685,6 +685,12 @@ def test_the_lines_about_changing_are_tied_to_their_bookings(tmp_path: Path) -> 
             ["booking:skydeck-ticket"],
         ),
     ]
+    # The fee at any time is tied by what the report as JSON says of the fee, and of nothing else.
+    report = untimed["report"]
+    no_fee = {key: value for key, value in report.items() if key != "changing_at_any_time"}
+    assert tied({**untimed, "report": no_fee}) == tied(untimed)[:3]
+    no_cost = {key: value for key, value in report.items() if key != "cancelling_at_any_time"}
+    assert tied({**untimed, "report": no_cost}) == [*tied(untimed)[:2], tied(untimed)[3]]
     # A term of each kind for one BOOKING at one instant, beside an OFFER that expires then.
     content = json.loads((EXAMPLES / "the-room" / "a-change.json").read_text())
     wednesday = "2027-05-12T18:00:00-05:00[America/Chicago]"

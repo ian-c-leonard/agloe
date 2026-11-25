@@ -386,7 +386,7 @@ export function lines(text, report, trip) {
   const withNone = [["cancelling or for changing", neither], ...KINDS_OF_TERMS.map((kind) => [kind, terms.none[kind].filter((id) => !neither.includes(id))])];
   for (const [what, ids] of withNone) {
     const none = last.filter((line) => line.text === `No terms for ${what} are stated for ${listed(ids)}.`);
-    if (ids.length && none.length === 1) none[0].about = ids.map((id) => `booking:${id}`);
+    if (none.length === 1) none[0].about = ids.map((id) => `booking:${id}`);
   }
   const undated = last.filter((line) => line.text === `No time of expiry is stated for ${listed(terms.undated)}.`);
   if (terms.undated.length && undated.length === 1) undated[0].about = terms.undated.map((id) => `offer:${id}`);

@@ -95,6 +95,7 @@ def test_the_terms_for_changing_follow_the_rules_of_a_list_of_terms() -> None:
 def test_a_list_of_terms_for_changing_holds_a_term_and_a_term_states_something() -> None:
     assert "/facts/3/booking/changing" in problems(a_room())
     assert "/facts/3/booking/changing/0" in problems(a_room({}))
+    assert "/facts/3/booking/changing/0/costs" in problems(a_room({"costs": []}))
 
 
 def test_a_problem_in_one_list_is_not_said_of_the_other() -> None:
@@ -191,6 +192,10 @@ def test_a_fee_that_never_changes_is_known_at_any_time() -> None:
     flat = load(a_room(term(FEE), cancelling=(term(FREE), term(ALL, WEDNESDAY))))
     assert costs_at_any_time(flat, "changing") == (("room", money(("25.00", "USD"))),)
     assert costs_at_any_time(flat, "cancelling") == ()
+    # A BOOKING that states no terms for cancelling has its fee all the same.
+    alone = load(a_room(term(FEE)))
+    assert costs_at_any_time(alone, "changing") == (("room", money(("25.00", "USD"))),)
+    assert costs_at_any_time(alone, "cancelling") == ()
     rising = load(a_room(term(FREE), term(FEE, TUESDAY), cancelling=(term(ALL),)))
     assert costs_at_any_time(rising, "changing") == ()
     assert costs_at_any_time(rising, "cancelling") == (("room", money(("189.00", "USD"))),)
