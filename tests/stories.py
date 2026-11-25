@@ -174,11 +174,12 @@ def offer(
     id: str | None = None,
     price: str | None = "10.00 USD",
     objects: Sequence[str] = (),
+    expires: str | None = None,
 ) -> Document:
     """An OFFER: this many PERSONs can still buy a right to an OPTION, at this price each.
 
     With no price, nobody knows what a place costs. With ``objects``, the places are for
-    those OBJECTs and not for PERSONs.
+    those OBJECTs and not for PERSONs. ``expires`` is the time at which it expires.
     """
     offered: Document = {"option": option, "places": places}
     if objects:
@@ -186,7 +187,14 @@ def offer(
     if price is not None:
         amount, currency = price.split()
         offered["prices"] = [{"amount": amount, "currency": currency}]
+    if expires is not None:
+        offered["expires"] = expires
     return {"id": id or f"{option}-offer", "offer": offered}
+
+
+def now(hour: int, minute: int = 0, day: int = 15) -> Document:
+    """A FACT that states the time now, on a day of the stories in Chicago."""
+    return {"id": "today", "now": at(hour, minute, day)}
 
 
 def budget(

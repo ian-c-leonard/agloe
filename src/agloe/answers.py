@@ -264,6 +264,11 @@ class Report:
     In a FILE with a cap, a FEASIBLE Report has a row for each cap in ``caps``, and an
     UNDETERMINED one has a plan for each set of ``missing`` in ``plans``, in the same order.
 
+    An UNDETERMINED Report of a FILE that states no time now, and has an OFFER that states
+    when it expires, says in ``before`` until when each set of ``missing`` is enough, in the
+    same order. None: at any time. A set can be empty there: the TRIP works before that
+    time with nothing else found out. Any other Report leaves ``before`` empty.
+
     A FEASIBLE Report says in ``supplies`` who meets each requirement of an OPTION in the
     ITINERARY shown. It says in ``objects`` where each OBJECT is that an OPTION of the
     ITINERARY requires or refuses, or might.
@@ -280,6 +285,7 @@ class Report:
     missing: tuple[tuple[Missing, ...], ...] = ()
     caps: tuple[CapRow, ...] = ()
     plans: tuple[Plan, ...] = ()
+    before: tuple[int | None, ...] = ()
     supplies: tuple[Supply, ...] = ()
     objects: tuple[Carried, ...] = ()
 
@@ -536,9 +542,65 @@ def reports(
         return
     if ahead:
         yield Answer.UNDETERMINED
+    if file.now() is None and file.dated_offers():
+        cases = _by_stretch(file, works, shown, can_work)
+        missing = tuple(some for some, _, _ in cases)
+        before = tuple(until for _, _, until in cases)
+        plans = tuple(_plan(seen, some, shown) for some, seen, _ in cases) if file.caps else ()
+        yield Report(Answer.UNDETERMINED, missing=missing, plans=plans, before=before)
+        return
     missing = _missing(file, works, shown)
     plans = tuple(_plan(file, some, shown) for some in missing) if file.caps else ()
     yield Report(Answer.UNDETERMINED, missing=missing, plans=plans)
+
+
+def as_seen(file: File, before: int | None) -> File:
+    """A FILE that states no time now, as it is in the stretch of time that ends at a moment.
+
+    The times at which its OFFERs expire cut time into stretches, and in each stretch the
+    OFFERs that are open are known. This is the FILE with a time now in the stretch just
+    before ``before``. None: in the last stretch, after every OFFER that states when it
+    expires has expired.
+    """
+    if before is not None:
+        return file.as_of(before - 1)
+    return file.as_of(max(offer.expires or 0 for offer in file.dated_offers()))
+
+
+def _by_stretch(
+    file: File, works: Works, shown: Shown, can_work: CanWork
+) -> list[tuple[tuple[Missing, ...], File, int | None]]:
+    """The cases of a TRIP whose FILE states no time now, each with the time it holds until.
+
+    Nobody knows which OFFERs have expired. So the cases are worked out once for each
+    stretch of time between two expiries, on the FILE as it is in that stretch, from the
+    last stretch to the first. Every purchase that is possible later is possible earlier,
+    so a case of one stretch holds in every stretch before it. Each case is given once, with
+    the latest stretch in which it holds: the FILE as it is there, and the time at which
+    that stretch ends. None: it holds at any time.
+
+    Where the TRIP works in a stretch with nothing else found out, that is a case with no
+    unknown FACT, and no earlier stretch adds one: each would end sooner.
+    """
+    ends = sorted({offer.expires for offer in file.dated_offers() if offer.expires is not None})
+    cases: list[tuple[tuple[Missing, ...], File, int | None]] = []
+    listed: set[frozenset[Unknown]] = set()
+    for until in (None, *reversed(ends)):
+        seen = as_seen(file, until)
+        if works(seen, worst_case(seen)):
+            if until is None:
+                # The worst case of the FILE has every such OFFER closed, as this stretch has.
+                raise AssertionError("the TRIP works after every expiry, and not at worst")
+            cases.append(((), seen, until))
+            break
+        if not can_work(Remaining(seen)):
+            continue
+        for some in _missing(seen, works, shown):
+            asked = frozenset(needed.unknown for needed in some)
+            if asked not in listed:
+                listed.add(asked)
+                cases.append((some, seen, until))
+    return cases
 
 
 def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> bool:

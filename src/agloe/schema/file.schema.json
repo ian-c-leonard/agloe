@@ -558,6 +558,10 @@
               "minItems": 1,
               "maxItems": 1,
               "items": { "$ref": "#/$defs/money" }
+            },
+            "expires": {
+              "description": "When the OFFER expires: its places can be bought before this time, and no longer at it. Left out: nobody has said when it expires.",
+              "$ref": "#/$defs/time"
             }
           }
         }

@@ -25,6 +25,7 @@ from agloe.answers import (
     Missing,
     Plan,
     Report,
+    as_seen,
     bought_if_needed,
     cancelling_at_any_time,
     cancelling_now,
@@ -244,9 +245,15 @@ def as_json(file: File, report: Report) -> dict[str, object]:
         out["at_worst"] = [_broken_as_json(file, report, found) for found in report.at_worst]
     if report.conflict:
         out["conflict"] = list(report.conflict)
-    if report.missing:
+    if report.missing or report.before:
+        # A case that holds only before a time has that time as its last condition.
+        untils = report.before or [None] * len(report.missing)
         out["missing"] = [
-            [_missing_as_json(needed) for needed in enough] for enough in report.missing
+            [
+                *(_missing_as_json(needed) for needed in enough),
+                *([] if until is None else [{"what": "time", "before": written(until, file.zone)}]),
+            ]
+            for enough, until in zip(report.missing, untils, strict=True)
         ]
     if report.caps:
         out["caps"] = [_cap_as_json(file, row) for row in report.caps]
@@ -690,6 +697,7 @@ def clock_for(file: File, report: Report) -> Clock:
     # The time now and the DEADLINEs are shown with every report of a FILE that states them.
     now = file.now()
     moments += [each.at for each in deadlines(file)] + ([] if now is None else [now.at])
+    moments += [until for until in report.before if until is not None]
     offsets = {local(moment, file.zone).utcoffset() for moment in moments}
     return Clock(file.zone, len(offsets) > 1)
 
@@ -724,8 +732,17 @@ def as_text(file: File, report: Report) -> str:
             lines += ["", *_budgets(file)]
     else:
         lines = ["UNDETERMINED: the FILE does not say enough to tell.", ""]
-        cases = [_case(file, enough) for enough in report.missing]
-        plans = [_plan_in_words(file, plan) for plan in report.plans] or [[] for _ in cases]
+        # A FILE that states no time now is seen as it is in the stretch of each case: the
+        # OFFERs that are open there are the ones its words count.
+        untils = report.before or [None] * len(report.missing)
+        seen = [file if not report.before else as_seen(file, until) for until in untils]
+        cases = [
+            _timed(clock, _case(at, enough) if enough else "", until)
+            for at, enough, until in zip(seen, report.missing, untils, strict=True)
+        ]
+        plans = [
+            _plan_in_words(at, plan) for at, plan in zip(seen, report.plans, strict=False)
+        ] or [[] for _ in cases]
         asked = [needed.unknown for enough in report.missing for needed in enough]
         kinds = {unknown.what for unknown in asked}
         # A set with another transfer is not settled, and a report lists such sets only
@@ -1374,6 +1391,17 @@ class _OwnWords(str):
 def _with_a_capital(words: str) -> str:
     """The words as the start of a sentence. A name at the start is left as it is."""
     return f"{words[0].upper()}{words[1:]}" if isinstance(words, _OwnWords) else words
+
+
+def _timed(clock: Clock, case: str, until: int | None) -> str:
+    """A case with the time that it holds until: the last condition of the case.
+
+    A case with no unknown FACT holds before that time and asks nothing else.
+    """
+    if until is None:
+        return case
+    cutoff = f"it is before {clock.moment(until)}"
+    return f"{case}, and {cutoff}" if case else cutoff
 
 
 def _case(file: File, enough: Sequence[Missing]) -> str:

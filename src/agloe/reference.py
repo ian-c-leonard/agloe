@@ -192,7 +192,12 @@ class World:
     OPTION that needs a right: each takes one place of an OFFER. ``payable`` holds each OFFER
     and PERSON where the PERSON can pay for a place of it: the place costs nothing, or a
     BUDGET that lists the PERSON holds the currency of its price. It holds the same for
-    each OFFER and each OBJECT that the OFFER names.
+    each OFFER and each OBJECT that the OFFER names. ``closed`` holds each OFFER that has
+    expired here though the FILE does not say so: where the FILE states no time now, nobody
+    knows which OFFERs have expired, and the worst of the ways has each one closed that
+    states when it expires. Nobody takes a place of a closed OFFER, so ``places`` does not
+    count its places and ``payable`` holds no pair of it. An OFFER that has expired by the
+    time the FILE states is not among the OFFERs of the FILE at all.
 
     ``spent`` says, for each cap by its BUDGET and currency, the most that the BOOKINGs might
     have charged to it in ten-thousandths. None: no upper bound. Each cap has its own sum, so
@@ -255,6 +260,7 @@ class World:
     rights: frozenset[tuple[str, str]] = frozenset()
     places: Mapping[str, int] = field(default_factory=dict[str, int])
     payable: frozenset[tuple[str, str]] = frozenset()
+    closed: frozenset[str] = frozenset()
     spent: Mapping[tuple[str, str], int | None] = field(
         default_factory=dict[tuple[str, str], int | None]
     )
@@ -907,8 +913,16 @@ def _world(
         for thing in file.objects
         if not file.listed(thing.id) and well(Unknown("funding", about=thing.id))
     }
+    # Which OFFERs are open. Where the FILE states the time now, it says so itself. Where it
+    # states none, nobody knows: at best no OFFER has expired, and at worst each one has
+    # that states when it expires. Everything about a place of an OFFER follows from this.
+    shut: frozenset[str] = frozenset()
+    if file.now() is None and not well(Unknown("time")):
+        shut = frozenset(offer.id for offer in file.dated_offers())
     payable: set[tuple[str, str]] = set()
     for offer in (fact for fact in file.facts if isinstance(fact, Offer)):
+        if offer.id in shut or offer.id in file.expired:
+            continue
         price = offer.price
         if price is None:
             free = well(Unknown("price", offer.option, about=offer.id))
@@ -1014,7 +1028,8 @@ def _world(
             if ticket:
                 ticketed.add(pair)
                 if file.booking_for(*pair) is None and not found_one:
-                    (offered if file.offers_for(*pair) else uncovered).add(pair)
+                    on_offer = any(offer.id not in shut for offer in file.offers_for(*pair))
+                    (offered if on_offer else uncovered).add(pair)
             required = file.requires_object(*pair)
             if required is None:
                 required = not well(Unknown("does not require", option.id, about=thing.id))
@@ -1064,8 +1079,12 @@ def _world(
         another_option,
         frozenset(needs_right),
         frozenset(rights),
-        {option.id: file.places_on_offer(option.id) for option in file.options},
+        {
+            option.id: sum(offer.places for offer in file.offers(option.id) if offer.id not in shut)
+            for option in file.options
+        },
         frozenset(payable),
+        shut,
         spent,
         requires,
         frozenset(has),
@@ -1400,7 +1419,7 @@ def _with_no_place(
     the rack alone, at a price that a BUDGET pays for the bike only, the bike has the rack
     and the car has no right.
     """
-    offers = file.offers_for_objects(option)
+    offers = [each for each in file.offers_for_objects(option) if each.id not in world.closed]
     things = [thing for _, thing, _, _ in taking]
     if len(placed(file, world, option, things, offers)) == len(things):
         return []
