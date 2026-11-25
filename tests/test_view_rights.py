@@ -536,10 +536,25 @@ def test_a_booking_says_what_cancelling_and_changing_cost_as_far_as_the_file_say
     assert bookings_of("no-change-on-thursday")["room"]["terms"][1].endswith(
         ", the seller accepts no change."
     )
-    # A BOOKING that states no terms says nothing of them.
+    # A BOOKING that states one kind of terms says nothing of the other.
     assert bookings_of("a-change")["skydeck-ticket"]["terms"] == [
         "What cancelling costs at any time: 32.00 USD."
     ]
+
+
+def test_a_term_that_starts_at_a_time_says_nothing_of_the_time_before(tmp_path: Path) -> None:
+    """The only term of the room starts on Wednesday at six. What cancelling costs before
+    that, the FILE does not say, and neither does the page: such a term holds at no other
+    time."""
+    content = json.loads((EXAMPLES / "the-room" / "on-monday.json").read_text())
+    room = next(fact for fact in content["facts"] if fact["id"] == "room")
+    room["booking"]["cancelling"] = room["booking"]["cancelling"][1:]
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    (shown,) = all_rights([sent], [found], [text])
+    bookings = {booking["id"]: booking for each in shown["rights"] for booking in each["bookings"]}
+    assert bookings["room"]["terms"] == [f"What cancelling costs: from {WEDNESDAY}, 189.00 USD."]
     tickets = rights_of("a-ticket/works")["rights"][0]["bookings"]
     assert [ticket["terms"] for ticket in tickets] == [[], []]
 
