@@ -119,6 +119,16 @@ export function toBuyIn(report) {
   return Array.isArray(stated) && stated.every(isOne) ? stated : [];
 }
 
+/** The OFFERs that have expired by the time now that the FILE states, as the view sends them. */
+export function expiredIn(trip) {
+  return new Set(trip.rights.flatMap((each) => each.offers.filter((offer) => offer.expired === true).map((offer) => offer.id)));
+}
+
+/** These OFFERs by their ids, each marked where it has expired, as the report marks it. */
+export function withExpired(offers, expired) {
+  return offers.map((id) => (expired.has(id) ? `${id} (expired)` : id));
+}
+
 /**
  * What a report says in its last part, by BOOKING and by OFFER. `deadlines` holds each
  * DEADLINE in the report's order: the `booking` whose term for cancelling starts, or the

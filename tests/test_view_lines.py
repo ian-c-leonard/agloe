@@ -22,7 +22,24 @@ import pytest
 from agloe import compiler, report
 from agloe.file import File, parse, read
 from agloe.view.trip import shown
-from tests.stories import EXAMPLES, budget, needs_right, offer
+from tests.stories import (
+    EXAMPLES,
+    at,
+    budget,
+    cutoff,
+    every_use,
+    has_object,
+    lasts,
+    lock,
+    moves,
+    needs_right,
+    needs_right_for,
+    no_other_right_for,
+    offer,
+    starts_at,
+    starts_from,
+    trip,
+)
 from tests.test_offers_for_objects import a_crossing, car_deck, two_trains
 
 FILES = sorted(
@@ -636,6 +653,33 @@ def test_the_lines_about_an_offer_that_expires_are_tied_to_it(tmp_path: Path) ->
     }
     (purchase,) = [line for line in found if line["warns"]]
     assert purchase["text"].endswith(", before 5:00 pm on Thursday 13 May 2027.")
+
+
+def test_cases_are_tied_under_a_heading_that_says_some_are_not_settled() -> None:
+    """A bike on a train: another transfer might help at any time, and the rack until Thursday."""
+    facts = [
+        starts_at("train", 6),
+        lasts("train", "PT1H"),
+        cutoff("train", "PT0S"),
+        starts_from("alex", "home"),
+        has_object("alex", "bike"),
+        every_use("bike"),
+        needs_right_for("train", "bike"),
+        offer("train", 1, "rack", "0.00 USD", objects=["bike"], expires=at(17, day=13)),
+        no_other_right_for("train", "bike", "rack"),
+    ]
+    file = trip(
+        ["alex"],
+        ["home", "town"],
+        [moves("train", "home", "town")],
+        facts,
+        [lock("train", "alex")],
+        objects=["bike"],
+    )
+    asked = asked_about(file)
+    assert "The trip works, or might work, in any of these cases:\n" in asked["text"]
+    (found,) = lines_of([asked])
+    assert [line["case"] for line in found if line["case"] is not None] == [0, 1]
 
 
 def test_what_the_report_says_is_charged_to_a_cap_is_kept_in_its_own_words(

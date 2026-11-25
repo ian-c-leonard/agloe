@@ -14,7 +14,7 @@
 // Nothing here judges a TRIP. Whether everybody who takes part has a right is for the
 // COMPILER to say: the page names who uses a right only where the report does.
 
-import { carriedIn, listed, marksBy, optionsOf, toBuyIn, usesIn } from "./named.js";
+import { carriedIn, expiredIn, listed, marksBy, optionsOf, toBuyIn, usesIn, withExpired } from "./named.js";
 import { paidOf } from "./money.js";
 import { needsARight } from "./who.js";
 
@@ -36,9 +36,6 @@ function offerOf(offer) {
   const still = offer.expired === null ? "" : " still";
   return `an OFFER with ${places} that can${still} be bought${until}${covers}${price}`;
 }
-
-/** These OFFERs by their ids, each marked where it has expired, as the report marks it. */
-const withExpired = (offers, expired) => offers.map((id) => (expired.has(id) ? `${id} (expired)` : id));
 
 /**
  * Whether the BOOKINGs and the OFFERs under an OPTION are all the rights for a PERSON to take
@@ -100,7 +97,7 @@ export function rights(trip, report = null, stated = null) {
   // The OBJECTs that a FACT says an OPTION needs a right for, each with that FACT.
   const needing = (option) => trip.objects.flatMap((each) => each.rights.filter((right) => right.option === option && right.needed).map((right) => ({ id: each.id, name: each.name, record: right.record })));
   // The OFFERs that have expired by the time now that the FILE states.
-  const expired = new Set(trip.rights.flatMap((each) => each.offers.filter((offer) => offer.expired === true).map((offer) => offer.id)));
+  const expired = expiredIn(trip);
   // The OBJECTs of which a FACT says that the FILE lists every right to an OPTION that
   // covers them, each with that FACT and the OFFERs that it names.
   const closedFor = (option) => trip.objects.flatMap((each) => each.rights_closed.filter((closed) => closed.option === option).map((closed) => ({ name: closed.called, record: closed.record, offers: closed.offers })));
@@ -174,7 +171,7 @@ export function rights(trip, report = null, stated = null) {
   const clash = all.some((each) => each.clash.length > 0);
   const asked = all.some((each) => each.cases.length > 0);
   const says =
-    "The BOOKINGs and the OFFERs of the FILE, each under the OPTION that it gives a right to." +
+    "The BOOKINGs and the OFFERs of the FILE, each under the OPTION that it is for." +
     (clash ? " A red edge marks what the report names among what rules out every plan." : "") +
     (asked ? " A yellow edge marks what the report names in what the FILE does not say." : "");
   return { says, clash, asked, rights: shown };

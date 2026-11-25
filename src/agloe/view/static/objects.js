@@ -22,7 +22,7 @@
 // and nobody who has it can take part. That is what the two FACTs mean in every TRIP. An
 // OPTION that carries the OBJECT and refuses it still carries it, from no PERSON.
 
-import { atHandFor, carriedIn, either, listed, marksBy, togetherIn } from "./named.js";
+import { atHandFor, carriedIn, either, expiredIn, listed, marksBy, togetherIn, withExpired } from "./named.js";
 import { clock, clocksOf } from "./times.js";
 import { whoIsIn } from "./who.js";
 
@@ -293,7 +293,7 @@ export function objects(trip, report = null, stated = null) {
         ),
         // Each OPTION of which a FACT says that the FILE lists every right for the OBJECT,
         // as the report words it.
-        ...thing.rights_closed.map((each) => `The FILE lists every right to ${each.name} that covers it: nobody on the trip holds another or can get one${each.offers.length ? `, except from ${listed(each.offers)}` : ""}.`),
+        ...thing.rights_closed.map((each) => `The FILE lists every right to ${each.name} that covers it: nobody on the trip holds another or can get one${each.offers.length ? `, except from ${listed(withExpired(each.offers, expiredIn(trip)))}` : ""}.`),
       ],
       // An OBJECT's own records: the FACT about where it is when the TRIP starts, the FACTs
       // that the FILE states every OPTION that requires it or refuses it, every one that

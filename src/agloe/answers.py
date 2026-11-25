@@ -622,16 +622,18 @@ def _by_stretch(
     comes with its plan, as the FILE is in that stretch.
 
     A case says more than which FACTs it asks for: how long a length of time can be, what
-    an OPTION can require, what each cap has left. An earlier stretch can allow more of
-    those, with the same FACTs. So a case is left out only where a later stretch has one
-    that says the same, in all of that. Then the later one holds for longer.
+    an OPTION can require, who buys which place, what another transfer has to do, what
+    each cap has left. An earlier stretch can differ in any of those, with the same FACTs.
+    So a case is left out only where a later stretch has the very same case, in all of
+    that: then the later one holds for longer. Nothing is worked out about one case
+    covering another, so a report can list a case that asks more than another one does.
 
     Where the TRIP works in a stretch with nothing else found out, that is a case with no
     unknown FACT, and no earlier stretch adds one: each would end sooner.
     """
     ends = sorted({offer.expires for offer in file.dated_offers() if offer.expires is not None})
     cases: list[tuple[tuple[Missing, ...], Plan | None, int | None]] = []
-    said: set[tuple[tuple[tuple[Unknown, int | None, str | None], ...], Plan | None]] = set()
+    listed: set[tuple[tuple[Missing, ...], Plan | None]] = set()
     for until in (None, *reversed(ends)):
         if until is not None and until <= FIRST_TIME:
             # No time now is before the first time a FILE can state: this stretch is empty.
@@ -647,12 +649,8 @@ def _by_stretch(
             continue
         for some in _missing(seen, works, shown):
             plan = _plan(seen, some, shown) if file.caps else None
-            # What the case says: its FACTs with their limits, and what each cap has left.
-            # Who buys which place is one plan of many, and no part of what it says.
-            states = tuple((needed.unknown, needed.at_most, needed.of) for needed in some)
-            rows = None if plan is None else replace(plan, buys=())
-            if (states, rows) not in said:
-                said.add((states, rows))
+            if (some, plan) not in listed:
+                listed.add((some, plan))
                 cases.append((some, plan, until))
     return cases
 

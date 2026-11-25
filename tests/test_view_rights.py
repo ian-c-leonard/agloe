@@ -24,7 +24,7 @@ STORY = EXAMPLES / "a-ticket"
 FILES = sorted(
     path for path in EXAMPLES.rglob("*.json") if not path.name.endswith(".expected.json")
 )
-SAYS = "The BOOKINGs and the OFFERs of the FILE, each under the OPTION that it gives a right to."
+SAYS = "The BOOKINGs and the OFFERs of the FILE, each under the OPTION that it is for."
 RED = " A red edge marks what the report names among what rules out every plan."
 YELLOW = " A yellow edge marks what the report names in what the FILE does not say."
 NEEDED = "People need a right to take part."

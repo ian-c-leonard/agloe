@@ -39,7 +39,7 @@ const TO_BUY = /^ {4}! .+ still ha(?:s|ve) to buy a right to this( if it needs o
  */
 const TO_COVER = /^ {4}! A right to this (might )?still ha(?:s|ve) to be bought for .+, from .+\.$/;
 /** How the line starts that gives one plan for a case: who buys which place. */
-const ONE_PLAN = "One plan that works then: ";
+const ONE_PLAN = /^One plan that (?:works|might work) then: /;
 /** How the line starts that says which places of an OBJECT are bought together at most. */
 const TOGETHER = "Of the places for ";
 
@@ -237,7 +237,7 @@ export function lines(text, report, trip) {
       found[next].under = line.case;
       if (!free(found[next])) continue;
       const words = found[next].text.trimStart();
-      if (words.startsWith(ONE_PLAN)) found[next].about = offers.map((offer) => `offer:${offer}`);
+      if (ONE_PLAN.test(words)) found[next].about = offers.map((offer) => `offer:${offer}`);
       if (words.startsWith(TOGETHER)) together.push(found[next]);
       const cap = caps.find((id) => words.startsWith(`${id}, on `));
       if (cap !== undefined) found[next].about = [`cap:${cap}`];

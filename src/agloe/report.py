@@ -743,11 +743,6 @@ def as_text(file: File, report: Report) -> str:
             _timed(clock, _case(at, enough) if enough else "", until)
             for at, enough, until in zip(seen, report.missing, untils, strict=True)
         ]
-        plans = [
-            _plan_in_words(at, plan) for at, plan in zip(seen, report.plans, strict=False)
-        ] or [[] for _ in cases]
-        asked = [needed.unknown for enough in report.missing for needed in enough]
-        kinds = {unknown.what for unknown in asked}
         # A set with another transfer is not settled. Among the sets of one stretch of time,
         # a report lists such sets only where it lists no other. A FILE that states no time
         # now can have a settled case in one stretch and an unsettled one in another.
@@ -756,6 +751,12 @@ def as_text(file: File, report: Report) -> str:
             for number, enough in enumerate(report.missing, 1)
             if any(needed.unknown.what == "another transfer" for needed in enough)
         ]
+        plans = [
+            _plan_in_words(at, plan, number not in unsettled)
+            for number, (at, plan) in enumerate(zip(seen, report.plans, strict=False), 1)
+        ] or [[] for _ in cases]
+        asked = [needed.unknown for enough in report.missing for needed in enough]
+        kinds = {unknown.what for unknown in asked}
         works = "works"
         if unsettled:
             works = "might work" if len(unsettled) == len(cases) else "works, or might work,"
@@ -842,6 +843,15 @@ def as_text(file: File, report: Report) -> str:
                 lines[-1] += " A place of which a line above says what it can cost has that much."
         if _turns_on_who_pays(report):
             one_way = "Who buys which place is from one plan that works in that case. "
+            if report.missing and any(
+                needed.unknown.what == "another transfer"
+                for enough in report.missing
+                for needed in enough
+            ):
+                one_way = (
+                    "Who buys which place is from one plan for that case: it works, or might"
+                    " work where the case is not settled. "
+                )
             lines += ["", *_budgets(file, one_way)]
         if "another option" in kinds:
             lines += [
@@ -1485,7 +1495,8 @@ def _timed(clock: Clock, case: str, until: int | None) -> str:
     """
     if until is None:
         return case
-    cutoff = f"it is before {clock.moment(until)}"
+    # The case is said again where no other line names the clocks, so it names them itself.
+    cutoff = f"it is before {clock.moment(until)} ({clock.zone})"
     if not case:
         return _OwnWords(cutoff)
     return (
@@ -1981,8 +1992,11 @@ def _charged_to(cap: Cap, cover: Cover) -> bool:
     return cover.budget == cap.budget and price is not None and price.currency == cap.limit.currency
 
 
-def _plan_in_words(file: File, plan: Plan) -> list[str]:
-    """One plan for a set of unknown FACTs: who buys what, and the sum for each cap."""
+def _plan_in_words(file: File, plan: Plan, settled: bool = True) -> list[str]:
+    """One plan for a set of unknown FACTs: who buys what, and the sum for each cap.
+
+    Where the set is not settled, nobody has worked out whether the plan works.
+    """
     pots = _names(file.budgets)
     buys: list[str] = []
     for cover in plan.buys:
@@ -2007,7 +2021,8 @@ def _plan_in_words(file: File, plan: Plan) -> list[str]:
             place += ", if the OPTION needs a right"
         buys.append(place)
     nothing = "nobody buys a place from an OFFER of this FILE"
-    lines = [f"One plan that works then: {'; '.join(buys) or nothing}."]
+    works = "works" if settled else "might work"
+    lines = [f"One plan that {works} then: {'; '.join(buys) or nothing}."]
     shown = _names([*file.persons, *file.objects], "and")
     lines += [
         _together_in_words(file, shown[thing], sets) for thing, sets in _together(plan.buys).items()

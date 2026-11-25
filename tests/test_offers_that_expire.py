@@ -263,7 +263,7 @@ def test_with_no_time_now_the_answer_is_what_holds_at_every_time() -> None:
     assert any(len(set(each)) == 3 for each in seen)
 
 
-def test_each_case_holds_just_before_its_time_and_no_longer_at_it() -> None:
+def test_each_case_holds_just_before_its_time() -> None:
     timed = untimed = 0
     for file in generated(200, with_now=False, seed=17):
         found = answers.check(file)
@@ -274,16 +274,39 @@ def test_each_case_holds_just_before_its_time_and_no_longer_at_it() -> None:
             asked = [needed.unknown for needed in enough]
             seen_at = as_seen(file, until)
             assert any_works(seen_at, with_these_at_best(seen_at, asked))
-            if until is None:
-                untimed += 1
-                continue
-            timed += 1
-            # At that time the OFFERs that expire then are closed, and the case is not enough.
-            later = file.as_of(until)
-            assert not any_works(later, with_these_at_best(later, asked))
+            timed += until is not None
+            untimed += until is None
         # A case with no unknown FACT is the last one: no earlier stretch adds to it.
         assert all(enough for enough in found.missing[:-1])
     assert timed > 10 and untimed > 10
+
+
+def test_the_cases_with_no_time_now_are_those_of_the_file_in_each_stretch() -> None:
+    """Checked the slow way: the FILE with a time in each stretch, from the last to the first.
+
+    A case of an earlier stretch is left out only where a later one has the very same case.
+    """
+    several = 0
+    for file in generated(200, with_now=False, seed=19):
+        found = answers.check(file)
+        if found.answer is not Answer.UNDETERMINED:
+            continue
+        ends = sorted({offer.expires for offer in file.dated_offers() if offer.expires is not None})
+        expected: list[tuple[Any, Any, int | None]] = []
+        for until in (None, *reversed(ends)):
+            at = answers.check(as_seen(file, until))
+            if at.answer is Answer.FEASIBLE:
+                expected.append(((), None, until))
+                break
+            plans = at.plans or (None,) * len(at.missing)
+            for some, plan in zip(at.missing, plans, strict=True):
+                if all((some, plan) != (other, its) for other, its, _ in expected):
+                    expected.append((some, plan, until))
+        assert [(some, until) for some, _, until in expected] == list(
+            zip(found.missing, found.before, strict=True)
+        )
+        several += len({until for _, _, until in expected}) > 1
+    assert several > 10
 
 
 # The FILEs of the review of the words.
@@ -310,8 +333,8 @@ def test_two_offers_with_no_price_each_have_their_own_time() -> None:
         ([("price", "early")], instant(WEDNESDAY)),
     ]
     said = report.as_text(file, found)
-    assert "and it is before 5:00 pm on Thursday 13 May 2027" in said
-    assert "and it is before 5:00 pm on Wednesday 12 May 2027" in said
+    assert "and it is before 5:00 pm on Thursday 13 May 2027 (America/Chicago)" in said
+    assert "and it is before 5:00 pm on Wednesday 12 May 2027 (America/Chicago)" in said
 
 
 def test_a_case_shows_the_purchase_and_the_cap_of_its_own_stretch() -> None:
@@ -333,7 +356,9 @@ def test_a_case_shows_the_purchase_and_the_cap_of_its_own_stretch() -> None:
     (plan,) = found.plans
     assert [(cover.person, cover.by) for cover in plan.buys] == [("sam", "dear")]
     said = report.as_text(file, found)
-    assert "The trip works if it is before 5:00 pm on Thursday 13 May 2027." in said
+    assert (
+        "The trip works if it is before 5:00 pm on Thursday 13 May 2027 (America/Chicago)." in said
+    )
     assert "dear" in said and "from cheap" not in said
 
 
@@ -535,7 +560,7 @@ def test_the_report_as_json_has_the_expiry_and_the_time_of_a_case() -> None:
     )
     (case,) = as_json(two)["missing"]
     assert [each["what"] for each in case] == ["price", "time"]
-    assert "and it is before 5:00 pm on Thursday 13 May 2027." in said(two)
+    assert "and it is before 5:00 pm on Thursday 13 May 2027 (America/Chicago)." in said(two)
 
 
 def test_the_times_of_expiry_count_for_the_offsets() -> None:
@@ -665,7 +690,8 @@ def test_an_earlier_stretch_can_allow_a_longer_duration() -> None:
     ]
     words = said(file)
     assert "visit takes 1 h or less" in words
-    assert "visit takes 2 h or less, and it is before 5:00 pm on Thursday 13 May 2027" in words
+    until = "it is before 5:00 pm on Thursday 13 May 2027 (America/Chicago)"
+    assert f"visit takes 2 h or less, and {until}" in words
 
 
 def test_an_earlier_stretch_can_leave_more_of_a_cap() -> None:
@@ -693,7 +719,7 @@ def test_an_earlier_stretch_can_leave_more_of_a_cap() -> None:
     assert [(cover.person, cover.by) for cover in early.buys] == [("sam", "cheap")]
     assert [row.left for row in late.caps] == [50000]
     assert [row.left for row in early.caps] == [320000]
-    # The same condition in two stretches is listed once, with the later one.
+    # The same receipt and the same price from another OFFER, in an earlier stretch.
     no_cheaper = [
         offer("tour", 1, id="cheap", price="30.00 USD", expires=WEDNESDAY)
         if fact["id"] == "cheap"
@@ -701,7 +727,8 @@ def test_an_earlier_stretch_can_leave_more_of_a_cap() -> None:
         for fact in facts
     ]
     same = trip(EVERYONE, ["dock"], [stays("tour", "dock")], no_cheaper, decisions, rights=True)
-    assert checked(same).before == (None,)
+    # Another purchase is another case, though it leaves the cap as much.
+    assert checked(same).before == (None, instant(WEDNESDAY))
 
 
 def test_an_offer_that_expires_at_the_first_time_a_file_can_state_is_open_at_no_time() -> None:
@@ -713,6 +740,14 @@ def test_an_offer_that_expires_at_the_first_time_a_file_can_state_is_open_at_no_
         every_right("tour", "tour-offer"),
     )
     assert checked(file).answer is Answer.INFEASIBLE
+    # With another OFFER that might still be open, no case is about the time before that.
+    two = a_boat_tour(
+        offer("tour", 1, id="never", expires=first),
+        offer("tour", 1, id="late", expires=THURSDAY),
+    )
+    found = checked(two)
+    assert found.answer is Answer.UNDETERMINED
+    assert set(found.before) == {None, instant(THURSDAY)}
 
 
 def test_a_report_says_which_of_its_cases_are_not_settled() -> None:
@@ -744,7 +779,7 @@ def test_a_report_says_which_of_its_cases_are_not_settled() -> None:
     assert found.before == (None, instant(THURSDAY))
     words = said(file)
     assert "The trip works, or might work, in any of these cases:\n" in words
-    assert "  2. It is before 5:00 pm on Thursday 13 May 2027.\n" in words
+    assert "  2. It is before 5:00 pm on Thursday 13 May 2027 (America/Chicago).\n" in words
     assert "\nCase 1 is not settled. What the FILE lists does not do that for bike" in words
     assert "These cases are not settled" not in words
     # With the time now stated, every case is of one kind.

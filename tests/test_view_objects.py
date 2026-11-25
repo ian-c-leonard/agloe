@@ -852,7 +852,7 @@ def test_an_object_says_whether_its_options_are_all_there_are() -> None:
     )
 
 
-def test_an_object_says_where_the_file_lists_every_right_for_it() -> None:
+def test_an_object_says_where_the_file_lists_every_right_for_it(tmp_path: Path) -> None:
     """The car deck is sold out: a FACT says that the FILE lists every right to the ferry
     that covers the car. The card of the car says so in the words of the report, and it is
     marked, because the report names that FACT among what rules out every plan."""
@@ -878,6 +878,18 @@ def test_an_object_says_where_the_file_lists_every_right_for_it() -> None:
     )
     assert car["whole"][-1] == said
     assert f"  every-place-for-the-car: t{said[1:-1]}".replace("it:", "the car:", 1) in text
+    # An OFFER that has expired is marked, as the report marks it.
+    content = json.loads(short.read_text())
+    for fact in content["facts"]:
+        if fact["id"] == "car-deck":
+            fact["offer"]["expires"] = "2027-07-15T17:00:00-05:00[America/Chicago]"
+    content["facts"].append({"id": "today", "now": "2027-07-16T09:00:00-05:00[America/Chicago]"})
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    (car,) = all_objects([sent], [found], [text])[0]["objects"]
+    assert car["whole"][-1] == said.replace("car-deck.", "car-deck (expired).")
+    assert "except from car-deck (expired)\n" in text
 
 
 def test_an_object_says_which_offer_it_takes_a_place_of_in_a_plan(tmp_path: Path) -> None:
