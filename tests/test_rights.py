@@ -154,7 +154,10 @@ def test_facts_about_rights_are_checked_like_every_other_fact() -> None:
     assert problems(every_right("cruise")) == "/facts/3: cruise is not an OPTION in this FILE"
     assert problems(booking("tour", "pat")) == "/facts/3: pat is not a PERSON in this FILE"
     assert problems(booking("tour", "alex", "alex")) == "/facts/3: alex is covered more than once"
-    nobody = "/facts/3: fits no known shape; the closest miss: [] should be non-empty"
+    nobody = (
+        "/facts/3: fits no known shape; the closest miss: at /facts/3/booking/covers, []"
+        " should be non-empty"
+    )
     assert problems(booking("tour")) == nobody
     maybe = {"id": "maybe", "option": "tour", "needs_right": "yes"}
     assert problems(maybe).endswith("'yes' is not of type 'boolean'")
@@ -354,9 +357,8 @@ def test_a_missing_right_makes_a_trip_infeasible_where_the_rights_are_complete()
     assert found.conflict == conflict
     assert has_no_record_to_spare(file, conflict)
     whole = "nobody on the trip holds another or can get one"
-    assert (
-        in_words(file)[-2] == f"  every-right-to-tour: the FILE lists every right to tour: {whole}"
-    )
+    stated = "the FILE lists every right for a PERSON to take part in tour"
+    assert in_words(file)[-2] == f"  every-right-to-tour: {stated}: {whole}"
 
 
 def test_a_conflict_holds_every_booking_for_the_option() -> None:

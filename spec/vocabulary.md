@@ -60,7 +60,7 @@ Describes a set that a FACT states the FILE holds in full: a set of OPTIONs and 
 
 - Everything that goes straight from one PLACE to another and starts within a stated time span. Nothing unlisted does. The FACT can name both PLACEs, one of them, or neither, and a PLACE it does not name stands for every PLACE.
 - Every OPTION that SATISFIES a stated WANT. Each one is in the FILE, with a FACT that it SATISFIES the WANT. Nothing else does.
-- Every right anybody on the TRIP holds or can get for a PERSON to take part in a stated OPTION. The BOOKINGs in the FILE secure those that are held. Nobody on the TRIP can get another, except by a place of an OFFER that the FACT names.
+- Every right anybody on the TRIP holds or can get to a stated OPTION, for PERSONs to take part or for one stated OBJECT. The BOOKINGs in the FILE secure those that are held. Nobody on the TRIP can get another, except by a place of an OFFER that the FACT names.
 - Every OPTION of the FILE that requires a stated CAPABILITY. Each one has a FACT that says so. An OPTION of the FILE with no such FACT does not require it.
 - Every OPTION of the FILE that requires or refuses a stated OBJECT. Each one has a FACT that says so. An OPTION of the FILE with no such FACT does neither.
 - Every OPTION that hands a stated OBJECT over, keeps it or carries it. Each one is in the FILE, with a FACT that says so. Nothing else transfers the OBJECT.
@@ -113,9 +113,9 @@ A physical thing with a position that OPTIONs may require, refuse or move: a ren
 
 ### BUDGET
 
-A store of one or more currencies that OPTIONs, OFFERs and BOOKINGs draw on: money, loyalty points, energy. A BUDGET belongs to one PERSON or is shared by several, and states which PERSONs may draw on it. Each currency either has a limit or is unlimited. Limits never mix currencies: no conversion ever decides whether a limit is kept. A currency may refill on a stated event, as energy does with a night's sleep; money never refills.
+A store of one or more currencies that OPTIONs, OFFERs and BOOKINGs draw on: money, loyalty points, energy. A BUDGET belongs to one PERSON or is shared by several, and lists the PERSONs who may draw on it and the OBJECTs whose places it may pay for. Each currency either has a limit or is unlimited. Limits never mix currencies: no conversion ever decides whether a limit is kept. A currency may refill on a stated event, as energy does with a night's sleep; money never refills.
 
-*Uses:* PERSON, → OPTION, → OFFER, → BOOKING.
+*Uses:* PERSON, → OBJECT, → OPTION, → OFFER, → BOOKING.
 
 ---
 

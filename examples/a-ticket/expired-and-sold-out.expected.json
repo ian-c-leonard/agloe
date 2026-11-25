@@ -1,0 +1,22 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "skydeck-needs-a-ticket",
+    "alex-skydeck-ticket",
+    "skydeck-tickets",
+    "skydeck-is-sold-out-otherwise",
+    "today",
+    "lock-skydeck"
+  ],
+  "now": {
+    "fact": "today",
+    "at": "2027-05-14T09:00:00-05:00[America/Chicago]"
+  },
+  "deadlines": [],
+  "no_terms_for_cancelling": [
+    "alex-skydeck-ticket"
+  ],
+  "no_terms_for_changing": [
+    "alex-skydeck-ticket"
+  ]
+}

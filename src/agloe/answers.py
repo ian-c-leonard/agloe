@@ -13,6 +13,7 @@ from enum import Enum
 from itertools import chain, combinations
 
 from agloe.file import (
+    FIRST_TIME,
     Booking,
     Cap,
     Complete,
@@ -21,6 +22,7 @@ from agloe.file import (
     CompleteRequires,
     CompleteRequiresObject,
     CompleteRights,
+    CompleteRightsFor,
     CompleteTransfers,
     Fact,
     File,
@@ -28,6 +30,7 @@ from agloe.file import (
     Lock,
     Money,
     NeedsRightFor,
+    Now,
     ObjectStarts,
     Offer,
     RefusesObject,
@@ -35,6 +38,7 @@ from agloe.file import (
     RequiresObject,
     Start,
     StartsFrom,
+    Term,
     WithObject,
 )
 from agloe.reference import (
@@ -57,6 +61,8 @@ from agloe.reference import (
     longest_case,
     no_better_than,
     one_way_each,
+    places_taken,
+    taking_a_place,
     unknowns,
     way_to_pay,
     whereabouts,
@@ -82,14 +88,26 @@ class Cover:
     ``by`` is the id of a BOOKING, or of an OFFER from which the PERSON takes a place. A place
     is ``to_buy``: nothing secures it until a BOOKING does. It has a ``price``, and the
     ``budget`` that pays it. A price of nothing has no BUDGET.
+
+    A place that covers an OBJECT names the ``object``, and no PERSON. ``might`` says that
+    the OBJECT only might be in the OPTION: nobody knows where it is, or whether the OPTION
+    takes it along. The place has to be bought only if the OBJECT is there.
+
+    ``together`` comes with a place for an OBJECT that takes places in one set of OPTIONs
+    or in another, and never in two of the sets: nobody knows where it is, and it is in one
+    place at a time. It holds each set, with the OPTIONs in the order of the plan. A cap
+    counts the set that costs the most.
     """
 
     option: str
-    person: str
+    person: str | None
     by: str
     to_buy: bool
     price: Money | None = None
     budget: str | None = None
+    object: str | None = None
+    might: bool = False
+    together: tuple[tuple[str, ...], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -129,10 +147,16 @@ class CapRow:
     might have charged it besides, with the amount where the FILE states one, and None where
     the BOOKING states no payment. ``asked`` holds those among them whose charge a set of
     unknown FACTs asks about. ``to_buy`` is what the plan buys from it, and ``if_needed`` the
-    most it buys besides, if OPTIONs turn out to need a right. ``left`` is what the cap still
+    most it buys besides, if OPTIONs turn out to need a right or an OBJECT turns out to be
+    there: ``bought_if_needed`` says which purchases that counts. ``left`` is what the cap still
     allows after all of that, with each BOOKING in ``might`` counted in full unless the set
     asks about it. Whatever else comes to be charged to the cap has to fit in it. The
     amounts are whole ten-thousandths of the cap's currency.
+
+    ``left_for`` is for an OFFER with no price yet whose places cover OBJECTs: the OFFER,
+    and what the cap allows for each place that the plan takes of it, where that is more
+    than an equal share of ``left``. The cap counts the set of an OBJECT's places that
+    costs the most, and a place is bought only with the others of its own sets.
     """
 
     cap: str
@@ -142,6 +166,7 @@ class CapRow:
     to_buy: int
     if_needed: int
     left: int
+    left_for: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -193,7 +218,8 @@ class Use:
 
     ``check`` is "needs a right for" where the OPTION needs a right for the OBJECT, or
     might, and a PERSON who takes part has the OBJECT, or it is handed over or carried
-    there. ``by`` is then the BOOKING that covers the OBJECT.
+    there. ``by`` is then the BOOKING that covers the OBJECT. Where none does, ``offer`` is
+    the OFFER that the OBJECT takes a place of there.
     """
 
     option: str
@@ -201,6 +227,7 @@ class Use:
     where: tuple[Where, ...]
     check: str = "requires"
     by: str | None = None
+    offer: str | None = None
 
 
 @dataclass(frozen=True)
@@ -238,6 +265,11 @@ class Report:
     In a FILE with a cap, a FEASIBLE Report has a row for each cap in ``caps``, and an
     UNDETERMINED one has a plan for each set of ``missing`` in ``plans``, in the same order.
 
+    An UNDETERMINED Report of a FILE that states no time now, and has an OFFER that states
+    when it expires, says in ``before`` until when each set of ``missing`` is enough, in the
+    same order. None: at any time. A set can be empty there: the TRIP works before that
+    time with nothing else found out. Any other Report leaves ``before`` empty.
+
     A FEASIBLE Report says in ``supplies`` who meets each requirement of an OPTION in the
     ITINERARY shown. It says in ``objects`` where each OBJECT is that an OPTION of the
     ITINERARY requires or refuses, or might.
@@ -254,6 +286,7 @@ class Report:
     missing: tuple[tuple[Missing, ...], ...] = ()
     caps: tuple[CapRow, ...] = ()
     plans: tuple[Plan, ...] = ()
+    before: tuple[int | None, ...] = ()
     supplies: tuple[Supply, ...] = ()
     objects: tuple[Carried, ...] = ()
 
@@ -261,6 +294,296 @@ class Report:
 type Shown = Callable[[File, World], Itinerary | None]
 type Works = Callable[[File, World], bool]
 type CanWork = Callable[[Remaining], bool]
+
+
+@dataclass(frozen=True)
+class Deadline:
+    """A DEADLINE: the time at which a term of a BOOKING starts, for cancelling or for changing.
+
+    ``after`` is what cancelling costs in that term, and ``before`` what it costs in the
+    term before it: one amount for each currency, and none where it costs nothing. None: the
+    FILE states no cost there. ``first`` says that the term is the first of its list, so
+    that the FILE states nothing of the time before it. The two costs are never the same
+    stated cost.
+
+    ``kind`` is "cancelling" or "changing". For a term for changing, the two costs are what
+    the seller charges for a change: the fee alone.
+
+    ``refused_after`` says that the term that starts states that the seller accepts no
+    cancellation, or no change, and ``refused_before`` that the term before it states so.
+    Such a term states no cost. The two terms never both state it.
+    """
+
+    at: int
+    booking: str
+    before: tuple[Money, ...] | None
+    after: tuple[Money, ...] | None
+    first: bool = False
+    kind: str = "cancelling"
+    refused_before: bool = False
+    refused_after: bool = False
+
+    @property
+    def change(self) -> str:
+        """How the cost changes: it "rises", "falls" or "differs", or a side is not stated.
+
+        It differs where it is more in one currency and less in another: amounts in different
+        currencies are never added or compared.
+
+        Where the seller accepts none in the term that starts, the chance "ends" after a
+        term that states a cost, and nothing is stated before otherwise. Where the seller
+        accepted none in the term before, the chance "starts" with a stated cost.
+        """
+        if self.refused_after:
+            return "ends" if self.before is not None else "not stated before"
+        if self.refused_before:
+            return "starts" if self.after is not None else "not stated from then"
+        if self.before is None or self.after is None:
+            sides = [(self.before, "before"), (self.after, "from then")]
+            return "not stated " + " or ".join(side for cost, side in sides if cost is None)
+        more, less = _more_and_less(self.before, self.after)
+        if more and less:
+            return "differs"
+        return "rises" if more else "falls"
+
+    @property
+    def stake(self) -> tuple[Money, ...] | None:
+        """The STAKE: what cancelling costs more once the DEADLINE has passed, or the fee.
+
+        Empty: nothing. That is so where the cost falls, and wherever it is nothing
+        in the new term, whatever it was before. None: unknown, because the FILE states no
+        cost on one side or on both, or not one sum, because the cost is more in one currency
+        and less in another.
+
+        Where the seller accepts none in the term that starts, it is None: after a term with
+        a stated cost a chance is lost, and the FILE gives that no amount. Where the seller
+        accepted none in the term before, nothing is at STAKE: there was nothing to do
+        before the DEADLINE.
+        """
+        if self.refused_after:
+            return None
+        if self.refused_before or self.after == ():
+            return ()
+        if self.before is None or self.after is None:
+            return None
+        more, less = _more_and_less(self.before, self.after)
+        if less:
+            return None if more else ()
+        return more
+
+
+def _more_and_less(
+    before: Sequence[Money], after: Sequence[Money]
+) -> tuple[tuple[Money, ...], bool]:
+    """What the later cost has more of, by currency, and whether it has less of any.
+
+    An amount in a currency that the earlier cost does not have is more by all of it, as the
+    FILE states it.
+    """
+    was = {each.currency: each for each in before}
+    now = {each.currency: each for each in after}
+    more = tuple(
+        each.less(was[each.currency]) if each.currency in was else each
+        for each in after
+        if each.currency not in was or each.units > was[each.currency].units
+    )
+    less = any(each.currency not in now or each.units > now[each.currency].units for each in before)
+    return more, less
+
+
+# The two lists of terms that a BOOKING can state, in the order a report names them.
+KINDS_OF_TERMS = ("cancelling", "changing")
+
+
+def deadlines(file: File) -> tuple[Deadline, ...]:
+    """The DEADLINEs that a report of this FILE lists, earliest first.
+
+    The time of a term for cancelling is a DEADLINE, unless the FILE states the same cost for
+    that term and for the one before it. A term with no stated cost is one, also after a term
+    with none: the terms change there, and nobody has said how. Before a first term that
+    states its time, the FILE states nothing. The terms for changing give DEADLINEs in the
+    same way, apart from those for cancelling.
+
+    Where the FILE states the time now, these are the DEADLINEs after it. One at that very
+    time has passed: its term holds already. Where it states none, they are all of them.
+    DEADLINEs at one instant come in the FILE's order of BOOKINGs, and those of one BOOKING
+    with cancelling first.
+    """
+    now = file.now()
+    found: list[Deadline] = []
+    for fact in file.facts:
+        if not isinstance(fact, Booking):
+            continue
+        for kind in KINDS_OF_TERMS:
+            held: Term | None = None
+            for term in fact.terms(kind):
+                before = None if held is None else held.costs
+                changes = not _say_the_same(held, term)
+                if term.since is not None and changes and (now is None or term.since > now.at):
+                    was_refused = held is not None and held.refused
+                    found.append(
+                        Deadline(
+                            term.since,
+                            fact.id,
+                            before,
+                            term.costs,
+                            held is None,
+                            kind,
+                            was_refused,
+                            term.refused,
+                        )
+                    )
+                held = term
+    return tuple(sorted(found, key=lambda each: each.at))
+
+
+@dataclass(frozen=True)
+class Expiry:
+    """A DEADLINE: the time at which an OFFER expires. Its places can be bought before it."""
+
+    at: int
+    offer: str
+
+
+def expiries(file: File) -> tuple[Expiry, ...]:
+    """The expiries that a report of this FILE lists, earliest first.
+
+    Each OFFER that states when it expires has one. Where the FILE states the time now,
+    these are the ones after it: an OFFER has expired at the time it states. Where it
+    states none, they are all of them. Expiries at one instant come in the FILE's order.
+    """
+    found = [
+        Expiry(offer.expires, offer.id)
+        for offer in file.dated_offers()
+        if offer.expires is not None and offer.id not in file.expired
+    ]
+    return tuple(sorted(found, key=lambda each: each.at))
+
+
+def every_deadline(file: File) -> tuple[Deadline | Expiry, ...]:
+    """Every DEADLINE that a report of this FILE lists, earliest first.
+
+    Those at one instant come in the FILE's order of FACTs, a BOOKING and an OFFER alike.
+    """
+    order = {fact.id: at for at, fact in enumerate(file.facts)}
+
+    def place(found: Deadline | Expiry) -> tuple[int, int]:
+        return found.at, order[found.booking if isinstance(found, Deadline) else found.offer]
+
+    return tuple(sorted([*deadlines(file), *expiries(file)], key=place))
+
+
+def with_no_expiry(file: File) -> tuple[str, ...]:
+    """The OFFERs that do not state when they expire, in the FILE's order."""
+    return tuple(fact.id for fact in file.facts if isinstance(fact, Offer) and fact.expires is None)
+
+
+def _the_same(one: Sequence[Money] | None, other: Sequence[Money] | None) -> bool:
+    """Whether two costs are stated and are the same amount in every currency."""
+    if one is None or other is None:
+        return False
+    return {each.currency: each.units for each in one} == {
+        each.currency: each.units for each in other
+    }
+
+
+def _say_the_same(one: Term | None, other: Term) -> bool:
+    """Whether a term and the one before it state the same thing.
+
+    Both say that the seller accepts none, or both state the same cost. A term with no
+    stated cost is the same as no other: nobody has said what it holds.
+    """
+    if one is None:
+        return False
+    if one.refused or other.refused:
+        return one.refused == other.refused
+    return _the_same(one.costs, other.costs)
+
+
+def _holding_now(file: File, kind: str) -> list[tuple[str, Term | None]]:
+    """The term of each BOOKING with terms that holds at the time now, in the FILE's order.
+
+    It is the last one that has started. None: none has. Empty where the FILE does not
+    state the time now.
+    """
+    now = file.now()
+    if now is None:
+        return []
+    holding: list[tuple[str, Term | None]] = []
+    for fact in file.facts:
+        if isinstance(fact, Booking) and fact.terms(kind):
+            held = None
+            for term in fact.terms(kind):
+                if term.since is None or term.since <= now.at:
+                    held = term
+            holding.append((fact.id, held))
+    return holding
+
+
+def costs_now(file: File, kind: str) -> tuple[tuple[str, tuple[Money, ...] | None], ...]:
+    """What cancelling each BOOKING with terms costs at the time now, in the FILE's order.
+
+    It is the cost of the term that holds at that time: the last one that has started. None:
+    the FILE states no cost for that time. Empty where the FILE does not state the time now.
+    ``kind`` is "cancelling", or "changing" for what the seller charges for a change.
+    """
+    return tuple(
+        (id, None if held is None else held.costs) for id, held in _holding_now(file, kind)
+    )
+
+
+def not_accepted_now(file: File, kind: str) -> tuple[str, ...]:
+    """The BOOKINGs whose seller accepts no cancellation at the time now, or no change.
+
+    The term that holds at that time says so. They are among those of ``costs_now``, with
+    no cost. ``kind`` is "cancelling" or "changing".
+    """
+    return tuple(id for id, held in _holding_now(file, kind) if held is not None and held.refused)
+
+
+def costs_at_any_time(file: File, kind: str) -> tuple[tuple[str, tuple[Money, ...]], ...]:
+    """What cancelling costs for each BOOKING whose terms state one cost for all time.
+
+    Its first term holds from when the BOOKING was made, and every term states that same
+    cost. So a report can say what cancelling it costs though the FILE does not state the
+    time now. They come in the FILE's order. ``kind`` is "cancelling", or "changing" for
+    what the seller charges for a change.
+    """
+    costs: list[tuple[str, tuple[Money, ...]]] = []
+    for fact in file.facts:
+        if isinstance(fact, Booking) and fact.terms(kind):
+            first = fact.terms(kind)[0]
+            same = all(_the_same(first.costs, term.costs) for term in fact.terms(kind))
+            if first.since is None and first.costs is not None and same:
+                costs.append((fact.id, first.costs))
+    return tuple(costs)
+
+
+def not_accepted_at_any_time(file: File, kind: str) -> tuple[str, ...]:
+    """The BOOKINGs whose seller accepts no cancellation at any time, or no change.
+
+    The first term holds from when the BOOKING was made, and every term says that the
+    seller accepts none. They come in the FILE's order. ``kind`` is "cancelling" or
+    "changing".
+    """
+    return tuple(
+        fact.id
+        for fact in file.facts
+        if isinstance(fact, Booking)
+        and fact.terms(kind)
+        and fact.terms(kind)[0].since is None
+        and all(term.refused for term in fact.terms(kind))
+    )
+
+
+def with_no_terms(file: File, kind: str) -> tuple[str, ...]:
+    """The BOOKINGs that state no terms of one kind, in the FILE's order.
+
+    ``kind`` is "cancelling" or "changing".
+    """
+    return tuple(
+        fact.id for fact in file.facts if isinstance(fact, Booking) and not fact.terms(kind)
+    )
 
 
 def check(
@@ -326,7 +649,7 @@ def reports(
                 break
         rights = _covers(file, worst, chosen)
         supplies, brought = _supplied(file, chosen)
-        objects, held = _carried(file, worst, chosen)
+        objects, held = _carried(file, worst, chosen, rights)
         used = {cover.by for cover in rights} | brought | held
         relies_on = [fact.id for fact in file.facts if _relied_on(file, chosen, fact, used)]
         relies_on += [want.id for want in file.wants if want.musts or want.must_nots]
@@ -360,9 +683,75 @@ def reports(
         return
     if ahead:
         yield Answer.UNDETERMINED
+    if file.now() is None and file.dated_offers():
+        cases = _by_stretch(file, works, shown, can_work)
+        missing = tuple(some for some, _, _ in cases)
+        before = tuple(until for _, _, until in cases)
+        plans = tuple(plan for _, plan, _ in cases if plan is not None)
+        yield Report(Answer.UNDETERMINED, missing=missing, plans=plans, before=before)
+        return
     missing = _missing(file, works, shown)
     plans = tuple(_plan(file, some, shown) for some in missing) if file.caps else ()
     yield Report(Answer.UNDETERMINED, missing=missing, plans=plans)
+
+
+def as_seen(file: File, before: int | None) -> File:
+    """A FILE that states no time now, as it is in the stretch of time that ends at a moment.
+
+    The times at which its OFFERs expire cut time into stretches, and in each stretch the
+    OFFERs that are open are known. This is the FILE with a time now in the stretch just
+    before ``before``. None: in the last stretch, after every OFFER that states when it
+    expires has expired.
+    """
+    if before is not None:
+        return file.as_of(before - 1)
+    return file.as_of(max(offer.expires or 0 for offer in file.dated_offers()))
+
+
+def _by_stretch(
+    file: File, works: Works, shown: Shown, can_work: CanWork
+) -> list[tuple[tuple[Missing, ...], Plan | None, int | None]]:
+    """The cases of a TRIP whose FILE states no time now, each with the time it holds until.
+
+    Nobody knows which OFFERs have expired. So the cases are worked out once for each
+    stretch of time between two expiries, on the FILE as it is in that stretch, from the
+    last stretch to the first. Every purchase that is possible later is possible earlier,
+    so a case of one stretch holds in every stretch before it. Each case comes with the
+    time at which its stretch ends. None: it holds at any time. In a FILE with a cap it
+    comes with its plan, as the FILE is in that stretch.
+
+    A case says more than which FACTs it asks for: how long a length of time can be, what
+    an OPTION can require, who buys which place, what another transfer has to do, what
+    each cap has left. An earlier stretch can differ in any of those, with the same FACTs.
+    So a case is left out only where a later stretch has the very same case, in all of
+    that: then the later one holds for longer. Nothing is worked out about one case
+    covering another, so a report can list a case that asks more than another one does.
+
+    Where the TRIP works in a stretch with nothing else found out, that is a case with no
+    unknown FACT, and no earlier stretch adds one: each would end sooner.
+    """
+    ends = sorted({offer.expires for offer in file.dated_offers() if offer.expires is not None})
+    cases: list[tuple[tuple[Missing, ...], Plan | None, int | None]] = []
+    listed: set[tuple[tuple[Missing, ...], Plan | None]] = set()
+    for until in (None, *reversed(ends)):
+        if until is not None and until <= FIRST_TIME:
+            # No time now is before the first time a FILE can state: this stretch is empty.
+            continue
+        seen = as_seen(file, until)
+        if works(seen, worst_case(seen)):
+            if until is None:
+                # The worst case of the FILE has every such OFFER closed, as this stretch has.
+                raise AssertionError("the TRIP works after every expiry, and not at worst")
+            cases.append(((), _plan(seen, (), shown) if file.caps else None, until))
+            break
+        if not can_work(Remaining(seen)):
+            continue
+        for some in _missing(seen, works, shown):
+            plan = _plan(seen, some, shown) if file.caps else None
+            if (some, plan) not in listed:
+                listed.add((some, plan))
+                cases.append((some, plan, until))
+    return cases
 
 
 def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> bool:
@@ -377,8 +766,11 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> 
     ``used`` holds those. In a FILE with a cap it relies on every BOOKING: each says what it
     charged, and that is how each cap is known to hold. It relies on no FACT that the rights
     to an OPTION are COMPLETE. ``used`` also holds the FACTs about CAPABILITIES and about
-    OBJECTs that it relies on.
+    OBJECTs that it relies on. It relies on the time now where it takes a place of an OFFER
+    that states when it expires: the place can be bought only before that time.
     """
+    if isinstance(fact, Now):
+        return any(offer.id in used for offer in file.dated_offers())
     if isinstance(fact, Has | Requires | CompleteRequires):
         return fact.id in used
     if isinstance(fact, ObjectStarts | RequiresObject | RefusesObject | WithObject):
@@ -393,7 +785,7 @@ def _relied_on(file: File, itinerary: Itinerary, fact: Fact, used: Set[str]) -> 
         return True
     if isinstance(fact, Booking | Offer):
         return fact.id in used
-    if isinstance(fact, CompleteRights):
+    if isinstance(fact, CompleteRights | CompleteRightsFor):
         return False
     if isinstance(fact, StartsFrom):
         in_it = any(fact.person in step.persons for step in itinerary)
@@ -411,24 +803,52 @@ def _covers(file: File, world: World, itinerary: Itinerary) -> tuple[Cover, ...]
     out: no record gives it. The other PERSONs who take part take places of the OPTIONs'
     OFFERs, each paid from a BUDGET, as ``way_to_pay`` gives them for the whole TRIP. The plan
     works in this world, so there is a way to pay.
+
+    After the PERSONs of an OPTION come the OBJECTs that take a place of an OFFER there, as
+    ``taking_a_place`` gives them, each with its OFFER and the BUDGET that pays. Where an
+    OBJECT takes places in one set of OPTIONs or in another, as ``taken_together`` says,
+    each of its places comes with those sets.
     """
     order = {person.id: number for number, person in enumerate(file.persons)}
     taking_part = {step.option: step.persons for step in itinerary if step.option is not None}
-    paying = way_to_pay(file, world, taking_part)
+    taking, together = places_taken(file, world, itinerary)
+    paying = way_to_pay(file, world, taking_part, taking, together)
     if paying is None:
         raise AssertionError("a plan that works has no way to pay")
+    turn = {step.option: number for number, step in enumerate(itinerary)}
+
+    def sets_of(thing: str) -> tuple[tuple[str, ...], ...]:
+        """The sets of OPTIONs where this OBJECT takes places together, where it has several."""
+        sets = together.get(thing, ())
+        if len(sets) < 2:
+            return ()
+        in_order = [sorted(turn[option] for option in some) for some in sets]
+        return tuple(
+            tuple(itinerary[number].option or "" for number in some) for some in sorted(in_order)
+        )
+
     covers: list[Cover] = []
     for step in itinerary:
-        if step.option is None or step.option not in world.needs_right:
+        if step.option is None:
             continue
         offers = {offer.id: offer for offer in file.offers(step.option)}
-        for person in sorted(step.persons, key=order.__getitem__):
+        needed = step.option in world.needs_right
+        for person in sorted(step.persons, key=order.__getitem__) if needed else ():
             booked = file.booking(step.option, person)
             if booked is not None:
                 covers.append(Cover(step.option, person, booked.id, False))
             elif (step.option, person) in paying:
                 offer, budget = paying[step.option, person]
                 covers.append(Cover(step.option, person, offer, True, offers[offer].price, budget))
+        for_objects = {offer.id: offer for offer in file.offers_for_objects(step.option)}
+        for thing, sure in taking.get(step.option, {}).items():
+            offer, budget = paying[step.option, thing]
+            price = for_objects[offer].price
+            covers.append(
+                Cover(
+                    step.option, None, offer, True, price, budget, thing, not sure, sets_of(thing)
+                )
+            )
     return tuple(covers)
 
 
@@ -472,7 +892,7 @@ def _supplied(file: File, itinerary: Itinerary) -> tuple[tuple[Supply, ...], set
 
 
 def _carried(
-    file: File, world: World, itinerary: Itinerary
+    file: File, world: World, itinerary: Itinerary, rights: Sequence[Cover] = ()
 ) -> tuple[tuple[Carried, ...], set[str]]:
     """Where each OBJECT of a plan is, and the FACTs about OBJECTs that the plan relies on.
 
@@ -497,7 +917,9 @@ def _carried(
     states none and a FACT says that the FILE states every OPTION that needs a right for
     the OBJECT, it relies on that FACT. Where the OPTION needs the right, or might, and a
     PERSON who takes part has the OBJECT, or it is handed over or carried there, the plan
-    relies on the BOOKING that covers the OBJECT, and the report names it.
+    relies on the BOOKING that covers the OBJECT, and the report names it. Where no BOOKING
+    does and the OBJECT takes a place of an OFFER there, the report names the OFFER:
+    ``rights`` holds those places.
 
     An OBJECT that is carried is in the OPTION from its start, and lies at the PLACE where
     the OPTION ends from its end, as the plan shows that end. That is said whether or not a
@@ -552,6 +974,7 @@ def _carried(
 
     relied: set[str] = set()
     carried: list[Carried] = []
+    on_offer = {(cover.option, cover.object): cover.by for cover in rights if cover.object}
     for thing in file.objects:
         every = file.object_requirements_complete(thing.id)
         for step in steps:
@@ -615,6 +1038,10 @@ def _carried(
                 relied.add(covering.id)
                 stated = file.needs_right_for(option, thing.id) is True
                 uses.append(Use(option, stated, in_order(before), "needs a right for", covering.id))
+            elif (option, thing.id) in on_offer:
+                stated = file.needs_right_for(option, thing.id) is True
+                offer = on_offer[option, thing.id]
+                uses.append(Use(option, stated, in_order(before), "needs a right for", offer=offer))
             if after != before:
                 # It is kept for sure where whoever might have it takes part.
                 sure = all(each.person in step.persons for each in before)
@@ -879,6 +1306,8 @@ def _to_bring(
     OBJECT there is a check, "requires": the OBJECT has to be at hand. Each OPTION that
     refuses it there is a check, "refuses": no PERSON may have the OBJECT in it. So is each
     OPTION that needs a right for the OBJECT where nothing covers it, "needs a right for".
+    An OPTION where only a place of an OFFER could cover it is the same where the plan
+    takes no place there: the plan counts on the OBJECT being out of the OPTION.
     With each comes whether a FACT says that the OPTION requires or refuses the OBJECT, or
     needs the right, and whether
     the check holds in the same plan without another transfer: with what the FILE lists,
@@ -916,6 +1345,7 @@ def _to_bring(
         world, brought=world.brought - {thing}, refuses=world.refuses - might_refuse, does=does
     )
     steps = [step for step in plan if step.option is not None]
+    placed = taking_a_place(file, world, plan)
     checks: list[tuple[str, str, bool, bool]] = []
     # Where the OBJECT might be just before each OPTION of the plan starts.
     for before, step in zip(just_before(file, listed_only, plan)[thing], steps, strict=True):
@@ -928,7 +1358,8 @@ def _to_bring(
             stated = file.refuses_object(option, thing) is True
             holds = not brought_in(before, step.persons)
             checks.append((option, "refuses", stated, holds))
-        if (option, thing) in world.uncovered:
+        no_place = (option, thing) in world.offered and thing not in placed.get(option, {})
+        if (option, thing) in world.uncovered or no_place:
             # Nothing covers the OBJECT there, so no PERSON who takes part may have it:
             # another transfer has to leave it where it needs no right.
             stated = file.needs_right_for(option, thing) is True
@@ -944,8 +1375,9 @@ def _bought(file: File, enough: Sequence[Unknown], shown: Shown) -> list[tuple[C
     every other unknown FACT badly. A price is about the places of its OFFER. That a BUDGET
     can pay for a PERSON is about the places that PERSON takes and has to pay for there: at
     a price above nothing, or at a price that nobody knows and that the set does not ask
-    for. A price the set asks for turns out well, and that place goes with the price. Any
-    other FACT has none, and a set that asks nothing about money is not searched.
+    for. A price the set asks for turns out well, and that place goes with the price. That
+    a BUDGET can pay for an OBJECT is about the places that cover that OBJECT, in the same
+    way. Any other FACT has none, and a set that asks nothing about money is not searched.
     """
     if not any(unknown.what in ("price", "funding") for unknown in enough):
         return [() for _ in enough]
@@ -961,7 +1393,9 @@ def _bought(file: File, enough: Sequence[Unknown], shown: Shown) -> list[tuple[C
                 for cover in places
                 if cover.by not in quoted and (cover.price is None or cover.price.amount)
             )
-            bought.append(tuple(cover for cover in to_pay if cover.person == unknown.person))
+            # The FACT names a PERSON or an OBJECT, and a place is for one of the two.
+            asked = (unknown.person, unknown.about)
+            bought.append(tuple(cover for cover in to_pay if (cover.person, cover.object) == asked))
         else:
             bought.append(())
     return bought
@@ -1035,13 +1469,98 @@ def _cap_rows(file: File, covers: Sequence[Cover], asked: Sequence[str]) -> tupl
             and cover.budget == cap.budget
             and cover.price.currency == currency
         ]
-        sure = sum(c.price.units for c in mine if c.price and file.needs_right(c.option) is True)
-        most = sum(c.price.units for c in mine if c.price and file.needs_right(c.option) is None)
+        sure = sum(c.price.units for c in mine if c.price and right_needed(file, c) is True)
+        most = sum(c.price.units for c in bought_if_needed(file, mine) if c.price)
         named = tuple(booking for booking, _ in might if booking in asked)
         besides = sum(units or 0 for booking, units in might if booking not in named)
         left = cap.limit.units - paid - besides - sure - most
-        rows.append(CapRow(cap.id, paid, might, named, sure, most, left))
+        unpriced = [
+            cover
+            for cover in covers
+            if cover.to_buy and cover.price is None and cover.object is not None
+        ]
+        left_for = tuple(
+            (offer, each)
+            for offer in dict.fromkeys(cover.by for cover in unpriced)
+            if (each := _each_can_cost(mine, [c for c in unpriced if c.by == offer], left))
+            is not None
+        )
+        rows.append(CapRow(cap.id, paid, might, named, sure, most, left, left_for))
     return tuple(rows)
+
+
+def _each_can_cost(priced: Sequence[Cover], places: Sequence[Cover], left: int) -> int | None:
+    """What each place of one OFFER with no price can cost, where a cap leaves more for it
+    than an equal share of what it has left.
+
+    ``priced`` are the purchases that the cap counts, ``places`` the places that the plan
+    takes of the OFFER, each for an OBJECT, and ``left`` what the cap has left. One price
+    holds for every place of the OFFER. Of an OBJECT that takes places in one set of
+    OPTIONs or in another, the cap counts the set that costs the most. So a place adds
+    nothing until its own sets cost as much as the dearest one. The result is the highest
+    price at which the cap still holds, in whole ten-thousandths. None: that is no more
+    than what is left, shared equally among the places.
+    """
+    if left < 0 or not any(place.together for place in places):
+        return None
+
+    def added(price: int) -> int:
+        """What the cap counts more once each of the places has this price."""
+        more = 0
+        for place in places:
+            theirs = [cover for cover in priced if cover.object == place.object]
+            costs = [
+                sum(c.price.units for c in theirs if c.price and c.option in some)
+                for some in place.together
+            ]
+            with_it = [
+                cost + price * (place.option in some)
+                for cost, some in zip(costs, place.together, strict=True)
+            ]
+            more += max(with_it) - max(costs) if costs else price
+        return more
+
+    # The highest price that still fits: what is added only grows with the price.
+    fits, too_much = 0, left + sum(cover.price.units for cover in priced if cover.price) + 1
+    while too_much - fits > 1:
+        price = (fits + too_much) // 2
+        fits, too_much = (price, too_much) if added(price) <= left else (fits, price)
+    return fits if fits > left // len(places) else None
+
+
+def bought_if_needed(file: File, covers: Sequence[Cover]) -> list[Cover]:
+    """The purchases among these that make up the most they can cost, besides the sure ones.
+
+    The purchases are in one currency. One is sure where the FILE says that its right is
+    needed. The others are made only if an OPTION turns out to need a right, or if an
+    OBJECT turns out to be there. They are separate, so the most they can cost is their
+    sum. An OBJECT that takes places in one set of OPTIONs or in another is different. It
+    takes the places of one set, so its purchases count for the set that costs the most,
+    and for the first such set.
+    """
+    open_ones = [cover for cover in covers if right_needed(file, cover) is None]
+    counted = [cover for cover in open_ones if not cover.together]
+    for thing in dict.fromkeys(cover.object for cover in covers if cover.together):
+        theirs = [cover for cover in covers if cover.object == thing]
+        sets = theirs[0].together
+        costs = [
+            sum(c.price.units for c in theirs if c.price and c.option in some) for some in sets
+        ]
+        worst = sets[costs.index(max(costs))]
+        counted += [cover for cover in open_ones if cover.object == thing and cover.option in worst]
+    return [cover for cover in open_ones if cover in counted]
+
+
+def right_needed(file: File, cover: Cover) -> bool | None:
+    """Whether the right that a place gives is needed, as the FILE says. None: nobody knows.
+
+    For a PERSON that is whether the OPTION needs a right. For an OBJECT it is whether the
+    OPTION needs a right for the OBJECT. Nobody knows either where the OBJECT only might be
+    in the OPTION.
+    """
+    if cover.object is not None:
+        return None if cover.might else file.needs_right_for(cover.option, cover.object)
+    return file.needs_right(cover.option)
 
 
 def _with_enough_of_each(
@@ -1171,7 +1690,8 @@ def _asked_of_objects(
     A fourth thing can be unknown about an OPTION and an OBJECT: whether a right is needed
     there and something covers the OBJECT. Its unknown FACT is that the OPTION needs no
     right for the OBJECT, or that another right covers it, whichever the FILE leaves open.
-    A set that holds neither leaves the OBJECT with no right there.
+    A set that holds neither leaves the OBJECT with no right there, or with a place of an
+    OFFER for the OPTION that names it and nothing else.
 
     Some of those things are tested together in the upper bound of ``no_better_than``,
     where every unknown FACT helps whoever needs it: there each of them is put at its
@@ -1212,13 +1732,15 @@ def _asked_of_objects(
         # Whether anything works does not turn on how sure the requirement is: a plan can
         # choose the carry that a sure requirement would make.
         worst = {pair: "might_take" if pair in required else "might_keep" for pair in open_to_do}
+        on_offer = {pair for pair in no_right if file.offers_for(*pair)}
         harder = replace(
             bound,
             needs=required,
             refuses=bound.refuses | refuses,
             does={**bound.does, **worst},
             ticketed=bound.ticketed | no_right,
-            uncovered=bound.uncovered | no_right,
+            uncovered=bound.uncovered | (no_right - on_offer),
+            offered=bound.offered | on_offer,
         )
         return not works(file, harder)
 

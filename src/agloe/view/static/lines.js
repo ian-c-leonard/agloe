@@ -13,7 +13,7 @@
 //
 // Nothing here judges a TRIP. It finds what the report already says, line by line.
 
-import { boughtIn, cappedIn, casesIn, listed, notAtHandIn, objectsIn, requirementsIn, takenIn, toBuyIn } from "./named.js";
+import { KINDS_OF_TERMS, boughtIn, cappedIn, casesIn, listed, notAtHandIn, objectsIn, requirementsIn, takenIn, termsIn, toBuyIn, togetherIn, togetherInPlans } from "./named.js";
 
 /**
  * A line that shows one step of a plan: "  2:00 pm to 3:00 pm: Museum visit, Alex and Sam". A
@@ -26,11 +26,35 @@ const WARNING = /^ {4}! /;
 /** How the line starts that states the one case in which a trip works, or might work. */
 const ONE_CASE = /^The trip (?:works|might work) if /;
 /** The line above the cases in which a trip works or might, where the report lists several. */
-const CASES = /^The trip (?:works|might work) in any of these cases:$/;
-/** A warning that says who still has to buy a right, and from which OFFER. */
-const TO_BUY = /^ {4}! .+ still ha(?:s|ve) to buy a right to this(?: if it needs one)?, from (.+)\.$/;
+const CASES = /^The trip (?:works|might work|works, or might work,) in any of these cases:$/;
+/**
+ * A warning that says who still has to buy a right. It says "if it needs one" where nobody
+ * knows whether the OPTION needs a right.
+ */
+const TO_BUY = /^ {4}! .+ still ha(?:s|ve) to buy a right to this( if it needs one)?, from .+\.$/;
+/**
+ * A warning that says which OBJECT still needs a right. It says that the right might have to
+ * be bought where nobody knows whether it is needed: the OPTION might need none, or the
+ * OBJECT might not be in it.
+ */
+const TO_COVER = /^ {4}! A right to this (might )?still ha(?:s|ve) to be bought for .+, from .+\.$/;
 /** How the line starts that gives one plan for a case: who buys which place. */
-const ONE_PLAN = "One plan that works then: ";
+const ONE_PLAN = /^One plan that (?:works|might work) then: /;
+/** How the line starts that says which places of an OBJECT are bought together at most. */
+const TOGETHER = "Of the places for ";
+
+/**
+ * The OFFER that a warning about a purchase names. The line ends with ", from " and the id of
+ * the OFFER, and then nothing more, or that the place costs nothing, or its price and the
+ * BUDGET that pays. After that it can say before which time the place has to be bought. A name with a comma in it is in quotation marks, so the BUDGET has none
+ * outside them. Names before the OFFER can be a list with commas, and one of them can be
+ * called "from home": the line is read from its end.
+ */
+function offerIn(text) {
+  const bare = text.replace(/"(?:[^"\\]|\\.)*"/g, '""');
+  const found = /, from ([a-z0-9]+(?:-[a-z0-9]+)*)(?:|, at no cost|, for [^,]+ from [^,]+)(?:, before [^,]+)?\.$/.exec(bare);
+  return found === null ? null : found[1];
+}
 /** The line above the sums of a plan in each currency. */
 const SUMS = "The money of this plan, by currency:";
 /** The line above what a plan charges to each cap. */
@@ -41,6 +65,31 @@ const OBJECTS = "Where each OBJECT is:";
 const BUDGETS = " The BUDGETs of this FILE:";
 /** The line above who meets what the OPTIONs of a plan require. */
 const MEETS = "Who meets the requirements:";
+/** How the line starts that is above the records that rule out every plan. */
+const CONFLICT = /^These .+ rule out every plan/;
+/** How a line starts that says what the lines marked "!" under the steps of a plan mean. */
+const EXPLAINS = "WARNING: ";
+/**
+ * How the line starts that opens the last part of a report: the time now, the DEADLINEs and
+ * what cancelling costs. That part is about no plan, no case and no conflict. A DEADLINE has
+ * a line that starts with a time, as a step does, and it can name an OPTION with " to " in
+ * its name.
+ */
+const TERMS = /^(?:This report uses .+ as the time now \(times in .+\)\.|This FILE does not state the time now\.)/;
+
+/** How the line above the DEADLINEs reads: one where the FILE states the time now, one where it does not. */
+const DEADLINES = /^(?:DEADLINEs after that time, earliest first:|This FILE does not state the time now\. So nobody knows which of its DEADLINEs have passed\. )/;
+/** What a line for one DEADLINE says after its time, up to the id of the BOOKING, by the kind of its term. */
+const STARTS = { cancelling: "a term for cancelling ", changing: "a term for changes to " };
+/** The line above what each BOOKING costs at the time now, and at any time: to cancel, and the fee for a change. */
+const COSTS_NOW = { cancelling: "What cancelling costs now:", changing: "The fee for a change now, apart from any difference in price:" };
+const COSTS_AT_ANY_TIME = { cancelling: "What cancelling costs at any time:", changing: "The fee for a change at any time, apart from any difference in price:" };
+
+/** Where the last part of a report starts among its lines, or how many lines there are. */
+const termsFrom = (texts) => {
+  const at = texts.findIndex((text) => TERMS.test(text));
+  return at < 0 ? texts.length : at;
+};
 
 /**
  * The lists of ids that a report as JSON names one after another in its words, each with what
@@ -54,7 +103,7 @@ function listsOf(report) {
   const caps = report?.answer === "FEASIBLE" && Array.isArray(report.caps) ? report.caps.map((each) => each?.cap) : null;
   const lists = [
     [report?.relies_on, (text) => /^The plan relies on these .+:$/.test(text)],
-    [report?.conflict, (text) => /^These .+ rule out every plan/.test(text)],
+    [report?.conflict, (text) => CONFLICT.test(text)],
     [paid, (text) => text === "What the BOOKINGs state that they paid:"],
     [caps, (text) => text === CAPS],
   ];
@@ -64,13 +113,17 @@ function listsOf(report) {
 /**
  * Each line of a report in words: its text, the step of the TRIP that it shows or is about,
  * the record that it names, and the case that it states, as its place in `missing` of the
- * report as JSON. `step`, `record` and `case` are null where a line has none. `warns` says
- * that the line is a warning under its step. `meets` is null, or the place in `requirements`
+ * report as JSON. `step`, `record` and `case` are null where a line has none. `under` is the
+ * case that the line says more of, where the report sets it under the line of that case, and
+ * null otherwise. `warns` says that the line is a warning under its step. `meets` is null, or
+ * the place in `requirements`
  * of the report as JSON of the requirement that the line says somebody meets. `about` holds
  * what else the line is about, each as the page names a thing: `offer:ID` for an OFFER that
  * the line says somebody buys a place of, `budget:ID` for a BUDGET that the line states,
  * `cap:ID` for a cap that the line states under the plan of a case, `booking:ID` for a
- * BOOKING that the line says states no payment, and `object:ID` for an OBJECT that the line is
+ * BOOKING that the line says states no payment, or whose cost of cancelling or lack of terms
+ * the line states, `offer:ID` too for an OFFER whose expiry or lack of one the line states,
+ * and `object:ID` for an OBJECT that the line is
  * about. A line about an OBJECT at a step of the plan holds that step
  * too, by its number, as the page names a step.
  *
@@ -87,13 +140,16 @@ function listsOf(report) {
  */
 export function lines(text, report, trip) {
   const all = text.split("\n");
-  const plan = all.filter((line) => STEP.test(line)).length;
+  // A step is a line before the last part of the report: a DEADLINE there is none.
+  const ends = termsFrom(all);
+  const isStep = (line, n) => n < ends && STEP.test(line);
+  const plan = all.filter(isStep).length;
   const tied = trip !== null && trip.itinerary && plan === trip.steps.length;
   let step = -1;
   let under = false; // whether this line can still be a warning under the step above it
-  const one = (text, at = null, warns = false) => ({ text, step: at, warns, record: null, case: null, meets: null, about: [] });
-  const found = all.map((line) => {
-    if (tied && STEP.test(line)) {
+  const one = (text, at = null, warns = false) => ({ text, step: at, warns, record: null, case: null, under: null, meets: null, about: [] });
+  const found = all.map((line, n) => {
+    if (tied && isStep(line, n)) {
       step += 1;
       under = true;
       return one(line, step);
@@ -102,14 +158,36 @@ export function lines(text, report, trip) {
     under = false;
     return one(line);
   });
-  // A warning that says who still has to buy a right names its OFFER after "from". It is tied
-  // to that OFFER where the report as JSON has the plan buy a place of it for the same step.
+  // Under a step, the report in words has one warning for each place that the report as JSON
+  // has the plan still buy at that OPTION, in the same order. A warning that says who still
+  // has to buy a right names its OFFER after "from", and is tied to that OFFER. A warning
+  // that says which OBJECT still needs a right is tied to its OFFER too, and to each OBJECT
+  // of that purchase. So two OBJECTs that take places of one OFFER, each paid from its own
+  // BUDGET, each have their own line. Where the warnings under a step and the purchases of
+  // the report as JSON do not agree one by one, none of them is tied: in the OFFER, in
+  // whether the place is for OBJECTs, and in whether the right only might be needed. A
+  // name in the line can hold ", from " itself: `offerIn` reads the OFFER outside every
+  // name.
+  const known = new Set((trip === null ? [] : trip.objects).map((each) => each.id));
+  const places = new Map();
   for (const line of found) {
     const from = line.warns ? TO_BUY.exec(line.text) : null;
-    if (from === null) continue;
-    const named = (offer) => from[1] === offer || from[1].startsWith(`${offer}, `);
-    const bought = toBuyIn(report).filter((buy) => buy.option === trip.steps[line.step].option && named(buy.offer));
-    line.about = [...new Set(bought.map((buy) => `offer:${buy.offer}`))];
+    const cover = line.warns && from === null ? TO_COVER.exec(line.text) : null;
+    if (from === null && cover === null) continue;
+    if (!places.has(line.step)) places.set(line.step, []);
+    places.get(line.step).push({ line, covers: cover !== null, might: (from ?? cover)[1] !== undefined });
+  }
+  for (const [step, said] of places) {
+    const buys = toBuyIn(report).filter((buy) => buy.option === trip.steps[step].option);
+    const things = (buy) => (Array.isArray(buy.objects) ? buy.objects : null);
+    const agrees = (each, buy) => {
+      const named = offerIn(each.line.text) === buy.offer;
+      const covered = things(buy);
+      if (!named || (covered !== null) !== each.covers || (buy.only_if_needed === true) !== each.might) return false;
+      return covered === null || covered.every((id) => known.has(id));
+    };
+    if (said.length !== buys.length || !said.every((each, n) => agrees(each, buys[n]))) continue;
+    said.forEach((each, n) => (each.line.about = [`offer:${buys[n].offer}`, ...(things(buys[n]) ?? []).map((id) => `object:${id}`)]));
   }
   for (const [ids, isHeading] of listsOf(report)) {
     // The lines under the one heading of this list, where they name its ids one after another.
@@ -141,21 +219,30 @@ export function lines(text, report, trip) {
   // The one plan that the report gives for a case is under the line of the case, further in.
   // It is tied to the OFFERs that somebody buys a place of in that plan. Under it, the report
   // states each cap with what that plan charges to it, on a line that starts with the id of
-  // the cap. Each of those is tied to its cap.
+  // the cap. Each of those is tied to its cap. Between the two, one line for each OBJECT of
+  // which the report as JSON says in which OPTIONs it takes places together says which of
+  // its places are bought together at most. Those are tied to their OBJECTs, where the
+  // words hold as many of them as that.
   const bought = boughtIn(report);
   const capped = cappedIn(report);
+  const inSeveral = togetherInPlans(report);
   found.forEach((line, at) => {
     if (line.case === null) return;
     const offers = bought[line.case] ?? [];
     const caps = capped[line.case] ?? [];
+    const things = inSeveral[line.case] ?? [];
+    const together = [];
     const inset = (text) => text.length - text.trimStart().length;
     for (let next = at + 1; next < found.length && found[next].text.trim() !== "" && inset(found[next].text) > inset(line.text); next += 1) {
+      found[next].under = line.case;
       if (!free(found[next])) continue;
       const words = found[next].text.trimStart();
-      if (words.startsWith(ONE_PLAN)) found[next].about = offers.map((offer) => `offer:${offer}`);
+      if (ONE_PLAN.test(words)) found[next].about = offers.map((offer) => `offer:${offer}`);
+      if (words.startsWith(TOGETHER)) together.push(found[next]);
       const cap = caps.find((id) => words.startsWith(`${id}, on `));
       if (cap !== undefined) found[next].about = [`cap:${cap}`];
     }
+    if (together.length === things.length && things.every((id) => known.has(id))) together.forEach((each, n) => (each.about = [`object:${things[n]}`]));
   });
   // The money of a plan. One line names the BOOKINGs that state no payment: it is about each
   // of them. Under their heading, one line for each currency sums what the plan pays in it:
@@ -222,19 +309,28 @@ export function lines(text, report, trip) {
   }
   // Where each OBJECT is in the plan: under their heading, up to the first line that is not
   // set in, one line for each OBJECT of the report as JSON, and after it one line for each
-  // OPTION that requires it or refuses it. They are tied only where the words hold exactly as
-  // many lines as that. How far a line is set in is not compared: a name can start with a
-  // space. A line about a requirement or a refusal is about the OBJECT and about the step that
-  // its OPTION is.
+  // OPTION that requires it or refuses it. Last comes one line for an OBJECT of which the
+  // report as JSON says in which OPTIONs it takes places together. They are tied only where
+  // the words hold exactly as many lines as that. How far a line is set in is not compared:
+  // a name can start with a space. A line about a requirement or a refusal is about the
+  // OBJECT and about the step that its OPTION is.
   const things = objectsIn(report);
+  const inSets = new Set(togetherIn(report).map((each) => each.object));
   const above = found.flatMap((line, at) => (line.text === OBJECTS ? [at] : []));
   if (things.length && above.length === 1) {
     const under = [];
     for (let at = above[0] + 1; at < found.length && found[at].text.startsWith("  "); at += 1) under.push(found[at]);
-    // A line about a right for the OBJECT is also about the BOOKING that it names.
-    const ties = things.flatMap(({ object, options, bookings }) => [
+    // A line about a right for the OBJECT is also about the BOOKING that it names, or
+    // about the OFFER that it says the OBJECT takes a place of.
+    const ties = things.flatMap(({ object, options, bookings, offers }) => [
       [`object:${object}`],
-      ...options.map((option, n) => [...(stepOf(option) < 0 ? [] : [String(stepOf(option))]), `object:${object}`, ...(bookings[n] === null ? [] : [`booking:${bookings[n]}`])]),
+      ...options.map((option, n) => [
+        ...(stepOf(option) < 0 ? [] : [String(stepOf(option))]),
+        `object:${object}`,
+        ...(bookings[n] === null ? [] : [`booking:${bookings[n]}`]),
+        ...(offers[n] === null ? [] : [`offer:${offers[n]}`]),
+      ]),
+      ...(inSets.has(object) ? [[`object:${object}`]] : []),
     ]);
     if (under.length === ties.length && under.every(free)) under.forEach((line, n) => (line.about = ties[n]));
   }
@@ -251,22 +347,91 @@ export function lines(text, report, trip) {
       under.forEach((at, n) => Object.assign(found[at], { step: steps[n], meets: n }));
     }
   }
+  // The last part of a report. Under the heading of the DEADLINEs, a line for each one
+  // names its BOOKING or its OFFER right after its time, in the order of the report as
+  // JSON, and a line for a BOOKING says first which kind of term starts. Under each of two
+  // more headings for each kind of term, a line for each BOOKING starts with its id. Up to
+  // three lines name the BOOKINGs that state no terms: of neither kind, for cancelling only
+  // and for changing only. One line names the OFFERs that state no time of
+  // expiry. Each of these lines is about what it names, only where the words under a
+  // heading are one line for each entry of the report as JSON, and each names the record
+  // of its entry. A line names its record before any name of an OPTION, so a name cannot
+  // stand in for it.
+  const terms = termsIn(report);
+  const last = found.slice(ends);
+  // The lines set in under the one line that is this heading: none where it is not there once.
+  const setInUnder = (isHeading) => {
+    const heads = last.flatMap((line, at) => (isHeading(line.text) ? [at] : []));
+    const rows = [];
+    for (let at = heads[0] + 1; heads.length === 1 && at < last.length && last[at].text.startsWith("  "); at += 1) rows.push(last[at]);
+    return rows;
+  };
+  const tie = (rows, entries) => {
+    if (rows.length === entries.length && rows.every((line, n) => entries[n].names(line.text))) rows.forEach((line, n) => (line.about = [entries[n].about]));
+  };
+  // A time has no colon with a space after it, so the first one ends the time of the line.
+  const afterItsTime = (text) => (text.includes(": ") ? text.slice(text.indexOf(": ") + 2) : "");
+  const atItsStart = (id) => ({ names: (text) => text.startsWith(`  ${id}, the BOOKING for `), about: `booking:${id}` });
+  const ofDeadline = (each) =>
+    each.offer === undefined
+      ? { names: (text) => afterItsTime(text).startsWith(`${STARTS[each.kind]}${each.booking}, the BOOKING for `), about: `booking:${each.booking}` }
+      : { names: (text) => afterItsTime(text).startsWith(`${each.offer}, the OFFER for `), about: `offer:${each.offer}` };
+  tie(setInUnder((text) => DEADLINES.test(text)), terms.deadlines.map(ofDeadline));
+  for (const kind of KINDS_OF_TERMS) {
+    tie(setInUnder((text) => text === COSTS_NOW[kind]), terms.now[kind].map(atItsStart));
+    tie(setInUnder((text) => text === COSTS_AT_ANY_TIME[kind]), terms.always[kind].map(atItsStart));
+  }
+  // A BOOKING that states neither kind of terms is named once, for both.
+  const neither = terms.none.cancelling.filter((id) => terms.none.changing.includes(id));
+  const withNone = [["cancelling or for changing", neither], ...KINDS_OF_TERMS.map((kind) => [kind, terms.none[kind].filter((id) => !neither.includes(id))])];
+  for (const [what, ids] of withNone) {
+    const none = last.filter((line) => line.text === `No terms for ${what} are stated for ${listed(ids)}.`);
+    if (none.length === 1) none[0].about = ids.map((id) => `booking:${id}`);
+  }
+  const undated = last.filter((line) => line.text === `No time of expiry is stated for ${listed(terms.undated)}.`);
+  if (terms.undated.length && undated.length === 1) undated[0].about = terms.undated.map((id) => `offer:${id}`);
   return found;
 }
 
 /**
  * What the report states, in its own words, for the parts of the page that say it again, from
  * its lines. For the cases in which the trip works: the line of each case, at the place of the
- * case, and the heading over them where the report lists several. For the caps of a plan, in
- * `charged`: what the report says is charged to each cap and what it has left, by the id of
- * the cap.
+ * case, and the heading over them where the report lists several. In `under`, at the place of
+ * each case: the lines that the report sets under the line of that case. For the caps of a
+ * plan, in `charged`: what the report says is charged to each cap and what it has left, by
+ * the id of the cap. In `records`: what the report says of each record that it lists by its
+ * id, in the first line that does so. In `conflict`: the line over the records that rule out
+ * every plan, or null. In `warnings`: what it warns of at each step, each line with the "!"
+ * that the report marks it with. In `explains`: each line with which the report says what
+ * its lines marked "!" mean, and under which condition they come true.
+ *
+ * A report that shows no plan says nothing after its cases, or after the records that rule
+ * out every plan, that is not about them, until its last part: the time now, the DEADLINEs
+ * and what cancelling costs. `also` holds all of that: each paragraph up to that part, or to
+ * the end of a report that has none, as the list of its lines.
+ *
+ * A line that is said again is `says`, its words without the space around them, `about`,
+ * what the line is about as the page names things, and `inset`, whether the report sets it
+ * in. `whole` says that every line which looks like a warning is tied to its step. Where it
+ * is false, the warnings here are not all of them.
  */
 export function statedIn(tied) {
   const cases = [];
+  const under = [];
   const charged = {};
+  const records = {};
+  const warnings = [];
+  const said = (line) => ({ says: line.text.trim(), about: [...(line.step === null ? [] : [String(line.step)]), ...line.about], inset: line.text.startsWith(" ") });
   let capped = false;
-  for (const line of tied) {
+  let last = -1; // the last line of the cases, or of the records that rule out every plan
+  for (const [at, line] of tied.entries()) {
     if (line.case !== null) cases[line.case] = line.text.trim();
+    if (line.under !== null) (under[line.under] ??= []).push(said(line));
+    if (line.case !== null || line.under !== null) last = at;
+    // A warning keeps its mark: the report says what its lines marked "!" mean.
+    if (line.warns) (warnings[line.step] ??= []).push({ says: line.text.trim(), about: line.about });
+    // A line that lists a record starts with its id, set in.
+    if (line.record !== null && !Object.hasOwn(records, line.record) && line.text.startsWith(`  ${line.record}: `)) records[line.record] = line.text.slice(line.record.length + 4);
     // Under "The caps:", and nowhere else, a line states the cap with its limit and its
     // BUDGET, and after the last colon what is charged to it. A line that is not set in ends
     // what is under a heading.
@@ -274,7 +439,22 @@ export function statedIn(tied) {
     else if (capped && line.record !== null && line.text.startsWith(`  ${line.record}: at most `)) charged[line.record] = line.text.slice(line.text.lastIndexOf(": ") + 2);
   }
   const heading = tied.find((line) => CASES.test(line.text));
-  return { heading: cases.length > 1 && heading !== undefined ? heading.text : null, cases, charged };
+  // The line over the records that rule out every plan: the lines under it name them.
+  const over = tied.findIndex((line, at) => CONFLICT.test(line.text) && at + 1 < tied.length && tied[at + 1].record !== null);
+  if (over >= 0) for (last = over; last + 1 < tied.length && tied[last + 1].record !== null; last += 1);
+  const also = [];
+  let more = false; // whether the line before this one is of the same paragraph
+  // The last part of a report is about the time now and what cancelling costs: it says
+  // nothing more of a case, or of the records that rule out every plan.
+  const ends = termsFrom(tied.map((line) => line.text));
+  for (const line of last < 0 ? [] : tied.slice(last + 1, ends)) {
+    if (line.text.trim() !== "" && !more) also.push([]);
+    more = line.text.trim() !== "";
+    if (more) also[also.length - 1].push(said(line));
+  }
+  const whole = tied.every((line) => line.warns || !WARNING.test(line.text));
+  const explains = tied.flatMap((line) => (line.text.startsWith(EXPLAINS) ? [line.text] : []));
+  return { heading: cases.length > 1 && heading !== undefined ? heading.text : null, cases, under, also, charged, records, conflict: over < 0 ? null : tied[over].text, warnings, explains, whole };
 }
 
 /**
@@ -284,7 +464,7 @@ export function statedIn(tied) {
 export function warningsOf(tied) {
   const warnings = [];
   for (const line of tied) {
-    if (line.warns) (warnings[line.step] ??= []).push(line.text.replace(/^ {4}! /, ""));
+    if (line.warns) (warnings[line.step] ??= []).push(line.text.replace(WARNING, ""));
   }
   return warnings;
 }

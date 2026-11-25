@@ -59,6 +59,8 @@ FILES = sorted(
 # In the report in words: the line that names a day, and a line that shows one step of the plan.
 DAY = re.compile(r"^(\w+ \d+ \w+ \d+) \(times in (.+)\)$")
 LINE = re.compile(r"^  \d{1,2}:\d\d(:\d\d)? [ap]m.* to .+: .+$")
+# How the last part of a report starts. Its DEADLINEs have lines that start with a time too.
+LAST_PART = re.compile(r"^This (report uses .+ as the time now|FILE does not state the time now)")
 DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 MONTHS = [
     "January",
@@ -212,7 +214,7 @@ def test_the_calendar_says_what_the_report_says() -> None:
         sent = sent_of[path]
         nobody = {n for n, step in enumerate(sent["steps"]) if not step["persons"]}
         day = ""
-        for line in beside(path, ".expected.txt").read_text().split("\n"):
+        for line in of_the_plan(beside(path, ".expected.txt").read_text()):
             header = DAY.match(line)
             if header:
                 day = header[1]
@@ -487,8 +489,9 @@ def test_the_calendar_tells_a_person_called_nobody_from_nobody() -> None:
         ("lunch", 0, 1, '"nobody" and alex', 'No LOCK names "nobody" and alex.', False),
         ("van", 2, 2, "nobody of the TRIP", "No LOCK names anybody for it.", True),
     ]
-    # The names over the columns are the names of the PERSONs as they are.
-    assert laid["persons"] == [{"id": "nobody", "name": "nobody"}, {"id": "alex", "name": "alex"}]
+    # The names over the columns are the names as the report shows them: it puts a name
+    # that it uses for no PERSON in quotation marks wherever it is shown.
+    assert laid["persons"] == [{"id": "nobody", "name": '"nobody"'}, {"id": "alex", "name": "alex"}]
 
 
 def test_the_calendar_of_the_flight_home() -> None:
@@ -766,6 +769,13 @@ def test_the_calendar_warns_only_of_what_the_report_warns_of() -> None:
     assert seen > 3
 
 
+def of_the_plan(words: str) -> list[str]:
+    """The lines of a report in words up to its last part, which is about no plan."""
+    lines = words.split("\n")
+    ends = next((at for at, line in enumerate(lines) if LAST_PART.match(line)), len(lines))
+    return lines[:ends]
+
+
 def warnings_are_those_of_the_report(
     sent: Trip, words: str, calendar_of: Calendar, name: str
 ) -> bool:
@@ -776,7 +786,7 @@ def warnings_are_those_of_the_report(
     # The lines of the report that start with "!", each under the line of its step.
     under: dict[int, list[str]] = {}
     step = -1
-    for line in words.split("\n"):
+    for line in of_the_plan(words):
         if LINE.match(line):
             step += 1
         elif line.startswith("    ! ") and step >= 0:

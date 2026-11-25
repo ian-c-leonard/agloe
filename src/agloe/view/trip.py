@@ -70,9 +70,7 @@ show as one time of day are never drawn as one.
 """
 
 import re
-import unicodedata
-from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import cast
@@ -80,23 +78,17 @@ from typing import cast
 from agloe import report as reports
 from agloe.answers import Answer, Report
 from agloe.file import (
-    Budget,
-    Capability,
     Complete,
     Duration,
     File,
     Money,
     NeedsRight,
-    Object,
-    Option,
-    Person,
-    Place,
     Start,
     Unwritable,
-    Want,
-    Way,
+    comes_twice,
     local,
 )
+from agloe.names import to_show as _names
 
 type Trip = dict[str, object]
 type _Shape = Mapping[str, type | tuple[type, ...]]
@@ -107,15 +99,6 @@ _AN_HOUR = 60 * 60
 _AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}")
 _DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _OFFSET = re.compile(r"UTC[+-][0-9]{1,2}(:[0-9]{2}(:[0-9]{2})?)?")
-_WITH_AN_ID = re.compile(r" \([a-z0-9]+(-[a-z0-9]+)*\)$")  # how a name ends when its id is shown
-# What a page shows nothing for: the characters that Unicode calls default ignorable. A soft
-# hyphen, a space of no width, a mark of direction, a character that joins two others, and one
-# that only says how the sign before it is drawn.
-_UNSEEN = re.compile(
-    "[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e"
-    "\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufff8"
-    "\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0000-\U000e0fff]"
-)
 _NONE = type(None)
 _NAMED: _Shape = {"id": str, "name": str}
 _TRIP: _Shape = {
@@ -195,9 +178,25 @@ _BOOKING: _Shape = {
     "paid": (dict, _NONE),
 }
 _PAID: _Shape = {"amount": str, "currency": str, "budget": (str, _NONE), "by": (str, _NONE)}
-_BUDGET: _Shape = {"id": str, "name": str, "persons": list, "currencies": list, "caps": list}
+_BUDGET: _Shape = {
+    "id": str,
+    "name": str,
+    "persons": list,
+    "objects": list,
+    "names": dict,
+    "currencies": list,
+    "caps": list,
+}
 _CAP: _Shape = {"id": str, "limit": dict}
-_OFFER: _Shape = {"id": str, "places": int, "price": (dict, _NONE)}
+_OFFER: _Shape = {
+    "id": str,
+    "places": int,
+    "price": (dict, _NONE),
+    "objects": list,
+    "names": dict,
+    "until": (str, _NONE),
+    "expired": (bool, _NONE),
+}
 _MONEY: _Shape = {"amount": str, "currency": str}
 _ALL_RIGHTS: _Shape = {"record": str, "offers": list}
 _AMOUNT = re.compile(r"[0-9]+(\.[0-9]+)?")  # an amount of money, as a FILE writes one
@@ -212,6 +211,14 @@ _OBJECT: _Shape = {
     "transfers_complete": (str, _NONE),
     "rights": list,
     "rights_complete": (str, _NONE),
+    "rights_closed": list,
+}
+_OBJECT_CLOSED: _Shape = {
+    "option": str,
+    "name": str,
+    "record": str,
+    "called": str,
+    "offers": list,
 }
 _OBJECT_STARTS: _Shape = {"person": (str, _NONE), "place": (str, _NONE), "record": str}
 _OBJECT_NEED: _Shape = {"option": str, "name": str, "needed": bool, "record": str}
@@ -488,60 +495,6 @@ def _length(stated: Duration | None) -> Trip | None:
     }
 
 
-def seen_as(name: str) -> str:
-    """A name as a page shows it, so that two names that a page shows alike are the same.
-
-    It is without the characters that a page shows nothing for, with each accent joined to
-    its letter, and with each run of spaces as one space. A format character is left out too:
-    a page shows nothing for most of them. A character that is another one set in another way
-    counts as that one, as Unicode has it: two letters drawn as one sign, a wide letter, a
-    space or a hyphen that does not break.
-
-    This stops there. A letter of another alphabet that is drawn like one of this alphabet is
-    another letter, and a dash is no hyphen.
-    """
-    plain = unicodedata.normalize("NFKC", name).replace("\u2010", "-")
-    seen = "".join(each for each in _UNSEEN.sub("", plain) if unicodedata.category(each) != "Cf")
-    return " ".join(seen.split())
-
-
-def _names(
-    records: Sequence[Person | Place | Option | Way | Want | Capability | Budget | Object],
-    joins: str | None = None,
-) -> dict[str, str]:
-    """The name to show for each record, as the report shows it, so that no two show the same.
-
-    A record whose name another record has shows its id too. If two would still show the same,
-    every record shows its id. A name is in quotes where it could be taken for something else:
-    one with a comma, a colon, a semicolon or a quote mark, one that ends like a name with its
-    id, and one that holds the word ``joins``, which joins the list the names are for.
-
-    This is the rule of the report in words. A test holds the two together. One thing is
-    added for a page: two names count as the same where a page shows them alike, as
-    ``seen_as`` tells it. Each name is still printed in the spelling of the FILE.
-    """
-    looks = seen_as
-
-    def quoted(name: str) -> str:
-        splits = any(mark in name for mark in ",:;") or (
-            joins is not None and joins in name.casefold().split()
-        )
-        if splits or '"' in name or _WITH_AN_ID.search(name):
-            return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
-        return name
-
-    shared = Counter(looks(record.name) for record in records)
-    shown = {
-        record.id: quoted(record.name)
-        if shared[looks(record.name)] == 1
-        else f"{quoted(record.name)} ({record.id})"
-        for record in records
-    }
-    if len({looks(name) for name in shown.values()}) < len(shown):
-        return {record.id: f"{quoted(record.name)} ({record.id})" for record in records}
-    return shown
-
-
 def _wants(file: File, names: Mapping[str, str]) -> list[Trip]:
     """The WANTs of the FILE, in its order, each with what the FILE says of it.
 
@@ -593,15 +546,26 @@ def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
     A BOOKING covers PERSONs and OBJECTs, and the report names them in one list. So each
     BOOKING comes with the name to show for each of them (``names``): no PERSON and no
     OBJECT of the FILE shows the same name as another there.
+
+    An OFFER has places for PERSONs, or for the OBJECTs it names (``objects``, in the
+    FILE's order). The report says that a place covers one or another of them, so each
+    comes with the name to show in such a list (``names``).
     """
     needs = {fact.option: fact for fact in file.facts if isinstance(fact, NeedsRight)}
     holders = _names([*file.persons, *file.objects], "and")
+    either = _names([*file.persons, *file.objects], "or")
     rights: list[Trip] = []
     for option in file.options:
         need, complete = needs.get(option.id), file.rights_complete(option.id)
-        bookings, offers = file.bookings(option.id), file.offers(option.id)
+        bookings = file.bookings(option.id)
+        # Every OFFER that the FILE states: one that has expired is drawn too, and says so.
+        offers = file.offers_stated(option.id)
         # An OPTION that needs a right for an OBJECT has rights to show too.
-        ticketed = any(file.needs_right_for(option.id, thing.id) is True for thing in file.objects)
+        ticketed = any(
+            file.needs_right_for(option.id, thing.id) is True
+            or file.rights_complete_for(option.id, thing.id) is not None
+            for thing in file.objects
+        )
         if need is None and complete is None and not bookings and not offers and not ticketed:
             continue
         rights.append(
@@ -636,6 +600,20 @@ def _rights(file: File, names: Mapping[str, str]) -> list[Trip]:
                         "id": offer.id,
                         "places": offer.places,
                         "price": None if offer.price is None else _money(offer.price),
+                        "objects": [each.id for each in file.objects if each.id in offer.objects],
+                        "names": {each: either[each] for each in offer.objects},
+                        # Until when its places can be bought, in the words of a report and
+                        # with its offset from UTC: the card names no time zone. Then whether
+                        # that time has passed by the time now that the FILE states. None:
+                        # nobody knows, because the FILE states no time now.
+                        "until": None
+                        if offer.expires is None
+                        else reports.Clock(file.zone, True).moment(offer.expires),
+                        "expired": None
+                        if offer.expires is not None
+                        and file.now() is None
+                        and offer.id not in file.expired
+                        else offer.id in file.expired,
                     }
                     for offer in offers
                 ],
@@ -660,10 +638,15 @@ def _objects(file: File, names: Mapping[str, str]) -> list[Trip]:
     ``transfers_complete`` the FACT that it states every OPTION that hands the OBJECT over,
     keeps it or carries it. ``rights`` holds each OPTION of which a FACT says whether it
     needs a right for the OBJECT, and ``rights_complete`` is the FACT that the FILE states
-    every one of its OPTIONs that does.
+    every one of its OPTIONs that does. ``rights_closed`` holds each OPTION of which a FACT
+    says that the FILE lists every right to it that covers the OBJECT, with that FACT and
+    the OFFERs that it names. The
+    report names the OBJECT there as a BOOKING names it, so that no PERSON shows the same
+    name, and ``called`` is that name.
     """
     objects: list[Trip] = []
     called = _names(file.objects)
+    among_all = _names([*file.persons, *file.objects], "and")
     for thing in file.objects:
         starts = file.object_starts(thing.id)
         needs = [(option, file.object_requirement(option.id, thing.id)) for option in file.options]
@@ -671,6 +654,9 @@ def _objects(file: File, names: Mapping[str, str]) -> list[Trip]:
         does = [(option, file.action(option.id, thing.id)) for option in file.options]
         tickets = [(option, file.object_right(option.id, thing.id)) for option in file.options]
         ticketed = file.object_rights_complete(thing.id)
+        closed = [
+            (option, file.rights_complete_for(option.id, thing.id)) for option in file.options
+        ]
         required, moved = (
             file.object_requirements_complete(thing.id),
             file.transfers_complete(thing.id),
@@ -725,6 +711,17 @@ def _objects(file: File, names: Mapping[str, str]) -> list[Trip]:
                     if fact is not None
                 ],
                 "rights_complete": None if ticketed is None else ticketed.id,
+                "rights_closed": [
+                    {
+                        "option": option.id,
+                        "name": names[option.id],
+                        "record": fact.id,
+                        "called": among_all[thing.id],
+                        "offers": list(fact.offers),
+                    }
+                    for option, fact in closed
+                    if fact is not None
+                ],
             }
         )
     return objects
@@ -739,15 +736,21 @@ def _budgets(file: File) -> list[Trip]:
     """The BUDGETs of the FILE, in its order, each with what the FILE says of it.
 
     ``persons`` are those who may draw on the BUDGET for what the TRIP still has to buy, in the
-    FILE's order of PERSONs. ``currencies`` are those it holds. ``caps`` holds each DECISION
+    FILE's order of PERSONs. ``objects`` are the OBJECTs whose places it may pay for, in the
+    FILE's order of OBJECTs. The report names both in one list, so each comes with the name
+    to show there (``names``): no PERSON and no OBJECT of the FILE shows the same name as
+    another. ``currencies`` are those it holds. ``caps`` holds each DECISION
     that the TRIP spends at most an amount from the BUDGET, in the FILE's order.
     """
     called = _names(file.budgets)
+    listed = _names([*file.persons, *file.objects], "and")
     return [
         {
             "id": budget.id,
             "name": called[budget.id],
             "persons": [each.id for each in file.persons if each.id in budget.persons],
+            "objects": [each.id for each in file.objects if each.id in budget.objects],
+            "names": {each: listed[each] for each in (*budget.persons, *budget.objects)},
             "currencies": list(budget.currencies),
             "caps": [
                 {"id": cap.id, "limit": _money(cap.limit)}
@@ -876,8 +879,7 @@ def _seconds_into_the_day(file: File, moment: int) -> int:
 
 def _comes_twice(file: File, moment: int) -> bool:
     """Whether the clocks of the FILE's time zone show this time twice, as when they go back."""
-    there = local(moment, file.zone)
-    return there.replace(fold=1 - there.fold).utcoffset() != there.utcoffset()
+    return comes_twice(moment, file.zone)
 
 
 def _time(file: File, moment: int, with_its_offset: bool) -> Trip:
@@ -1048,7 +1050,7 @@ def holds(trip: object) -> bool:
     planned = sent["itinerary"] is True
     options = _the_options(sent["options"], persons, places)
     ways = _the_ways(sent["ways"], places)
-    budgets = _the_budgets(sent["budgets"], persons)
+    budgets = _the_budgets(sent["budgets"], persons, _object_ids(sent["objects"]))
     steps = cast("list[object]", sent["steps"])
     return (
         options is not None
@@ -1184,10 +1186,13 @@ def _is_travel_listed_in_full(travel: object, places: frozenset[str]) -> bool:
     return _all_different(records) is not None
 
 
-def _the_budgets(budgets: object, persons: frozenset[str]) -> frozenset[str] | None:
+def _the_budgets(
+    budgets: object, persons: frozenset[str], objects: frozenset[str]
+) -> frozenset[str] | None:
     """The ids of the BUDGETs of such a TRIP, or None where these are not its BUDGETs.
 
-    Each has an id of its own and a name. It lists PERSONs of the TRIP, each once, and holds
+    Each has an id of its own and a name. It lists PERSONs and OBJECTs of the TRIP, each
+    once, with a name to show for each, and holds
     one currency at least, each once. It has one cap at most in a currency, and each cap is a
     DECISION of its own with an amount of money.
     """
@@ -1198,13 +1203,21 @@ def _the_budgets(budgets: object, persons: frozenset[str]) -> frozenset[str] | N
             return None
         said = cast("dict[str, object]", budget)
         who, held = _all_different(said["persons"]), _all_different(said["currencies"])
+        things = _all_different(said["objects"])
         if (
             not cast("str", said["name"]).strip()
             or who is None
             or not who <= persons
+            or things is None
+            or not things <= objects
             or not held
             or not all(currency.strip() for currency in held)
         ):
+            return None
+        named = cast("dict[str, object]", said["names"])
+        if frozenset(named) != who | things:
+            return None
+        if not all(isinstance(name, str) and name.strip() for name in named.values()):
             return None
         capped: list[object] = []
         for cap in cast("list[object]", said["caps"]):
@@ -1250,8 +1263,9 @@ def _are_rights(
     Each OPTION of the TRIP is there once at most, and each BOOKING and each OFFER once. A
     BOOKING covers PERSONs and OBJECTs of the TRIP, each once and one at least, with a name
     to show for each, and what it paid names a BUDGET and a PERSON of the TRIP, or none. An
-    OFFER has one place at least, and a price that is an amount in a currency. A FACT that
-    the FILE lists every right to an OPTION names OFFERs for that OPTION.
+    OFFER has one place at least, and a price that is an amount in a currency. It names
+    OBJECTs of the TRIP, each once, with a name to show for each, or none. A FACT that
+    the FILE lists every right to an OPTION names OFFERs for that OPTION that name no OBJECT.
     """
     which: list[object] = []
     ids: list[object] = []
@@ -1292,8 +1306,15 @@ def _are_rights(
                 return False
             if not _is_money(stated["price"]):
                 return False
+            for_things = _all_different(stated["objects"])
+            named = cast("dict[str, object]", stated["names"])
+            if for_things is None or not for_things <= objects or frozenset(named) != for_things:
+                return False
+            if not all(isinstance(name, str) and name.strip() for name in named.values()):
+                return False
             ids.append(stated["id"])
-            on_offer.append(stated["id"])
+            if not for_things:
+                on_offer.append(stated["id"])
         if complete is not None:
             if not _fits(complete, _ALL_RIGHTS):
                 return False
@@ -1349,6 +1370,7 @@ def _are_objects(
             ("refuses", _OBJECT_REFUSAL),
             ("transfers", _TRANSFER),
             ("rights", _OBJECT_NEED),
+            ("rights_closed", _OBJECT_CLOSED),
         )
         for kind, shape in kinds:
             named: list[object] = []
@@ -1358,6 +1380,12 @@ def _are_objects(
                 stated = cast("dict[str, object]", each)
                 if not cast("str", stated["name"]).strip() or not stated["record"]:
                     return False
+                if kind == "rights_closed" and not cast("str", stated["called"]).strip():
+                    return False
+                if kind == "rights_closed":
+                    open_offers = _all_different(stated["offers"])
+                    if open_offers is None or not all(open_offers):
+                        return False
                 if kind == "transfers" and stated["does"] not in _DOES:
                     return False
                 named.append(stated["option"])

@@ -419,9 +419,8 @@ def test_too_few_places_make_a_trip_infeasible_where_the_rights_are_complete() -
         == "  tour-offer: an OFFER has 1 place for tour that can still be bought, for 10.00 USD"
     )
     whole = "nobody on the trip holds another or can get one, except from tour-offer"
-    assert (
-        in_words(file)[-2] == f"  every-right-to-tour: the FILE lists every right to tour: {whole}"
-    )
+    stated = "the FILE lists every right for a PERSON to take part in tour"
+    assert in_words(file)[-2] == f"  every-right-to-tour: {stated}: {whole}"
 
 
 def test_each_case_says_everything_its_set_holds() -> None:
@@ -768,6 +767,7 @@ def test_the_plan_shown_and_what_covers_whom_follow_the_rules_on_random_trips() 
                 person.id for person in file.persons if person.id in each.persons
             ]
             for cover in covers:
+                assert cover.person is not None  # no OFFER of these trips is for an OBJECT
                 booked = file.booking(each.option, cover.person)
                 assert cover.to_buy is (booked is None)
                 assert booked is None or cover.by == booked.id

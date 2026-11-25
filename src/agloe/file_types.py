@@ -39,6 +39,7 @@ class Budget(TypedDict):
     id: Id
     name: Name
     persons: list[Id]
+    objects: NotRequired[list[Id]]
     currencies: list[Currency]
 
 
@@ -205,21 +206,32 @@ class NeedsRight(TypedDict):
     needs_right: bool
 
 
-class Booking(TypedDict):
-    option: Id
-    covers: list[Id]
-    paid: NotRequired[Payment]
+TermForCancelling = TypedDict(
+    "TermForCancelling",
+    {
+        "from": NotRequired[Time],
+        "accepted": NotRequired[Literal[False]],
+        "costs": NotRequired[list[Money]],
+    },
+)
 
 
-class BookingFact(TypedDict):
-    id: Id
-    booking: Booking
+TermForChanging = TypedDict(
+    "TermForChanging",
+    {
+        "from": NotRequired[Time],
+        "accepted": NotRequired[Literal[False]],
+        "costs": NotRequired[list[Money]],
+    },
+)
 
 
 class Offer(TypedDict):
     option: Id
     places: int
+    for_objects: NotRequired[list[Id]]
     prices: NotRequired[list[Money]]
+    expires: NotRequired[Time]
 
 
 class OfferFact(TypedDict):
@@ -315,6 +327,22 @@ class NeedsRightForObject(TypedDict):
     needs_right_for: ObjectRight
 
 
+class RightsForAnObject(TypedDict):
+    rights_to: Id
+    for_object: Id
+    offers: NotRequired[list[Id]]
+
+
+class CompleteRightsForAnObject(TypedDict):
+    id: Id
+    complete: RightsForAnObject
+
+
+class TimeNow(TypedDict):
+    id: Id
+    now: Time
+
+
 class NeedingARightForAnObject(TypedDict):
     needs_right_for: Id
 
@@ -375,6 +403,19 @@ class Lock(TypedDict):
     persons: list[Id]
 
 
+class Booking(TypedDict):
+    option: Id
+    covers: list[Id]
+    paid: NotRequired[Payment]
+    cancelling: NotRequired[list[TermForCancelling]]
+    changing: NotRequired[list[TermForChanging]]
+
+
+class BookingFact(TypedDict):
+    id: Id
+    booking: Booking
+
+
 class File(TypedDict):
     persons: list[Person]
     places: list[Place]
@@ -412,5 +453,7 @@ class File(TypedDict):
         | CompleteTransfers
         | NeedsRightForObject
         | CompleteRightsNeededForAnObject
+        | CompleteRightsForAnObject
+        | TimeNow
     ]
     decisions: list[Lock | TripStart | TripEnd | Cap]

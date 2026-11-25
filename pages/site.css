@@ -330,10 +330,6 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .part strong { display: block; font: italic 400 1.6rem/1.15 var(--display); margin-bottom: 8px; }
 .after { margin-top: 44px; max-width: 46em; display: grid; gap: 14px; color: var(--ink2); }
 
-/* What it must be */
-.musts { list-style: none; padding: 0; margin-top: 34px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px clamp(32px, 5vw, 64px); }
-.musts li { font-size: 0.98rem; line-height: 1.55; color: var(--ink2); }
-.musts strong { display: block; font: italic 400 1.3rem/1.2 var(--display); color: var(--ink); margin-bottom: 3px; }
 
 .two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 44px clamp(32px, 5vw, 64px); align-items: start; }
 .terminal.plain { overflow-x: auto; white-space: pre; margin: 0; }
@@ -381,12 +377,12 @@ footer { padding-block: 34px 46px; font-size: 0.93rem; color: var(--muted); bord
 footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 40px; }
 
 @media (max-width: 900px) {
-  .split, .hero .split, .two, .parts, .musts, footer .wrap { grid-template-columns: minmax(0, 1fr); }
+  .split, .hero .split, .two, .parts, footer .wrap { grid-template-columns: minmax(0, 1fr); }
   .parts { gap: 34px; }
   h1 { font-size: clamp(2.5rem, 11vw, 3.4rem); }
 }
 
-/* How a rule is built: a page that follows one rule along a road of four stops. */
+/* How a rule is built: a page that follows one rule along a road of four steps. */
 .built .wrap { display: grid; gap: clamp(30px, 4vw, 46px); }
 .built .lead { max-width: 39em; }
 /* The stops, as four towns on one road. */
@@ -574,4 +570,102 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
 @media (prefers-reduced-motion: reduce) {
   .switches b::after { transition: none; }
   .figure .again { display: none; }
+}
+
+/* The examples: each story of the rules page, with the answer and the report of each of its FILEs. */
+.examples .hero { padding-bottom: clamp(30px, 4vw, 48px); }
+/* Which answer to pick out. It needs a browser that can tell which one is chosen. */
+.show { border: 0; margin: 6px 0 0; padding: 0; min-width: 0; }
+.show legend { float: left; padding: 0; margin: 4px 12px 0 0; }
+.show b { font-weight: 500; margin-left: 3px; opacity: 0.65; }
+.folders { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 8px; }
+.folders a { display: block; padding: 3px 11px; border: 1px solid var(--line); border-radius: 999px; background: rgba(255, 253, 247, 0.6); font: 500 0.76rem/1.6 var(--mono); text-decoration: none; }
+.folders a:hover { border-color: var(--ink); color: var(--ink); }
+.story { display: grid; gap: 16px; scroll-margin-top: 18px; }
+.story + .story { margin-top: clamp(34px, 5vw, 54px); padding-top: clamp(34px, 5vw, 54px); border-top: 1px solid var(--line); }
+/* A story is named by its folder, as the command line names it. */
+.story h2 { font: 500 0.95rem/1.4 var(--mono); font-style: normal; letter-spacing: 0.02em; text-shadow: none; color: var(--muted); }
+.story h2 a { text-decoration: none; }
+.story h2 b { font-weight: 500; font-size: 1.3rem; color: var(--ink); }
+.story h2 a:hover b { color: var(--accent); }
+.part { display: grid; gap: 14px; }
+.part + .part { margin-top: 20px; }
+.told { max-width: 50em; line-height: 1.6; }
+.cases { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+/* One FILE: its name, what it says and the answer, with the colour of the answer at its edge. */
+.case { display: grid; grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.2fr) minmax(0, 1.45fr); gap: 4px 28px; padding: 13px 18px 12px; border: 1px solid var(--line); border-left: 5px solid var(--dot); border-radius: 10px; background: rgba(255, 253, 247, 0.66); font-size: 0.93rem; line-height: 1.5; }
+.case.feasible { --dot: var(--ink); }
+.case.infeasible { --dot: var(--stop); }
+.case.undetermined { --dot: var(--brass); }
+.case h4 { margin: 0; font: 600 0.95rem/1.5 var(--text); }
+.case-says { color: var(--ink2); }
+.case details { grid-column: 1 / -1; margin-top: 4px; }
+.case summary { width: max-content; cursor: pointer; font: 500 0.72rem/1.6 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); }
+.case details[open] summary { margin-bottom: 10px; }
+.case .terminal { padding: 16px 18px; font-size: 0.74rem; }
+.case .terminal pre { margin: 0; font: inherit; white-space: pre-wrap; overflow-wrap: break-word; }
+.case details .small { margin-top: 10px; font-size: 0.85rem; display: flex; gap: 18px; }
+/* Picking out one answer fades the other FILEs. They stay, because a FILE can say "as above". */
+@supports selector(:has(*)) {
+  .examples:has(input[value="feasible"]:checked) .case:not(.feasible):not(:has(details[open])),
+  .examples:has(input[value="infeasible"]:checked) .case:not(.infeasible):not(:has(details[open])),
+  .examples:has(input[value="undetermined"]:checked) .case:not(.undetermined):not(:has(details[open])) { opacity: 0.36; }
+}
+@media (max-width: 900px) {
+  .case { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* How an answer is decided: what is unknown, the two cases, and one trip in four FILEs. */
+.plain { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; }
+.cases-two { margin: 0; display: grid; gap: 10px; }
+.cases-two div { padding: 12px 16px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255, 253, 247, 0.66); }
+.cases-two dt, .decides th, .world h4 { margin: 0; font: 500 0.72rem/1.4 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.cases-two dd { margin: 4px 0 0; font-size: 0.95rem; line-height: 1.5; }
+/* Which answer follows from the two cases. */
+.decides { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
+.decides th { text-align: left; padding: 6px 12px 7px 0; border-bottom: 1.5px solid var(--ink); }
+.decides td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--line); }
+.decides td:last-child { font: 500 0.82rem var(--mono); }
+.decides .undetermined { color: var(--brass-ink); }
+.decides .infeasible { color: var(--stop); }
+/* One FILE in the two cases, side by side, and the answer under them. */
+.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.worlds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; }
+.worlds .unknown { grid-column: 1 / -1; font-weight: 500; }
+.world { display: grid; gap: 12px; align-content: start; padding: 14px 16px 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(250, 242, 227, 0.6); }
+.world > p { font: 500 0.82rem/1.5 var(--mono); padding-left: 20px; position: relative; }
+.world > p::before { content: ""; position: absolute; left: 0; top: 0.3em; width: 11px; height: 11px; border-radius: 50%; background: currentColor; }
+.world > p.no { color: var(--stop); }
+.worlds .says { grid-column: 1 / -1; display: grid; gap: 5px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: rgba(250, 242, 227, 0.6); box-shadow: inset 0 1px 2px rgba(59, 42, 20, 0.1); }
+.says .answer-line.unsure { color: var(--brass-ink); }
+/* The afternoon from 2 pm to 5 pm: a bar for each thing, and a dashed line at the time to be there. */
+.clock { position: relative; display: grid; gap: 8px; padding-top: 22px; }
+.clock .hours { position: absolute; left: 0; right: 0; top: 0; display: flex; justify-content: space-between; font: 500 0.64rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.clock .hours i { font-style: normal; }
+.clock .row { margin: 0; display: grid; gap: 3px; position: relative; }
+/* The time to be there, 4:15 pm, is a dashed mark across each bar's row. */
+.clock .row::after { content: ""; position: absolute; left: 75%; bottom: -4px; height: 19px; border-left: 1.5px dashed var(--ink); }
+.clock .row span { font-size: 0.8rem; line-height: 1.35; color: var(--ink2); }
+.clock .bar { display: block; height: 11px; border-radius: 6px; margin-left: calc(var(--from) * 1%); width: calc((var(--to) - var(--from)) * 1%); background: var(--vermilion); }
+.clock .bar.visit { background: var(--ink); }
+/* The mark is named under the bars: the words end at the mark, and the dashed line runs down beside them. */
+.clock .due { margin: 0; width: 75%; padding: 2px 7px 0 0; border-right: 1.5px dashed var(--ink); text-align: right; font: 500 0.64rem/1.5 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+/* Brass is for what nobody knows: a ride with no limit is in pieces as far as the edge, and one that takes no time is a dot. */
+.clock .bar.endless { background: repeating-linear-gradient(90deg, var(--brass) 0 9px, transparent 9px 15px); border-radius: 6px 0 0 6px; }
+.clock .bar.instant { width: 11px; margin-left: calc(var(--from) * 1% - 5px); background: var(--brass); }
+@supports selector(:has(*)) {
+  #two-cases .worlds { display: none; }
+  #two-cases:has(input[value="flight-home/works"]:checked) .worlds[data-file="flight-home/works"],
+  #two-cases:has(input[value="flight-home/cannot-work"]:checked) .worlds[data-file="flight-home/cannot-work"],
+  #two-cases:has(input[value="flight-home/depends-on-the-cab"]:checked) .worlds[data-file="flight-home/depends-on-the-cab"],
+  #two-cases:has(input[value="flight-home/depends-on-another-way"]:checked) .worlds[data-file="flight-home/depends-on-another-way"] { display: grid; }
+}
+/* On the home page: the two pages on how it works, side by side. */
+.hows { list-style: none; margin: 30px 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px clamp(24px, 4vw, 48px); }
+.hows .preview { height: 100%; align-content: start; }
+.hows .preview > strong { font: italic 400 1.7rem/1.15 var(--display); text-shadow: var(--pressed); }
+.hows .preview > span { font-size: 0.98rem; line-height: 1.55; color: var(--ink2); }
+.hows .decides { margin-top: 4px; }
+@media (max-width: 900px) {
+  .four, .worlds, .hows { grid-template-columns: minmax(0, 1fr); }
 }

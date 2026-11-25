@@ -1,0 +1,9 @@
+INFEASIBLE: this trip cannot work.
+
+These FACTs and DECISIONs rule out every plan by themselves. Take any one away and they no longer do. A FACT that is taken away leaves what it said unknown. Times are in America/Chicago.
+  alex-has-the-car: Alex has the car when the TRIP starts
+  everything-that-moves-the-car: the FILE states every OPTION that hands over, keeps or carries the car: there is none
+  ferry-needs-a-car-ticket: Car ferry to Muskegon needs a right for the car
+  ferry-tickets: a BOOKING for Car ferry to Muskegon covers Alex and Sam
+  the-car-deck-is-full: the FILE lists every right to Car ferry to Muskegon that covers the car: nobody on the trip holds another or can get one
+  lock-ferry: Alex and Sam take part in Car ferry to Muskegon

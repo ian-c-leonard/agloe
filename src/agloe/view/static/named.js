@@ -109,13 +109,53 @@ export function usesIn(report) {
 
 /**
  * The places that a plan still buys, as a report states them: for each its OPTION, its OFFER,
- * and whether somebody buys it only if the OPTION turns out to need a right. Only a report
+ * and whether somebody buys it only if the OPTION turns out to need a right. A place that
+ * covers an OBJECT comes with its `objects`. Only a report
  * that shows a plan holds any, and a list that is not of that shape is none.
  */
 export function toBuyIn(report) {
   const stated = report !== null && typeof report === "object" && report.answer === "FEASIBLE" ? report.to_buy : null;
   const isOne = (each) => each !== null && typeof each === "object" && typeof each.option === "string" && typeof each.offer === "string";
   return Array.isArray(stated) && stated.every(isOne) ? stated : [];
+}
+
+/** The OFFERs that have expired by the time now that the FILE states, as the view sends them. */
+export function expiredIn(trip) {
+  return new Set(trip.rights.flatMap((each) => each.offers.filter((offer) => offer.expired === true).map((offer) => offer.id)));
+}
+
+/** These OFFERs by their ids, each marked where it has expired, as the report marks it. */
+export function withExpired(offers, expired) {
+  return offers.map((id) => (expired.has(id) ? `${id} (expired)` : id));
+}
+
+/** The two kinds of terms that a BOOKING states, in the order a report names them. */
+export const KINDS_OF_TERMS = ["cancelling", "changing"];
+
+/**
+ * What a report says in its last part, by BOOKING and by OFFER. `deadlines` holds each
+ * DEADLINE in the report's order: the `booking` whose term starts, with the `kind` of the
+ * term, "cancelling" or "changing", or the `offer` that expires. `now` and `always` hold,
+ * for each kind of term, the BOOKINGs whose cost the report states for the time now and for
+ * any time, and `none` those that state no terms of that kind. `undated` holds the OFFERs
+ * that state no time of expiry. A list that is not of that shape is none.
+ */
+export function termsIn(report) {
+  const stated = report !== null && typeof report === "object" ? report : {};
+  const isRecord = (each) => each !== null && typeof each === "object";
+  const bookings = (list) => (Array.isArray(list) && list.every((each) => isRecord(each) && typeof each.booking === "string") ? list.map((each) => each.booking) : []);
+  const ids = (list) => (Array.isArray(list) && list.every((id) => typeof id === "string") ? list : []);
+  // A DEADLINE of each kind names its own record and not the other.
+  const isDeadline = (each) => isRecord(each) && (each.kind === "expiry" ? typeof each.offer === "string" && each.booking === undefined : KINDS_OF_TERMS.includes(each.kind) && typeof each.booking === "string" && each.offer === undefined);
+  const deadlines = Array.isArray(stated.deadlines) && stated.deadlines.every(isDeadline) ? stated.deadlines.map((each) => (each.kind === "expiry" ? { offer: each.offer } : { booking: each.booking, kind: each.kind })) : [];
+  const byKind = (read) => Object.fromEntries(KINDS_OF_TERMS.map((kind) => [kind, read(kind)]));
+  return {
+    deadlines,
+    now: byKind((kind) => bookings(stated[`${kind}_now`])),
+    always: byKind((kind) => bookings(stated[`${kind}_at_any_time`])),
+    none: byKind((kind) => ids(stated[`no_terms_for_${kind}`])),
+    undated: ids(stated.no_expiry_stated),
+  };
 }
 
 /**
@@ -219,12 +259,25 @@ export function objectsIn(report) {
   const things = stated.map((each) => {
     // An OPTION that needs a right for the OBJECT, or might, has its line after those two.
     const covered = isBy(each.covered_in) ? each.covered_in : [];
+    // It names the BOOKING that covers the OBJECT, or the OFFER that the OBJECT takes a
+    // place of.
     const booked = (by) => (typeof by.booking === "string" ? by.booking : null);
-    const checks = [...each.required_by.map((by) => [steps.indexOf(by.option), 0, by.option, null]), ...each.refused_by.map((by) => [steps.indexOf(by.option), 1, by.option, null]), ...covered.map((by) => [steps.indexOf(by.option), 2, by.option, booked(by)])];
+    const offered = (by) => (typeof by.offer === "string" ? by.offer : null);
+    const checks = [
+      ...each.required_by.map((by) => [steps.indexOf(by.option), 0, by.option, null, null]),
+      ...each.refused_by.map((by) => [steps.indexOf(by.option), 1, by.option, null, null]),
+      ...covered.map((by) => [steps.indexOf(by.option), 2, by.option, booked(by), offered(by)]),
+    ];
     checks.sort((one, other) => one[0] - other[0] || one[1] - other[1]);
-    return { object: each.object, options: checks.map(([, , option]) => option), bookings: checks.map(([, , , booking]) => booking), placed: checks.every(([at]) => at >= 0) };
+    return {
+      object: each.object,
+      options: checks.map(([, , option]) => option),
+      bookings: checks.map(([, , , booking]) => booking),
+      offers: checks.map(([, , , , offer]) => offer),
+      placed: checks.every(([at]) => at >= 0),
+    };
   });
-  return things.every((each) => each.placed) ? things.map(({ object, options, bookings }) => ({ object, options, bookings })) : [];
+  return things.every((each) => each.placed) ? things.map(({ object, options, bookings, offers }) => ({ object, options, bookings, offers })) : [];
 }
 
 /**
@@ -239,7 +292,8 @@ export function objectsIn(report) {
  * `option`, whether a FACT says that the OPTION requires the OBJECT (`stated`), and `where`
  * the OBJECT is just before the OPTION starts. `covers` holds the OPTIONs of the plan that
  * need a right for the OBJECT, or might, where the OBJECT is there: each as a use is, with
- * the `booking` that covers the OBJECT. Only a report that shows a plan holds any, and
+ * the `booking` that covers the OBJECT, or the `offer` that the OBJECT takes a place of
+ * where no BOOKING covers it. Only a report that shows a plan holds any, and
  * a list that is not of that shape is none.
  */
 export function carriedIn(report) {
@@ -251,10 +305,37 @@ export function carriedIn(report) {
   const isUse = (each) => isRecord(each) && typeof each.option === "string" && typeof each.stated === "boolean" && isWhere(each.where);
   const areUses = (list) => Array.isArray(list) && list.every(isUse);
   // Where an OPTION needs a right for the OBJECT, or might, and the OBJECT is there: a use
-  // with the `booking` that covers it.
-  const areCovers = (list) => list === undefined || (areUses(list) && list.every((use) => typeof use.booking === "string"));
+  // with the `booking` that covers it, or with the `offer` that it takes a place of.
+  const areCovers = (list) => list === undefined || (areUses(list) && list.every((use) => typeof use.booking === "string" || typeof use.offer === "string"));
   const isOne = (each) => isRecord(each) && typeof each.object === "string" && Array.isArray(each.path) && each.path.every(isStay) && areUses(each.required_by) && areUses(each.refused_by) && areCovers(each.covered_in);
   return Array.isArray(stated) && stated.every(isOne) ? stated.map((each) => ({ object: each.object, stays: each.path, uses: each.required_by, refusals: each.refused_by, covers: each.covered_in ?? [] })) : [];
+}
+
+/**
+ * The OBJECTs that take places of OFFERs in one set of OPTIONs or in another, as a report
+ * states them for the plan it shows: each with its `object` and its `options`, a list for
+ * each set. Such an OBJECT is in one place at a time, and nobody knows where, so it takes
+ * the places of one set and never of two. Only a report that shows a plan holds any, and a
+ * list that is not of that shape is none.
+ */
+export function togetherIn(report) {
+  const stated = report !== null && typeof report === "object" && report.answer === "FEASIBLE" ? report.places_together : null;
+  const isSet = (some) => Array.isArray(some) && some.length > 0 && some.every((id) => typeof id === "string");
+  const isOne = (each) => each !== null && typeof each === "object" && !Array.isArray(each) && typeof each.object === "string" && Array.isArray(each.options) && each.options.length > 1 && each.options.every(isSet);
+  return Array.isArray(stated) && stated.every(isOne) ? stated : [];
+}
+
+/**
+ * The OBJECTs that take places in one set of OPTIONs or in another in the one plan that a
+ * report gives for each case in which the trip works: a list of their ids for each case, at
+ * the place of the case. Only a report with one plan for each of its cases holds any.
+ */
+export function togetherInPlans(report) {
+  const cases = casesIn(report);
+  const plans = cases.length && Array.isArray(report.plans) && report.plans.length === cases.length ? report.plans : [];
+  const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
+  const named = (plan) => (isRecord(plan) && Array.isArray(plan.places_together) && plan.places_together.every((each) => isRecord(each) && typeof each.object === "string") ? plan.places_together : []);
+  return plans.map((plan) => named(plan).map((each) => each.object));
 }
 
 /** The cases that need something for which `about` says yes, as their places among the cases. */

@@ -20,9 +20,28 @@ from typing import Any, cast
 import pytest
 
 from agloe import compiler, report
-from agloe.file import parse, read
+from agloe.file import File, parse, read
 from agloe.view.trip import shown
-from tests.stories import EXAMPLES
+from tests.stories import (
+    EXAMPLES,
+    at,
+    budget,
+    cap,
+    cutoff,
+    every_use,
+    has_object,
+    lasts,
+    lock,
+    moves,
+    needs_right,
+    needs_right_for,
+    no_other_right_for,
+    offer,
+    starts_at,
+    starts_from,
+    trip,
+)
+from tests.test_offers_for_objects import a_crossing, car_deck, two_trains
 
 FILES = sorted(
     path for path in EXAMPLES.rglob("*.json") if not path.name.endswith(".expected.json")
@@ -46,7 +65,10 @@ def offers_of(line: Line) -> list[str]:
 
 def asked_of(path: Path) -> dict[str, Any]:
     """The report on this FILE in words and as JSON, and the TRIP that the view sends with it."""
-    file = read(path)
+    return asked_about(read(path))
+
+
+def asked_about(file: File) -> dict[str, Any]:
     found = compiler.check(file)
     return {
         "text": report.as_text(file, found),
@@ -158,9 +180,13 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
         to_buy = {buy["offer"] for buy in said.get("to_buy", [])}
         in_plans = {buy["offer"] for plan in said.get("plans", []) for buy in plan["buys"]}
         tied_to = {offer for line in found for offer in offers_of(line)}
-        assert tied_to <= to_buy | in_plans, name
-        assert to_buy <= tied_to, name
-        purchases += bool(tied_to)
+        # The last part of a report ties a line to an OFFER too: one that says when the
+        # OFFER expires, and the one that names the OFFERs with no time of expiry.
+        expiring = {each["offer"] for each in said.get("deadlines", []) if "offer" in each}
+        undated = set(said.get("no_expiry_stated", []))
+        assert tied_to <= to_buy | in_plans | expiring | undated, name
+        assert to_buy | expiring | undated <= tied_to, name
+        purchases += bool(tied_to & (to_buy | in_plans))
         # Where the report states the BUDGETs of the FILE, each has its line, in the FILE's
         # order, and that line starts with its name.
         pots = [
@@ -191,9 +217,16 @@ def test_the_lines_are_the_report_and_each_is_tied_to_what_it_is_about() -> None
             if "object" in each
         }
         expected += [f"object:{thing}" for _, thing in late]
+        # A warning that an OBJECT still needs a right is about that OBJECT too.
+        expected += [
+            f"object:{thing}" for buy in said.get("to_buy", []) for thing in buy.get("objects", [])
+        ]
+        in_sets = {each["object"] for each in said.get("places_together", [])}
         for thing in said.get("objects", []):
             checks = len(thing["required_by"]) + len(thing["refused_by"])
             checks += len(thing["covered_in"])
+            # One more line where the report says in which OPTIONs it takes places together.
+            checks += thing["object"] in in_sets
             expected += [f"object:{thing['object']}"] * (1 + checks)
         assert sorted(about) == sorted(expected), name
         carried += bool(expected)
@@ -245,9 +278,11 @@ def test_a_line_that_says_who_buys_a_place_is_tied_to_the_offer() -> None:
     assert buys[0]["text"].startswith("    ! Sam still has to buy a right to this, from ")
     assert buys[1]["text"] == "  USD: 32.00 paid; 32.00 still to buy (skydeck-tickets)"
     # A report that names another OFFER for that step, or none, leaves the line tied to none.
+    # So does a report that says the right only might be needed, where the line does not.
     odd: list[Any] = [
         [{**asked["report"]["to_buy"][0], "offer": "skydeck"}],
         [{**asked["report"]["to_buy"][0], "option": "lunch"}],
+        [{**asked["report"]["to_buy"][0], "only_if_needed": True}],
         "skydeck-tickets",
         [],
     ]
@@ -262,6 +297,158 @@ def test_a_line_that_says_who_buys_a_place_is_tied_to_the_offer() -> None:
     (late,) = lines_of([asked_of(EXAMPLES / "flight-home" / "works-but-risky.json")])
     assert any(line["warns"] for line in late)
     assert all(line["about"] == [] for line in late)
+
+
+def test_a_line_about_who_buys_is_tied_whatever_the_travelers_are_called() -> None:
+    """Four travelers still take a place each, and one of them is called "from home". Their
+    names are a list with commas, and the OFFER comes after it."""
+    asked = asked_of(EXAMPLES / "a-ticket" / "not-bought-yet.json")
+    (line,) = [each for each in lines_of([asked])[0] if each["warns"]]
+    start = "    ! Sam still has to buy a right to this, from "
+    assert line["text"].startswith(start)
+    many = "    ! alex, from home, cy and di still have to buy a right to this, from "
+    renamed = {**asked, "text": asked["text"].replace(start, many)}
+    (other,) = lines_of([renamed])
+    (line,) = [each for each in other if each["warns"]]
+    assert line["text"].startswith(many) and line["about"] == ["offer:skydeck-tickets"]
+
+
+def test_a_line_about_a_right_that_an_object_still_needs_is_tied_to_its_offer() -> None:
+    """A right to the ferry still has to be bought for the car, from the OFFER car-deck."""
+    asked = asked_of(EXAMPLES / "a-car-ferry" / "a-place-on-the-car-deck.json")
+    (found,) = lines_of([asked])
+    buys = [line for line in found if offers_of(line)]
+    assert [(line["about"], line["step"], line["warns"]) for line in buys] == [
+        (["offer:car-deck", "object:car"], 0, True),
+        # Under the car: the ferry needs a right for it, and a place of the OFFER covers it.
+        (["0", "object:car", "offer:car-deck"], None, False),
+        # The sum in USD of what the plan pays: it still buys a place of the OFFER.
+        (["offer:car-deck"], None, False),
+    ]
+    start = "    ! A right to this still has to be bought for the car, from car-deck, "
+    assert buys[0]["text"].startswith(start)
+    assert buys[1]["text"].endswith("A place from car-deck covers the car, once it is bought.")
+    # A right that might be needed has other words. The line is tied to the OBJECTs of which
+    # the report as JSON says the same.
+    (buy,) = asked["report"]["to_buy"]
+    maybe = "    ! A right to this might still have to be bought for the car, from car-deck."
+    text = asked["text"].replace(buys[0]["text"], maybe)
+    if_needed = {
+        **asked,
+        "text": text,
+        "report": {**asked["report"], "to_buy": [{**buy, "only_if_needed": True}]},
+    }
+    (other,) = lines_of([if_needed])
+    (line,) = [line for line in other if line["warns"]]
+    assert (line["text"], line["about"]) == (maybe, ["offer:car-deck", "object:car"])
+    # A report that names another OFFER for that step, an OBJECT that the TRIP does not
+    # have, or a place of the other kind leaves the line tied to none.
+    odd: list[Any] = [
+        [{**buy, "offer": "seats"}],
+        [{**buy, "option": "drive"}],
+        [{**buy, "objects": ["boat"]}],
+        [{**buy, "only_if_needed": True}],
+        [{key: value for key, value in buy.items() if key != "objects"}],
+        [],
+    ]
+    for to_buy in odd:
+        (other,) = lines_of([{**asked, "report": {**asked["report"], "to_buy": to_buy}}])
+        assert all(line["about"] == [] for line in other if line["warns"])
+
+
+def test_two_objects_that_take_places_of_one_offer_each_have_their_own_line() -> None:
+    """The car and the bike each take a place on the rack, and each has its own BUDGET. The
+    report has a warning for each, and each is tied to its own OBJECT."""
+    rack = offer("ferry", 2, "rack", "5.00 USD", objects=["car", "bike"])
+    pots = [budget("car-money", objects=["car"]), budget("bike-money", objects=["bike"])]
+    file = a_crossing(rack, budgets=[budget("money", "alex", "sam"), *pots], bike=True)
+    asked = asked_about(file)
+    said = asked["report"]
+    (tied,) = lines_of([asked])
+    warned = [(line["text"], line["about"]) for line in tied if line["warns"]]
+    start = "    ! A right to this still has to be bought for"
+    assert warned == [
+        (f"{start} car, from rack, for 5.00 USD from car-money.", ["offer:rack", "object:car"]),
+        (f"{start} bike, from rack, for 5.00 USD from bike-money.", ["offer:rack", "object:bike"]),
+    ]
+    # Where the report as JSON names one of the two purchases only, the lines and the
+    # purchases do not agree one by one, and none is tied.
+    first, _ = cast("list[dict[str, object]]", said["to_buy"])
+    (other,) = lines_of([{**asked, "report": {**said, "to_buy": [first]}}])
+    assert all(line["about"] == [] for line in other if line["warns"])
+
+
+def test_a_line_about_a_place_is_tied_whatever_the_name_of_the_budget_that_pays() -> None:
+    """Alex and Sam each still buy a seat, and the car a place on the car deck. The BUDGET
+    that pays is called "Travel fund, from savings". Its name comes after the OFFER in each
+    line, and the lines are tied to their OFFERs all the same."""
+    fund = {**budget("fund", "alex", "sam", objects=["car"]), "name": "Travel fund, from savings"}
+    people = [needs_right("ferry"), offer("ferry", 20, "seats")]
+    asked = asked_about(a_crossing(car_deck(), *people, budgets=[fund], rights=True))
+    (tied,) = lines_of([asked])
+    warned = [(line["text"], line["about"]) for line in tied if line["warns"]]
+    paid = 'from "Travel fund, from savings".'
+    assert warned == [
+        (
+            f"    ! alex and sam still have to buy a right to this, from seats, "
+            f"for 10.00 USD each {paid}",
+            ["offer:seats"],
+        ),
+        (
+            f"    ! A right to this still has to be bought for car, from car-deck, "
+            f"for 90.00 USD {paid}",
+            ["offer:car-deck", "object:car"],
+        ),
+    ]
+    # Where only the if of the seats is unlike the report as JSON, no line of the step is tied.
+    seats, deck = asked["report"]["to_buy"]
+    unlike = {**asked["report"], "to_buy": [{**seats, "only_if_needed": True}, deck]}
+    (other,) = lines_of([{**asked, "report": unlike}])
+    assert all(line["about"] == [] for line in other if line["warns"])
+    # A word of the name is no OFFER, though ", from " comes before it and a comma after it.
+    named_so = {**asked["report"], "to_buy": [seats, {**deck, "offer": "savings"}]}
+    asked["text"] = asked["text"].replace("from savings", "from savings, for rail")
+    (other,) = lines_of([{**asked, "report": named_so}])
+    assert any('"Travel fund, from savings, for rail"' in line["text"] for line in other)
+    assert all(line["about"] == [] for line in other if line["warns"])
+
+
+def test_the_line_about_places_that_are_bought_together_is_tied_to_its_object() -> None:
+    """Nobody said where the bike is. Under the bike, the report says that at most one of
+    its two places has to be bought, and that line is about the bike."""
+    asked = asked_of(EXAMPLES / "a-car-ferry" / "nobody-said-where-the-bike-is.json")
+    (found,) = lines_of([asked])
+    (line,) = [line for line in found if line["text"].startswith("    Of the places for ")]
+    assert line["about"] == ["object:bike"]
+    assert (line["step"], line["record"], line["warns"]) == (None, None, False)
+    # Where the report as JSON does not say so, the lines under the OBJECTs are one more
+    # than it accounts for, and none of them is tied.
+    said = {key: value for key, value in asked["report"].items() if key != "places_together"}
+    (other,) = lines_of([{**asked, "report": said}])
+    under = other[[line["text"] for line in other].index("Where each OBJECT is:") + 1 :]
+    assert all(line["about"] == [] for line in under if line["text"].startswith("  the "))
+
+
+def test_the_line_about_places_under_a_case_is_tied_to_its_object() -> None:
+    """Nobody knows the price of a seat, and the plan for each case has a place for the
+    bike on two trains. Under each case, the line that says that one of them is bought at
+    most is about the bike."""
+    seats = [needs_right("north"), offer("north", 5, "seats", None)]
+    seats.append({"id": "south-open", "option": "south", "needs_right": False})
+    asked = asked_about(two_trains("30.00", *seats, rights=True))
+    assert asked["report"]["answer"] == "UNDETERMINED"
+    (found,) = lines_of([asked])
+    said = [line for line in found if line["text"].lstrip().startswith("Of the places for ")]
+    assert len(said) == len(asked["report"]["plans"]) > 1
+    assert all(line["about"] == ["object:bike"] and line["under"] is not None for line in said)
+    # Where the report as JSON names no such OBJECT for a plan, the line is tied to nothing.
+    plans = [
+        {key: value for key, value in plan.items() if key != "places_together"}
+        for plan in asked["report"]["plans"]
+    ]
+    (other,) = lines_of([{**asked, "report": {**asked["report"], "plans": plans}}])
+    said = [line for line in other if line["text"].lstrip().startswith("Of the places for ")]
+    assert said and all(line["about"] == [] for line in said)
 
 
 def test_the_plan_that_a_report_gives_for_a_case_is_tied_to_the_offers_it_buys_from() -> None:
@@ -364,6 +551,273 @@ def test_the_line_about_bookings_that_state_no_payment_is_tied_to_each_of_them(
         money = {**asked["report"]["money"], "not_stated": not_stated}
         (other,) = lines_of([{**asked, "report": {**asked["report"], "money": money}}])
         assert all(line["about"] == [] for line in other)
+
+
+def test_the_lines_about_cancelling_are_tied_to_their_bookings(tmp_path: Path) -> None:
+    """The room has two DEADLINEs, and the ticket costs 32 dollars at any time."""
+
+    def about(asked: dict[str, Any]) -> dict[str, list[str]]:
+        (found,) = lines_of([asked])
+        return {line["text"].strip()[:60]: line["about"] for line in found if line["about"]}
+
+    start = "a term for cancelling room, the BOO"
+    steps = asked_of(EXAMPLES / "the-room" / "in-steps.json")
+    assert about(steps) == {
+        f"12:00 pm on Tuesday 11 May 2027: {start}"[:60]: ["booking:room"],
+        f"6:00 pm on Wednesday 12 May 2027: {start}"[:60]: ["booking:room"],
+        "room, the BOOKING for Night at the hotel: nothing": ["booking:room"],
+        "skydeck-ticket, the BOOKING for Skydeck visit: 32.00 USD": ["booking:skydeck-ticket"],
+        "No terms for changing are stated for room and skydeck-ticket."[:60]: [
+            "booking:room",
+            "booking:skydeck-ticket",
+        ],
+    }
+    # A report as JSON that does not name the same BOOKINGs ties none of those lines.
+    report = steps["report"]
+    fewer = {**report, "deadlines": report["deadlines"][:1]}
+    assert all("a term for" not in text for text in about({**steps, "report": fewer}))
+    more = {**report, "deadlines": [*report["deadlines"], report["deadlines"][-1]]}
+    assert all("a term for" not in text for text in about({**steps, "report": more}))
+    wrong = [{**each, "booking": "skydeck-ticket"} for each in report["deadlines"]]
+    assert all(
+        "a term for" not in text
+        for text in about({**steps, "report": {**report, "deadlines": wrong}})
+    )
+    other = {**report, "cancelling_now": list(reversed(report["cancelling_now"]))}
+    assert all("the BOOKING for" not in text[:30] for text in about({**steps, "report": other}))
+    # Fewer entries for the costs now than the words have lines: none of those lines is tied.
+    partly = {**report, "cancelling_now": report["cancelling_now"][:1]}
+    assert all("the BOOKING for" not in text[:30] for text in about({**steps, "report": partly}))
+    # The name of an OPTION can read like the start of a DEADLINE line. A line names its
+    # BOOKING before that name, and only the lines under the heading are DEADLINEs.
+    odd = json.loads((EXAMPLES / "the-room" / "on-monday.json").read_text())
+    title = "Read: a term for cancelling skydeck-ticket, the BOOKING for night, starts. More"
+    for option in odd["options"]:
+        if option["id"] == "night":
+            option["name"] = title
+    path = tmp_path / "odd.json"
+    path.write_text(json.dumps(odd))
+    asked = asked_of(path)
+    tied = about(asked)
+    assert tied[f"6:00 pm on Wednesday 12 May 2027: {start}"[:60]] == ["booking:room"]
+    assert tied[f'room, the BOOKING for "{title}"'[:60]] == ["booking:room"]
+    renamed = [{**each, "booking": "skydeck-ticket"} for each in asked["report"]["deadlines"]]
+    other_report = {**asked["report"], "deadlines": renamed}
+    mistied = about({**asked, "report": other_report})
+    assert f"6:00 pm on Wednesday 12 May 2027: {start}"[:60] not in mistied
+    assert mistied[f'room, the BOOKING for "{title}"'[:60]] == ["booking:room"]
+    # A DEADLINE of the report as JSON has a kind, and names the record of that kind only.
+    for wrong in ({"kind": "typo"}, {"offer": "skydeck-ticket"}, {"kind": "expiry"}):
+        odd_kind = [{**each, **wrong} for each in report["deadlines"]]
+        assert all(
+            "a term for" not in text
+            for text in about({**steps, "report": {**report, "deadlines": odd_kind}})
+        )
+    # The one line about the BOOKINGs with no terms is about each of them.
+    # The ticket states neither kind of terms, and the room none for changing.
+    free = asked_of(EXAMPLES / "the-room" / "free-until-wednesday.json")
+    neither = "No terms for cancelling or for changing are stated for skydeck-ticket."[:60]
+    only = "No terms for changing are stated for room."
+    assert about(free)[neither] == ["booking:skydeck-ticket"]
+    assert about(free)[only] == ["booking:room"]
+    named = {**free["report"], "no_terms_for_cancelling": ["room"]}
+    assert not {neither, only} & set(about({**free, "report": named}))
+    # Each of the lines is tied by itself: the one that still names what the JSON names is.
+    fewer = {**free["report"], "no_terms_for_changing": ["room"]}
+    assert neither not in about({**free, "report": fewer})
+    assert about({**free, "report": fewer})[only] == ["booking:room"]
+    # With no time now, a line says what cancelling costs at any time.
+    untimed = asked_of(EXAMPLES / "the-room" / "nobody-said-what-time-it-is.json")
+    assert about(untimed)["skydeck-ticket, the BOOKING for Skydeck visit: 32.00 USD"] == [
+        "booking:skydeck-ticket"
+    ]
+    assert about(untimed)[f"6:00 pm on Wednesday 12 May 2027: {start}"[:60]] == ["booking:room"]
+    # A BOOKING whose id reads like a number is tied like any other.
+    content = json.loads((EXAMPLES / "the-room" / "nobody-said-what-time-it-is.json").read_text())
+    for fact in content["facts"]:
+        if fact["id"] == "skydeck-ticket":
+            fact["id"] = "24"
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    assert about(asked_of(path))["24, the BOOKING for Skydeck visit: 32.00 USD"] == ["booking:24"]
+
+
+def test_the_lines_about_changing_are_tied_to_their_bookings(tmp_path: Path) -> None:
+    """A change to the room costs 25 dollars from Tuesday, and cancelling it 189 from Wednesday."""
+
+    def tied(asked: dict[str, Any]) -> list[tuple[str, list[str]]]:
+        (found,) = lines_of([asked])
+        return [(line["text"].strip()[:52], line["about"]) for line in found if line["about"]]
+
+    change = "12:00 pm on Tuesday 11 May 2027: a term for changes to room, the BOOKING"[:52]
+    cancel = "6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING"[:52]
+    room = "room, the BOOKING for Night at the hotel: nothing"
+    ticket = "skydeck-ticket, the BOOKING for Skydeck visit: 32.00 USD"[:52]
+    asked = asked_of(EXAMPLES / "the-room" / "a-change.json")
+    assert tied(asked) == [
+        (change, ["booking:room"]),
+        (cancel, ["booking:room"]),
+        (room, ["booking:room"]),
+        (ticket, ["booking:skydeck-ticket"]),
+        (room, ["booking:room"]),
+        ("No terms for changing are stated for skydeck-ticket.", ["booking:skydeck-ticket"]),
+    ]
+    # A line says which kind of term starts, and the report as JSON has to say the same.
+    report = asked["report"]
+    kinds = {"changing": "cancelling", "cancelling": "changing"}
+    swapped = [{**each, "kind": kinds[each["kind"]]} for each in report["deadlines"]]
+    assert tied({**asked, "report": {**report, "deadlines": swapped}}) == tied(asked)[2:]
+    # The fees are tied under their own heading, apart from what cancelling costs.
+    no_fee = {key: value for key, value in report.items() if key != "changing_now"}
+    assert tied({**asked, "report": no_fee}) == [*tied(asked)[:4], tied(asked)[5]]
+    both = {**report, "changing_now": [*report["changing_now"], report["cancelling_now"][1]]}
+    assert tied({**asked, "report": both}) == [*tied(asked)[:4], tied(asked)[5]]
+    no_cost = {key: value for key, value in report.items() if key != "cancelling_now"}
+    assert tied({**asked, "report": no_cost}) == [*tied(asked)[:2], *tied(asked)[4:]]
+    # With no time now, a line says what a change costs at any time.
+    untimed = asked_of(EXAMPLES / "the-room" / "a-change-with-no-time-now.json")
+    assert tied(untimed) == [
+        (change, ["booking:room"]),
+        (cancel, ["booking:room"]),
+        (ticket, ["booking:skydeck-ticket"]),
+        (
+            "skydeck-ticket, the BOOKING for Skydeck visit: 5.00 USD"[:52],
+            ["booking:skydeck-ticket"],
+        ),
+    ]
+    # The fee at any time is tied by what the report as JSON says of the fee, and of nothing else.
+    report = untimed["report"]
+    no_fee = {key: value for key, value in report.items() if key != "changing_at_any_time"}
+    assert tied({**untimed, "report": no_fee}) == tied(untimed)[:3]
+    no_cost = {key: value for key, value in report.items() if key != "cancelling_at_any_time"}
+    assert tied({**untimed, "report": no_cost}) == [*tied(untimed)[:2], tied(untimed)[3]]
+    # A term of each kind for one BOOKING at one instant, beside an OFFER that expires then.
+    content = json.loads((EXAMPLES / "the-room" / "a-change.json").read_text())
+    wednesday = "2027-05-12T18:00:00-05:00[America/Chicago]"
+    for fact in content["facts"]:
+        if fact["id"] == "room":
+            fact["booking"]["changing"][1]["from"] = wednesday
+    content["facts"].append(
+        {"id": "late-checkout", "offer": {"option": "night", "places": 1, "expires": wednesday}}
+    )
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    together = asked_of(path)
+    at = "6:00 pm on Wednesday 12 May 2027: "
+    assert tied(together)[:3] == [
+        (f"{at}a term for cancelling room, the BOOKING"[:52], ["booking:room"]),
+        (f"{at}a term for changes to room, the BOOKING"[:52], ["booking:room"]),
+        (f"{at}late-checkout, the OFFER for Night at the hotel"[:52], ["offer:late-checkout"]),
+    ]
+    report = together["report"]
+    swapped = [
+        {**each, "kind": kinds.get(each["kind"], each["kind"])} for each in report["deadlines"]
+    ]
+    assert tied({**together, "report": {**report, "deadlines": swapped}}) == tied(together)[3:]
+
+
+def test_a_line_that_says_the_seller_accepts_none_is_tied_to_its_booking() -> None:
+    """From Tuesday the hotel accepts no change to the room. The Skydeck accepts no
+    cancellation of the ticket."""
+
+    def tied(asked: dict[str, Any]) -> list[tuple[str, list[str]]]:
+        (found,) = lines_of([asked])
+        return [(line["text"].strip()[:52], line["about"]) for line in found if line["about"]]
+
+    change = "12:00 pm on Tuesday 11 May 2027: a term for changes to room, the BOOKING"[:52]
+    cancel = "6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING"[:52]
+    ticket = "skydeck-ticket, the BOOKING for Skydeck visit: 32.00 USD"[:52]
+    monday = asked_of(EXAMPLES / "the-room" / "no-change-from-tuesday.json")
+    assert tied(monday)[:2] == [(change, ["booking:room"]), (cancel, ["booking:room"])]
+    thursday = asked_of(EXAMPLES / "the-room" / "no-change-on-thursday.json")
+    assert tied(thursday) == [
+        ("room, the BOOKING for Night at the hotel: 189.00 USD", ["booking:room"]),
+        (ticket, ["booking:skydeck-ticket"]),
+        (
+            "room, the BOOKING for Night at the hotel: the seller accepts no change"[:52],
+            ["booking:room"],
+        ),
+        ("No terms for changing are stated for skydeck-ticket.", ["booking:skydeck-ticket"]),
+    ]
+    untimed = asked_of(EXAMPLES / "the-room" / "the-ticket-cannot-be-cancelled.json")
+    never = "skydeck-ticket, the BOOKING for Skydeck visit: the seller accepts no"[:52]
+    assert tied(untimed)[1] == (never, ["booking:skydeck-ticket"])
+
+
+def test_the_lines_about_an_offer_that_expires_are_tied_to_it(tmp_path: Path) -> None:
+    """Sam still has to buy a ticket, before Thursday. A second OFFER states no expiry."""
+    content = json.loads((EXAMPLES / "a-ticket" / "the-offer-ends-on-thursday.json").read_text())
+    spare = {"id": "spare-tickets", "offer": {"option": "skydeck", "places": 1}}
+    content["facts"].append(spare)
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    (found,) = lines_of([asked_of(path)])
+    tied = {line["text"].strip()[:40]: line["about"] for line in found if offers_of(line)}
+    assert tied == {
+        # The purchase under its step, which ends with the time to buy before.
+        "! Sam still has to buy a right to this, ": ["offer:skydeck-tickets"],
+        # What the plan still pays in dollars.
+        "USD: 32.00 paid; 32.00 still to buy (sky": ["offer:skydeck-tickets"],
+        # The expiry among the DEADLINEs, and the OFFER that states none.
+        "5:00 pm on Thursday 13 May 2027: skydeck": ["offer:skydeck-tickets"],
+        "No time of expiry is stated for spare-ti": ["offer:spare-tickets"],
+    }
+    (purchase,) = [line for line in found if line["warns"]]
+    assert purchase["text"].endswith(", before 5:00 pm on Thursday 13 May 2027.")
+
+
+def test_cases_are_tied_under_a_heading_that_says_some_are_not_settled() -> None:
+    """A bike on a train: another transfer might help at any time, and the rack until Thursday."""
+    facts = [
+        starts_at("train", 6),
+        lasts("train", "PT1H"),
+        cutoff("train", "PT0S"),
+        starts_from("alex", "home"),
+        has_object("alex", "bike"),
+        every_use("bike"),
+        needs_right_for("train", "bike"),
+        offer("train", 1, "rack", "0.00 USD", objects=["bike"], expires=at(17, day=13)),
+        no_other_right_for("train", "bike", "rack"),
+    ]
+    file = trip(
+        ["alex"],
+        ["home", "town"],
+        [moves("train", "home", "town")],
+        facts,
+        [lock("train", "alex")],
+        objects=["bike"],
+    )
+    asked = asked_about(file)
+    assert "The trip works, or might work, in any of these cases:\n" in asked["text"]
+    (found,) = lines_of([asked])
+    assert [line["case"] for line in found if line["case"] is not None] == [0, 1]
+    # With a cap, each case has a plan. Alex needs a seat too, from an OFFER with no price.
+    # The plan under the case that is not settled might work, and both name the OFFER.
+    fare = [needs_right("train"), offer("train", 1, "fare", None)]
+    capped = trip(
+        ["alex"],
+        ["home", "town"],
+        [moves("train", "home", "town")],
+        [*facts, *fare],
+        [lock("train", "alex"), cap("money", "1.00 USD")],
+        rights=True,
+        objects=["bike"],
+    )
+    asked = asked_about(capped)
+    (found,) = lines_of([asked])
+    plans = {
+        line["text"].strip()[:30]: offers_of(line)
+        for line in found
+        if line["text"].strip().startswith("One plan that")
+    }
+    assert plans == {
+        # Another transfer and the price of the seat, at any time: not settled.
+        "One plan that might work then:": ["fare"],
+        # The price of the seat, before the rack expires: the bike takes a place too.
+        "One plan that works then: alex": ["fare", "rack"],
+        # Another right for Alex, before the rack expires.
+        "One plan that works then: a pl": ["rack"],
+    }
 
 
 def test_what_the_report_says_is_charged_to_a_cap_is_kept_in_its_own_words(

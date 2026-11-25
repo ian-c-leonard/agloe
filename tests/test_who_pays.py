@@ -875,7 +875,8 @@ def test_offers_that_nobody_can_need_cost_the_search_nothing(booked: bool) -> No
 
 
 def test_a_budget_that_lists_nobody_is_shown_as_that() -> None:
-    """A PERSON can be called nobody. The words for an empty list are not a name."""
+    """A PERSON can be called nobody. The words for an empty list are not a name, and the
+    name is in quotes."""
     unpriced = [offer("tour", 1, price=None), every_right("tour", "tour-offer")]
     document = {
         "persons": [{"id": "p", "name": "nobody"}],
@@ -889,7 +890,7 @@ def test_a_budget_that_lists_nobody_is_shown_as_that() -> None:
     }
     file = load(document)
     assert in_words(file)[-2:] == [
-        "  pounds: for nobody; it holds GBP",
+        '  pounds: for "nobody"; it holds GBP',
         "  euros: it lists no PERSON; it holds EUR",
     ]
     # A name cannot copy the marks between the parts of a line either.
@@ -1063,7 +1064,7 @@ def test_what_a_report_asks_about_money_is_enough_once_the_file_states_it() -> N
                 payers += 1
                 unstated += bool(to_quote)
             else:
-                buyers = [cover.person for cover in needed.buys]
+                buyers = [cover.person for cover in needed.buys if cover.person is not None]
                 shared = [
                     currency
                     for currency in ("USD", "EUR")
@@ -1114,6 +1115,7 @@ def test_what_a_report_says_about_each_purchase_follows_the_rules_on_random_trip
                 continue
             bought += 1
             assert cover.price is not None and cover.price == offers[cover.by].price
+            assert cover.person is not None  # no OFFER of these trips is for an OBJECT
             payer = file.pays(cover.person, cover.price)
             assert cover.budget == (None if payer is None else payer.id)
             assert payer is not None or not cover.price.amount

@@ -1,0 +1,9 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "ferry-needs-a-ticket",
+    "ferry-tickets",
+    "the-ferry-is-sold-out",
+    "lock-ferry"
+  ]
+}

@@ -11,10 +11,11 @@ to say: the page names who uses a right only where the report does.
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
-from agloe.file import read
+from agloe.file import Offer, read
 from agloe.view.trip import holds
 from tests.stories import EXAMPLES
 from tests.test_view_calendar import drawn, in_words, parts, with_its_report
@@ -23,12 +24,18 @@ STORY = EXAMPLES / "a-ticket"
 FILES = sorted(
     path for path in EXAMPLES.rglob("*.json") if not path.name.endswith(".expected.json")
 )
-SAYS = "The BOOKINGs and the OFFERs of the FILE, each under the OPTION that it gives a right to."
+SAYS = "The BOOKINGs and the OFFERs of the FILE, each under the OPTION that it is for."
 RED = " A red edge marks what the report names among what rules out every plan."
 YELLOW = " A yellow edge marks what the report names in what the FILE does not say."
 NEEDED = "People need a right to take part."
-NOT_ALL = "Another right to it may exist: the FILE does not say that these are all."
-ALL = "The FILE lists every right to it: nobody on the trip holds another or can get one"
+NOT_ALL = (
+    "Another right for a PERSON to take part in it may exist:"
+    " the FILE does not say that these are all."
+)
+ALL = (
+    "The FILE lists every right for a PERSON to take part in it:"
+    " nobody on the trip holds another or can get one"
+)
 ON_OFFER = "an OFFER with 2 places that can still be bought, for 32.00 USD each"
 
 type Trip = dict[str, Any]
@@ -146,9 +153,11 @@ def test_the_rights_mark_what_the_report_says_the_file_does_not_say() -> None:
 def test_each_kind_of_offer_and_of_set_of_rights_has_its_words() -> None:
     sent = drawn(STORY / "not-bought-yet.json")
     (skydeck, *_) = sent["rights"]
+    for_persons: dict[str, Any] = {"objects": [], "names": {}}
     skydeck["offers"] = [
-        {"id": "last-ticket", "places": 1, "price": {"amount": "0.50", "currency": "EUR"}},
-        {"id": "desk", "places": 3, "price": None},
+        {"id": "last-ticket", "places": 1, "price": {"amount": "0.50", "currency": "EUR"}}
+        | for_persons,
+        {"id": "desk", "places": 3, "price": None} | for_persons,
     ]
     skydeck["complete"] = {"record": "every-ticket", "offers": ["last-ticket", "desk"]}
     (shown,) = all_rights([sent])
@@ -159,6 +168,42 @@ def test_each_kind_of_offer_and_of_set_of_rights_has_its_words() -> None:
     ]
     assert rights["whole"] == f"{ALL}, except from last-ticket and desk."
     assert rights["records"] == ["skydeck-needs-a-ticket", "every-ticket"]
+
+
+def test_an_offer_for_objects_says_what_a_place_covers() -> None:
+    """Three places on the car deck are on OFFER for the car. The plan takes one of them."""
+    (ferry,) = rights_of("a-car-ferry/a-place-on-the-car-deck")["rights"]
+    (deck,) = ferry["offers"]
+    assert deck["says"] == (
+        "an OFFER with 3 places that can still be bought to cover the car, for 90.00 USD each"
+    )
+    assert deck["uses"] == "In the plan: a place of it covers the car."
+    assert ferry["closed"] == []
+    # A FACT says that the FILE lists every right for the car, and it names the OFFER. The
+    # report shows no plan, so the page says nothing of who takes a place.
+    (ferry,) = rights_of("a-car-ferry/the-trip-money-is-three-dollars-short")["rights"]
+    assert ferry["closed"] == [
+        "The FILE lists every right to it that covers the car: nobody on the trip holds another"
+        " or can get one, except from car-deck."
+    ]
+    (deck,) = ferry["offers"]
+    assert deck["uses"] is None and deck["clash"] == ["car-deck"]
+    # One place for either car: the OFFER names both, as a list that "or" joins.
+    (ferry,) = rights_of("a-car-ferry/one-place-and-two-cars")["rights"]
+    (deck,) = ferry["offers"]
+    assert deck["says"] == (
+        "an OFFER with 1 place that can still be bought to cover the car or Jo's car, for 90.00 USD"
+    )
+    # A place that is taken only if the OPTION turns out to need the right, and one that the
+    # plan does not take.
+    sent, found = with_its_report(EXAMPLES / "a-car-ferry" / "a-place-on-the-car-deck.json")
+    (buy,) = found["to_buy"]
+    (shown,) = all_rights([sent], [{**found, "to_buy": [{**buy, "only_if_needed": True}]}])
+    assert shown["rights"][0]["offers"][0]["uses"] == (
+        "In the plan: a place of it covers the car, if a right is needed there."
+    )
+    (shown,) = all_rights([sent], [{**found, "to_buy": []}])
+    assert shown["rights"][0]["offers"][0]["uses"] == "In the plan: no place of it is taken."
 
 
 def test_who_uses_a_right_is_said_only_where_the_report_names_them() -> None:
@@ -227,8 +272,8 @@ def test_a_booking_names_the_objects_that_it_covers(tmp_path: Path) -> None:
 
 def test_the_rights_card_says_what_it_does_not_cover_for_an_object(tmp_path: Path) -> None:
     """The ferry needs a right for the car, and no BOOKING covers the car. A FACT says that
-    the FILE lists every right to the ferry. That is about the PERSONs who take part, and
-    the card says so: the report still asks for a right for the car. An OPTION that only
+    the FILE lists every right for a PERSON to take part in the ferry, and the card says
+    it in those words: the report still asks for a right for the car. An OPTION that only
     needs a right for an OBJECT has a card too."""
     content = json.loads((EXAMPLES / "a-car-ferry" / "the-car-has-no-ticket.json").read_text())
     content["facts"].append({"id": "sold-out", "complete": {"rights_to": "ferry"}})
@@ -239,32 +284,47 @@ def test_the_rights_card_says_what_it_does_not_cover_for_an_object(tmp_path: Pat
     whole = all_rights([sent], [found], [text])[0]
     (ferry,) = whole["rights"]
     assert ferry["things"] == "It needs a right for the car."
-    scope = "; that is about the PERSONs who take part, and it says nothing of a right for the car."
-    assert ferry["whole"] == f"{ALL}{scope}"
+    assert (ferry["whole"], ferry["closed"]) == (f"{ALL}.", [])
     assert "ferry-needs-a-car-ticket" in ferry["records"]
     # The right for the car is the one case of the report, and the card is marked with it.
     assert (ferry["cases"], whole["asked"]) == ([0], True)
-    # Where no FACT says whether the ferry needs a right for the car, it might, and the
-    # card says the same of the FACT that the FILE lists every right.
-    silent = json.loads(json.dumps(content))
-    kept = ("ferry-needs-a-car-ticket", "every-ticket-for-the-car")
-    silent["facts"] = [fact for fact in silent["facts"] if fact["id"] not in kept]
-    path.write_text(json.dumps(silent))
+    # A FACT says that the FILE lists every right to the ferry that covers the car. The
+    # card says so, beside what it says of the PERSONs, and it is marked where the report
+    # names that FACT among what rules out every plan.
+    content["facts"].append(
+        {"id": "the-car-deck-is-full", "complete": {"rights_to": "ferry", "for_object": "car"}}
+    )
+    path.write_text(json.dumps(content))
     sent, found, text = in_words(path)
-    assert "a BOOKING for it that covers the car is enough instead." in text
-    (ferry, *_) = all_rights([sent], [found], [text])[0]["rights"]
-    assert (ferry["things"], ferry["whole"]) == (None, f"{ALL}{scope}")
-    # Where a FACT says that the ferry needs no right for the car, the card adds nothing.
-    for fact in content["facts"]:
-        if fact["id"] == "ferry-needs-a-car-ticket":
-            fact["needs_right_for"]["needed"] = False
+    assert found["answer"] == "INFEASIBLE"
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    for_the_car = "The FILE lists every right to it that covers the car"
+    assert ferry["closed"] == [f"{for_the_car}: nobody on the trip holds another or can get one."]
+    assert (
+        f"  the-car-deck-is-full: t{ferry['closed'][0][1:-1]}".replace(
+            "to it that", "to Car ferry to Muskegon that"
+        )
+        in text
+    )
+    assert (ferry["whole"], "the-car-deck-is-full" in ferry["clash"]) == (f"{ALL}.", True)
+    # Where the car is called Alex too, the card names it as the report does, with its id.
+    content["objects"][0]["name"] = "Alex"
     path.write_text(json.dumps(content))
     sent, found, text = in_words(path)
     (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
-    assert ferry["whole"] == f"{ALL}."
-    for fact in content["facts"]:
-        if fact["id"] == "ferry-needs-a-car-ticket":
-            fact["needs_right_for"]["needed"] = True
+    assert ferry["closed"] == [
+        "The FILE lists every right to it that covers Alex (car):"
+        " nobody on the trip holds another or can get one."
+    ]
+    assert "that covers Alex (car): nobody on the trip" in text
+    content["objects"][0]["name"] = "car and trailer"
+    path.write_text(json.dumps(content))
+    sent, found, text = in_words(path)
+    (ferry,) = all_rights([sent], [found], [text])[0]["rights"]
+    assert ferry["closed"][0].startswith('The FILE lists every right to it that covers "car and')
+    assert 'that covers "car and trailer": nobody on the trip' in text
+    content["objects"][0]["name"] = "the car"
+    content["facts"] = [fact for fact in content["facts"] if fact["id"] != "the-car-deck-is-full"]
     # Nobody needs a right to take part in the ferry, and it has no BOOKING: it still needs
     # a right for the car, so it has a card.
     for fact in content["facts"]:
@@ -406,6 +466,31 @@ def a_ferry_with(tmp_path: Path, name: str, change: Any) -> Path:
     return path
 
 
+def test_an_offer_that_expires_says_until_when_and_whether_it_has_expired() -> None:
+    until = "until 5:00 pm (UTC-5) on Thursday 13 May 2027, for 32.00 USD each"
+    for name, says in (
+        ("the-offer-ends-on-thursday", f"an OFFER with 2 places that can still be bought {until}"),
+        ("the-offer-has-expired", f"an OFFER that had 2 places that could be bought {until}"),
+        # With no time now, nobody knows whether a place can still be bought.
+        (
+            "nobody-said-whether-the-offer-has-expired",
+            f"an OFFER with 2 places that can be bought {until}",
+        ),
+    ):
+        (skydeck,) = [
+            each for each in rights_of(f"a-ticket/{name}")["rights"] if each["option"] == "skydeck"
+        ]
+        (tickets,) = skydeck["offers"]
+        assert tickets["says"] == says, name
+    # A COMPLETE set names an OFFER as long as the FILE holds it, and marks an expired one.
+    (skydeck,) = [
+        each
+        for each in rights_of("a-ticket/expired-and-sold-out")["rights"]
+        if each["option"] == "skydeck"
+    ]
+    assert skydeck["whole"].endswith("or can get one, except from skydeck-tickets (expired).")
+
+
 def test_every_example_shows_its_rights_in_the_words_of_the_report(tmp_path: Path) -> None:
     """Each BOOKING and each OFFER of each FILE is shown, worded as the report words it.
 
@@ -454,12 +539,16 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report(tmp_path: Pat
             for step in found.get("itinerary", [])
             for by in step.get("rights", {}).values()
         } | {
-            (use["option"], use["booking"])
+            (use["option"], use["booking"] or use.get("offer"))
             for thing in found.get("objects", [])
             for use in thing.get("covered_in", [])
         }
         for option in file.options:
-            listed = [*file.bookings(option.id), *file.offers(option.id)]
+            # Each OFFER for the OPTION: for PERSONs, or for the OBJECTs it names.
+            on_offer = [
+                fact for fact in file.facts if isinstance(fact, Offer) and fact.option == option.id
+            ]
+            listed = [*file.bookings(option.id), *on_offer]
             if (
                 not listed
                 and not file.needs_right(option.id)
@@ -473,9 +562,9 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report(tmp_path: Pat
             assert [booking["id"] for booking in rights["bookings"]] == [
                 fact.id for fact in file.bookings(option.id)
             ], name
-            assert [offer["id"] for offer in rights["offers"]] == [
-                fact.id for fact in file.offers(option.id)
-            ], name
+            assert [offer["id"] for offer in rights["offers"]] == [fact.id for fact in on_offer], (
+                name
+            )
             for booking in rights["bookings"]:
                 # Where the report has a line about this BOOKING, the page says the same.
                 if f"  {booking['id']}: a BOOKING" in words:
@@ -496,8 +585,14 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report(tmp_path: Pat
             for offer in rights["offers"]:
                 if f"  {offer['id']}: an OFFER" in words:
                     offers += 1
-                    said = offer["says"].replace("an OFFER with ", "an OFFER has ", 1)
-                    said = said.replace(" that can still", f" for {called} that can still", 1)
+                    # The card gives the time of expiry with its offset from UTC, and the
+                    # report only where its times have more than one offset.
+                    said = re.sub(r" \(UTC[^)]*\)", "", offer["says"])
+                    said = said.replace("an OFFER with ", "an OFFER has ", 1)
+                    said = said.replace(" that can ", f" for {called} that can ", 1)
+                    # An OFFER that has expired had its places.
+                    said = said.replace("an OFFER that had ", "an OFFER had ", 1)
+                    said = said.replace(" that could be", f" for {called} that could be", 1)
                     assert f"  {offer['id']}: {said}" in words, name
             for right in (*rights["bookings"], *rights["offers"]):
                 # Somebody uses it in the plan exactly where the report says so.
@@ -506,6 +601,7 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report(tmp_path: Pat
                     unused = (
                         "In the plan: nobody uses it.",
                         "In the plan: nobody takes a place of it.",
+                        "In the plan: no place of it is taken.",
                     )
                     assert (right["uses"] in unused) is ((option.id, right["id"]) not in used), name
                 else:
@@ -513,7 +609,7 @@ def test_every_example_shows_its_rights_in_the_words_of_the_report(tmp_path: Pat
             complete = file.rights_complete(option.id)
             if complete is not None and f"  {complete.id}: " in words:
                 sets += 1
-                said = rights["whole"].replace("to it:", f"to {called}:", 1)
+                said = rights["whole"].replace("part in it:", f"part in {called}:", 1)
                 assert f"  {complete.id}: t{said[1:-1]}" in words, name
         assert set(by_option) <= {option.id for option in file.options}, name
     assert min(bookings, uses) > 5

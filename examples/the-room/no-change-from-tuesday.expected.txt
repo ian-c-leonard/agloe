@@ -1,0 +1,51 @@
+FEASIBLE: this trip works.
+
+Friday 14 May 2027 (times in America/Chicago)
+  7:00 pm to 8:30 pm: Dinner, Alex
+  8:30 pm to 8:55 pm: the walk between River North and the hotel, Alex
+  11:30 pm to 7:30 am on 15 May: Night at the hotel, Alex
+
+Saturday 15 May 2027 (times in America/Chicago)
+  8:00 am to 8:45 am: Breakfast, Alex
+  8:45 am to 9:00 am: the walk between the hotel and Willis Tower, Alex
+  10:00 am to 11:30 am: Skydeck visit, Alex
+
+The plan relies on these FACTs and DECISIONs:
+  dinner-time: Dinner starts at 7:00 pm on Friday 14 May 2027
+  dinner-length: Dinner takes 1 h 30 min
+  dinner-is-walk-up: nobody needs a right to take part in Dinner
+  night-time: Night at the hotel starts at 11:30 pm on Friday 14 May 2027
+  night-length: Night at the hotel takes 8 h
+  night-arrival: nobody has to be at the hotel before Night at the hotel starts
+  night-needs-a-room: people need a right to take part in Night at the hotel
+  room: a BOOKING for Night at the hotel covers Alex
+  breakfast-time: Breakfast starts at 8:00 am on Saturday 15 May 2027
+  breakfast-length: Breakfast takes 45 min
+  breakfast-arrival: nobody has to be at the hotel before Breakfast starts
+  breakfast-is-walk-up: nobody needs a right to take part in Breakfast
+  skydeck-time: Skydeck visit starts at 10:00 am on Saturday 15 May 2027
+  skydeck-length: Skydeck visit takes 1 h 30 min
+  skydeck-arrival: nobody has to be at Willis Tower before Skydeck visit starts
+  skydeck-needs-a-ticket: people need a right to take part in Skydeck visit
+  skydeck-ticket: a BOOKING for Skydeck visit covers Alex
+  walk-to-hotel-length: the walk between River North and the hotel takes 25 min
+  walk-to-tower-length: the walk between the hotel and Willis Tower takes 15 min
+  lock-dinner: Alex takes part in Dinner
+  lock-night: Alex takes part in Night at the hotel
+  lock-breakfast: Alex takes part in Breakfast
+  lock-skydeck: Alex takes part in Skydeck visit
+
+This report uses 9:00 am on Monday 10 May 2027 as the time now (times in America/Chicago). The FACT today states it.
+
+DEADLINEs after that time, earliest first:
+  12:00 pm on Tuesday 11 May 2027: a term for changes to room, the BOOKING for Night at the hotel, starts. The seller accepts no change in it. The fee for a change is nothing in the term before it. At STAKE: the chance to change it.
+  6:00 pm on Wednesday 12 May 2027: a term for cancelling room, the BOOKING for Night at the hotel, starts. Cancelling costs 189.00 USD in it, and nothing in the term before it. At STAKE: 189.00 USD.
+
+What cancelling costs now:
+  room, the BOOKING for Night at the hotel: nothing
+  skydeck-ticket, the BOOKING for Skydeck visit: 32.00 USD
+
+The fee for a change now, apart from any difference in price:
+  room, the BOOKING for Night at the hotel: nothing
+
+No terms for changing are stated for skydeck-ticket.

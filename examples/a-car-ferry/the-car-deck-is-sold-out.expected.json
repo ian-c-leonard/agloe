@@ -1,0 +1,11 @@
+{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "alex-has-the-car",
+    "everything-that-moves-the-car",
+    "ferry-needs-a-car-ticket",
+    "ferry-tickets",
+    "the-car-deck-is-full",
+    "lock-ferry"
+  ]
+}

@@ -8,7 +8,7 @@ import pytest
 
 from agloe import report
 from agloe.answers import check
-from agloe.file import read
+from agloe.file import comes_twice, read
 from agloe.reference import broken, needless, worst_case
 from tests.stories import EXAMPLES
 
@@ -52,12 +52,20 @@ def test_every_expected_result_has_its_file() -> None:
 
 @pytest.mark.parametrize("path", FILES, ids=lambda path: f"{path.parent.name}/{path.stem}")
 def test_the_clock_of_a_report_is_the_one_its_text_uses(path: Path) -> None:
-    """Times are on the clocks of the FILE's time zone, with offsets only where they change."""
+    """Times are on the clocks of the FILE's time zone, with offsets only where they change.
+
+    Each step of the plan is shown with its start as the clock writes it. That start has
+    its offset where the times shown have more than one, and where the clocks show it twice.
+    """
     file = read(path)
-    clock = report.clock_for(file, check(file))
+    found = check(file)
+    clock = report.clock_for(file, found)
     assert clock.zone == file.zone
-    words = path.with_name(path.stem + ".expected.txt").read_text()
-    assert clock.offsets == ("(UTC" in words)
+    lines = path.with_name(path.stem + ".expected.txt").read_text().split("\n")
+    for step in found.itinerary:
+        start = clock.time(step.start)
+        assert any(line.startswith(f"  {start} to ") for line in lines), start
+        assert ("(UTC" in start) == (clock.offsets or comes_twice(step.start, file.zone))
 
 
 def test_an_offset_from_utc_is_written_to_the_second_where_it_has_seconds() -> None:

@@ -31,13 +31,14 @@
 
 <header class="top">
   <div class="wrap">
-    <a class="brand" href="./" aria-label="Agloe home">
-      <img class="mark" src="img/mark.png" width="44" height="44" alt="">
+    <a class="brand" href="/" aria-label="Agloe home">
+      <img class="mark" src="/img/mark.png" width="44" height="44" alt="">
       <svg class="word" viewBox="64 -728 2584 927" role="img" aria-label="Agloe"><path fill="currentColor" transform="scale(1,-1)" d="M594 599 277 93C252 51 223 30 172 25L166 0H388L394 25C318 30 301 49 326 87L405 215H678L696 87C701 45 679 30 603 25L596 0H856L863 25C817 30 800 51 794 98L714 700H688C641 700 592 706 544 712C489 720 424 728 375 728C175 728 64 617 64 481C64 376 128 311 222 311C315 311 382 373 382 452C382 488 357 520 318 520C286 520 261 496 261 461C261 436 276 419 276 398C276 371 253 357 217 357C154 357 115 407 115 481C115 602 217 683 372 683C431 683 514 671 560 658C596 648 620 640 594 599ZM433 259 629 573 672 259ZM1049 -199C1195 -199 1290 -141 1290 -55C1290 13 1244 47 1101 52C965 56 935 62 935 95C935 116 956 135 1001 135C1060 135 1063 113 1133 113C1265 113 1350 204 1350 318C1350 352 1336 395 1296 425C1309 439 1331 455 1349 455C1373 455 1377 429 1405 429C1434 429 1450 452 1450 474C1450 499 1426 514 1395 514C1355 514 1304 496 1261 444C1241 457 1211 466 1172 466C1040 466 955 375 955 261C955 226 967 194 991 169C924 165 864 128 864 70C864 37 877 11 909 -5C865 -21 831 -52 831 -98C831 -176 920 -199 1049 -199ZM1134 152C1078 152 1043 180 1043 243C1043 327 1085 427 1171 427C1227 427 1261 400 1261 335C1261 252 1220 152 1134 152ZM1054 -160C956 -160 893 -137 893 -90C893 -59 911 -36 958 -23C989 -30 1027 -34 1075 -35C1174 -37 1206 -52 1206 -87C1206 -123 1162 -160 1054 -160ZM1354 0H1577L1583 25C1530 30 1521 41 1530 77L1688 715H1656L1511 637L1507 617H1543C1565 617 1571 608 1565 584L1440 77C1431 41 1416 30 1360 25ZM1881 440 1871 461C1775 425 1675 342 1675 190C1675 72 1758 -15 1888 -15C2049 -15 2160 109 2160 262C2160 383 2078 460 1982 460C1904 460 1847 399 1847 312C1847 248 1884 201 1930 203C1962 203 1980 224 1980 249C1980 272 1966 290 1937 295C1913 298 1896 313 1896 345C1896 386 1922 421 1973 421C2030 421 2069 383 2069 295C2069 194 2019 24 1890 24C1805 24 1767 78 1767 157C1767 272 1816 398 1881 440ZM2416 -15C2539 -15 2626 76 2626 151C2626 174 2614 199 2580 199C2554 199 2526 178 2526 143C2526 125 2537 113 2537 94C2537 66 2496 27 2428 27C2335 27 2299 87 2299 167C2299 180 2299 192 2301 209L2648 317C2648 423 2558 466 2469 466C2328 466 2205 359 2205 185C2205 73 2283 -15 2416 -15ZM2472 427C2530 427 2569 400 2567 335L2308 254C2325 339 2371 427 2472 427Z"/></svg>
     </a>
     <nav class="links" aria-label="Main">
+      <a href="/#how">How it works</a>
       <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">Rules</a>
-      <a href="https://github.com/ian-c-leonard/agloe/tree/main/examples">Examples</a>
+      <a href="/examples/">Examples</a>
       <a href="https://github.com/ian-c-leonard/agloe/blob/main/docs/ROADMAP.md">Roadmap</a>
       <a href="https://github.com/ian-c-leonard/agloe">GitHub</a>
     </nav>
@@ -544,7 +545,6 @@ The plan relies on these FACTs and DECISIONs:
   <section class="band tint" id="what" aria-labelledby="what-title">
     <div class="wrap split">
       <div class="stack">
-        <span class="label">The compiler</span>
         <h2 id="what-title">One of three answers, each with its evidence.</h2>
         <ul class="key">
           <li class="feasible" data-from="README.md"><strong>FEASIBLE:</strong> the trip works. The report shows a plan, and warns when the plan holds only if uncertain durations stay short.</li>
@@ -560,95 +560,54 @@ The plan relies on these FACTs and DECISIONs:
     </div>
   </section>
 
-  <section class="band" id="built" aria-labelledby="built-title">
-    <div class="wrap split">
-      <div class="stack">
-        <span class="label">Method</span>
-        <h2 id="built-title">How a rule is built</h2>
-        <p>Each rule is a sentence on the rules page, then code in a slow checker, then code in a fast checker. The two checkers must give the same answers.</p>
-        <p class="actions"><a class="button" href="how-a-rule-is-built/">See one rule in each form</a></p>
-      </div>
-      <a class="card preview" href="how-a-rule-is-built/" aria-label="How a rule is built, in four steps">
-        <ol class="route">
+  <section class="band" id="how" aria-labelledby="how-title">
+    <div class="wrap">
+      <h2 id="how-title">How it works</h2>
+      <ul class="hows">
+        <li>
+          <a class="card preview" href="/how-a-rule-is-built/">
+            <strong>How a rule is built</strong>
+            <span>Each rule is a sentence on the rules page, then code in a slow checker, then code in a fast checker. The two checkers must give the same answers.</span>
+            <ol class="route">
           <li><svg class="town" viewBox="0 0 24 24" aria-hidden="true"><circle cx="20.40" cy="12.00" r="1.7"/><circle cx="19.27" cy="16.20" r="1.7"/><circle cx="16.20" cy="19.27" r="1.7"/><circle cx="12.00" cy="20.40" r="1.7"/><circle cx="7.80" cy="19.27" r="1.7"/><circle cx="4.73" cy="16.20" r="1.7"/><circle cx="3.60" cy="12.00" r="1.7"/><circle cx="4.73" cy="7.80" r="1.7"/><circle cx="7.80" cy="4.73" r="1.7"/><circle cx="12.00" cy="3.60" r="1.7"/><circle cx="16.20" cy="4.73" r="1.7"/><circle cx="19.27" cy="7.80" r="1.7"/></svg><span class="step"><strong>The idea</strong><span>A sentence in everyday words.</span></span></li>
           <li><svg class="town" viewBox="0 0 24 24" aria-hidden="true"><circle cx="20.40" cy="12.00" r="1.7"/><circle cx="19.27" cy="16.20" r="1.7"/><circle cx="16.20" cy="19.27" r="1.7"/><circle cx="12.00" cy="20.40" r="1.7"/><circle cx="7.80" cy="19.27" r="1.7"/><circle cx="4.73" cy="16.20" r="1.7"/><circle cx="3.60" cy="12.00" r="1.7"/><circle cx="4.73" cy="7.80" r="1.7"/><circle cx="7.80" cy="4.73" r="1.7"/><circle cx="12.00" cy="3.60" r="1.7"/><circle cx="16.20" cy="4.73" r="1.7"/><circle cx="19.27" cy="7.80" r="1.7"/></svg><span class="step"><strong>The words</strong><span>The same sentence on the rules page, in defined terms.</span></span></li>
           <li><svg class="town" viewBox="0 0 24 24" aria-hidden="true"><circle cx="20.40" cy="12.00" r="1.7"/><circle cx="19.27" cy="16.20" r="1.7"/><circle cx="16.20" cy="19.27" r="1.7"/><circle cx="12.00" cy="20.40" r="1.7"/><circle cx="7.80" cy="19.27" r="1.7"/><circle cx="4.73" cy="16.20" r="1.7"/><circle cx="3.60" cy="12.00" r="1.7"/><circle cx="4.73" cy="7.80" r="1.7"/><circle cx="7.80" cy="4.73" r="1.7"/><circle cx="12.00" cy="3.60" r="1.7"/><circle cx="16.20" cy="4.73" r="1.7"/><circle cx="19.27" cy="7.80" r="1.7"/></svg><span class="step"><strong>The slow checker</strong><span>Tries every possibility, and checks each against the sentence.</span></span></li>
           <li><svg class="town" viewBox="0 0 24 24" aria-hidden="true"><circle cx="20.40" cy="12.00" r="1.7"/><circle cx="19.27" cy="16.20" r="1.7"/><circle cx="16.20" cy="19.27" r="1.7"/><circle cx="12.00" cy="20.40" r="1.7"/><circle cx="7.80" cy="19.27" r="1.7"/><circle cx="4.73" cy="16.20" r="1.7"/><circle cx="3.60" cy="12.00" r="1.7"/><circle cx="4.73" cy="7.80" r="1.7"/><circle cx="7.80" cy="4.73" r="1.7"/><circle cx="12.00" cy="3.60" r="1.7"/><circle cx="16.20" cy="4.73" r="1.7"/><circle cx="19.27" cy="7.80" r="1.7"/></svg><span class="step"><strong>The fast checker</strong><span>States the sentence as logic and gives it to a solver.</span></span></li>
         </ol>
-      </a>
-    </div>
-  </section>
-
-  <section class="band tint" id="must" aria-labelledby="must-title">
-    <div class="wrap">
-      <div class="stack">
-        <span class="label">The standard it is held to</span>
-        <h2 id="must-title" data-from="docs/VISION.md">What it must be</h2>
-      </div>
-      <ul class="musts">
-        <li data-from="docs/VISION.md"><strong>Trustworthy.</strong> Anyone, person or agent, can check any trip, including one an AI drafted, and rely on the answer.</li>
-        <li data-from="docs/VISION.md"><strong>Flexible.</strong> It works for any kind of trip.</li>
-        <li data-from="docs/VISION.md"><strong>Whole-lifecycle.</strong> It covers the first idea, planning, booking, the live trip, recovery when things go wrong, and the record afterwards. The file keeps the agreed plan, the current forecast and what actually happened.</li>
-        <li data-from="docs/VISION.md"><strong>Intuitive.</strong> It is easy to read and understand.</li>
-        <li data-from="docs/VISION.md"><strong>Multiplayer.</strong> Several people and their agents share one plan. They propose changes, the file records what the group decided and why, and the trip stays fair to everyone.</li>
-        <li data-from="docs/VISION.md"><strong>Open.</strong> It imports what travelers already have, publishes to the tools they already use, and hands purchases to the services that sell them.</li>
-        <li data-from="docs/VISION.md"><strong>Durable.</strong> The file outlives any app, the way a calendar file does.</li>
-        <li data-from="docs/VISION.md"><strong>Agent-ready.</strong> AI agents write the file and use it as shared memory across sessions and tools.</li>
-        <li data-from="docs/VISION.md"><strong>Self-explaining.</strong> Every finding shows its evidence, and what is still missing.</li>
-        <li data-from="docs/VISION.md"><strong>Deterministic.</strong> The same file gives the same answer on any machine, on any day.</li>
+          </a>
+        </li>
+        <li>
+          <a class="card preview" href="/how-an-answer-is-decided/">
+            <strong>How an answer is decided</strong>
+            <span>A FILE can leave things out. The COMPILER looks for a plan that works in the worst case and, if it finds none, in the best case.</span>
+            <table class="decides">
+              <thead><tr><th>The worst case</th><th>The best case</th><th>The answer</th></tr></thead>
+              <tbody>
+                <tr><td>a plan works</td><td>a plan works</td><td class="feasible">FEASIBLE</td></tr>
+                <tr><td>no plan works</td><td>a plan works</td><td class="undetermined">UNDETERMINED</td></tr>
+                <tr><td>no plan works</td><td>no plan works</td><td class="infeasible">INFEASIBLE</td></tr>
+              </tbody>
+            </table>
+          </a>
+        </li>
       </ul>
     </div>
   </section>
 
-  <section class="band" id="run" aria-labelledby="run-title">
-    <div class="wrap two">
+  <section class="band tint" id="run" aria-labelledby="run-title">
+    <div class="wrap split">
       <div class="stack">
-        <span class="label">Try it</span>
         <h2 id="run-title">Check a trip yourself.</h2>
         <p>You can run the COMPILER from a copy of the repository. You need git and <a href="https://docs.astral.sh/uv/">uv</a>.</p>
-        <pre class="terminal plain" tabindex="0" aria-label="Commands to get Agloe and check two example trips">git clone https://github.com/ian-c-leonard/agloe.git
+        <p class="small">Every example is on the <a href="/examples/">examples page</a>, with its report.</p>
+      </div>
+      <pre class="terminal plain" tabindex="0" aria-label="Commands to get Agloe and check two example trips">git clone https://github.com/ian-c-leonard/agloe.git
 cd agloe
 uv run agloe check examples/flight-home/works.json
 uv run agloe check examples/a-must/cannot-work.json</pre>
-      </div>
-      <div class="stack">
-        <span class="label">In the open</span>
-        <h2 data-from="README.md">How it is built</h2>
-        <p data-from="README.md">Ian Leonard designs Agloe and makes its product decisions. AI agents do much of the building: Claude Code writes the code, and Codex reviews each step and each release. The <a href="https://github.com/ian-c-leonard/agloe/blob/main/docs/PRINCIPLES.md">principles</a> and <a href="https://github.com/ian-c-leonard/agloe/tree/main/docs/decisions">decisions</a> are public, so anyone can see why Agloe works the way it does.</p>
-      </div>
     </div>
   </section>
 
-  <section class="band night" id="name" aria-labelledby="name-title">
-    <div class="wrap split">
-      <div class="stack">
-        <span class="label">A town that was not there</span>
-        <h2 id="name-title" data-from="README.md">The name</h2>
-        <p data-from="README.md">Agloe was a town that appeared on maps of New York State but did not exist. Mapmakers invented it in the 1930s to catch anyone copying their maps. Agloe the compiler catches the parts of a plan that are not really there.</p>
-      </div>
-      <svg class="map" viewBox="0 0 560 380" role="img" aria-labelledby="map-title map-desc">
-        <title id="map-title">A sketch map with Agloe on it</title>
-        <desc id="map-desc">A road runs north from the town of Roscoe, near the Beaver Kill. Where a track crosses the road, a dashed circle marks Agloe, the town that was not there.</desc>
-        <clipPath id="sheet"><rect width="560" height="380" rx="14"/></clipPath>
-        <symbol id="fir" overflow="visible"><path transform="scale(0.24)" d="M0 -64Q4 -54 11 -45Q8 -47.5 5 -47Q9 -37 15.5 -27Q11 -30 6 -29.5Q11 -19 20 -7Q11 -11 3.2 -10V7H-3.2V-10Q-11 -11 -20 -7Q-11 -19 -6 -29.5Q-11 -30 -15.5 -27Q-9 -37 -5 -47Q-8 -47.5 -11 -45Q-4 -54 0 -64Z"/></symbol>
-        <g clip-path="url(#sheet)">
-          <path class="grid" d="M140 0v380M280 0v380M420 0v380M0 127h560M0 254h560"/>
-          <path id="beaver-kill" class="river draw" pathLength="1" d="M0 354C96 322 198 336 268 318 338 300 340 280 384 224 428 168 470 92 560 52"/>
-          <path class="highway draw second" pathLength="1" d="M0 318C150 300 252 246 322 264S470 300 560 320"/>
-          <path class="road draw third" pathLength="1" d="M322 264C316 220 286 196 272 160S252 116 232 96 204 44 194 0"/>
-          <path class="contour" d="M0 44C42 34 70 48 112 28S168 16 190 0M0 78C52 68 86 84 130 58S200 40 232 0"/>
-          <path class="track appear" d="M96 64 232 96l150 36"/>
-          <g class="wood appear"><use href="#fir" x="40" y="176"/><use href="#fir" x="62" y="176"/><use href="#fir" x="84" y="176"/><use href="#fir" x="51" y="198"/><use href="#fir" x="73" y="198"/><use href="#fir" x="95" y="198"/><use href="#fir" x="40" y="220"/><use href="#fir" x="62" y="220"/><use href="#fir" x="492" y="168"/><use href="#fir" x="514" y="168"/><use href="#fir" x="536" y="168"/><use href="#fir" x="503" y="190"/><use href="#fir" x="525" y="190"/><use href="#fir" x="492" y="212"/><use href="#fir" x="514" y="212"/></g>
-        </g>
-        <circle class="town appear" cx="322" cy="264" r="7.5"/>
-        <circle class="not-there appear" cx="232" cy="96" r="14"/>
-        <text class="place appear" x="338" y="252">Roscoe</text>
-        <text class="place big appear" x="256" y="92">Agloe</text>
-        <text class="water-name appear" dy="-12"><textPath href="#beaver-kill" startOffset="66%">Beaver Kill</textPath></text>
-        <text class="note appear" x="544" y="364" text-anchor="end">A sketch, not to scale</text>
-      </svg>
-    </div>
-  </section>
 </main>
 
 <footer>
@@ -659,20 +618,6 @@ uv run agloe check examples/a-must/cannot-work.json</pre>
   </div>
 </footer>
 
-<script>
-// The map draws itself once. Nothing on the page needs this.
-(() => {
-  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  // The map draws itself the first time it comes into view.
-  const map = document.querySelector(".map");
-  if (map && !still && "IntersectionObserver" in window) {
-    map.classList.add("unseen");
-    new IntersectionObserver((seen, watcher) => {
-      if (seen.some((entry) => entry.isIntersecting)) { map.classList.remove("unseen"); watcher.disconnect(); }
-    }, { threshold: 0.35 }).observe(map);
-  }
-})();
-</script>
 <script type="module" src="trip.js"></script>
 
 </body>
