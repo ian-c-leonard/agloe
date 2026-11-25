@@ -13,6 +13,7 @@ from enum import Enum
 from itertools import chain, combinations
 
 from agloe.file import (
+    FIRST_TIME,
     Booking,
     Cap,
     Complete,
@@ -587,7 +588,7 @@ def reports(
         cases = _by_stretch(file, works, shown, can_work)
         missing = tuple(some for some, _, _ in cases)
         before = tuple(until for _, _, until in cases)
-        plans = tuple(_plan(seen, some, shown) for some, seen, _ in cases) if file.caps else ()
+        plans = tuple(plan for _, plan, _ in cases if plan is not None)
         yield Report(Answer.UNDETERMINED, missing=missing, plans=plans, before=before)
         return
     missing = _missing(file, works, shown)
@@ -610,37 +611,49 @@ def as_seen(file: File, before: int | None) -> File:
 
 def _by_stretch(
     file: File, works: Works, shown: Shown, can_work: CanWork
-) -> list[tuple[tuple[Missing, ...], File, int | None]]:
+) -> list[tuple[tuple[Missing, ...], Plan | None, int | None]]:
     """The cases of a TRIP whose FILE states no time now, each with the time it holds until.
 
     Nobody knows which OFFERs have expired. So the cases are worked out once for each
     stretch of time between two expiries, on the FILE as it is in that stretch, from the
     last stretch to the first. Every purchase that is possible later is possible earlier,
-    so a case of one stretch holds in every stretch before it. Each case is given once, with
-    the latest stretch in which it holds: the FILE as it is there, and the time at which
-    that stretch ends. None: it holds at any time.
+    so a case of one stretch holds in every stretch before it. Each case comes with the
+    time at which its stretch ends. None: it holds at any time. In a FILE with a cap it
+    comes with its plan, as the FILE is in that stretch.
+
+    A case says more than which FACTs it asks for: how long a length of time can be, what
+    an OPTION can require, what each cap has left. An earlier stretch can allow more of
+    those, with the same FACTs. So a case is left out only where a later stretch has one
+    that says the same, in all of that. Then the later one holds for longer.
 
     Where the TRIP works in a stretch with nothing else found out, that is a case with no
     unknown FACT, and no earlier stretch adds one: each would end sooner.
     """
     ends = sorted({offer.expires for offer in file.dated_offers() if offer.expires is not None})
-    cases: list[tuple[tuple[Missing, ...], File, int | None]] = []
-    listed: set[frozenset[Unknown]] = set()
+    cases: list[tuple[tuple[Missing, ...], Plan | None, int | None]] = []
+    said: set[tuple[tuple[tuple[Unknown, int | None, str | None], ...], Plan | None]] = set()
     for until in (None, *reversed(ends)):
+        if until is not None and until <= FIRST_TIME:
+            # No time now is before the first time a FILE can state: this stretch is empty.
+            continue
         seen = as_seen(file, until)
         if works(seen, worst_case(seen)):
             if until is None:
                 # The worst case of the FILE has every such OFFER closed, as this stretch has.
                 raise AssertionError("the TRIP works after every expiry, and not at worst")
-            cases.append(((), seen, until))
+            cases.append(((), _plan(seen, (), shown) if file.caps else None, until))
             break
         if not can_work(Remaining(seen)):
             continue
         for some in _missing(seen, works, shown):
-            asked = frozenset(needed.unknown for needed in some)
-            if asked not in listed:
-                listed.add(asked)
-                cases.append((some, seen, until))
+            plan = _plan(seen, some, shown) if file.caps else None
+            # What the case says: its FACTs with their limits, and what each cap has left.
+            # Who buys which place is one plan of many, and no part of what it says.
+            states = tuple((needed.unknown, needed.at_most, needed.of) for needed in some)
+            rows = None if plan is None else replace(plan, buys=())
+            if (states, rows) not in said:
+                said.add((states, rows))
+                cases.append((some, plan, until))
     return cases
 
 

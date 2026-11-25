@@ -748,9 +748,17 @@ def as_text(file: File, report: Report) -> str:
         ] or [[] for _ in cases]
         asked = [needed.unknown for enough in report.missing for needed in enough]
         kinds = {unknown.what for unknown in asked}
-        # A set with another transfer is not settled, and a report lists such sets only
-        # where it lists no other.
-        works = "might work" if "another transfer" in kinds else "works"
+        # A set with another transfer is not settled. Among the sets of one stretch of time,
+        # a report lists such sets only where it lists no other. A FILE that states no time
+        # now can have a settled case in one stretch and an unsettled one in another.
+        unsettled = [
+            number
+            for number, enough in enumerate(report.missing, 1)
+            if any(needed.unknown.what == "another transfer" for needed in enough)
+        ]
+        works = "works"
+        if unsettled:
+            works = "might work" if len(unsettled) == len(cases) else "works, or might work,"
         if len(cases) == 1:
             lines.append(f"The trip {works} if {cases[0]}.")
             lines += [f"  {line}" for line in plans[0]]
@@ -763,6 +771,10 @@ def as_text(file: File, report: Report) -> str:
             moved = {unknown.about for unknown in asked if unknown.what == "another transfer"}
             names = [_names(file.objects)[each.id] for each in file.objects if each.id in moved]
             this = "That is" if len(cases) == 1 else "These cases are"
+            if len(unsettled) < len(cases):
+                one = len(unsettled) == 1
+                which = _listed([str(number) for number in unsettled])
+                this = f"Case {which} is" if one else f"Cases {which} are"
             lines += [
                 "",
                 f"{this} not settled. What the FILE lists does not do that for"

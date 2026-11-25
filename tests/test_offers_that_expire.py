@@ -24,12 +24,19 @@ from tests.stories import (
     booking,
     budget,
     cap,
+    cutoff,
+    every,
     every_right,
+    lasts,
     lock,
+    must,
+    needs_no_right,
     needs_right,
     no_other_right_for,
     now,
     offer,
+    satisfies,
+    starts_at,
     stays,
     trip,
 )
@@ -40,6 +47,11 @@ from tests.test_offers_for_objects import BOTH, a_crossing
 THURSDAY = at(17, day=13)  # when the OFFER of these stories expires: 5:00 pm on 13 May
 MONDAY = now(9, day=10)
 FRIDAY = now(9, day=14)
+
+
+def at_hour(option: str, hour: int) -> list[Any]:
+    """An OPTION that starts at this hour and takes one hour, with nothing left unknown."""
+    return [starts_at(option, hour), lasts(option, "PT1H"), cutoff(option, "PT0S")]
 
 
 def tour(*more: Any) -> File:
@@ -602,3 +614,97 @@ def test_the_expiries_are_in_the_order_of_time() -> None:
         instant(THURSDAY),
         instant(THURSDAY),
     ]
+
+
+# A case of an earlier stretch that allows more than a later one with the same FACTs.
+
+
+def test_an_earlier_stretch_can_allow_a_longer_duration() -> None:
+    """Alex's visit starts at 9:00 am and nobody has said how long it takes. A show at
+    10:00 am or one at 11:00 am meets his must. Only the later one needs a ticket, and its
+    one seat is on OFFER until Thursday."""
+    facts = [
+        starts_at("visit", 9),
+        *(
+            each
+            for show, hour in (("early-show", 10), ("late-show", 11))
+            for each in at_hour(show, hour)
+        ),
+        satisfies("early-show", "a-show"),
+        satisfies("late-show", "a-show"),
+        every("a-show"),
+        needs_no_right("visit"),
+        needs_no_right("early-show"),
+        needs_right("late-show"),
+        offer("late-show", 1, expires=THURSDAY),
+        every_right("late-show", "late-show-offer"),
+    ]
+    options = [stays("visit", "hall"), stays("early-show", "hall"), stays("late-show", "hall")]
+    file = trip(
+        ["alex"],
+        ["hall"],
+        options,
+        facts,
+        [lock("visit", "alex")],
+        wants=[must("a-show", "alex")],
+        rights=True,
+    )
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert [
+        ([(needed.unknown.what, needed.unknown.option, needed.at_most) for needed in enough], until)
+        for enough, until in zip(found.missing, found.before, strict=True)
+    ] == [
+        ([("duration", "visit", 3600)], None),
+        ([("duration", "visit", 7200)], instant(THURSDAY)),
+    ]
+    words = said(file)
+    assert "visit takes 1 h or less" in words
+    assert "visit takes 2 h or less, and it is before 5:00 pm on Thursday 13 May 2027" in words
+
+
+def test_an_earlier_stretch_can_leave_more_of_a_cap() -> None:
+    """Alex's BOOKING states no payment. Sam buys a seat for 3 dollars until Wednesday, or one
+    for 30 dollars at any time. The cap is 35 dollars."""
+    facts = [
+        *at_ten("tour"),
+        needs_right("tour"),
+        booking("tour", "alex"),
+        offer("tour", 1, id="cheap", price="3.00 USD", expires=WEDNESDAY),
+        offer("tour", 1, id="dear", price="30.00 USD"),
+        every_right("tour", "cheap", "dear"),
+    ]
+    decisions = [lock("tour", "alex", "sam"), cap("money", "35.00 USD")]
+    file = trip(EVERYONE, ["dock"], [stays("tour", "dock")], facts, decisions, rights=True)
+    found = checked(file)
+    assert found.answer is Answer.UNDETERMINED
+    assert found.before == (None, instant(WEDNESDAY))
+    assert [[needed.unknown.what for needed in enough] for enough in found.missing] == [
+        ["charged"],
+        ["charged"],
+    ]
+    late, early = found.plans
+    assert [(cover.person, cover.by) for cover in late.buys] == [("sam", "dear")]
+    assert [(cover.person, cover.by) for cover in early.buys] == [("sam", "cheap")]
+    assert [row.left for row in late.caps] == [50000]
+    assert [row.left for row in early.caps] == [320000]
+    # The same condition in two stretches is listed once, with the later one.
+    no_cheaper = [
+        offer("tour", 1, id="cheap", price="30.00 USD", expires=WEDNESDAY)
+        if fact["id"] == "cheap"
+        else fact
+        for fact in facts
+    ]
+    same = trip(EVERYONE, ["dock"], [stays("tour", "dock")], no_cheaper, decisions, rights=True)
+    assert checked(same).before == (None,)
+
+
+def test_an_offer_that_expires_at_the_first_time_a_file_can_state_is_open_at_no_time() -> None:
+    """No time now is before that time, so no case says "it is before" it."""
+    first = "0001-01-01T00:00:00+00:00[UTC]"
+    file = a_boat_tour(
+        booking("tour", "alex"),
+        offer("tour", 2, expires=first),
+        every_right("tour", "tour-offer"),
+    )
+    assert checked(file).answer is Answer.INFEASIBLE

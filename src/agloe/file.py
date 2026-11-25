@@ -738,16 +738,16 @@ class File:
         """The OFFERs that have expired by the time now, where the FILE states it.
 
         An OFFER has expired at the time it states and from then on. With no time now, nobody
-        knows which have expired, and this holds none. The lookups of OFFERs that follow
+        knows which have expired. Then this holds only an OFFER that expires at the first
+        time a FILE can state: no time now is before that. The lookups of OFFERs that follow
         leave these out: nobody can take a place of them.
         """
         now = self.now()
-        if now is None:
-            return frozenset()
+        at_least = FIRST_TIME if now is None else now.at
         return frozenset(
             fact.id
             for fact in self.facts
-            if isinstance(fact, Offer) and fact.expires is not None and fact.expires <= now.at
+            if isinstance(fact, Offer) and fact.expires is not None and fact.expires <= at_least
         )
 
     def as_of(self, moment: int) -> File:
@@ -1146,6 +1146,10 @@ class File:
             facts=tuple(fact for fact in self.facts if fact.id != record),
             decisions=tuple(each for each in self.decisions if each.id != record),
         )
+
+
+# The first second that a FILE can state: the start of the year 0001 in UTC.
+FIRST_TIME = -62_135_596_800
 
 
 def instant(text: str) -> int:

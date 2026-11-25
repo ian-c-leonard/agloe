@@ -26,7 +26,7 @@ const WARNING = /^ {4}! /;
 /** How the line starts that states the one case in which a trip works, or might work. */
 const ONE_CASE = /^The trip (?:works|might work) if /;
 /** The line above the cases in which a trip works or might, where the report lists several. */
-const CASES = /^The trip (?:works|might work) in any of these cases:$/;
+const CASES = /^The trip (?:works|might work|works, or might work,) in any of these cases:$/;
 /**
  * A warning that says who still has to buy a right. It says "if it needs one" where nobody
  * knows whether the OPTION needs a right.
