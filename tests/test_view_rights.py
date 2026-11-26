@@ -80,6 +80,8 @@ def test_the_rights_to_an_option_say_who_has_one_and_what_is_on_offer() -> None:
             ),
             # It states no terms for cancelling or for changing.
             "terms": [],
+            # So the report says nothing of what holds now.
+            "now": [],
             # The report says which right each PERSON uses, and the page says the same.
             "uses": "In the plan: Alex uses it.",
             "records": ["alex-skydeck-ticket"],
@@ -557,6 +559,87 @@ def test_a_term_that_starts_at_a_time_says_nothing_of_the_time_before(tmp_path: 
     assert bookings["room"]["terms"] == [f"What cancelling costs: from {WEDNESDAY}, 189.00 USD."]
     tickets = rights_of("a-ticket/works")["rights"][0]["bookings"]
     assert [ticket["terms"] for ticket in tickets] == [[], []]
+
+
+def test_a_booking_with_dated_terms_says_what_the_report_says_holds_now(tmp_path: Path) -> None:
+    """Which term holds at the time now is for the COMPILER to say. The card says it where
+    the report does, in the report's words for the cost."""
+    # It is Monday, and the room can be cancelled at no cost until Wednesday at six.
+    bookings = bookings_of("on-monday")
+    assert bookings["room"]["now"] == ["The report says that cancelling costs nothing now."]
+    # One term that holds at any time says its cost already.
+    assert bookings["skydeck-ticket"]["now"] == []
+    # It is Wednesday at six: the later term holds.
+    assert bookings_of("at-six-on-wednesday")["room"]["now"] == [
+        "The report says that cancelling costs 189.00 USD now."
+    ]
+    # Both kinds of terms, each with what holds now.
+    assert bookings_of("a-change")["room"]["now"] == [
+        "The report says that cancelling costs nothing now.",
+        "The report says that the fee for a change is nothing now, apart from any difference in"
+        " price.",
+    ]
+    # On Thursday the seller accepts no change.
+    assert bookings_of("no-change-on-thursday")["room"]["now"] == [
+        "The report says that cancelling costs 189.00 USD now.",
+        "The report says that the seller accepts no change now.",
+    ]
+    # A FILE that states no time now has no report of what holds now.
+    assert bookings_of("nobody-said-what-time-it-is")["room"]["now"] == []
+    # The term that holds states no cost: the report says that the FILE does not say.
+    content = json.loads((EXAMPLES / "the-room" / "free-until-wednesday.json").read_text())
+    today = next(fact for fact in content["facts"] if "now" in fact)
+    today["now"] = "2027-05-13T09:00:00-05:00[America/Chicago]"
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    (shown,) = all_rights([sent], [found], [words])
+    (room,) = [b for each in shown["rights"] for b in each["bookings"] if b["id"] == "room"]
+    assert room["now"] == ["The report says that the FILE does not say what cancelling costs now."]
+    # Before the report comes, the card says the terms and nothing of what holds now.
+    (early,) = all_rights([sent])
+    (room,) = [b for each in early["rights"] for b in each["bookings"] if b["id"] == "room"]
+    assert (len(room["terms"]), room["now"]) == (1, [])
+
+
+def test_every_example_says_what_holds_now_in_the_words_of_its_report() -> None:
+    """Where a card says what the report says holds now, the report has a row for that
+    BOOKING under its heading for the time now, with the same words for the cost."""
+    heads = {
+        "cancelling": "What cancelling costs now:",
+        "the fee for a change": "The fee for a change now, apart from any difference in price:",
+        "no cancellation": "What cancelling costs now:",
+        "no change": "The fee for a change now, apart from any difference in price:",
+    }
+    asked = [in_words(path) for path in FILES]
+    shown = all_rights(
+        [sent for sent, _, _ in asked],
+        [found for _, found, _ in asked],
+        [words for _, _, words in asked],
+    )
+    held: list[str] = []
+    for path, (_, found, words), each in zip(FILES, asked, shown, strict=True):
+        name = f"{path.parent.name}/{path.stem}"
+        rows: dict[tuple[str, str], str] = {}
+        over = ""
+        for line in words.split("\n"):
+            if not line.startswith("  "):
+                over = line
+            elif ", the BOOKING for " in line and ": " in line:
+                rows[over, line.strip().split(",")[0]] = line.rsplit(": ", 1)[1]
+        said = 0
+        for booking in (booking for rights in each["rights"] for booking in rights["bookings"]):
+            for sentence in booking["now"]:
+                said += 1
+                (heading,) = {head for key, head in heads.items() if key in sentence}
+                value = rows[heading, booking["id"]]
+                assert value in sentence, (name, sentence, value)
+                held.append(value)
+        # A card says it only for a BOOKING whose terms are dated, so never more often than
+        # the report as JSON has rows for the time now.
+        in_json = sum(len(found.get(f"{kind}_now", [])) for kind in ("cancelling", "changing"))
+        assert said <= in_json, name
+    assert {"nothing", "189.00 USD", "the seller accepts no change"} <= set(held), set(held)
 
 
 def test_the_part_says_the_time_now_that_the_file_states() -> None:

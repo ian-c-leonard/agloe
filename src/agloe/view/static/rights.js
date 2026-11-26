@@ -8,7 +8,8 @@
 // with its places, the OBJECTs that it names and the price of one place, and the FACT that
 // the FILE lists every right to the OPTION. It also sends the time now, where a FACT states
 // it. This puts
-// them in words, as the report words them. Where the report shows a plan, it says who uses
+// them in words, as the report words them. Where the report says what cancelling or changing
+// a BOOKING costs at the time now, the BOOKING says that too. Where the report shows a plan, it says who uses
 // each BOOKING and who takes a place of each OFFER in that plan, as the report states it. It
 // marks what the report names: the records that rule out every plan, and the cases in which a
 // trip that depends on something works.
@@ -16,7 +17,7 @@
 // Nothing here judges a TRIP. Whether everybody who takes part has a right is for the
 // COMPILER to say: the page names who uses a right only where the report does.
 
-import { KINDS_OF_TERMS, carriedIn, expiredIn, listed, marksBy, optionsOf, toBuyIn, usesIn, withExpired } from "./named.js";
+import { KINDS_OF_TERMS, carriedIn, costsNowIn, expiredIn, listed, marksBy, optionsOf, toBuyIn, usesIn, withExpired } from "./named.js";
 import { amountOf, paidOf } from "./money.js";
 import { needsARight } from "./who.js";
 
@@ -92,6 +93,28 @@ function termsOf(booking) {
   });
 }
 
+/** What the report says holds at the time now, for each kind of terms: a cost, that the FILE states none, or that the seller accepts none. */
+const NOW = {
+  cancelling: { costs: (cost) => `cancelling costs ${cost} now`, unsaid: "the FILE does not say what cancelling costs now" },
+  changing: { costs: (cost) => `the fee for a change is ${cost} now, apart from any difference in price`, unsaid: "the FILE does not state the fee for a change now" },
+};
+
+/**
+ * What the report says that cancelling a BOOKING and changing it cost at the time now, for
+ * each kind of terms that the BOOKING dates. Which term holds now is for the COMPILER to
+ * say, so the card says it only where the report does. One term that holds at any time says
+ * its cost already.
+ */
+function nowOf(booking, held) {
+  return KINDS_OF_TERMS.flatMap((kind) => {
+    const terms = booking.terms[kind];
+    const row = held[kind].get(booking.id);
+    if (!terms.length || (terms.length === 1 && terms[0].since === null) || row === undefined) return [];
+    const says = row.refused ? `${NONE_ACCEPTED[kind]} now` : row.costs === null ? NOW[kind].unsaid : NOW[kind].costs(row.costs.length ? listed(row.costs.map(amountOf)) : "nothing");
+    return [`The report says that ${says}.`];
+  });
+}
+
 export function rights(trip, report = null, stated = null) {
   const none = { says: "", clash: false, asked: false, rights: [] };
   if (trip === null) return none;
@@ -123,6 +146,8 @@ export function rights(trip, report = null, stated = null) {
   const needing = (option) => trip.objects.flatMap((each) => each.rights.filter((right) => right.option === option && right.needed).map((right) => ({ id: each.id, name: each.name, record: right.record })));
   // The OFFERs that have expired by the time now that the FILE states.
   const expired = expiredIn(trip);
+  // What the report says that cancelling and changing cost at the time now.
+  const held = costsNowIn(report);
   // The OBJECTs of which a FACT says that the FILE lists every right to an OPTION that
   // covers them, each with that FACT and the OFFERs that it names.
   const closedFor = (option) => trip.objects.flatMap((each) => each.rights_closed.filter((closed) => closed.option === option).map((closed) => ({ name: closed.called, record: closed.record, offers: closed.offers })));
@@ -153,6 +178,8 @@ export function rights(trip, report = null, stated = null) {
           says: `a BOOKING that covers ${called([...booking.covers, ...booking.objects])}${paymentOf(booking)}`,
           // What it states for cancelling it and for changing it, as far as the FILE says.
           terms: termsOf(booking),
+          // What the report says holds of those at the time now.
+          now: nowOf(booking, held),
           uses: !trip.itinerary ? null : users.length ? `In the plan: ${called(users)} ${users.length === 1 ? "uses" : "use"} it.` : "In the plan: nobody uses it.",
           ...marked([booking.id], (need) => need.booking === booking.id, "The report names this BOOKING in what the FILE does not say."),
         };

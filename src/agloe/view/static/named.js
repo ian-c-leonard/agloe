@@ -140,6 +140,27 @@ export const KINDS_OF_TERMS = ["cancelling", "changing"];
  * any time, and `none` those that state no terms of that kind. `undated` holds the OFFERs
  * that state no time of expiry. A list that is not of that shape is none.
  */
+/**
+ * What a report says that cancelling and changing cost at the time now, for each kind of
+ * terms: the BOOKINGs by their ids, each with its `costs` (amounts, an empty list for
+ * nothing, null where the FILE states none) and whether the seller accepts none (`refused`).
+ * Only a report on a FILE that states the time now holds any. A list that is not of that
+ * shape is none.
+ */
+export function costsNowIn(report) {
+  const stated = report !== null && typeof report === "object" ? report : {};
+  const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
+  const isMoney = (each) => isRecord(each) && typeof each.amount === "string" && typeof each.currency === "string";
+  const isRow = (each) => isRecord(each) && typeof each.booking === "string" && (each.costs === null || (Array.isArray(each.costs) && each.costs.every(isMoney)));
+  return Object.fromEntries(
+    KINDS_OF_TERMS.map((kind) => {
+      const rows = stated[`${kind}_now`];
+      const read = Array.isArray(rows) && rows.every(isRow) ? rows : [];
+      return [kind, new Map(read.map((row) => [row.booking, { costs: row.costs, refused: row.accepted === false }]))];
+    }),
+  );
+}
+
 export function termsIn(report) {
   const stated = report !== null && typeof report === "object" ? report : {};
   const isRecord = (each) => each !== null && typeof each === "object";

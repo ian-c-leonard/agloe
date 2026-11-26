@@ -1405,6 +1405,10 @@ def test_a_booking_says_on_its_card_what_cancelling_and_changing_cost(chromium: 
             " 2027, 189.00 USD.",
             "The fee for a change, apart from any difference in price: at first, nothing; from"
             " 12:00 pm (UTC-5) on Tuesday 11 May 2027, 25.00 USD.",
+            # Which term holds at the time now is the report's to say.
+            "The report says that cancelling costs nothing now.",
+            "The report says that the fee for a change is nothing now, apart from any difference"
+            " in price.",
             "In the plan: Alex uses it.",
         ]
         # The card is the drawing of the BOOKING: a DEADLINE of the report lights it up.
