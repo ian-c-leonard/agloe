@@ -602,15 +602,78 @@ def test_a_booking_with_dated_terms_says_what_the_report_says_holds_now(tmp_path
     assert (len(room["terms"]), room["now"]) == (1, [])
 
 
+def room_with(tmp_path: Path, change: Any) -> tuple[dict[str, Rights], dict[str, Any]]:
+    """The BOOKINGs that the page shows for the room on Monday, after a change to the FILE,
+    by their ids, and the report on that FILE as JSON."""
+    content = json.loads((EXAMPLES / "the-room" / "on-monday.json").read_text())
+    change(content)
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    sent, found, words = in_words(path)
+    (shown,) = all_rights([sent], [found], [words])
+    cards = {booking["id"]: booking for each in shown["rights"] for booking in each["bookings"]}
+    return cards, found
+
+
+def test_each_booking_says_what_holds_now_for_itself(tmp_path: Path) -> None:
+    """Two BOOKINGs have dated terms, and other costs hold for each on Monday."""
+    thursday = "2027-05-13T18:00:00-05:00[America/Chicago]"
+
+    def dated_ticket(content: Any) -> None:
+        ticket = next(fact for fact in content["facts"] if fact["id"] == "skydeck-ticket")
+        ticket["booking"]["cancelling"] = [
+            {"costs": [{"amount": "32.00", "currency": "USD"}]},
+            {"from": thursday, "costs": [{"amount": "50.00", "currency": "USD"}]},
+        ]
+
+    cards, _ = room_with(tmp_path, dated_ticket)
+    assert cards["room"]["now"] == ["The report says that cancelling costs nothing now."]
+    assert cards["skydeck-ticket"]["now"] == [
+        "The report says that cancelling costs 32.00 USD now."
+    ]
+
+
+def test_a_cost_that_holds_at_any_time_is_not_said_as_the_cost_now(tmp_path: Path) -> None:
+    """The room has two terms with one cost, and nobody has said what time it is. The report
+    states that cost for any time. The card says the two terms, and nothing of the time now."""
+
+    def one_cost_and_no_time_now(content: Any) -> None:
+        content["facts"] = [fact for fact in content["facts"] if "now" not in fact]
+        room = next(fact for fact in content["facts"] if fact["id"] == "room")
+        for term in room["booking"]["cancelling"]:
+            term["costs"] = [{"amount": "189.00", "currency": "USD"}]
+
+    cards, found = room_with(tmp_path, one_cost_and_no_time_now)
+    assert "room" in [row["booking"] for row in found["cancelling_at_any_time"]]
+    assert "cancelling_now" not in found
+    assert cards["room"]["terms"] == [
+        f"What cancelling costs: at first, 189.00 USD; from {WEDNESDAY}, 189.00 USD."
+    ]
+    assert cards["room"]["now"] == []
+
+
 def test_every_example_says_what_holds_now_in_the_words_of_its_report() -> None:
-    """Where a card says what the report says holds now, the report has a row for that
-    BOOKING under its heading for the time now, with the same words for the cost."""
+    """For every BOOKING whose terms of a kind are dated, the card says what the report says
+    holds now, and nothing where the report has no row for it. The cost is in the words of
+    the report's row for that BOOKING, under its heading for the time now."""
     heads = {
         "cancelling": "What cancelling costs now:",
-        "the fee for a change": "The fee for a change now, apart from any difference in price:",
-        "no cancellation": "What cancelling costs now:",
-        "no change": "The fee for a change now, apart from any difference in price:",
+        "changing": "The fee for a change now, apart from any difference in price:",
     }
+
+    def sentence(kind: str, value: str) -> str:
+        """What the card says for one row of the report, from the words of that row."""
+        if value.startswith("the seller accepts no "):
+            return f"The report says that {value} now."
+        if value == "the FILE does not say" and kind == "cancelling":
+            return "The report says that the FILE does not say what cancelling costs now."
+        if value == "the FILE does not say":
+            return "The report says that the FILE does not state the fee for a change now."
+        if kind == "cancelling":
+            return f"The report says that cancelling costs {value} now."
+        apart = ", apart from any difference in price"
+        return f"The report says that the fee for a change is {value} now{apart}."
+
     asked = [in_words(path) for path in FILES]
     shown = all_rights(
         [sent for sent, _, _ in asked],
@@ -618,7 +681,7 @@ def test_every_example_says_what_holds_now_in_the_words_of_its_report() -> None:
         [words for _, _, words in asked],
     )
     held: list[str] = []
-    for path, (_, found, words), each in zip(FILES, asked, shown, strict=True):
+    for path, (sent, _, words), each in zip(FILES, asked, shown, strict=True):
         name = f"{path.parent.name}/{path.stem}"
         rows: dict[tuple[str, str], str] = {}
         over = ""
@@ -627,18 +690,20 @@ def test_every_example_says_what_holds_now_in_the_words_of_its_report() -> None:
                 over = line
             elif ", the BOOKING for " in line and ": " in line:
                 rows[over, line.strip().split(",")[0]] = line.rsplit(": ", 1)[1]
-        said = 0
+        terms = {
+            booking["id"]: booking["terms"]
+            for rights in sent["rights"]
+            for booking in rights["bookings"]
+        }
         for booking in (booking for rights in each["rights"] for booking in rights["bookings"]):
-            for sentence in booking["now"]:
-                said += 1
-                (heading,) = {head for key, head in heads.items() if key in sentence}
-                value = rows[heading, booking["id"]]
-                assert value in sentence, (name, sentence, value)
-                held.append(value)
-        # A card says it only for a BOOKING whose terms are dated, so never more often than
-        # the report as JSON has rows for the time now.
-        in_json = sum(len(found.get(f"{kind}_now", [])) for kind in ("cancelling", "changing"))
-        assert said <= in_json, name
+            expected: list[str] = []
+            for kind, heading in heads.items():
+                stated = terms[booking["id"]][kind]
+                dated = bool(stated) and not (len(stated) == 1 and stated[0]["since"] is None)
+                if dated and (heading, booking["id"]) in rows:
+                    expected.append(sentence(kind, rows[heading, booking["id"]]))
+                    held.append(rows[heading, booking["id"]])
+            assert booking["now"] == expected, (name, booking["id"])
     assert {"nothing", "189.00 USD", "the seller accepts no change"} <= set(held), set(held)
 
 

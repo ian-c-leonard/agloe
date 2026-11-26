@@ -133,14 +133,6 @@ export function withExpired(offers, expired) {
 export const KINDS_OF_TERMS = ["cancelling", "changing"];
 
 /**
- * What a report says in its last part, by BOOKING and by OFFER. `deadlines` holds each
- * DEADLINE in the report's order: the `booking` whose term starts, with the `kind` of the
- * term, "cancelling" or "changing", or the `offer` that expires. `now` and `always` hold,
- * for each kind of term, the BOOKINGs whose cost the report states for the time now and for
- * any time, and `none` those that state no terms of that kind. `undated` holds the OFFERs
- * that state no time of expiry. A list that is not of that shape is none.
- */
-/**
  * What a report says that cancelling and changing cost at the time now, for each kind of
  * terms: the BOOKINGs by their ids, each with its `costs` (amounts, an empty list for
  * nothing, null where the FILE states none) and whether the seller accepts none (`refused`).
@@ -161,6 +153,14 @@ export function costsNowIn(report) {
   );
 }
 
+/**
+ * What a report says in its last part, by BOOKING and by OFFER. `deadlines` holds each
+ * DEADLINE in the report's order: the `booking` whose term starts, with the `kind` of the
+ * term, "cancelling" or "changing", or the `offer` that expires. `now` and `always` hold,
+ * for each kind of term, the BOOKINGs whose cost the report states for the time now and for
+ * any time, and `none` those that state no terms of that kind. `undated` holds the OFFERs
+ * that state no time of expiry. A list that is not of that shape is none.
+ */
 export function termsIn(report) {
   const stated = report !== null && typeof report === "object" ? report : {};
   const isRecord = (each) => each !== null && typeof each === "object";
