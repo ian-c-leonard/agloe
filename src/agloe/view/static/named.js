@@ -133,6 +133,27 @@ export function withExpired(offers, expired) {
 export const KINDS_OF_TERMS = ["cancelling", "changing"];
 
 /**
+ * What a report says that cancelling and changing cost at the time now, for each kind of
+ * terms: the BOOKINGs by their ids, each with its `costs` (amounts, an empty list for
+ * nothing, null where the FILE states none) and whether the seller accepts none (`refused`).
+ * Only a report on a FILE that states the time now holds any. A list that is not of that
+ * shape is none.
+ */
+export function costsNowIn(report) {
+  const stated = report !== null && typeof report === "object" ? report : {};
+  const isRecord = (each) => each !== null && typeof each === "object" && !Array.isArray(each);
+  const isMoney = (each) => isRecord(each) && typeof each.amount === "string" && typeof each.currency === "string";
+  const isRow = (each) => isRecord(each) && typeof each.booking === "string" && (each.costs === null || (Array.isArray(each.costs) && each.costs.every(isMoney)));
+  return Object.fromEntries(
+    KINDS_OF_TERMS.map((kind) => {
+      const rows = stated[`${kind}_now`];
+      const read = Array.isArray(rows) && rows.every(isRow) ? rows : [];
+      return [kind, new Map(read.map((row) => [row.booking, { costs: row.costs, refused: row.accepted === false }]))];
+    }),
+  );
+}
+
+/**
  * What a report says in its last part, by BOOKING and by OFFER. `deadlines` holds each
  * DEADLINE in the report's order: the `booking` whose term starts, with the `kind` of the
  * term, "cancelling" or "changing", or the `offer` that expires. `now` and `always` hold,
