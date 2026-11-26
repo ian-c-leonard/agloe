@@ -680,6 +680,8 @@ def test_the_rights_to_each_option_are_sent_as_far_as_the_file_says() -> None:
                     "budget": "trip-money",
                     "by": "alex",
                 },
+                # Its terms for cancelling and for changing: it states none.
+                "terms": {"cancelling": [], "changing": []},
             }
         ],
         "offers": [
@@ -2099,7 +2101,14 @@ RIGHTS: dict[str, Any] = {
     "name": "night",
     "needs": {"needed": True, "record": "night-needs-a-room"},
     "bookings": [
-        {"id": "room", "covers": ["alex"], "objects": [], "names": {"alex": "alex"}, "paid": None}
+        {
+            "id": "room",
+            "covers": ["alex"],
+            "objects": [],
+            "names": {"alex": "alex"},
+            "paid": None,
+            "terms": {"cancelling": [], "changing": []},
+        }
     ],
     "offers": [
         {
@@ -2190,6 +2199,76 @@ def _booking(**other: object) -> Callable[[Trip], None]:
 
 def _offer(**other: object) -> Callable[[Trip], None]:
     return _rights(offers=[{**RIGHTS["offers"][0], **other}])
+
+
+def _term(**other: object) -> Trip:
+    """A term of a BOOKING as it is sent: from when the BOOKING was made, at no cost."""
+    return {"since": None, "costs": [], "refused": False, **other}
+
+
+def rooms_of(name: str) -> tuple[Trip, dict[str, Trip]]:
+    """What is sent of an example about the room, and its BOOKINGs by their ids."""
+    sent = drawn(EXAMPLES / "the-room" / f"{name}.json")
+    bookings = {
+        booking["id"]: booking for rights in sent["rights"] for booking in rights["bookings"]
+    }
+    return sent, bookings
+
+
+def test_a_booking_is_sent_with_its_terms_and_the_trip_with_the_time_now() -> None:
+    """The room can be cancelled at no cost until Wednesday at six, and it is Monday."""
+    sent, bookings = rooms_of("on-monday")
+    # The time now, with the FACT that states it, as a report words a time.
+    assert sent["now"] == {"record": "today", "at": "9:00 am (UTC-5) on Monday 10 May 2027"}
+    free: Trip = {"since": None, "costs": [], "refused": False}
+    wednesday = "6:00 pm (UTC-5) on Wednesday 12 May 2027"
+    assert bookings["room"]["terms"] == {
+        "cancelling": [
+            # From when the BOOKING was made: cancelling costs nothing.
+            free,
+            {
+                "since": wednesday,
+                "costs": [{"amount": "189.00", "currency": "USD"}],
+                "refused": False,
+            },
+        ],
+        # It states no terms for changing.
+        "changing": [],
+    }
+    assert bookings["skydeck-ticket"]["terms"]["cancelling"] == [
+        {"since": None, "costs": [{"amount": "32.00", "currency": "USD"}], "refused": False}
+    ]
+    # A term that states no cost: nobody knows what cancelling costs while it holds.
+    _, bookings = rooms_of("free-until-wednesday")
+    assert bookings["room"]["terms"]["cancelling"] == [
+        free,
+        {"since": wednesday, "costs": None, "refused": False},
+    ]
+    # A cost in two currencies has both amounts, in the FILE's order.
+    _, bookings = rooms_of("points-and-dollars")
+    assert bookings["room"]["terms"]["cancelling"][1]["costs"] == [
+        {"amount": "30000", "currency": "hotel-points"},
+        {"amount": "25.00", "currency": "USD"},
+    ]
+    # A term can say that the seller accepts no cancellation. It states no cost.
+    _, bookings = rooms_of("the-ticket-cannot-be-cancelled")
+    assert bookings["skydeck-ticket"]["terms"]["cancelling"] == [
+        {"since": None, "costs": None, "refused": True}
+    ]
+    # Terms for changing are sent in the same way.
+    _, bookings = rooms_of("a-change")
+    assert bookings["room"]["terms"]["changing"] == [
+        free,
+        {
+            "since": "12:00 pm (UTC-5) on Tuesday 11 May 2027",
+            "costs": [{"amount": "25.00", "currency": "USD"}],
+            "refused": False,
+        },
+    ]
+    # A FILE that states no time now sends none.
+    sent, _ = rooms_of("nobody-said-what-time-it-is")
+    assert sent["now"] is None
+    assert drawn(EXAMPLES / "flight-home" / "works.json")["now"] is None
 
 
 def test_a_trip_that_says_something_of_the_rights_to_an_option_is_a_trip() -> None:
@@ -2549,6 +2628,57 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "a booking whose names are a list": _booking(names=["alex"]),
     "two bookings with one id": _rights(bookings=[RIGHTS["bookings"][0]] * 2),
     "a booking with the id of an offer": _booking(id="rooms"),
+    "a booking whose terms are a list": _booking(terms=[]),
+    "a booking with terms of one kind only": _booking(terms={"cancelling": []}),
+    "a booking with terms of a third kind": _booking(
+        terms={"cancelling": [], "changing": [], "moving": []}
+    ),
+    "a term that is a cost and no more": _booking(
+        terms={"cancelling": [{"amount": "5.00", "currency": "USD"}], "changing": []}
+    ),
+    "a term with no word on whether the seller accepts": _booking(
+        terms={"cancelling": [{"since": None, "costs": None}], "changing": []}
+    ),
+    "a later term that holds from when the booking was made": _booking(
+        terms={"cancelling": [_term(), _term()], "changing": []}
+    ),
+    "a term that holds from no time": _booking(
+        terms={"cancelling": [_term(since=" ")], "changing": []}
+    ),
+    "a term whose cost is an amount and no list": _booking(
+        terms={"cancelling": [], "changing": [_term(costs={"amount": "5.00", "currency": "USD"})]}
+    ),
+    "a term whose cost has no currency": _booking(
+        terms={"cancelling": [_term(costs=[{"amount": "5.00"}])], "changing": []}
+    ),
+    "a term whose cost is no amount": _booking(
+        terms={"cancelling": [_term(costs=[{"amount": "five", "currency": "USD"}])], "changing": []}
+    ),
+    "a term whose cost holds nothing where an amount is": _booking(
+        terms={"cancelling": [_term(costs=[None])], "changing": []}
+    ),
+    "a term with two amounts in one currency": _booking(
+        terms={
+            "cancelling": [
+                _term(
+                    costs=[
+                        {"amount": "5.00", "currency": "USD"},
+                        {"amount": "6.00", "currency": "USD"},
+                    ]
+                )
+            ],
+            "changing": [],
+        }
+    ),
+    "a term with an amount of nothing": _booking(
+        terms={
+            "cancelling": [_term(costs=[{"amount": "0.00", "currency": "USD"}])],
+            "changing": [],
+        }
+    ),
+    "a term that accepts none and states a cost": _booking(
+        terms={"cancelling": [_term(refused=True)], "changing": []}
+    ),
     "an offer that is no record": _rights(offers=["rooms"], complete=None),
     "an offer with no place": _offer(places=0),
     "an offer with places in words": _offer(places="2"),
@@ -2706,6 +2836,18 @@ BROKEN: dict[str, Callable[[Trip], None]] = {
     "a day with an offset in words": _set("days", 0, "offset", to="UTC minus five"),
     "too many days": _set(
         "days", to=[{"date": "2027-05-15", "offset": None, "opens": 0, "closes": 86400}] * 63
+    ),
+    "a time now that is a time and no more": _set("now", to="9:00 am"),
+    "a time now with no FACT": _set("now", to={"at": "9:00 am on Monday 10 May 2027"}),
+    "a time now whose FACT has no id": _set(
+        "now", to={"record": "", "at": "9:00 am on Monday 10 May 2027"}
+    ),
+    "a time now at no time": _set("now", to={"record": "today", "at": " "}),
+    "a time now whose FACT has a blank id": _set(
+        "now", to={"record": " ", "at": "9:00 am on Monday 10 May 2027"}
+    ),
+    "a time now with one thing more": _set(
+        "now", to={"record": "today", "at": "9:00 am on Monday 10 May 2027", "more": 1}
     ),
     "a last date that is no date": _set("until", to="soon"),
     "a last date that is a number": _set("until", to=20270916),

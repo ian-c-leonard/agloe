@@ -3,9 +3,11 @@
 //
 // The view sends what the FILE says of the rights to each OPTION: whether a PERSON needs a
 // right to take part, each BOOKING with the PERSONs and the OBJECTs it covers, the name to
-// show for each of them in one list, and what it paid, each OFFER
+// show for each of them in one list, what it paid, and its terms for cancelling and for
+// changing, each OFFER
 // with its places, the OBJECTs that it names and the price of one place, and the FACT that
-// the FILE lists every right to the OPTION. This puts
+// the FILE lists every right to the OPTION. It also sends the time now, where a FACT states
+// it. This puts
 // them in words, as the report words them. Where the report shows a plan, it says who uses
 // each BOOKING and who takes a place of each OFFER in that plan, as the report states it. It
 // marks what the report names: the records that rule out every plan, and the cases in which a
@@ -14,8 +16,8 @@
 // Nothing here judges a TRIP. Whether everybody who takes part has a right is for the
 // COMPILER to say: the page names who uses a right only where the report does.
 
-import { carriedIn, expiredIn, listed, marksBy, optionsOf, toBuyIn, usesIn, withExpired } from "./named.js";
-import { paidOf } from "./money.js";
+import { KINDS_OF_TERMS, carriedIn, expiredIn, listed, marksBy, optionsOf, toBuyIn, usesIn, withExpired } from "./named.js";
+import { amountOf, paidOf } from "./money.js";
 import { needsARight } from "./who.js";
 
 /** What a case of a report can need that is about the rights to an OPTION, for a PERSON or for an OBJECT. */
@@ -67,6 +69,29 @@ function wholeOf(complete, expired) {
  * them. `stated` holds the words of the report for those cases, as lines.js finds them.
  * `clash` and `asked` on the whole say that something here is marked so.
  */
+/** What the terms of each kind state, as a report heads it, and what a term says where the seller accepts none. */
+const COSTS = { cancelling: "What cancelling costs", changing: "The fee for a change" };
+const APART = { cancelling: "", changing: ", apart from any difference in price" };
+const NONE_ACCEPTED = { cancelling: "the seller accepts no cancellation", changing: "the seller accepts no change" };
+
+/**
+ * What a BOOKING states for cancelling it and for changing it: one sentence for each kind of
+ * terms that it states, with its terms in the order of time. A term holds from its time
+ * until the next one starts. The first can hold from when the BOOKING was made: where it is
+ * the only one, it holds at any time. A term states a cost, or states none, or says that the
+ * seller accepts none. A cost is one amount for each currency, and nothing is added up.
+ */
+function termsOf(booking) {
+  return KINDS_OF_TERMS.flatMap((kind) => {
+    const terms = booking.terms[kind];
+    if (!terms.length) return [];
+    const always = terms.length === 1 && terms[0].since === null;
+    const says = (term) => (term.refused ? NONE_ACCEPTED[kind] : term.costs === null ? "the FILE does not say" : term.costs.length ? listed(term.costs.map(amountOf)) : "nothing");
+    const parts = terms.map((term) => (always ? says(term) : `${term.since === null ? "at first" : `from ${term.since}`}, ${says(term)}`));
+    return [`${COSTS[kind]}${always ? " at any time" : ""}${APART[kind]}: ${parts.join("; ")}.`];
+  });
+}
+
 export function rights(trip, report = null, stated = null) {
   const none = { says: "", clash: false, asked: false, rights: [] };
   if (trip === null) return none;
@@ -126,6 +151,8 @@ export function rights(trip, report = null, stated = null) {
           id: booking.id,
           name: booking.id,
           says: `a BOOKING that covers ${called([...booking.covers, ...booking.objects])}${paymentOf(booking)}`,
+          // What it states for cancelling it and for changing it, as far as the FILE says.
+          terms: termsOf(booking),
           uses: !trip.itinerary ? null : users.length ? `In the plan: ${called(users)} ${users.length === 1 ? "uses" : "use"} it.` : "In the plan: nobody uses it.",
           ...marked([booking.id], (need) => need.booking === booking.id, "The report names this BOOKING in what the FILE does not say."),
         };
@@ -170,8 +197,13 @@ export function rights(trip, report = null, stated = null) {
   const all = shown.flatMap((each) => [each, ...each.bookings, ...each.offers]);
   const clash = all.some((each) => each.clash.length > 0);
   const asked = all.some((each) => each.cases.length > 0);
+  // Which term of a BOOKING holds, and whether an OFFER has expired, turns on the time now.
+  // So the part says which time the FILE states, and says so where it states none.
+  const dated = trip.rights.some((each) => each.bookings.some((booking) => KINDS_OF_TERMS.some((kind) => booking.terms[kind].length)) || each.offers.some((offer) => offer.until !== null));
+  const now = trip.now !== null ? ` The FILE states the time now: ${trip.now.at}.` : dated ? " The FILE does not state the time now." : "";
   const says =
     "The BOOKINGs and the OFFERs of the FILE, each under the OPTION that it is for." +
+    now +
     (clash ? " A red edge marks what the report names among what rules out every plan." : "") +
     (asked ? " A yellow edge marks what the report names in what the FILE does not say." : "");
   return { says, clash, asked, rights: shown };

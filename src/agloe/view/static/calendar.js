@@ -75,11 +75,15 @@ function lanesOf(marks) {
   return placed;
 }
 
-/** What the calendar says of the records that a report names as ruling out every plan. */
+/**
+ * What the calendar says of the records that a report names as ruling out every plan. The
+ * calendar marks what is about a step in it, or about when the TRIP starts or ends. It says
+ * the time now in words and marks nothing for it.
+ */
 function rulesOut(named, marked) {
   if (!named) return "";
   const names = ` The report names ${named === 1 ? "1 record that rules" : `${named} records that rule`} out every plan.`;
-  if (!marked) return `${names} ${named === 1 ? "It is not" : "None of them is"} about what the calendar shows.`;
+  if (!marked) return `${names} ${named === 1 ? "It is not" : "None of them is"} about a step in the calendar, or about when the TRIP starts or ends.`;
   if (named === 1) return `${names} A red edge marks what it is about.`;
   return `${names} A red edge marks what ${marked} of them ${marked === 1 ? "is" : "are"} about.`;
 }
@@ -200,7 +204,12 @@ export function calendar(trip, report = null, warnings = [], stated = null) {
   // shows it: on its days, or among the steps with no time.
   const asked = steps.some((step) => step.cases.length && (step.parts.length || step.when === null));
   const asks = !needed.length ? "" : asked ? " A yellow edge marks each step shown that the report names in what the FILE does not say." : " What the report says the FILE does not say is not about a step shown here.";
-  const says = saysOf(trip, steps.length - untimed.length) + rulesOut(ruled.size, marked.size) + warns + asks;
+  // The time now is a FACT of the FILE about time, whatever else the FILE holds: the
+  // calendar says it, as soon as the FILE is read.
+  // A report can name that FACT among what rules out every plan: an OFFER has expired by then.
+  const named = trip.now !== null && ruled.has(trip.now.record) ? " The report names that FACT among what rules out every plan." : "";
+  const now = trip.now === null ? "" : ` The FILE states the time now: ${trip.now.at}.${named}`;
+  const says = saysOf(trip, steps.length - untimed.length) + now + rulesOut(ruled.size, marked.size) + warns + asks;
   if (!trip.days.length) return { ...none, says, zone: trip.zone, itinerary: trip.itinerary, clash: marked.size > 0, asked, persons: trip.persons, untimed };
 
   // ---- the hours that every day shows: from the earliest start of a step on any day to the

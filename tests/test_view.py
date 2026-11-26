@@ -416,7 +416,7 @@ EMPTY = (
     '"itinerary": true, "days": [], '
     '"until": null, "starts": null, "ends": null, "steps": [], "wants": [], "options": [], '
     '"ways": [], "complete_travel": [], "rights": [], "budgets": [], "capabilities": [], '
-    '"objects": []}'
+    '"objects": [], "now": null}'
 )
 
 
@@ -1455,8 +1455,9 @@ def test_the_page_keeps_the_answer_of_a_report_that_cannot_be_written() -> None:
 def test_the_page_says_when_it_no_longer_hears_the_view() -> None:
     """What it shows stays, marked as on the FILE as it was, until the view speaks again."""
     first = sent_for((STORY / "works.json").read_bytes(), 1)
-    again = sent_for((STORY / "works.json").read_bytes(), 1)
-    (said,) = page_says([[*first, {"kind": "lost"}, *again]])
+    # The view sends a page that comes back what it has for that state of the FILE: the same
+    # events, with the times that the check took.
+    (said,) = page_says([[*first, {"kind": "lost"}, *first]])
     reported, lost = said[4:6]
     assert lost["mark"] == "lost"
     assert not any(word in lost["line"] for word in ANSWERS)

@@ -243,7 +243,16 @@ def test_the_calendar_says_what_the_report_says() -> None:
         assert calendar_of["untimed"] == [], name
         assert calendar_of["itinerary"] is True, name
         if in_report:
-            assert calendar_of["says"] == f"The ITINERARY of the report.{CHICAGO}", name
+            # The calendar says the time now where the FILE states it, as the report does.
+            now = (
+                ""
+                if sent["now"] is None
+                else f" The FILE states the time now: {sent['now']['at']}."
+            )
+            report = beside(path, ".expected.txt").read_text()
+            stated = [line for line in report.split("\n") if line.startswith("This report uses ")]
+            assert bool(stated) is (sent["now"] is not None), name
+            assert calendar_of["says"] == f"The ITINERARY of the report.{CHICAGO}{now}", name
             with_nobody += bool(nobody)
             # The report shows when a step ends at the earliest. The calendar adds how late
             # it can end, where the FILE gives a range.
@@ -615,7 +624,7 @@ def test_the_calendar_marks_only_what_a_report_names() -> None:
     """For every example: each record that a mark names is one that the report names."""
     pairs = [with_its_report(path) for path in FILES]
     laid = calendars([sent for sent, _ in pairs], [found for _, found in pairs])
-    seen = 0
+    seen = with_the_time_now = 0
     for path, (sent, found), calendar_of in zip(FILES, pairs, laid, strict=True):
         name = f"{path.parent.name}/{path.stem}"
         conflict = found.get("conflict", [])
@@ -641,12 +650,20 @@ def test_the_calendar_marks_only_what_a_report_names() -> None:
             ending = (
                 f"what {len(marked)} of them {'is' if len(marked) == 1 else 'are'} about."
                 if marked
-                else "None of them is about what the calendar shows."
+                else "None of them is about a step in the calendar, or about when the TRIP"
+                " starts or ends."
             )
             assert calendar_of["says"].endswith(ending), name
+            # Where the report names the FACT about the time now, the calendar says so.
+            told = "The report names that FACT among what rules out every plan."
+            named_now = sent["now"] is not None and sent["now"]["record"] in conflict
+            assert (told in calendar_of["says"]) is named_now, name
+            with_the_time_now += named_now
         else:
             assert found["answer"] != "INFEASIBLE", name
     assert seen > 5
+    # An OFFER that has expired by the time now: that time is part of why no plan works.
+    assert with_the_time_now > 0
 
 
 def test_a_report_that_names_nothing_the_page_can_read_marks_nothing() -> None:
@@ -671,7 +688,7 @@ def test_a_report_that_names_nothing_the_page_can_read_marks_nothing() -> None:
     other = calendar(sent, {"answer": "INFEASIBLE", "conflict": ["ways-to-ohare", "train-length"]})
     assert other["says"].endswith(
         " The report names 2 records that rule out every plan."
-        " None of them is about what the calendar shows."
+        " None of them is about a step in the calendar, or about when the TRIP starts or ends."
     )
     assert other["clash"] is False
 
@@ -684,6 +701,29 @@ def in_words(path: Path) -> tuple[Trip, dict[str, Any], str]:
     file = read(path)
     found = compiler.check(file)
     return sent_for(file, found), report.as_json(file, found), report.as_text(file, found)
+
+
+def test_the_calendar_says_the_time_now_that_the_file_states(tmp_path: Path) -> None:
+    """The time now is a FACT about time. The calendar says it, whatever else the FILE holds."""
+    now = " The FILE states the time now: 9:00 am (UTC-5) on Monday 10 May 2027."
+    sent, found, words = in_words(EXAMPLES / "the-room" / "on-monday.json")
+    assert calendar(sent, found, words)["says"] == f"The ITINERARY of the report.{CHICAGO}{now}"
+    # A FILE that states none says nothing of it.
+    sent, found, words = in_words(EXAMPLES / "the-room" / "nobody-said-what-time-it-is.json")
+    assert calendar(sent, found, words)["says"] == f"The ITINERARY of the report.{CHICAGO}"
+    # Two drives that anybody can join: the FILE has no BOOKING and no OFFER, so the page has
+    # no part for them. It states the time now all the same, and the calendar says it, also
+    # before the report comes.
+    content = json.loads((EXAMPLES / "a-driver" / "works.json").read_text())
+    content["facts"].append({"id": "today", "now": "2027-07-17T07:00:00-05:00[America/Chicago]"})
+    path = tmp_path / "trip.json"
+    path.write_text(json.dumps(content))
+    early = " The FILE states the time now: 7:00 am (UTC-5) on Saturday 17 July 2027."
+    sent, found, words = in_words(path)
+    assert parts("rights", [sent], [found], [words])[0]["rights"] == []
+    assert early in calendar(sent, found, words)["says"]
+    before = shown(read(path))
+    assert before is not None and early in calendar(cast("Trip", before))["says"]
 
 
 def test_the_calendar_marks_the_steps_at_which_the_report_warns_of_something() -> None:
@@ -1744,6 +1784,7 @@ def made(times: list[tuple[str, str | None]]) -> Trip:
         "budgets": [],
         "capabilities": [],
         "objects": [],
+        "now": None,
         "steps": [
             {
                 "option": "stay",
@@ -1868,6 +1909,7 @@ def some_trip(chosen: random.Random) -> Trip:
         "budgets": [],
         "capabilities": [],
         "objects": [],
+        "now": None,
         "starts": bound("trip-start"),
         "ends": bound("trip-end"),
         "steps": steps,
