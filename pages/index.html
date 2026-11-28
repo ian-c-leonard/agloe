@@ -93,7 +93,7 @@
         <li class="why" id="file-half-planned">
           <div class="stack">
             <h3>A trip that is half planned</h3>
-            <p>People plan a trip in pieces. One part can be booked while another is open. An agent can record what is settled, what is on offer and what nobody knows yet, and the report names what is missing.</p>
+            <p>People plan a trip in pieces. A traveler can book one part while another is open. An agent can record what is booked and what is only on offer. It can leave out what nobody knows yet, and the report names what is missing.</p>
           </div>
           <figure class="grows" id="file-grows">
             <figcaption>One FILE at three moments</figcaption>
@@ -122,7 +122,7 @@
             <h3>What each person wants, and what delivers it</h3>
             <p>An agent records what each PERSON wants apart from the OPTIONs that could deliver it. A WANT can be a must for one PERSON and a must-not for another. For each OPTION, the agent records how well it delivers each WANT, from 0 to 10.</p>
             <p>The agent can list each restaurant and show it finds, and choose none. This FILE has five OPTIONs and no DECISION.</p>
-            <p class="small">Today a WANT is a must or a must-not for each PERSON. Preferences in between are planned.</p>
+            <p class="small">Today a WANT is a must or a must-not for each PERSON. Preferences in between are not in the format yet.</p>
           </div>
           <figure class="holds" id="who-wants-what" data-file="pages/files/three-travelers.json">
             <figcaption>Three travelers, three WANTs and five OPTIONs</figcaption>
@@ -150,7 +150,7 @@
         </li>
         <li class="why" id="file-requirements">
           <div class="stack">
-            <h3>What an OPTION asks for</h3>
+            <h3>What an OPTION requires</h3>
             <p>Some OPTIONs are open only to people who meet a requirement. An agent can record a ticket that each PERSON needs, a time to be there, a skill, or a thing to bring.</p>
           </div>
           <figure class="asks">
@@ -206,8 +206,8 @@
         <li class="why" id="compiler-growth">
           <div class="stack">
             <h3>What grows as a trip grows</h3>
-            <p>The FILE for three travelers has five OPTIONs. That makes 32,768 choices of who takes part in what, before any time, route or ticket is checked.</p>
-            <p>The COMPILER uses a solver for the search. <span data-from="docs/VISION.md">The same file gives the same answer on any machine, on any day.</span></p>
+            <p>The FILE for three travelers has five OPTIONs. That makes 32,768 choices of who takes part in what, and each choice still has to fit the times and the routes.</p>
+            <p>The COMPILER uses a solver for the search. It is deterministic: it gives the same answer for the same FILE each time.</p>
           </div>
           <figure class="counts" id="choices">
             <figcaption>Choices of who takes part in what</figcaption>
