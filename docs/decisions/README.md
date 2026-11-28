@@ -10,3 +10,4 @@ Each significant or hard-to-reverse decision gets a short record here before cod
 | [0004](0004-rules-in-words-with-a-reference-checker.md) | The rules in words, with a reference checker that defines the right answer | Accepted |
 | [0005](0005-the-home-page-runs-the-reference-checker.md) | The home page runs the reference checker in the reader's browser | Accepted |
 | [0006](0006-the-view-is-a-page-that-a-local-command-serves.md) | The view is a page that a local command serves | Accepted |
+| [0007](0007-the-view-writes-a-decision-that-a-person-makes.md) | The view writes a DECISION that a person makes on the page | Proposed |
