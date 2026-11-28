@@ -631,7 +631,7 @@ def test_the_choices_are_counted_as_the_page_says() -> None:
         figure.group(1),
     )
     document = three_travelers()
-    assert marked is not None
+    assert marked is not None and figure.group(1).count('class="this"') == 1
     assert (int(marked.group(1)), int(marked.group(2))) == (
         len(document["persons"]),
         len(document["options"]),
