@@ -320,14 +320,6 @@ code { font-family: var(--mono); font-size: 0.9em; }
 /* The FILE */
 .document { margin: 0; padding: 20px 22px; max-height: 470px; overflow: auto; font: 0.76rem/1.7 var(--mono); white-space: pre; tab-size: 2; }
 
-/* The three parts */
-.parts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(28px, 4vw, 52px); margin-top: 40px; }
-.part { display: grid; gap: 14px; align-content: start; }
-.part svg { width: 54px; height: 54px; }
-.part svg * { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.part svg .t { stroke: var(--accent); }
-.part svg .b { stroke: var(--brass); }
-.part strong { display: block; font: italic 400 1.6rem/1.15 var(--display); margin-bottom: 8px; }
 .after { margin-top: 44px; max-width: 46em; display: grid; gap: 14px; color: var(--ink2); }
 
 
@@ -690,36 +682,58 @@ footer .wrap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); 
 .grows .told { font-weight: 500; }
 .grows .story { font-size: 0.93rem; line-height: 1.5; color: var(--ink2); }
 .grows .record { font: 400 0.74rem/1.5 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
-/* A WANT, and under it each OPTION with what a FACT says of the two. */
-.wanted .want, .wanted li { display: grid; grid-template-columns: 4.6em minmax(0, 1fr); gap: 2px 12px; align-items: baseline; padding: 11px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
-.wanted .want { border-color: var(--ink); }
-.wanted strong { font-weight: 600; }
-.wanted .how { grid-column: 2; font-size: 0.9rem; color: var(--muted); }
-.wanted ul { list-style: none; margin: 0; padding: 0 0 0 26px; display: grid; gap: 8px; position: relative; }
-.wanted ul::before { content: ""; position: absolute; left: 11px; top: -14px; bottom: 22px; border-left: 1.5px solid var(--line); }
-.wanted li { position: relative; }
-.wanted li::before { content: ""; position: absolute; left: -15px; top: 22px; width: 15px; border-top: 1.5px solid var(--line); }
-.wanted li.does { border-color: var(--vermilion); }
-.wanted li.does .how { color: var(--ink); }
 /* The other things a FILE can say: what the travelers say, and what the format makes of it. */
 .also { grid-column: 1 / -1; display: grid; gap: 14px; }
 .also dl { margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px clamp(22px, 3vw, 40px); }
 .also dl div { display: grid; gap: 5px; align-content: start; padding-top: 12px; border-top: 1.5px solid var(--ink); }
 .also dt { font: italic 400 1.22rem/1.3 var(--display); text-shadow: var(--pressed); }
 .also dd { margin: 0; font-size: 0.93rem; line-height: 1.55; color: var(--ink2); }
-/* Three shares on one scale: a name, a bar from the left edge and the figure at its end. */
-.meters ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
-.meters li { display: grid; grid-template-columns: minmax(0, 1fr) 3.6em; gap: 5px 12px; align-items: center; }
-.meters .who { grid-column: 1 / -1; font-size: 0.93rem; line-height: 1.4; }
-.meters .track { display: block; height: 14px; border-radius: 0 4px 4px 0; background: rgba(75, 70, 62, 0.13); }
-.meters .track i { display: block; height: 100%; min-width: 2px; width: calc(var(--share) * 1%); border-radius: 0 4px 4px 0; background: var(--ink2); }
-.meters .solver .track { background: rgba(213, 80, 30, 0.16); }
-.meters .solver .track i { background: var(--vermilion); }
-.meters .share { font: 500 0.95rem var(--mono); text-align: right; }
-.meters .solver .who, .meters .solver .share { font-weight: 600; }
-/* A definition from the vocabulary. */
-.defined > p:not(.small) { font-size: 1.08rem; line-height: 1.55; }
 @media (max-width: 900px) {
   .why { grid-template-columns: minmax(0, 1fr); }
   .also dl { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* The three parts of the home page: the FILE, the COMPILER and the OPTIMIZER. Each opens with its name. */
+.part > .wrap > .stack h2 { font-size: clamp(2.4rem, 4.6vw, 3.5rem); }
+.part > .wrap > .stack .lead { max-width: 40em; }
+.why > .terminal { align-self: start; }
+/* One record of each kind: its kind, what it says in plain words, and the record itself. */
+.anatomy dl { margin: 0; display: grid; gap: 0; }
+.anatomy dl div { display: grid; grid-template-columns: 6.6em minmax(0, 1fr); gap: 2px 12px; padding: 9px 0; border-top: 1px solid var(--line); }
+.anatomy dl div:first-child { border-top: 0; padding-top: 0; }
+.anatomy dt { font: 500 0.72rem/1.9 var(--mono); letter-spacing: 0.12em; color: var(--muted); }
+.anatomy dd { margin: 0; display: grid; gap: 2px; }
+.anatomy .meaning { font-size: 0.95rem; line-height: 1.4; }
+.anatomy .record { font: 400 0.72rem/1.5 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+/* Who wants what, and what delivers it: one table with a column for each WANT. */
+.holds table, .counts table, .scores table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+.holds thead th { font: 500 0.82rem/1.3 var(--text); text-align: center; vertical-align: bottom; padding: 0 6px 8px; width: 21%; }
+.holds tbody th[scope="rowgroup"] { padding: 14px 0 5px; text-align: left; font: 500 0.72rem/1.4 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); border-bottom: 1.5px solid var(--ink); }
+.holds tbody th[scope="row"] { text-align: left; font-weight: 500; padding: 8px 8px 8px 0; line-height: 1.3; }
+.holds td { text-align: center; padding: 8px 6px; }
+.holds tbody tr + tr th[scope="row"], .holds tbody tr + tr td { border-top: 1px solid var(--line); }
+.holds tbody tr:nth-child(2) th[scope="row"], .holds tbody tr:nth-child(2) td { border-top: 0; }
+.holds .must, .holds .must-not { font: 500 0.78rem var(--mono); }
+.holds .must-not { color: var(--stop); }
+.holds .delivers td { font: 500 0.95rem var(--mono); }
+/* What an OPTION asks for: lines of a report. */
+.asks ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+.asks li { font: 400 0.82rem/1.5 var(--mono); color: var(--ink2); padding-left: 16px; position: relative; overflow-wrap: anywhere; }
+.asks li::before { content: ""; position: absolute; left: 0; top: 0.55em; width: 6px; height: 6px; border-radius: 50%; background: var(--ink2); }
+/* How the choices grow, and the SCORE of two plans: figures in columns that line up. */
+.counts th, .scores thead th { text-align: right; padding: 0 0 7px 12px; font: 500 0.72rem/1.4 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); border-bottom: 1.5px solid var(--ink); }
+.counts th:first-child { text-align: left; padding-left: 0; }
+.counts td, .scores td { text-align: right; padding: 9px 0 9px 12px; border-bottom: 1px solid var(--line); font: 500 0.95rem var(--mono); font-variant-numeric: tabular-nums; }
+.counts td:first-child { text-align: left; padding-left: 0; }
+.counts .this td { color: var(--accent); font-weight: 600; }
+.scores thead th { vertical-align: bottom; width: 36%; }
+.scores th[scope="row"] { text-align: left; font-weight: 500; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.scores tfoot th, .scores tfoot td { border-bottom: 0; border-top: 1.5px solid var(--ink); font-weight: 600; }
+/* Three ways further in, side by side, and the commands to check a trip. */
+.hows.three { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: clamp(40px, 6vw, 68px); gap: 20px clamp(18px, 2.4vw, 28px); }
+.hows.three .preview > strong { font-size: 1.45rem; }
+.run { margin-top: clamp(40px, 6vw, 68px); padding-top: clamp(30px, 4vw, 46px); border-top: 1px solid var(--line); align-items: start; }
+.run h3 { font-size: clamp(1.55rem, 2.5vw, 2rem); }
+@media (max-width: 900px) {
+  .hows.three { grid-template-columns: minmax(0, 1fr); }
 }

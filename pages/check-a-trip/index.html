@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Check a trip in your browser: Agloe</title>
+<meta name="description" content="Alex and Sam have a flight to catch. Move the museum visit, the train or the flight, and the reference checker answers for the new FILE.">
+<meta name="theme-color" content="#FAF2E3">
+<link rel="icon" href="../favicon.ico" sizes="48x48">
+<link rel="icon" type="image/png" sizes="32x32" href="../favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="../favicon-192.png">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="canonical" href="https://agloe.ai/check-a-trip/">
+<link rel="preload" href="../fonts/bookmania-regular-italic-subset.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="../fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Agloe">
+<meta property="og:title" content="Check a trip in your browser: Agloe">
+<meta property="og:description" content="Alex and Sam have a flight to catch. Move the museum visit, the train or the flight, and the reference checker answers for the new FILE.">
+<meta property="og:url" content="https://agloe.ai/check-a-trip/">
+<meta property="og:image" content="https://agloe.ai/img/social-preview.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Agloe icon and name, the line Itineraries that compile, and the home page in a browser window">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to the content</a>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="Agloe home">
+      <img class="mark" src="/img/mark.png" width="44" height="44" alt="">
+      <svg class="word" viewBox="64 -728 2584 927" role="img" aria-label="Agloe"><path fill="currentColor" transform="scale(1,-1)" d="M594 599 277 93C252 51 223 30 172 25L166 0H388L394 25C318 30 301 49 326 87L405 215H678L696 87C701 45 679 30 603 25L596 0H856L863 25C817 30 800 51 794 98L714 700H688C641 700 592 706 544 712C489 720 424 728 375 728C175 728 64 617 64 481C64 376 128 311 222 311C315 311 382 373 382 452C382 488 357 520 318 520C286 520 261 496 261 461C261 436 276 419 276 398C276 371 253 357 217 357C154 357 115 407 115 481C115 602 217 683 372 683C431 683 514 671 560 658C596 648 620 640 594 599ZM433 259 629 573 672 259ZM1049 -199C1195 -199 1290 -141 1290 -55C1290 13 1244 47 1101 52C965 56 935 62 935 95C935 116 956 135 1001 135C1060 135 1063 113 1133 113C1265 113 1350 204 1350 318C1350 352 1336 395 1296 425C1309 439 1331 455 1349 455C1373 455 1377 429 1405 429C1434 429 1450 452 1450 474C1450 499 1426 514 1395 514C1355 514 1304 496 1261 444C1241 457 1211 466 1172 466C1040 466 955 375 955 261C955 226 967 194 991 169C924 165 864 128 864 70C864 37 877 11 909 -5C865 -21 831 -52 831 -98C831 -176 920 -199 1049 -199ZM1134 152C1078 152 1043 180 1043 243C1043 327 1085 427 1171 427C1227 427 1261 400 1261 335C1261 252 1220 152 1134 152ZM1054 -160C956 -160 893 -137 893 -90C893 -59 911 -36 958 -23C989 -30 1027 -34 1075 -35C1174 -37 1206 -52 1206 -87C1206 -123 1162 -160 1054 -160ZM1354 0H1577L1583 25C1530 30 1521 41 1530 77L1688 715H1656L1511 637L1507 617H1543C1565 617 1571 608 1565 584L1440 77C1431 41 1416 30 1360 25ZM1881 440 1871 461C1775 425 1675 342 1675 190C1675 72 1758 -15 1888 -15C2049 -15 2160 109 2160 262C2160 383 2078 460 1982 460C1904 460 1847 399 1847 312C1847 248 1884 201 1930 203C1962 203 1980 224 1980 249C1980 272 1966 290 1937 295C1913 298 1896 313 1896 345C1896 386 1922 421 1973 421C2030 421 2069 383 2069 295C2069 194 2019 24 1890 24C1805 24 1767 78 1767 157C1767 272 1816 398 1881 440ZM2416 -15C2539 -15 2626 76 2626 151C2626 174 2614 199 2580 199C2554 199 2526 178 2526 143C2526 125 2537 113 2537 94C2537 66 2496 27 2428 27C2335 27 2299 87 2299 167C2299 180 2299 192 2301 209L2648 317C2648 423 2558 466 2469 466C2328 466 2205 359 2205 185C2205 73 2283 -15 2416 -15ZM2472 427C2530 427 2569 400 2567 335L2308 254C2325 339 2371 427 2472 427Z"/></svg>
+    </a>
+    <nav class="links" aria-label="Main">
+      <a href="/#file">FILE</a>
+      <a href="/#compiler">COMPILER</a>
+      <a href="/#optimizer">OPTIMIZER</a>
+      <a href="/examples/">Examples</a>
+      <a href="https://github.com/ian-c-leonard/agloe">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero built">
+    <div class="wrap">
+      <div class="stack">
+        <h1>Check a trip in your browser</h1>
+        <p class="lead">Alex and Sam have a flight to catch. Move the museum visit, the train or the flight, and the reference checker answers for the new FILE.</p>
+      </div>
+    </div>
+    <div class="wrap">
+      <section class="trip card" id="trip" aria-labelledby="trip-title">
+        <div class="trip-head">
+          <div class="stack">
+            <h2 id="trip-title">Can Alex and Sam make their flight?</h2>
+          </div>
+          <div class="story"><span class="story-word">How the story starts</span><p data-from="spec/rules.md">Alex and Sam spend their last afternoon in Chicago at the Art Institute, then fly home from O'Hare. The flight leaves at 5:00 pm, and bag drop closes 45 minutes earlier. The Blue Line takes an hour from the museum to the terminal.</p></div>
+          <button class="button quiet" id="playing" type="button" aria-pressed="false">Play the story</button>
+        </div>
+        <div class="day" id="day"><noscript><p class="small">The drawing of the day needs JavaScript. The four versions, their FILEs and their reports are below.</p></noscript></div>
+        <div class="answers-now" aria-live="polite">
+          <div class="answer feasible" data-version="works"><p data-lines-from="examples/flight-home/works.expected.txt">FEASIBLE: this trip works.</p></div>
+          <div class="answer infeasible" data-version="cannot-work"><p data-lines-from="examples/flight-home/cannot-work.expected.txt">INFEASIBLE: this trip cannot work.</p><p class="page-words">The records marked in red rule out every plan together.</p></div>
+          <div class="answer undetermined" data-version="depends-on-the-cab"><p data-lines-from="examples/flight-home/depends-on-the-cab.expected.txt">UNDETERMINED: the FILE does not say enough to tell.</p><p data-lines-from="examples/flight-home/depends-on-the-cab.expected.txt">The trip works if Cab to O'Hare takes 45 min or less.</p></div>
+          <div class="answer risky" data-version="works-but-risky"><p data-lines-from="examples/flight-home/works-but-risky.expected.txt">FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold.</p><p data-lines-from="examples/flight-home/works-but-risky.expected.txt">5:00 pm to 7:30 pm: Flight home, Alex and Sam</p><p class="inset" data-lines-from="examples/flight-home/works-but-risky.expected.txt">! Alex and Sam would be 5 min too late for this.</p></div>
+          <div class="answer live" id="answer-live"><p></p></div>
+        </div>
+        <div class="tools" id="tools" hidden>
+          <p class="hint">Drag a block, the end of a block, the end of a road, or the time to be there. The small brass mark by the end of a road says how late that ride may run. The FILE changes with each move, and the checker runs again.</p>
+          <div class="add" role="group" aria-label="Add to the day">
+            <span class="add-word">Add</span>
+            <button type="button" data-add="lunch" aria-pressed="false">Lunch at the museum</button>
+            <button type="button" data-add="coffee" aria-pressed="false">Coffee at the gate</button>
+            <button type="button" data-add="cab" aria-pressed="false">A cab to O'Hare</button>
+            <label class="switch"><input type="checkbox" id="complete"><span>A FACT says every way straight to O'Hare that leaves from noon to 6:00 pm is listed</span></label>
+          </div>
+        </div>
+        <fieldset class="versions" aria-labelledby="trip-title">
+          <label><input type="radio" name="version" value="works" checked><span data-from="spec/rules.md">They leave the museum at 3:00 pm.</span></label>
+          <label><input type="radio" name="version" value="cannot-work"><span data-from="spec/rules.md">They leave at 3:30 pm, and a FACT says the Blue Line is the only way to O'Hare.</span></label>
+          <label><input type="radio" name="version" value="depends-on-the-cab"><span data-from="spec/rules.md">They leave at 3:30 pm. A cab is listed, but nobody has recorded how long it takes.</span></label>
+          <label><input type="radio" name="version" value="works-but-risky"><span data-from="spec/rules.md">They leave at 3:00 pm, and the Blue Line can take up to 80 minutes.</span></label>
+        </fieldset>
+        <div class="panes">
+          <section class="pane" aria-labelledby="pane-file">
+            <div class="mile" aria-hidden="true"><svg class="town" viewBox="0 0 24 24" aria-hidden="true"><circle cx="20.40" cy="12.00" r="1.7"/><circle cx="19.27" cy="16.20" r="1.7"/><circle cx="16.20" cy="19.27" r="1.7"/><circle cx="12.00" cy="20.40" r="1.7"/><circle cx="7.80" cy="19.27" r="1.7"/><circle cx="4.73" cy="16.20" r="1.7"/><circle cx="3.60" cy="12.00" r="1.7"/><circle cx="4.73" cy="7.80" r="1.7"/><circle cx="7.80" cy="4.73" r="1.7"/><circle cx="12.00" cy="3.60" r="1.7"/><circle cx="16.20" cy="4.73" r="1.7"/><circle cx="19.27" cy="7.80" r="1.7"/></svg><i></i></div>
+            <h3 id="pane-file"><span class="release">0.0</span> The FILE</h3>
+            <p data-from="docs/VISION.md"><strong>A standard format</strong> that represents a trip and all its nuances, readable by people and machines. It is the lasting record.</p>
+            <p class="small"><span data-from="spec/rules.md">A FILE lists PERSONs, PLACEs, OPTIONs, WAYs, WANTs, FACTs and DECISIONs.</span> The <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/vocabulary.md">vocabulary</a> says what each term in capitals means.</p>
+          <pre class="file-text" tabindex="0" aria-label="The FILE for this version of the trip" data-version="works" data-from="examples/flight-home/works.json">{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" }
+  ],
+  "places": [
+    { "id": "art-institute", "name": "the Art Institute" },
+    { "id": "ohare", "name": "O'Hare" },
+    { "id": "home", "name": "home" }
+  ],
+  "options": [
+    { "id": "museum-visit", "name": "Museum visit", "place": "art-institute" },
+    { "id": "blue-line", "name": "Blue Line to O'Hare", "from": "art-institute", "to": "ohare" },
+    { "id": "flight", "name": "Flight home", "from": "ohare", "to": "home" }
+  ],
+  "ways": [],
+  "wants": [],
+  "facts": [
+    { "id": "visit-time", "option": "museum-visit", "starts_at": "2027-05-15T14:00:00-05:00[America/Chicago]" },
+    { "id": "visit-length", "option": "museum-visit", "duration": "PT1H" },
+    { "id": "visit-needs-a-ticket", "option": "museum-visit", "needs_right": true },
+    { "id": "museum-tickets", "booking": { "option": "museum-visit", "covers": ["alex", "sam"] } },
+    { "id": "train-time", "option": "blue-line", "starts_any_time": true },
+    { "id": "train-length", "option": "blue-line", "duration": "PT1H" },
+    { "id": "train-is-walk-up", "option": "blue-line", "needs_right": false },
+    { "id": "flight-time", "option": "flight", "starts_at": "2027-05-15T17:00:00-05:00[America/Chicago]" },
+    { "id": "flight-length", "option": "flight", "duration": "PT2H30M" },
+    { "id": "bag-drop", "option": "flight", "arrive_before_start": "PT45M" },
+    { "id": "flight-needs-a-ticket", "option": "flight", "needs_right": true },
+    { "id": "flight-tickets", "booking": { "option": "flight", "covers": ["alex", "sam"] } }
+  ],
+  "decisions": [
+    { "id": "lock-visit", "lock": "museum-visit", "persons": ["alex", "sam"] },
+    { "id": "lock-flight", "lock": "flight", "persons": ["alex", "sam"] }
+  ]
+}</pre>
+          <pre class="file-text" tabindex="0" aria-label="The FILE for this version of the trip" data-version="cannot-work" data-from="examples/flight-home/cannot-work.json">{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" }
+  ],
+  "places": [
+    { "id": "art-institute", "name": "the Art Institute" },
+    { "id": "ohare", "name": "O'Hare" },
+    { "id": "home", "name": "home" }
+  ],
+  "options": [
+    { "id": "museum-visit", "name": "Museum visit", "place": "art-institute" },
+    { "id": "blue-line", "name": "Blue Line to O'Hare", "from": "art-institute", "to": "ohare" },
+    { "id": "flight", "name": "Flight home", "from": "ohare", "to": "home" }
+  ],
+  "ways": [],
+  "wants": [],
+  "facts": [
+    { "id": "visit-time", "option": "museum-visit", "starts_at": "2027-05-15T14:30:00-05:00[America/Chicago]" },
+    { "id": "visit-length", "option": "museum-visit", "duration": "PT1H" },
+    { "id": "visit-needs-a-ticket", "option": "museum-visit", "needs_right": true },
+    { "id": "museum-tickets", "booking": { "option": "museum-visit", "covers": ["alex", "sam"] } },
+    { "id": "train-time", "option": "blue-line", "starts_any_time": true },
+    { "id": "train-length", "option": "blue-line", "duration": "PT1H" },
+    { "id": "train-is-walk-up", "option": "blue-line", "needs_right": false },
+    { "id": "flight-time", "option": "flight", "starts_at": "2027-05-15T17:00:00-05:00[America/Chicago]" },
+    { "id": "flight-length", "option": "flight", "duration": "PT2H30M" },
+    { "id": "bag-drop", "option": "flight", "arrive_before_start": "PT45M" },
+    { "id": "flight-needs-a-ticket", "option": "flight", "needs_right": true },
+    { "id": "flight-tickets", "booking": { "option": "flight", "covers": ["alex", "sam"] } },
+    {
+      "id": "ways-to-ohare",
+      "complete": {
+        "to": "ohare",
+        "leaving": {
+          "earliest": "2027-05-15T12:00:00-05:00[America/Chicago]",
+          "latest": "2027-05-15T18:00:00-05:00[America/Chicago]"
+        }
+      }
+    }
+  ],
+  "decisions": [
+    { "id": "lock-visit", "lock": "museum-visit", "persons": ["alex", "sam"] },
+    { "id": "lock-flight", "lock": "flight", "persons": ["alex", "sam"] }
+  ]
+}</pre>
+          <pre class="file-text" tabindex="0" aria-label="The FILE for this version of the trip" data-version="depends-on-the-cab" data-from="examples/flight-home/depends-on-the-cab.json">{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" }
+  ],
+  "places": [
+    { "id": "art-institute", "name": "the Art Institute" },
+    { "id": "ohare", "name": "O'Hare" },
+    { "id": "home", "name": "home" }
+  ],
+  "options": [
+    { "id": "museum-visit", "name": "Museum visit", "place": "art-institute" },
+    { "id": "blue-line", "name": "Blue Line to O'Hare", "from": "art-institute", "to": "ohare" },
+    { "id": "flight", "name": "Flight home", "from": "ohare", "to": "home" },
+    { "id": "cab", "name": "Cab to O'Hare", "from": "art-institute", "to": "ohare" }
+  ],
+  "ways": [],
+  "wants": [],
+  "facts": [
+    { "id": "visit-time", "option": "museum-visit", "starts_at": "2027-05-15T14:30:00-05:00[America/Chicago]" },
+    { "id": "visit-length", "option": "museum-visit", "duration": "PT1H" },
+    { "id": "visit-needs-a-ticket", "option": "museum-visit", "needs_right": true },
+    { "id": "museum-tickets", "booking": { "option": "museum-visit", "covers": ["alex", "sam"] } },
+    { "id": "train-time", "option": "blue-line", "starts_any_time": true },
+    { "id": "train-length", "option": "blue-line", "duration": "PT1H" },
+    { "id": "train-is-walk-up", "option": "blue-line", "needs_right": false },
+    { "id": "cab-time", "option": "cab", "starts_any_time": true },
+    { "id": "cab-is-walk-up", "option": "cab", "needs_right": false },
+    { "id": "flight-time", "option": "flight", "starts_at": "2027-05-15T17:00:00-05:00[America/Chicago]" },
+    { "id": "flight-length", "option": "flight", "duration": "PT2H30M" },
+    { "id": "bag-drop", "option": "flight", "arrive_before_start": "PT45M" },
+    { "id": "flight-needs-a-ticket", "option": "flight", "needs_right": true },
+    { "id": "flight-tickets", "booking": { "option": "flight", "covers": ["alex", "sam"] } },
+    {
+      "id": "ways-to-ohare",
+      "complete": {
+        "to": "ohare",
+        "leaving": {
+          "earliest": "2027-05-15T12:00:00-05:00[America/Chicago]",
+          "latest": "2027-05-15T18:00:00-05:00[America/Chicago]"
+        }
+      }
+    }
+  ],
+  "decisions": [
+    { "id": "lock-visit", "lock": "museum-visit", "persons": ["alex", "sam"] },
+    { "id": "lock-flight", "lock": "flight", "persons": ["alex", "sam"] }
+  ]
+}</pre>
+          <pre class="file-text" tabindex="0" aria-label="The FILE for this version of the trip" data-version="works-but-risky" data-from="examples/flight-home/works-but-risky.json">{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" }
+  ],
+  "places": [
+    { "id": "art-institute", "name": "the Art Institute" },
+    { "id": "ohare", "name": "O'Hare" },
+    { "id": "home", "name": "home" }
+  ],
+  "options": [
+    { "id": "museum-visit", "name": "Museum visit", "place": "art-institute" },
+    { "id": "blue-line", "name": "Blue Line to O'Hare", "from": "art-institute", "to": "ohare" },
+    { "id": "flight", "name": "Flight home", "from": "ohare", "to": "home" }
+  ],
+  "ways": [],
+  "wants": [],
+  "facts": [
+    { "id": "visit-time", "option": "museum-visit", "starts_at": "2027-05-15T14:00:00-05:00[America/Chicago]" },
+    { "id": "visit-length", "option": "museum-visit", "duration": "PT1H" },
+    { "id": "visit-needs-a-ticket", "option": "museum-visit", "needs_right": true },
+    { "id": "museum-tickets", "booking": { "option": "museum-visit", "covers": ["alex", "sam"] } },
+    { "id": "train-time", "option": "blue-line", "starts_any_time": true },
+    { "id": "train-is-walk-up", "option": "blue-line", "needs_right": false },
+    {
+      "id": "train-length",
+      "option": "blue-line",
+      "contingent_duration": { "shortest": "PT1H", "longest": "PT1H20M" }
+    },
+    { "id": "flight-time", "option": "flight", "starts_at": "2027-05-15T17:00:00-05:00[America/Chicago]" },
+    { "id": "flight-length", "option": "flight", "duration": "PT2H30M" },
+    { "id": "bag-drop", "option": "flight", "arrive_before_start": "PT45M" },
+    { "id": "flight-needs-a-ticket", "option": "flight", "needs_right": true },
+    { "id": "flight-tickets", "booking": { "option": "flight", "covers": ["alex", "sam"] } }
+  ],
+  "decisions": [
+    { "id": "lock-visit", "lock": "museum-visit", "persons": ["alex", "sam"] },
+    { "id": "lock-flight", "lock": "flight", "persons": ["alex", "sam"] }
+  ]
+}</pre>
+            <pre class="file-text live" id="file-live" tabindex="0" aria-label="The FILE for your version of the trip"></pre>
+            <p class="small marks-key">Tinted lines differ from the first version. Red lines are the records that rule out every plan.</p>
+          </section>
+          <section class="pane" aria-labelledby="pane-compiler">
+            <div class="mile" aria-hidden="true"><svg class="town" viewBox="0 0 24 24" aria-hidden="true"><circle cx="20.40" cy="12.00" r="1.7"/><circle cx="19.27" cy="16.20" r="1.7"/><circle cx="16.20" cy="19.27" r="1.7"/><circle cx="12.00" cy="20.40" r="1.7"/><circle cx="7.80" cy="19.27" r="1.7"/><circle cx="4.73" cy="16.20" r="1.7"/><circle cx="3.60" cy="12.00" r="1.7"/><circle cx="4.73" cy="7.80" r="1.7"/><circle cx="7.80" cy="4.73" r="1.7"/><circle cx="12.00" cy="3.60" r="1.7"/><circle cx="16.20" cy="4.73" r="1.7"/><circle cx="19.27" cy="7.80" r="1.7"/></svg><i></i></div>
+            <h3 id="pane-compiler"><span class="release">0.1</span> The COMPILER</h3>
+            <p data-from="docs/VISION.md"><strong>A compiler</strong> that checks the whole plan and explains every conflict.</p>
+            <p class="small"><strong>The report is made for an AI agent that plans the trip</strong>, more than for a person. Its evidence is a plan, or the records that rule out every plan, or what the FILE would have to say. As data, it names each record by its id. The agent changes the FILE and checks again.</p>
+            <p class="small">The first release is tested by an agent that plans a trip alone. <span data-from="docs/ROADMAP.md">It writes the FILE, reads the COMPILER's reports, and ends with a FEASIBLE TRIP, with no other help.</span></p>
+            <div class="forms" role="radiogroup" aria-labelledby="forms-title">
+              <span class="label" id="forms-title">What the agent reads</span>
+              <label><input type="radio" name="form" value="words" checked><span>In words</span></label>
+              <label><input type="radio" name="form" value="data"><span>As data</span></label>
+            </div>
+            <div class="terminal">
+          <div class="report feasible" data-version="works">
+            <p class="command"><span aria-hidden="true">$ </span>uv run agloe check examples/flight-home/works.json</p>
+            <pre data-from="examples/flight-home/works.expected.txt">FEASIBLE: this trip works.
+
+Saturday 15 May 2027 (times in America/Chicago)
+  2:00 pm to 3:00 pm: Museum visit, Alex and Sam
+  3:00 pm to 4:00 pm: Blue Line to O'Hare, Alex and Sam
+  5:00 pm to 7:30 pm: Flight home, Alex and Sam
+
+The plan relies on these FACTs and DECISIONs:
+  visit-time: Museum visit starts at 2:00 pm on Saturday 15 May 2027
+  visit-length: Museum visit takes 1 h
+  visit-needs-a-ticket: people need a right to take part in Museum visit
+  museum-tickets: a BOOKING for Museum visit covers Alex and Sam
+  train-time: Blue Line to O'Hare can start at any time
+  train-length: Blue Line to O'Hare takes 1 h
+  train-is-walk-up: nobody needs a right to take part in Blue Line to O'Hare
+  flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
+  flight-length: Flight home takes 2 h 30 min
+  bag-drop: people must be at O'Hare 45 min before Flight home starts
+  flight-needs-a-ticket: people need a right to take part in Flight home
+  flight-tickets: a BOOKING for Flight home covers Alex and Sam
+  lock-visit: Alex and Sam take part in Museum visit
+  lock-flight: Alex and Sam take part in Flight home</pre>
+          </div>
+          <div class="report infeasible" data-version="cannot-work">
+            <p class="command"><span aria-hidden="true">$ </span>uv run agloe check examples/flight-home/cannot-work.json</p>
+            <pre data-from="examples/flight-home/cannot-work.expected.txt">INFEASIBLE: this trip cannot work.
+
+These FACTs and DECISIONs rule out every plan by themselves. Take any one away and they no longer do. A FACT that is taken away leaves what it said unknown. Times are in America/Chicago.
+  visit-time: Museum visit starts at 2:30 pm on Saturday 15 May 2027
+  visit-length: Museum visit takes 1 h
+  train-length: Blue Line to O'Hare takes 1 h
+  flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
+  bag-drop: people must be at O'Hare 45 min before Flight home starts
+  ways-to-ohare: every way straight to O'Hare that leaves between 12:00 pm on Saturday 15 May 2027 and 6:00 pm is listed
+  lock-visit: Alex and Sam take part in Museum visit
+  lock-flight: Alex and Sam take part in Flight home</pre>
+          </div>
+          <div class="report undetermined" data-version="depends-on-the-cab">
+            <p class="command"><span aria-hidden="true">$ </span>uv run agloe check examples/flight-home/depends-on-the-cab.json</p>
+            <pre data-from="examples/flight-home/depends-on-the-cab.expected.txt">UNDETERMINED: the FILE does not say enough to tell.
+
+The trip works if Cab to O'Hare takes 45 min or less.</pre>
+          </div>
+          <div class="report risky" data-version="works-but-risky">
+            <p class="command"><span aria-hidden="true">$ </span>uv run agloe check examples/flight-home/works-but-risky.json</p>
+            <pre data-from="examples/flight-home/works-but-risky.expected.txt">FEASIBLE, with a WARNING: this trip can work, but no plan is sure to hold.
+
+Saturday 15 May 2027 (times in America/Chicago)
+  2:00 pm to 3:00 pm: Museum visit, Alex and Sam
+  3:00 pm to 4:00 pm: Blue Line to O'Hare, Alex and Sam
+  5:00 pm to 7:30 pm: Flight home, Alex and Sam
+    ! Alex and Sam would be 5 min too late for this.
+
+WARNING: no plan is sure to hold if the uncertain parts take their longest. Each line marked "!" says what would go wrong at the step above it.
+
+The plan relies on these FACTs and DECISIONs:
+  visit-time: Museum visit starts at 2:00 pm on Saturday 15 May 2027
+  visit-length: Museum visit takes 1 h
+  visit-needs-a-ticket: people need a right to take part in Museum visit
+  museum-tickets: a BOOKING for Museum visit covers Alex and Sam
+  train-time: Blue Line to O'Hare can start at any time
+  train-is-walk-up: nobody needs a right to take part in Blue Line to O'Hare
+  train-length: Blue Line to O'Hare takes between 1 h and 1 h 20 min
+  flight-time: Flight home starts at 5:00 pm on Saturday 15 May 2027
+  flight-length: Flight home takes 2 h 30 min
+  bag-drop: people must be at O'Hare 45 min before Flight home starts
+  flight-needs-a-ticket: people need a right to take part in Flight home
+  flight-tickets: a BOOKING for Flight home covers Alex and Sam
+  lock-visit: Alex and Sam take part in Museum visit
+  lock-flight: Alex and Sam take part in Flight home</pre>
+          </div>
+              <div class="as-data" data-version="works">
+                <p class="command"><span aria-hidden="true">$ </span>uv run agloe check examples/flight-home/works.json --json</p>
+                <pre class="report-data" data-version="works" data-from="examples/flight-home/works.expected.json">{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "museum-visit",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T14:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T15:00:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "museum-tickets",
+        "sam": "museum-tickets"
+      }
+    },
+    {
+      "option": "blue-line",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T15:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T16:00:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "flight",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T17:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T19:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "flight-tickets",
+        "sam": "flight-tickets"
+      }
+    }
+  ],
+  "relies_on": [
+    "visit-time",
+    "visit-length",
+    "visit-needs-a-ticket",
+    "museum-tickets",
+    "train-time",
+    "train-length",
+    "train-is-walk-up",
+    "flight-time",
+    "flight-length",
+    "bag-drop",
+    "flight-needs-a-ticket",
+    "flight-tickets",
+    "lock-visit",
+    "lock-flight"
+  ],
+  "robust": true
+}</pre>
+              </div>
+              <div class="as-data" data-version="cannot-work">
+                <p class="command"><span aria-hidden="true">$ </span>uv run agloe check examples/flight-home/cannot-work.json --json</p>
+                <pre class="report-data" data-version="cannot-work" data-from="examples/flight-home/cannot-work.expected.json">{
+  "answer": "INFEASIBLE",
+  "conflict": [
+    "visit-time",
+    "visit-length",
+    "train-length",
+    "flight-time",
+    "bag-drop",
+    "ways-to-ohare",
+    "lock-visit",
+    "lock-flight"
+  ]
+}</pre>
+              </div>
+              <div class="as-data" data-version="depends-on-the-cab">
+                <p class="command"><span aria-hidden="true">$ </span>uv run agloe check examples/flight-home/depends-on-the-cab.json --json</p>
+                <pre class="report-data" data-version="depends-on-the-cab" data-from="examples/flight-home/depends-on-the-cab.expected.json">{
+  "answer": "UNDETERMINED",
+  "missing": [
+    [
+      {
+        "what": "duration",
+        "option": "cab",
+        "at_most": "PT45M"
+      }
+    ]
+  ]
+}</pre>
+              </div>
+              <div class="as-data" data-version="works-but-risky">
+                <p class="command"><span aria-hidden="true">$ </span>uv run agloe check examples/flight-home/works-but-risky.json --json</p>
+                <pre class="report-data" data-version="works-but-risky" data-from="examples/flight-home/works-but-risky.expected.json">{
+  "answer": "FEASIBLE",
+  "itinerary": [
+    {
+      "option": "museum-visit",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T14:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T15:00:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "museum-tickets",
+        "sam": "museum-tickets"
+      }
+    },
+    {
+      "option": "blue-line",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T15:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T16:00:00-05:00[America/Chicago]"
+    },
+    {
+      "option": "flight",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "start": "2027-05-15T17:00:00-05:00[America/Chicago]",
+      "end": "2027-05-15T19:30:00-05:00[America/Chicago]",
+      "rights": {
+        "alex": "flight-tickets",
+        "sam": "flight-tickets"
+      }
+    }
+  ],
+  "relies_on": [
+    "visit-time",
+    "visit-length",
+    "visit-needs-a-ticket",
+    "museum-tickets",
+    "train-time",
+    "train-is-walk-up",
+    "train-length",
+    "flight-time",
+    "flight-length",
+    "bag-drop",
+    "flight-needs-a-ticket",
+    "flight-tickets",
+    "lock-visit",
+    "lock-flight"
+  ],
+  "robust": false,
+  "at_worst": [
+    {
+      "constraint": "Each PERSON arrives in time",
+      "option": "flight",
+      "persons": [
+        "alex",
+        "sam"
+      ],
+      "late": "PT5M"
+    }
+  ]
+}</pre>
+              </div>
+              <div class="report live" id="report-live">
+                <p class="command" id="report-note"></p>
+                <pre id="report-text"></pre>
+                <pre id="report-json"></pre>
+              </div>
+            </div>
+          </section>
+          <section class="pane unbuilt" aria-labelledby="pane-optimizer">
+            <div class="mile" aria-hidden="true"><svg class="town" viewBox="0 0 24 24" aria-hidden="true"><circle cx="20.40" cy="12.00" r="1.7"/><circle cx="19.27" cy="16.20" r="1.7"/><circle cx="16.20" cy="19.27" r="1.7"/><circle cx="12.00" cy="20.40" r="1.7"/><circle cx="7.80" cy="19.27" r="1.7"/><circle cx="4.73" cy="16.20" r="1.7"/><circle cx="3.60" cy="12.00" r="1.7"/><circle cx="4.73" cy="7.80" r="1.7"/><circle cx="7.80" cy="4.73" r="1.7"/><circle cx="12.00" cy="3.60" r="1.7"/><circle cx="16.20" cy="4.73" r="1.7"/><circle cx="19.27" cy="7.80" r="1.7"/></svg></div>
+            <h3 id="pane-optimizer"><span class="release">0.2</span> The OPTIMIZER</h3>
+            <p data-from="docs/VISION.md"><strong>An optimizer</strong> that finds the best version for the priorities people set.</p>
+            <p class="small" data-from="docs/ROADMAP.md">The OPTIMIZER: ranking FEASIBLE ITINERARIES by SCORE, with each PERSON's SCORE shown beside the total.</p>
+            <div class="blind" aria-hidden="true"><i></i><i></i><i></i></div>
+            <p class="small soon">It is not built yet.</p>
+          </section>
+        </div>
+      </section>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Agloe is open source under the <a href="https://github.com/ian-c-leonard/agloe/blob/main/LICENSE">Apache License 2.0</a>.</span>
+    <span>The trips in the examples are fictional.</span>
+    <a href="https://github.com/ian-c-leonard/agloe">github.com/ian-c-leonard/agloe</a>
+  </div>
+</footer>
+
+<script type="module" src="../trip.js"></script>
+</body>
+</html>

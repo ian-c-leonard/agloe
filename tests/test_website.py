@@ -144,8 +144,13 @@ SITE_TEXT = {
     if not {"vendor", "examples"} & set(path.parts)
 } | {"examples/index.html": built_examples()}
 SITE_PAGES = {name: read_page(name, written) for name, written in SITE_TEXT.items()}
+# The page with the trip that a reader can change.
+TRIP = "check-a-trip/index.html"
+PAGE = SITE_PAGES[TRIP]
 # The home page.
-PAGE = SITE_PAGES["index.html"]
+HOME = SITE_TEXT["index.html"]
+# The FILE that the figures of the home page are drawn from.
+THREE = "pages/files/three-travelers.json"
 PASSAGES = [
     (name, kind, source, text)
     for name, page in SITE_PAGES.items()
@@ -218,7 +223,7 @@ def test_every_example_a_page_names_exists() -> None:
 
 def offered() -> list[str]:
     """The versions of the story that the page offers, in the order it offers them."""
-    return re.findall(r'name="version" value="([\w-]+)"', (PAGES / "index.html").read_text())
+    return re.findall(r'name="version" value="([\w-]+)"', (PAGES / TRIP).read_text())
 
 
 def test_the_page_carries_each_version_of_the_story_whole() -> None:
@@ -268,7 +273,7 @@ def test_each_thing_a_reader_can_add_gives_a_report() -> None:
         (PAGES / "trip" / "additions.json").read_text()
     )
     first: dict[str, list[Any]] = json.loads((ROOT / STORY / "works.json").read_text())
-    buttons = set(re.findall(r'data-add="([\w-]+)"', (PAGES / "index.html").read_text()))
+    buttons = set(re.findall(r'data-add="([\w-]+)"', (PAGES / TRIP).read_text()))
     assert buttons | {"complete"} == set(additions)
 
     def with_these(names: list[str]) -> str:
@@ -469,10 +474,6 @@ def test_the_two_cases_of_each_file_are_what_both_checkers_find() -> None:
     said = {"a plan works": "plan", "no plan works": "none"}
     table = {(said[worst], said[best]): answer for worst, best, answer in rows}
     assert len(table) == 3
-    # The home page shows the same table.
-    assert all(
-        f"<td>{worst}</td><td>{best}</td>" in SITE_TEXT["index.html"] for worst, best, _ in rows
-    )
     seen: set[str] = set()
     for name, worst, best in boards:
         file = read(ROOT / "examples" / f"{name}.json")
@@ -503,9 +504,7 @@ def test_the_file_that_grows_is_one_file_with_records_added() -> None:
     whoever writes a FILE. Both checkers are asked, and the first line of each report on it
     is the line the page gives.
     """
-    figure = re.search(
-        r'<figure class="grows" id="file-grows">(.*?)</figure>', SITE_TEXT["index.html"], re.S
-    )
+    figure = re.search(r'<figure class="grows" id="file-grows">(.*?)</figure>', HOME, re.S)
     assert figure is not None
     steps = re.findall(r"<li ([^>]+)>(.*?)</li>", figure.group(1), re.S)
     named = [dict(re.findall(r'data-([a-z-]+)="([^"]+)"', given)) for given, _ in steps]
@@ -540,58 +539,176 @@ def test_the_file_that_grows_is_one_file_with_records_added() -> None:
         assert reports_in.as_text(file, found).splitlines()[0] == html.unescape(said.group(1))
 
 
-def test_the_want_and_its_options_are_those_of_the_file() -> None:
-    """The home page shows one WANT of an example, and what a FACT says of each OPTION and it."""
+def three_travelers() -> dict[str, Any]:
+    """The FILE for three travelers, as JSON."""
+    return json.loads((ROOT / THREE).read_text())
+
+
+def named(records: list[dict[str, Any]]) -> dict[str, str]:
+    """The name of each record, by its id."""
+    return {record["id"]: record["name"] for record in records}
+
+
+def test_the_table_of_wants_is_what_the_file_holds() -> None:
+    """The home page shows who wants what in the FILE for three travelers, and what delivers it.
+
+    Each WANT has a column. Each PERSON has a row that says must or must not under the WANTs
+    they hold. Each OPTION has a row with its DEGREE OF SATISFACTION under each WANT that a
+    FACT says it delivers. A FACT says that each list is whole, so an empty cell means no.
+    """
     figure = re.search(
-        r'<figure class="wanted" id="want-and-options" data-file="([^"]+)">(.*?)</figure>',
-        SITE_TEXT["index.html"],
+        r'<figure class="holds" id="who-wants-what" data-file="([^"]+)">(.*?)</figure>', HOME, re.S
+    )
+    assert figure is not None and figure.group(1) == THREE
+    document, body = three_travelers(), figure.group(2)
+    columns = re.findall(r'<th scope="col" data-want="([\w-]+)">(.*?)</th>', body)
+    assert [(each["id"], each["name"]) for each in document["wants"]] == columns
+    said = {10: '<td class="must">must</td>', -10: '<td class="must-not">must not</td>'}
+    persons = re.findall(r'<tr data-person="([\w-]+)"><th scope="row">(.*?)</th>(.*?)</tr>', body)
+    assert [(person, name) for person, name, _ in persons] == list(
+        named(document["persons"]).items()
+    )
+    for person, _, cells in persons:
+        held = [
+            {holder["person"]: holder["degree"] for holder in want["holders"]}.get(person)
+            for want in document["wants"]
+        ]
+        assert cells == "".join(said[degree] if degree else "<td></td>" for degree in held), person
+    options = re.findall(r'<tr data-option="([\w-]+)"><th scope="row">(.*?)</th>(.*?)</tr>', body)
+    assert [(option, name) for option, name, _ in options] == list(
+        named(document["options"]).items()
+    )
+    delivered = {
+        (fact["option"], fact["satisfies"]["want"]): fact["satisfies"]["degree"]
+        for fact in document["facts"]
+        if "satisfies" in fact
+    }
+    assert all(degree > 0 for degree in delivered.values())
+    whole = {fact["complete"]["satisfies"] for fact in document["facts"] if "complete" in fact}
+    assert whole == {want["id"] for want in document["wants"]}
+    for option, _, cells in options:
+        row = [delivered.get((option, want["id"])) for want in document["wants"]]
+        assert cells == "".join(
+            f"<td>{degree}</td>" if degree else "<td></td>" for degree in row
+        ), option
+    assert document["decisions"] == [] and "five OPTIONs and no DECISION" in HOME
+
+
+def test_the_plan_for_three_travelers_is_what_both_checkers_show() -> None:
+    """The home page shows the first lines of the report on the FILE for three travelers."""
+    shown = re.search(
+        r'<div class="terminal" id="plan-for-three">.*?'
+        r"uv run agloe check ([\w/.-]+)</p>\s*<pre>(.*?)</pre>",
+        HOME,
         re.S,
     )
-    assert figure is not None
-    document = json.loads((ROOT / "examples" / f"{figure.group(1)}.json").read_text())
-    body = figure.group(2)
-    named = re.search(r'data-want="([^"]+)"', body)
-    assert named is not None
-    want = next(each for each in document["wants"] if each["id"] == named.group(1))
-    assert f"<strong>{want['name']}</strong>" in body
-    persons = {person["id"]: person["name"] for person in document["persons"]}
-    for holder in want["holders"]:
-        assert holder["degree"] == 10
-        assert f'<span class="how">a must for {persons[holder["person"]]}</span>' in body
-    shown = re.findall(
-        r'<li(?: class="does")? data-option="([^"]+)" data-degree="(\d+)">.*?'
-        r'<strong>(.*?)</strong><span class="how">(.*?)</span></li>',
-        body,
-    )
-    stated = {
-        fact["option"]: fact["satisfies"]["degree"]
-        for fact in document["facts"]
-        if fact.get("satisfies", {}).get("want") == want["id"]
-    }
-    assert {option: int(degree) for option, degree, _, _ in shown} == stated
-    assert len(shown) == len(document["options"])
-    options = {option["id"]: option["name"] for option in document["options"]}
-    for option, degree, name, how in shown:
-        assert name == options[option]
-        assert how == (
-            f"SATISFIES it, {degree} out of 10" if int(degree) else "does not SATISFY it"
-        )
+    assert shown is not None and shown.group(1) == THREE
+    wanted = html.unescape(shown.group(2)).rstrip("\n").split("\n")
+    file = read(ROOT / THREE)
+    for found in (answers.check(file), compiler.check(file)):
+        report = reports_in.as_text(file, found).split("\n")
+        assert report[: len(wanted)] == wanted
+        # The lines shown are the whole plan: the next line of the report is empty.
+        assert report[len(wanted)] == ""
 
 
-def test_each_bar_is_as_long_as_the_figure_beside_it() -> None:
-    """The home page draws three shares as bars. Each bar's length is the figure printed with it."""
-    figure = re.search(
-        r'<figure class="meters" id="with-a-solver">(.*?)</figure>', SITE_TEXT["index.html"], re.S
-    )
+def test_the_choices_are_counted_as_the_page_says() -> None:
+    """Each PERSON is in an OPTION or out of it: two choices for each pair of the two."""
+    figure = re.search(r'<figure class="counts" id="choices">(.*?)</figure>', HOME, re.S)
     assert figure is not None
     rows = re.findall(
-        r'style="--share: ([\d.]+)" title="([^"]+)">.*?<span class="share">([\d.]+)%</span>',
+        r'<tr data-travelers="(\d+)" data-options="(\d+)"(?: class="this")?>'
+        r"<td>(\d+)</td><td>(\d+)</td><td>([\d,]+)</td></tr>",
         figure.group(1),
     )
-    assert len(rows) == 3
-    for share, title, printed in rows:
-        assert share == printed
-        assert f"{printed}% of the tasks solved" in title
+    assert len(rows) == 4
+    for travelers, options, first, second, choices in rows:
+        assert (travelers, options) == (first, second)
+        assert f"{2 ** (int(travelers) * int(options)):,}" == choices
+    marked = re.search(
+        r'data-travelers="(\d+)" data-options="(\d+)" class="this">'
+        r"<td>\d+</td><td>\d+</td><td>([\d,]+)",
+        figure.group(1),
+    )
+    document = three_travelers()
+    assert marked is not None
+    assert (int(marked.group(1)), int(marked.group(2))) == (
+        len(document["persons"]),
+        len(document["options"]),
+    )
+    assert f"That makes {marked.group(3)} choices" in HOME
+
+
+def score(document: dict[str, Any], plan: dict[str, list[str]]) -> dict[str, int]:
+    """Each PERSON's SCORE for a plan, as the vocabulary defines SCORE, and the total.
+
+    A plan says who takes part in each OPTION. For every PERSON and every WANT they hold, the
+    DEGREE OF WANT times the DEGREE OF SATISFACTION that the plan delivers to them.
+    """
+    delivered = {
+        (fact["option"], fact["satisfies"]["want"]): fact["satisfies"]["degree"]
+        for fact in document["facts"]
+        if "satisfies" in fact
+    }
+    scores = dict.fromkeys((person["id"] for person in document["persons"]), 0)
+    for want in document["wants"]:
+        for holder in want["holders"]:
+            got = [
+                delivered.get((option, want["id"]), 0)
+                for option, persons in plan.items()
+                if holder["person"] in persons
+            ]
+            # In each plan of the page, a holder is in at most one OPTION that delivers the WANT.
+            assert sum(1 for degree in got if degree) <= 1
+            scores[holder["person"]] += holder["degree"] * max(got, default=0)
+    return scores | {"total": sum(scores.values())}
+
+
+def plan_of(file: Any, found: Any) -> dict[str, list[str]]:
+    """Who takes part in each OPTION of the plan that a report shows."""
+    steps = cast("list[dict[str, Any]]", reports_in.as_json(file, found)["itinerary"])
+    return {step["option"]: step["persons"] for step in steps if "option" in step}
+
+
+def test_the_two_plans_work_and_score_as_the_page_says() -> None:
+    """The home page gives each PERSON's SCORE for two plans of the FILE for three travelers.
+
+    The first is the plan that the COMPILER shows. The second is named on the page. With a
+    LOCK for each of its OPTIONs, both checkers say that the TRIP works and show that plan.
+    The SCOREs are worked out here from the FILE, by the vocabulary's definition.
+    """
+    figure = re.search(
+        r'<figure class="scores" id="two-plans" data-file="([^"]+)">(.*?)</figure>', HOME, re.S
+    )
+    assert figure is not None and figure.group(1) == THREE
+    document, body = three_travelers(), figure.group(2)
+    file = read(ROOT / THREE)
+    first = plan_of(file, compiler.check(file))
+    assert first == plan_of(file, answers.check(file))
+    other = re.search(r"data-plan='([^']+)'", body)
+    assert other is not None
+    second: dict[str, list[str]] = json.loads(other.group(1))
+    locked = json.loads(json.dumps(document))
+    locked["decisions"] = [
+        {"id": f"lock-{option}", "lock": option, "persons": persons}
+        for option, persons in second.items()
+    ]
+    with_locks = load(locked)
+    for found in (answers.check(with_locks), compiler.check(with_locks)):
+        assert reports_in.as_text(with_locks, found).startswith("FEASIBLE: this trip works.")
+        assert plan_of(with_locks, found) == second
+    rows = {
+        name: (first_plan, second_plan)
+        for name, first_plan, second_plan in re.findall(
+            r'<th scope="row">(\w+)</th><td>(\d+)</td><td>(\d+)</td>', body
+        )
+    }
+    names = named(document["persons"]) | {"total": "Total"}
+    for plan, column in ((first, 0), (second, 1)):
+        for person, points in score(document, plan).items():
+            assert int(rows[names[person]][column]) == points, (person, column)
+    # What the page says of the first plan: Jo's live blues, 3 out of 10.
+    assert first["dinner-tavern"] == ["jo"] and "gives Jo live blues at 3 out of 10" in HOME
 
 
 def test_the_page_gives_the_constraint_its_number_on_the_rules_page() -> None:
