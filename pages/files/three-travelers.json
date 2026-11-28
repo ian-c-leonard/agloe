@@ -1,0 +1,68 @@
+{
+  "persons": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" },
+    { "id": "jo", "name": "Jo" }
+  ],
+  "places": [
+    { "id": "willis-tower", "name": "Willis Tower" },
+    { "id": "river-north", "name": "River North" },
+    { "id": "blues-club", "name": "the blues club" }
+  ],
+  "options": [
+    { "id": "skydeck", "name": "Skydeck visit", "place": "willis-tower" },
+    { "id": "dinner-pizzeria", "name": "Dinner at the deep-dish place", "place": "river-north" },
+    { "id": "dinner-tavern", "name": "Dinner at the tavern", "place": "river-north" },
+    { "id": "rooftop-set", "name": "Blues on the rooftop", "place": "river-north" },
+    { "id": "blues-show", "name": "Blues show at the club", "place": "blues-club" }
+  ],
+  "ways": [
+    { "id": "train-to-river-north", "name": "the train between Willis Tower and River North", "between": ["willis-tower", "river-north"] },
+    { "id": "walk-to-club", "name": "the walk between River North and the blues club", "between": ["river-north", "blues-club"] }
+  ],
+  "wants": [
+    { "id": "view", "name": "a view from high up", "holders": [{ "person": "alex", "degree": 10 }, { "person": "jo", "degree": -10 }] },
+    { "id": "deep-dish", "name": "deep-dish pizza", "holders": [{ "person": "alex", "degree": 10 }, { "person": "sam", "degree": 10 }] },
+    { "id": "blues", "name": "live blues", "holders": [{ "person": "sam", "degree": 10 }, { "person": "jo", "degree": 10 }] }
+  ],
+  "facts": [
+    { "id": "skydeck-time", "option": "skydeck", "starts_at": "2027-05-15T10:00:00-05:00[America/Chicago]" },
+    { "id": "skydeck-length", "option": "skydeck", "duration": "PT1H30M" },
+    { "id": "skydeck-arrival", "option": "skydeck", "arrive_before_start": "PT0S" },
+    { "id": "skydeck-is-walk-up", "option": "skydeck", "needs_right": false },
+    { "id": "skydeck-is-high-up", "option": "skydeck", "satisfies": { "want": "view", "degree": 10 } },
+    { "id": "pizzeria-time", "option": "dinner-pizzeria", "starts_at": "2027-05-15T19:00:00-05:00[America/Chicago]" },
+    { "id": "pizzeria-length", "option": "dinner-pizzeria", "duration": "PT1H30M" },
+    { "id": "pizzeria-arrival", "option": "dinner-pizzeria", "arrive_before_start": "PT0S" },
+    { "id": "pizzeria-is-walk-up", "option": "dinner-pizzeria", "needs_right": false },
+    { "id": "pizzeria-serves-it", "option": "dinner-pizzeria", "satisfies": { "want": "deep-dish", "degree": 9 } },
+    { "id": "tavern-time", "option": "dinner-tavern", "starts_at": "2027-05-15T19:00:00-05:00[America/Chicago]" },
+    { "id": "tavern-length", "option": "dinner-tavern", "duration": "PT1H" },
+    { "id": "tavern-arrival", "option": "dinner-tavern", "arrive_before_start": "PT0S" },
+    { "id": "tavern-is-walk-up", "option": "dinner-tavern", "needs_right": false },
+    { "id": "tavern-has-a-trio", "option": "dinner-tavern", "satisfies": { "want": "blues", "degree": 3 } },
+    { "id": "rooftop-time", "option": "rooftop-set", "starts_at": "2027-05-15T21:00:00-05:00[America/Chicago]" },
+    { "id": "rooftop-length", "option": "rooftop-set", "duration": "PT2H" },
+    { "id": "rooftop-arrival", "option": "rooftop-set", "arrive_before_start": "PT0S" },
+    { "id": "rooftop-is-walk-up", "option": "rooftop-set", "needs_right": false },
+    { "id": "rooftop-has-blues", "option": "rooftop-set", "satisfies": { "want": "blues", "degree": 7 } },
+    { "id": "rooftop-is-high-up", "option": "rooftop-set", "satisfies": { "want": "view", "degree": 6 } },
+    { "id": "show-time", "option": "blues-show", "starts_at": "2027-05-15T21:00:00-05:00[America/Chicago]" },
+    { "id": "show-length", "option": "blues-show", "duration": "PT2H" },
+    { "id": "show-doors", "option": "blues-show", "arrive_before_start": "PT10M" },
+    { "id": "show-is-walk-up", "option": "blues-show", "needs_right": false },
+    { "id": "skydeck-serves-no-pizza", "option": "skydeck", "satisfies": { "want": "deep-dish", "degree": 0 } },
+    { "id": "skydeck-has-no-blues", "option": "skydeck", "satisfies": { "want": "blues", "degree": 0 } },
+    { "id": "pizzeria-is-on-the-ground", "option": "dinner-pizzeria", "satisfies": { "want": "view", "degree": 0 } },
+    { "id": "pizzeria-has-no-blues", "option": "dinner-pizzeria", "satisfies": { "want": "blues", "degree": 0 } },
+    { "id": "tavern-is-on-the-ground", "option": "dinner-tavern", "satisfies": { "want": "view", "degree": 0 } },
+    { "id": "tavern-serves-no-pizza", "option": "dinner-tavern", "satisfies": { "want": "deep-dish", "degree": 0 } },
+    { "id": "rooftop-serves-no-pizza", "option": "rooftop-set", "satisfies": { "want": "deep-dish", "degree": 0 } },
+    { "id": "show-is-on-the-ground", "option": "blues-show", "satisfies": { "want": "view", "degree": 0 } },
+    { "id": "show-serves-no-pizza", "option": "blues-show", "satisfies": { "want": "deep-dish", "degree": 0 } },
+    { "id": "train-length", "way": "train-to-river-north", "duration": "PT15M" },
+    { "id": "walk-to-club-length", "way": "walk-to-club", "duration": "PT15M" },
+    { "id": "show-has-blues", "option": "blues-show", "satisfies": { "want": "blues", "degree": 9 } }
+  ],
+  "decisions": []
+}
