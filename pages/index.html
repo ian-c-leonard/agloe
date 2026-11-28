@@ -55,8 +55,8 @@
         <h1>Compile your trips.</h1>
         <p class="lead" data-from="README.md">Agloe is a standard format for trips, a compiler that checks them, and an optimizer that finds the best version.</p>
         <div class="actions">
-          <a class="button" href="https://github.com/ian-c-leonard/agloe">See the code on GitHub</a>
-          <a class="button quiet" href="https://github.com/ian-c-leonard/agloe/blob/main/spec/rules.md">Read the rules</a>
+          <a class="button" href="/check-a-trip/">Check a trip in your browser</a>
+          <a class="button quiet" href="https://github.com/ian-c-leonard/agloe">See the code on GitHub</a>
         </div>
       </div>
     </div>
@@ -64,7 +64,7 @@
 
   <section class="band tint part" id="file" aria-labelledby="file-title">
     <div class="wrap">
-      <div class="stack">
+      <div class="stack" id="why">
         <h2 id="file-title">The FILE</h2>
         <p class="lead">People have started to plan trips with AI agents, and the agent has to keep each trip somewhere. It could keep notes in a document. With the Agloe format, it knows what is worth recording and how each record relates to the rest.</p>
       </div>
@@ -73,11 +73,11 @@
           <div class="stack">
             <h3>What to record, and how</h3>
             <p data-from="spec/rules.md">A FILE lists PERSONs, PLACEs, OPTIONs, WAYs, WANTs, FACTs and DECISIONs. It can list BUDGETs, CAPABILITIES and OBJECTs too.</p>
-            <p>Each record has an id, and one record names another by its id. A FACT names the OPTION it is about. A WANT names the PERSONs who hold it.</p>
+            <p>Each record has an id, and one record names another by its id. The FACT about the show names its OPTION, and the WANT names the PERSONs who hold it.</p>
             <p class="small">The <a href="https://github.com/ian-c-leonard/agloe/blob/main/src/agloe/schema/file.schema.json">schema</a> defines the structure, and the <a href="https://github.com/ian-c-leonard/agloe/blob/main/spec/vocabulary.md">vocabulary</a> defines each term.</p>
           </div>
           <figure class="anatomy" id="one-of-each">
-            <figcaption>One record of each kind, from a FILE for three travelers</figcaption>
+            <figcaption>Records from the FILE for three travelers</figcaption>
             <dl>
               <div><dt>PERSON</dt><dd><span class="meaning">Jo, a traveler</span><span class="record" data-lines-from="pages/files/three-travelers.json">{ "id": "jo", "name": "Jo" }</span></dd></div>
               <div><dt>PLACE</dt><dd><span class="meaning">The blues club</span><span class="record" data-lines-from="pages/files/three-travelers.json">{ "id": "blues-club", "name": "the blues club" }</span></dd></div>
@@ -96,7 +96,7 @@
             <p>People plan a trip in pieces. A traveler can book one part while another is open. An agent can record what is booked and what is only on offer. It can leave out what nobody knows yet, and the report names what is missing.</p>
           </div>
           <figure class="grows" id="file-grows">
-            <figcaption>One FILE at three moments</figcaption>
+            <figcaption>A FILE of another trip, at three moments</figcaption>
             <p class="story" data-from="spec/rules.md">The Skydeck sells tickets for a set time, and Alex bought one for 10:00 am before Sam decided to come. Both are LOCKed into the visit.</p>
             <ol>
               <li data-file="a-ticket/depends-on-a-ticket">
@@ -138,20 +138,20 @@
               </tbody>
               <tbody class="delivers">
                 <tr><th scope="rowgroup" colspan="4">What delivers it, out of 10</th></tr>
-                <tr data-option="skydeck"><th scope="row">Skydeck visit</th><td>10</td><td></td><td></td></tr>
-                <tr data-option="dinner-pizzeria"><th scope="row">Dinner at the deep-dish place</th><td></td><td>9</td><td></td></tr>
-                <tr data-option="dinner-tavern"><th scope="row">Dinner at the tavern</th><td></td><td></td><td>3</td></tr>
-                <tr data-option="rooftop-set"><th scope="row">Blues on the rooftop</th><td>6</td><td></td><td>7</td></tr>
-                <tr data-option="blues-show"><th scope="row">Blues show at the club</th><td></td><td></td><td>9</td></tr>
+                <tr data-option="skydeck"><th scope="row">Skydeck visit</th><td>10</td><td class="none">0</td><td class="none">0</td></tr>
+                <tr data-option="dinner-pizzeria"><th scope="row">Dinner at the deep-dish place</th><td class="none">0</td><td>9</td><td class="none">0</td></tr>
+                <tr data-option="dinner-tavern"><th scope="row">Dinner at the tavern</th><td class="none">0</td><td class="none">0</td><td>3</td></tr>
+                <tr data-option="rooftop-set"><th scope="row">Blues on the rooftop</th><td>6</td><td class="none">0</td><td>7</td></tr>
+                <tr data-option="blues-show"><th scope="row">Blues show at the club</th><td class="none">0</td><td class="none">0</td><td>9</td></tr>
               </tbody>
             </table>
-            <p class="small">An empty cell under an OPTION means that it does not deliver the WANT.</p>
+            <p class="small">A 0 says that the OPTION does not deliver the WANT.</p>
           </figure>
         </li>
         <li class="why" id="file-requirements">
           <div class="stack">
             <h3>What an OPTION requires</h3>
-            <p>Some OPTIONs are open only to people who meet a requirement. An agent can record a ticket that each PERSON needs, a time to be there, a skill, or a thing to bring.</p>
+            <p>An agent can record what an OPTION requires. Each visitor to the Skydeck needs a ticket. Bag drop for the flight closes 45 minutes before it leaves. The drive to the dunes needs the car and one person who can drive it.</p>
           </div>
           <figure class="asks">
             <figcaption>Four requirements, as a report states them</figcaption>
@@ -167,7 +167,7 @@
             <dl>
               <div>
                 <dt data-from="spec/rules.md">A cab is listed, but nobody has recorded how long it takes.</dt>
-                <dd>An agent can leave the travel time out. Alex and Sam can catch their flight if the cab takes 45 minutes or less.</dd>
+                <dd>An agent can leave the travel time out. If they leave the museum at 3:30 pm, they catch their flight if the cab takes 45 minutes or less.</dd>
               </div>
               <div>
                 <dt>From noon to 6:00 pm, only the Blue Line leaves straight for O'Hare.</dt>
@@ -175,7 +175,7 @@
               </div>
               <div>
                 <dt>The Blue Line can take up to 80 minutes.</dt>
-                <dd>An agent can record a range for a ride that the travelers do not control. <span data-from="spec/rules.md">At 80 minutes they reach O'Hare five minutes after bag drop closes.</span></dd>
+                <dd>An agent can record a range for a ride that the travelers do not control. If they leave at 3:00 pm and the ride takes 80 minutes, they reach O'Hare five minutes after bag drop closes.</dd>
               </div>
               <div>
                 <dt>Alex and Sam have decided to go up the Skydeck.</dt>
@@ -205,14 +205,14 @@
       <ol class="whys">
         <li class="why" id="compiler-growth">
           <div class="stack">
-            <h3>What grows as a trip grows</h3>
-            <p>The FILE for three travelers has five OPTIONs. That makes 32,768 choices of who takes part in what, and each choice still has to fit the times and the routes.</p>
+            <h3>How fast the choices grow</h3>
+            <p>The FILE for three travelers has five OPTIONs. Each traveler is in each OPTION or out of it. That makes 15 yes-or-no choices, and 32,768 ways to answer them. Each way still has to fit the times and the routes.</p>
             <p>The COMPILER uses a solver for the search. It is deterministic: it gives the same answer for the same FILE each time.</p>
           </div>
           <figure class="counts" id="choices">
-            <figcaption>Choices of who takes part in what</figcaption>
+            <figcaption>Ways to choose who takes part in what</figcaption>
             <table>
-              <thead><tr><th scope="col">Travelers</th><th scope="col">OPTIONs</th><th scope="col">Choices</th></tr></thead>
+              <thead><tr><th scope="col">Travelers</th><th scope="col">OPTIONs</th><th scope="col">Ways</th></tr></thead>
               <tbody>
                 <tr data-travelers="1" data-options="1"><td>1</td><td>1</td><td>2</td></tr>
                 <tr data-travelers="3" data-options="1"><td>3</td><td>1</td><td>8</td></tr>
@@ -247,11 +247,11 @@ Saturday 15 May 2027 (times in America/Chicago)
           </div>
         </li>
       </ol>
-      <ul class="hows three">
-        <li>
+      <ul class="hows three" id="how">
+        <li id="trip">
           <a class="card preview" href="/check-a-trip/">
             <strong>Check a trip in your browser</strong>
-            <span>Alex and Sam have a flight to catch. Move the museum visit, the train or the flight, and the reference checker answers for the new FILE.</span>
+            <span>Bag drop closes at 4:15 pm. Change when Alex and Sam leave the museum or how long the train takes, and the reference checker answers for the new FILE.</span>
           </a>
         </li>
         <li>
@@ -291,7 +291,7 @@ uv run agloe check examples/a-must/cannot-work.json</pre>
         <li class="why" id="optimizer-scores">
           <div class="stack">
             <h3>Two plans that both work</h3>
-            <p>The plan that the COMPILER shows for the three travelers works, and it gives Jo live blues at 3 out of 10. Another plan works too: the Skydeck for Alex, dinner at the deep-dish place for Alex and Sam, and the show at the club for Sam and Jo.</p>
+            <p>The plan that the COMPILER shows for the three travelers works. Another plan works too: the Skydeck for Alex, dinner at the deep-dish place for Alex and Sam, and the show at the club for Sam and Jo. Jo keeps away from heights in both. Jo hears blues at the tavern, 3 out of 10, or at the club, 9 out of 10.</p>
             <p>The OPTIMIZER will show each PERSON's SCORE beside the total. It will flag plans where one PERSON scores much lower than the others.</p>
             <p class="small" data-from="README.md">See the <a href="https://github.com/ian-c-leonard/agloe/blob/main/docs/ROADMAP.md">roadmap</a> for what each release contains.</p>
           </div>

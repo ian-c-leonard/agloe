@@ -553,8 +553,8 @@ def test_the_table_of_wants_is_what_the_file_holds() -> None:
     """The home page shows who wants what in the FILE for three travelers, and what delivers it.
 
     Each WANT has a column. Each PERSON has a row that says must or must not under the WANTs
-    they hold. Each OPTION has a row with its DEGREE OF SATISFACTION under each WANT that a
-    FACT says it delivers. A FACT says that each list is whole, so an empty cell means no.
+    they hold. Each OPTION has a row with its DEGREE OF SATISFACTION under each WANT. The FILE
+    has a FACT for every pair of an OPTION and a WANT, so no cell is left to a guess.
     """
     figure = re.search(
         r'<figure class="holds" id="who-wants-what" data-file="([^"]+)">(.*?)</figure>', HOME, re.S
@@ -583,13 +583,12 @@ def test_the_table_of_wants_is_what_the_file_holds() -> None:
         for fact in document["facts"]
         if "satisfies" in fact
     }
-    assert all(degree > 0 for degree in delivered.values())
-    whole = {fact["complete"]["satisfies"] for fact in document["facts"] if "complete" in fact}
-    assert whole == {want["id"] for want in document["wants"]}
+    assert len(delivered) == len(document["options"]) * len(document["wants"])
+    assert not [fact for fact in document["facts"] if "complete" in fact]
     for option, _, cells in options:
-        row = [delivered.get((option, want["id"])) for want in document["wants"]]
+        row = [delivered[option, want["id"]] for want in document["wants"]]
         assert cells == "".join(
-            f"<td>{degree}</td>" if degree else "<td></td>" for degree in row
+            f"<td>{degree}</td>" if degree else '<td class="none">0</td>' for degree in row
         ), option
     assert document["decisions"] == [] and "five OPTIONs and no DECISION" in HOME
 
@@ -636,7 +635,10 @@ def test_the_choices_are_counted_as_the_page_says() -> None:
         len(document["persons"]),
         len(document["options"]),
     )
-    assert f"That makes {marked.group(3)} choices" in HOME
+    pairs = int(marked.group(1)) * int(marked.group(2))
+    assert (
+        f"That makes {pairs} yes-or-no choices, and {marked.group(3)} ways to answer them." in HOME
+    )
 
 
 def score(document: dict[str, Any], plan: dict[str, list[str]]) -> dict[str, int]:
@@ -707,8 +709,18 @@ def test_the_two_plans_work_and_score_as_the_page_says() -> None:
     for plan, column in ((first, 0), (second, 1)):
         for person, points in score(document, plan).items():
             assert int(rows[names[person]][column]) == points, (person, column)
-    # What the page says of the first plan: Jo's live blues, 3 out of 10.
-    assert first["dinner-tavern"] == ["jo"] and "gives Jo live blues at 3 out of 10" in HOME
+    # What the page says of Jo: no view in either plan, and blues at the tavern or at the club.
+    delivered = {
+        (fact["option"], fact["satisfies"]["want"]): fact["satisfies"]["degree"]
+        for fact in document["facts"]
+        if "satisfies" in fact
+    }
+    for plan, place, option in ((first, "tavern", "dinner-tavern"), (second, "club", "blues-show")):
+        taken = [each for each, persons in plan.items() if "jo" in persons]
+        assert taken == [option]
+        assert delivered[option, "view"] == 0
+        assert f"at the {place}, {delivered[option, 'blues']} out of 10" in HOME
+    assert "Jo keeps away from heights in both." in HOME
 
 
 def test_the_page_gives_the_constraint_its_number_on_the_rules_page() -> None:
